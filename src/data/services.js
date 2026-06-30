@@ -1,0 +1,33 @@
+export const categories = [
+  { id: 'housing', name: 'আবাসন বন্ধু', icon: 'fa-house', desc: 'বাড়ি ভাড়া/ক্রয়', slug: 'housing' },
+  { id: 'job', name: 'কর্মসংস্থান', icon: 'fa-briefcase', desc: 'চাকরি পোস্ট/খোঁজ', slug: 'job' },
+  { id: 'health', name: 'স্বাস্থ্য সাথী', icon: 'fa-user-doctor', desc: 'ডাক্তার/হাসপাতাল', slug: 'health' },
+  { id: 'tuition', name: 'শিক্ষা সন্ধানী', icon: 'fa-chalkboard-user', desc: 'টিউটর/স্টুডেন্ট', slug: 'tuition' },
+  { id: 'plumbing', name: 'গৃহস্থালী কারিগর', icon: 'fa-plug', desc: 'প্লাম্বিং, ইলেকট্রিক', slug: 'plumbing' },
+  { id: 'ambulance', name: 'জীবন রক্ষা', icon: 'fa-truck-medical', desc: 'অ্যাম্বুলেন্স', slug: 'ambulance' },
+  { id: 'food', name: 'খাবারের ঠিকানা', icon: 'fa-utensils', desc: 'রেস্টুরেন্ট মেনু', slug: 'food' },
+  { id: 'courier', name: 'প্রেরণ সেবা', icon: 'fa-truck-fast', desc: 'ডেলিভারি/কুরিয়ার', slug: 'courier' },
+  { id: 'blood', name: 'রক্তবন্ধু', icon: 'fa-droplet', desc: 'রক্ত দান/সংগ্রহ', slug: 'blood' },
+  { id: 'used', name: 'পুনঃব্যবহার বাজার', icon: 'fa-rotate-left', desc: 'পুরনো মাল কিনি/বিক্রি', slug: 'used' },
+  { id: 'sports', name: 'প্রাণচাঞ্চল্য', icon: 'fa-football', desc: 'স্পোর্টস/বিনোদন', slug: 'sports' },
+  { id: 'lost', name: 'হারানো-পাওয়া', icon: 'fa-magnifying-glass', desc: 'লস্ট অ্যান্ড ফাউন্ড', slug: 'lost' },
+  { id: 'marriage', name: 'দাম্পত্য সহায়িকা', icon: 'fa-heart', desc: 'বিয়ে সংক্রান্ত', slug: 'marriage' },
+  { id: 'legal', name: 'আইনি সঙ্গী', icon: 'fa-scale-balanced', desc: 'পরামর্শ ও নথি', slug: 'legal' },
+  { id: 'event', name: 'আয়োজন বিশেষজ্ঞ', icon: 'fa-calendar-check', desc: 'ইভেন্ট ম্যানেজমেন্ট', slug: 'event' },
+  { id: 'cleaning', name: 'পরিচ্ছন্ন বাসস্থান', icon: 'fa-broom', desc: 'ঘর পরিষ্কার', slug: 'cleaning' },
+  { id: 'electronics', name: 'যন্ত্রবন্ধু', icon: 'fa-laptop', desc: 'মেরামত সার্ভিস', slug: 'electronics' },
+  { id: 'finance', name: 'অর্থমিত্র', icon: 'fa-coins', desc: 'ব্যাংকিং/লেনদেন', slug: 'finance' },
+  { id: 'pet', name: 'পশুবন্ধু', icon: 'fa-dog', desc: 'পোষ্যদের সেবা', slug: 'pet' },
+  { id: 'mental', name: 'মানসিক সাথী', icon: 'fa-brain', desc: 'কাউন্সেলিং', slug: 'mental' },
+  { id: 'entertainment', name: 'নৈপুণ্য সেবা', icon: 'fa-music', desc: 'শিল্প/বিনোদন', slug: 'entertainment' },
+  { id: 'local-event', name: 'আমাদের আয়োজন', icon: 'fa-flag', desc: 'স্থানীয় ইভেন্ট', slug: 'local-event' },
+  { id: 'emergency', name: 'জরুরি যোগাযোগ', icon: 'fa-phone', desc: 'পুলিশ, ফায়ার', slug: 'emergency' },
+  { id: 'renovation', name: 'ঘর সংস্কার', icon: 'fa-hammer', desc: 'রেনোভেশন সার্ভিস', slug: 'renovation' },
+  { id: 'vehicle', name: 'যানবাহন', icon: 'fa-car', desc: 'মেকানিক, ওয়াশ', slug: 'vehicle' },
+];
+
+export const featuredServices = [
+  { title: 'আবাসন বন্ধু', tag: 'ভাড়া', desc: 'মিরপুরে ৩ বেডরুম ফ্ল্যাট ভাড়া দেওয়া হবে, সাথে পার্কিং ও লিফট', time: '২ ঘণ্টা আগে', location: 'মিরপুর-১২', icon: 'fa-house-chimney', slug: 'housing' },
+  { title: 'স্বাস্থ্য সাথী', tag: 'চিকিৎসক', desc: 'অভিজ্ঞ কার্ডিওলজিস্ট ডা. রহমান, বিকাল ৫-৮ টা', time: '৫ ঘণ্টা আগে', location: 'ধানমন্ডি', icon: 'fa-user-md', slug: 'health' },
+  { title: 'গৃহস্থালী কারিগর', tag: 'প্লাম্বিং', desc: 'বাথরুমের পাইপ লিকেজ, ওয়াটার হিটার ইন্সটলেশন', time: '১ দিন আগে', location: 'বাড্ডা', icon: 'fa-tools', slug: 'plumbing' },
+];
