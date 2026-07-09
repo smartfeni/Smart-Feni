@@ -1,0 +1,252 @@
+---
+// ============================================================
+// কম্পোনেন্ট: লোকেশন সিলেক্টর (উপজেলা অটো-ডিটেক্ট + ম্যানুয়াল ফলব্যাক)
+// ============================================================
+---
+
+<div class="location-selector" id="locationSelector">
+  <button class="location-btn" id="locationBtn" type="button">
+    <i class="fas fa-location-dot"></i>
+    <span id="locationLabel">লোকেশন নির্ণয় হচ্ছে...</span>
+    <i class="fas fa-chevron-down chevron"></i>
+  </button>
+
+  <div class="location-dropdown" id="locationDropdown">
+    <p class="dropdown-title">আপনার উপজেলা বেছে নিন</p>
+    <button class="upazila-option" data-upazila="feni-sadar">ফেনী সদর</button>
+    <button class="upazila-option" data-upazila="chhagalnaiya">ছাগলনাইয়া</button>
+    <button class="upazila-option" data-upazila="daganbhuiyan">দাগনভূঞা</button>
+    <button class="upazila-option" data-upazila="parshuram">পরশুরাম</button>
+    <button class="upazila-option" data-upazila="fulgazi">ফুলগাজী</button>
+    <button class="upazila-option" data-upazila="sonagazi">সোনাগাজী</button>
+    <button class="detect-again" id="detectAgainBtn">
+      <i class="fas fa-crosshairs"></i> বর্তমান লোকেশন দিয়ে নির্ণয় করুন
+    </button>
+  </div>
+</div>
+
+<style>
+  .location-selector {
+    position: relative;
+  }
+
+  .location-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #FFF0EA;
+    color: #1B2A4A;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 40px;
+    font-weight: 500;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .location-btn:hover {
+    background: #FFE3D4;
+  }
+
+  .location-btn i.fa-location-dot {
+    color: #FF6B35;
+  }
+
+  .chevron {
+    font-size: 0.65rem;
+    margin-left: 2px;
+    transition: transform 0.2s ease;
+  }
+
+  .location-selector.open .chevron {
+    transform: rotate(180deg);
+  }
+
+  .location-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+    padding: 12px;
+    min-width: 220px;
+    z-index: 1000;
+    border: 1px solid #EEF3F9;
+  }
+
+  .location-selector.open .location-dropdown {
+    display: block;
+  }
+
+  .dropdown-title {
+    font-size: 0.75rem;
+    color: #7A8EA5;
+    font-weight: 600;
+    padding: 4px 12px 8px;
+  }
+
+  .upazila-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #1B2A4A;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .upazila-option:hover {
+    background: #F8FAFC;
+  }
+
+  .upazila-option.active {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .detect-again {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    background: none;
+    border: none;
+    border-top: 1px solid #EEF3F9;
+    margin-top: 8px;
+    padding: 10px 12px 4px;
+    font-size: 0.8rem;
+    color: #5A6E85;
+    cursor: pointer;
+  }
+
+  .detect-again:hover {
+    color: #FF6B35;
+  }
+
+  @media (max-width: 768px) {
+    .location-dropdown {
+      left: auto;
+      right: 0;
+    }
+  }
+</style>
+
+<script>
+  // ৬টা উপজেলার নাম ও কেন্দ্রীয় কোঅর্ডিনেট (nearest-match এর জন্য ব্যবহৃত হবে)
+  const UPAZILAS = [
+    { id: 'feni-sadar', name: 'ফেনী সদর', lat: 23.0159, lng: 91.3976 },
+    { id: 'chhagalnaiya', name: 'ছাগলনাইয়া', lat: 23.0389, lng: 91.5194 },
+    { id: 'daganbhuiyan', name: 'দাগনভূঞা', lat: 22.9833, lng: 91.1833 },
+    { id: 'parshuram', name: 'পরশুরাম', lat: 23.2250, lng: 91.4500 },
+    { id: 'fulgazi', name: 'ফুলগাজী', lat: 23.0700, lng: 91.4500 },
+    { id: 'sonagazi', name: 'সোনাগাজী', lat: 22.8500, lng: 91.3917 },
+  ];
+
+  const DEFAULT_UPAZILA = 'feni-sadar';
+  const STORAGE_KEY = 'smartfeni_upazila';
+
+  const selector = document.getElementById('locationSelector');
+  const btn = document.getElementById('locationBtn');
+  const label = document.getElementById('locationLabel');
+  const detectAgainBtn = document.getElementById('detectAgainBtn');
+  const options = document.querySelectorAll('.upazila-option');
+
+  function haversineDistance(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function findNearestUpazila(lat, lng) {
+    let nearest = UPAZILAS[0];
+    let minDist = Infinity;
+    for (const u of UPAZILAS) {
+      const d = haversineDistance(lat, lng, u.lat, u.lng);
+      if (d < minDist) {
+        minDist = d;
+        nearest = u;
+      }
+    }
+    return nearest;
+  }
+
+  function setUpazila(id, save = true) {
+    const upazila = UPAZILAS.find((u) => u.id === id) || UPAZILAS.find((u) => u.id === DEFAULT_UPAZILA);
+    label.textContent = upazila.name;
+    options.forEach((opt) => {
+      opt.classList.toggle('active', opt.dataset.upazila === upazila.id);
+    });
+    if (save) {
+      localStorage.setItem(STORAGE_KEY, upazila.id);
+    }
+  }
+
+  function detectLocation() {
+    label.textContent = 'লোকেশন নির্ণয় হচ্ছে...';
+    if (!navigator.geolocation) {
+      setUpazila(DEFAULT_UPAZILA);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const nearest = findNearestUpazila(latitude, longitude);
+        setUpazila(nearest.id);
+      },
+      () => {
+        // পারমিশন দেয়নি বা এরর হয়েছে — ফলব্যাক ডিফল্ট উপজেলা
+        setUpazila(DEFAULT_UPAZILA);
+      },
+      { timeout: 8000 }
+    );
+  }
+
+  // পেজ লোড হওয়ার সময়ের লজিক
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    setUpazila(saved, false);
+  } else {
+    detectLocation();
+  }
+
+  // ড্রপডাউন টগল
+  btn.addEventListener('click', () => {
+    selector.classList.toggle('open');
+  });
+
+  // বাইরে ক্লিক করলে ড্রপডাউন বন্ধ
+  document.addEventListener('click', (e) => {
+    if (!selector.contains(e.target)) {
+      selector.classList.remove('open');
+    }
+  });
+
+  // ম্যানুয়াল সিলেকশন
+  options.forEach((opt) => {
+    opt.addEventListener('click', () => {
+      setUpazila(opt.dataset.upazila);
+      selector.classList.remove('open');
+    });
+  });
+
+  // "বর্তমান লোকেশন দিয়ে নির্ণয় করুন" বাটন
+  detectAgainBtn.addEventListener('click', () => {
+    detectLocation();
+    selector.classList.remove('open');
+  });
+</script>
