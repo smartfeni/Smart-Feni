@@ -154,6 +154,11 @@
   const DEFAULT_UPAZILA = 'feni-sadar';
   const STORAGE_KEY = 'smartfeni_upazila';
 
+  // ফেনী জেলার কেন্দ্র থেকে এই দূরত্বের (কিমি) বাইরে হলে
+  // "ফেনীর বাইরে" ধরে নিয়ে ম্যানুয়াল সিলেকশনে পাঠানো হবে
+  const MAX_DISTANCE_KM = 40;
+  const FENI_CENTER = { lat: 23.0159, lng: 91.3976 };
+
   const selector = document.getElementById('locationSelector');
   const btn = document.getElementById('locationBtn');
   const label = document.getElementById('locationLabel');
@@ -182,7 +187,7 @@
         nearest = u;
       }
     }
-    return nearest;
+    return { nearest, distance: minDist };
   }
 
   function setUpazila(id, save = true) {
@@ -196,21 +201,44 @@
     }
   }
 
+  function openManualSelection() {
+    label.textContent = 'উপজেলা বেছে নিন';
+    selector.classList.add('open');
+  }
+
   function detectLocation() {
     label.textContent = 'লোকেশন নির্ণয় হচ্ছে...';
     if (!navigator.geolocation) {
-      setUpazila(DEFAULT_UPAZILA);
+      openManualSelection();
       return;
     }
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        const nearest = findNearestUpazila(latitude, longitude);
+
+        // ফেনী জেলার কেন্দ্র থেকে কত দূরে সেটা আগে চেক করা হচ্ছে
+        const distanceFromFeni = haversineDistance(
+          latitude,
+          longitude,
+          FENI_CENTER.lat,
+          FENI_CENTER.lng
+        );
+
+        if (distanceFromFeni > MAX_DISTANCE_KM) {
+          // ফেনীর বাইরে (যেমন সৌদি আরব) — ভুল উপজেলা না দেখিয়ে
+          // ম্যানুয়াল সিলেকশনের জন্য ডিফল্টে রাখা হচ্ছে এবং ড্রপডাউন খুলে দেওয়া হচ্ছে
+          setUpazila(DEFAULT_UPAZILA, false);
+          openManualSelection();
+          return;
+        }
+
+        const { nearest } = findNearestUpazila(latitude, longitude);
         setUpazila(nearest.id);
       },
       () => {
-        // পারমিশন দেয়নি বা এরর হয়েছে — ফলব্যাক ডিফল্ট উপজেলা
-        setUpazila(DEFAULT_UPAZILA);
+        // পারমিশন দেয়নি বা এরর হয়েছে
+        setUpazila(DEFAULT_UPAZILA, false);
+        openManualSelection();
       },
       { timeout: 8000 }
     );
