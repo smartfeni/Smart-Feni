@@ -1,6 +1,7 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: লোকেশন সিলেক্টর (উপজেলা অটো-ডিটেক্ট + ম্যানুয়াল ফলব্যাক)
+// ফিক্স: মোবাইলে ড্রপডাউন স্ক্রিনের বাইরে যাওয়া বাগ সমাধান
 // ============================================================
 ---
 
@@ -10,6 +11,8 @@
     <span id="locationLabel">লোকেশন নির্ণয় হচ্ছে...</span>
     <i class="fas fa-chevron-down chevron"></i>
   </button>
+
+  <div class="location-backdrop" id="locationBackdrop"></div>
 
   <div class="location-dropdown" id="locationDropdown">
     <p class="dropdown-title">আপনার উপজেলা বেছে নিন</p>
@@ -37,12 +40,20 @@
     background: #FFF0EA;
     color: #1B2A4A;
     border: none;
-    padding: 8px 16px;
+    padding: 9px 16px;
     border-radius: 40px;
     font-weight: 500;
     font-size: 0.85rem;
     cursor: pointer;
     transition: background 0.2s ease;
+    white-space: nowrap;
+    max-width: 160px;
+    overflow: hidden;
+  }
+
+  .location-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
@@ -52,18 +63,25 @@
 
   .location-btn i.fa-location-dot {
     color: #FF6B35;
+    flex-shrink: 0;
   }
 
   .chevron {
     font-size: 0.65rem;
     margin-left: 2px;
     transition: transform 0.2s ease;
+    flex-shrink: 0;
   }
 
   .location-selector.open .chevron {
     transform: rotate(180deg);
   }
 
+  .location-backdrop {
+    display: none;
+  }
+
+  /* ===== ডেস্কটপ: বাটনের নিচে normal absolute dropdown ===== */
   .location-dropdown {
     display: none;
     position: absolute;
@@ -73,7 +91,7 @@
     border-radius: 16px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
     padding: 12px;
-    min-width: 220px;
+    width: 240px;
     z-index: 1000;
     border: 1px solid #EEF3F9;
   }
@@ -132,16 +150,40 @@
     color: #FF6B35;
   }
 
+  /* ===== মোবাইল: স্ক্রিনের বাইরে যাওয়া ঠেকাতে fixed + centered ===== */
   @media (max-width: 768px) {
+    .location-btn {
+      max-width: 130px;
+      padding: 8px 12px;
+    }
+
+    .location-selector.open .location-backdrop {
+      display: block;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 26, 46, 0.4);
+      z-index: 998;
+    }
+
     .location-dropdown {
-      left: auto;
-      right: 0;
+      position: fixed;
+      top: auto;
+      bottom: auto;
+      left: 16px;
+      right: 16px;
+      width: auto;
+      max-width: 340px;
+      margin: 0 auto;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 1000;
+      max-height: 70vh;
+      overflow-y: auto;
     }
   }
 </style>
 
 <script>
-  // ৬টা উপজেলার নাম ও কেন্দ্রীয় কোঅর্ডিনেট (nearest-match এর জন্য ব্যবহৃত হবে)
   const UPAZILAS = [
     { id: 'feni-sadar', name: 'ফেনী সদর', lat: 23.0159, lng: 91.3976 },
     { id: 'chhagalnaiya', name: 'ছাগলনাইয়া', lat: 23.0389, lng: 91.5194 },
@@ -153,9 +195,6 @@
 
   const DEFAULT_UPAZILA = 'feni-sadar';
   const STORAGE_KEY = 'smartfeni_upazila';
-
-  // ফেনী জেলার কেন্দ্র থেকে এই দূরত্বের (কিমি) বাইরে হলে
-  // "ফেনীর বাইরে" ধরে নিয়ে ম্যানুয়াল সিলেকশনে পাঠানো হবে
   const MAX_DISTANCE_KM = 40;
   const FENI_CENTER = { lat: 23.0159, lng: 91.3976 };
 
@@ -163,9 +202,10 @@
   const btn = document.getElementById('locationBtn');
   const label = document.getElementById('locationLabel');
   const detectAgainBtn = document.getElementById('detectAgainBtn');
+  const backdrop = document.getElementById('locationBackdrop');
   const options = document.querySelectorAll('.upazila-option');
 
-  function haversineDistance(lat1, lng1, lat2, lng2) {
+  function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
     const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLng = ((lng2 - lng1) * Math.PI) / 180;
@@ -177,7 +217,7 @@
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  function findNearestUpazila(lat, lng) {
+  function findNearestUpazila(lat: number, lng: number) {
     let nearest = UPAZILAS[0];
     let minDist = Infinity;
     for (const u of UPAZILAS) {
@@ -190,11 +230,11 @@
     return { nearest, distance: minDist };
   }
 
-  function setUpazila(id, save = true) {
-    const upazila = UPAZILAS.find((u) => u.id === id) || UPAZILAS.find((u) => u.id === DEFAULT_UPAZILA);
-    label.textContent = upazila.name;
+  function setUpazila(id: string, save = true) {
+    const upazila = UPAZILAS.find((u) => u.id === id) || UPAZILAS.find((u) => u.id === DEFAULT_UPAZILA)!;
+    label!.textContent = upazila.name;
     options.forEach((opt) => {
-      opt.classList.toggle('active', opt.dataset.upazila === upazila.id);
+      opt.classList.toggle('active', (opt as HTMLElement).dataset.upazila === upazila.id);
     });
     if (save) {
       localStorage.setItem(STORAGE_KEY, upazila.id);
@@ -202,12 +242,12 @@
   }
 
   function openManualSelection() {
-    label.textContent = 'উপজেলা বেছে নিন';
-    selector.classList.add('open');
+    label!.textContent = 'উপজেলা বেছে নিন';
+    selector!.classList.add('open');
   }
 
   function detectLocation() {
-    label.textContent = 'লোকেশন নির্ণয় হচ্ছে...';
+    label!.textContent = 'লোকেশন নির্ণয় হচ্ছে...';
     if (!navigator.geolocation) {
       openManualSelection();
       return;
@@ -215,18 +255,9 @@
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-
-        // ফেনী জেলার কেন্দ্র থেকে কত দূরে সেটা আগে চেক করা হচ্ছে
-        const distanceFromFeni = haversineDistance(
-          latitude,
-          longitude,
-          FENI_CENTER.lat,
-          FENI_CENTER.lng
-        );
+        const distanceFromFeni = haversineDistance(latitude, longitude, FENI_CENTER.lat, FENI_CENTER.lng);
 
         if (distanceFromFeni > MAX_DISTANCE_KM) {
-          // ফেনীর বাইরে (যেমন সৌদি আরব) — ভুল উপজেলা না দেখিয়ে
-          // ম্যানুয়াল সিলেকশনের জন্য ডিফল্টে রাখা হচ্ছে এবং ড্রপডাউন খুলে দেওয়া হচ্ছে
           setUpazila(DEFAULT_UPAZILA, false);
           openManualSelection();
           return;
@@ -236,7 +267,6 @@
         setUpazila(nearest.id);
       },
       () => {
-        // পারমিশন দেয়নি বা এরর হয়েছে
         setUpazila(DEFAULT_UPAZILA, false);
         openManualSelection();
       },
@@ -244,7 +274,6 @@
     );
   }
 
-  // পেজ লোড হওয়ার সময়ের লজিক
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     setUpazila(saved, false);
@@ -252,29 +281,29 @@
     detectLocation();
   }
 
-  // ড্রপডাউন টগল
-  btn.addEventListener('click', () => {
-    selector.classList.toggle('open');
+  btn!.addEventListener('click', () => {
+    selector!.classList.toggle('open');
   });
 
-  // বাইরে ক্লিক করলে ড্রপডাউন বন্ধ
+  backdrop!.addEventListener('click', () => {
+    selector!.classList.remove('open');
+  });
+
   document.addEventListener('click', (e) => {
-    if (!selector.contains(e.target)) {
-      selector.classList.remove('open');
+    if (!selector!.contains(e.target as Node)) {
+      selector!.classList.remove('open');
     }
   });
 
-  // ম্যানুয়াল সিলেকশন
   options.forEach((opt) => {
     opt.addEventListener('click', () => {
-      setUpazila(opt.dataset.upazila);
-      selector.classList.remove('open');
+      setUpazila((opt as HTMLElement).dataset.upazila!);
+      selector!.classList.remove('open');
     });
   });
 
-  // "বর্তমান লোকেশন দিয়ে নির্ণয় করুন" বাটন
-  detectAgainBtn.addEventListener('click', () => {
+  detectAgainBtn!.addEventListener('click', () => {
     detectLocation();
-    selector.classList.remove('open');
+    selector!.classList.remove('open');
   });
 </script>
