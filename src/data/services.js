@@ -7,6 +7,7 @@ export const categories = [
   { id: 'emergency', name: 'ইমার্জেন্সি কন্টাক্ট', icon: 'fa-phone-volume', desc: 'জরুরি যোগাযোগ নম্বর', slug: 'emergency' },
   { id: 'blood', name: 'ব্লাড ডোনার', icon: 'fa-droplet', desc: 'রক্তদাতা খোঁজা', slug: 'blood' },
   { id: 'home-food', name: 'হোম মেস ফুড', icon: 'fa-utensils', desc: 'বাসার তৈরি খাবার', slug: 'home-food' },
+  { id: 'online-shop', name: 'অনলাইন শপ', icon: 'fa-store', desc: 'হোম মেড পণ্যের অনলাইন বাজার', slug: 'online-shop' },
   { id: 'recycle', name: 'রিসাইকেল মার্কেট', icon: 'fa-rotate-left', desc: 'পুরনো পণ্য কেনাবেচা', slug: 'recycle' },
   { id: 'tuition', name: 'টিউশন খুঁজুন', icon: 'fa-chalkboard-user', desc: 'টিউটর/স্টুডেন্ট খোঁজা', slug: 'tuition' },
   { id: 'sports', name: 'খেলাধুলা ও ইভেন্টস', icon: 'fa-football', desc: 'স্পোর্টস ও বিনোদন', slug: 'sports' },
