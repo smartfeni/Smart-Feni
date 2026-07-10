@@ -1,11 +1,10 @@
 ---
 // ============================================================
-// কম্পোনেন্ট: হিরো (সার্চ বার + অ্যানিমেটেড রোটেটিং প্লেসহোল্ডার)
+// কম্পোনেন্ট: হিরো (সার্চ বার + wipe-style অ্যানিমেটেড হিন্ট টেক্সট)
 // ব্র্যান্ড: স্মার্ট ফেনী
-// নতুন: সার্চ বক্সে "যেমন: X খুঁজুন" টাইপের হিন্ট টেক্সট
-//        দ্রুত স্লাইড-ইন/স্লাইড-আউট অ্যানিমেশনে ঘুরতে থাকবে
-//        (UC-এর "Search for 'AC service'" স্টাইলের মতো)
-//        টাইপ করা শুরু করলে বা ফোকাস করলে এটা সরে যাবে
+// হিন্ট ফরম্যাট: "কি লাগবে: [শব্দ]?" — "কি লাগবে: " ফিক্স,
+//   বাকিটা (শব্দ + ?) ডান থেকে বাম দিকে wipe হয়ে মুছবে,
+//   তারপর বাম থেকে ডানে wipe হয়ে নতুন শব্দ প্রকাশ পাবে (clip-path animation)
 // ============================================================
 ---
 
@@ -22,7 +21,8 @@
             oninput="handleSearch(this.value)"
           />
           <span class="rotating-hint" id="rotatingHint">
-            <span class="hint-text" id="hintText"></span>
+            <span class="hint-fixed">কি লাগবে: </span>
+            <span class="wipe-word" id="wipeWord"></span>
           </span>
         </div>
         <button class="btn-primary" onclick="handleSearchButtonClick()">
@@ -60,7 +60,6 @@
     const hint = document.getElementById('rotatingHint');
     if (!resultsContainer) return;
 
-    // টাইপ করা শুরু হলে রোটেটিং হিন্ট সরিয়ে দেওয়া
     if (hint) {
       hint.style.display = query && query.length > 0 ? 'none' : 'flex';
     }
@@ -105,49 +104,59 @@
   (window as any).handleSearch = handleSearch;
   (window as any).handleSearchButtonClick = handleSearchButtonClick;
 
-  // ===== রোটেটিং হিন্ট টেক্সট (দ্রুত স্লাইড ইন/আউট) =====
+  // ===== Wipe-style রোটেটিং হিন্ট =====
   const hintWords = [
-    'বাসা ভাড়া',
-    'প্লাম্বার',
-    'টিউশন',
-    'গাড়ি ভাড়া',
-    'ডাক্তার',
-    'রক্ত দাতা',
-    'চাকরির খবর',
+    'সিএনজি?',
+    'ডাক্তার?',
+    'বাসা ভাড়া?',
+    'চাকরি?',
+    'হোম ডেলিভারি?',
+    'প্লাম্বার?',
+    'ইলেক্ট্রিশিয়ান?',
+    'টিউশন?',
+    'জরুরী মোবাইল নাম্বার?',
+    'রক্তদাতা?',
   ];
 
-  const hintTextEl = document.getElementById('hintText');
+  const wipeWordEl = document.getElementById('wipeWord');
   const searchInputEl = document.getElementById('searchInput') as HTMLInputElement;
-  let hintIndex = 0;
+  let wordIndex = 0;
+  const HOLD_MS = 1300;
+  const WIPE_MS = 400;
 
-  function showHint(index: number) {
-    if (!hintTextEl) return;
-    hintTextEl.textContent = `যেমন: ${hintWords[index]} খুঁজুন`;
+  function setClip(el: HTMLElement, percent: number, animate: boolean) {
+    el.style.transition = animate ? `clip-path ${WIPE_MS}ms ease` : 'none';
+    el.style.clipPath = `inset(0 ${percent}% 0 0)`;
   }
 
-  function rotateHint() {
-    if (!hintTextEl || !searchInputEl) return;
-    // টাইপ করা থাকলে বা ফোকাসে থাকলে ঘোরানো বন্ধ
+  function cycleWord() {
+    if (!wipeWordEl || !searchInputEl) return;
     if (document.activeElement === searchInputEl || searchInputEl.value) return;
 
-    hintTextEl.classList.add('slide-out');
+    // ধাপ ১: বর্তমান শব্দ ডান থেকে বাম দিকে wipe হয়ে মুছে যাবে
+    setClip(wipeWordEl, 100, true);
 
     setTimeout(() => {
-      hintIndex = (hintIndex + 1) % hintWords.length;
-      showHint(hintIndex);
-      hintTextEl.classList.remove('slide-out');
-      hintTextEl.classList.add('slide-in-prep');
+      // ধাপ ২: টেক্সট বদলে দেওয়া, ক্লিপ ১০০% এ রিসেট (invisible অবস্থায়) কোনো animation ছাড়া
+      wordIndex = (wordIndex + 1) % hintWords.length;
+      wipeWordEl.textContent = hintWords[wordIndex];
+      setClip(wipeWordEl, 100, false);
 
+      // ফোর্স রিফ্লো, তারপর ধাপ ৩: বাম থেকে ডানে wipe হয়ে প্রকাশ পাবে
       requestAnimationFrame(() => {
-        hintTextEl.classList.remove('slide-in-prep');
+        setClip(wipeWordEl, 0, true);
       });
-    }, 250);
+    }, WIPE_MS);
   }
 
-  showHint(0);
-  setInterval(rotateHint, 1600);
+  // শুরুতে প্রথম শব্দ সরাসরি (কোনো wipe ছাড়া) দেখানো
+  if (wipeWordEl) {
+    wipeWordEl.textContent = hintWords[0];
+    setClip(wipeWordEl, 0, false);
+  }
 
-  // ফোকাস করলে হিন্ট সরানো, ব্লার করলে (আর ইনপুট খালি থাকলে) আবার দেখানো
+  setInterval(cycleWord, HOLD_MS + WIPE_MS);
+
   searchInputEl?.addEventListener('focus', () => {
     const hint = document.getElementById('rotatingHint');
     if (hint) hint.style.display = 'none';
@@ -186,7 +195,6 @@
     font-size: 1.05rem;
   }
 
-  /* ===== ইনপুট + রোটেটিং হিন্ট ওভারলে ===== */
   .input-wrap {
     flex: 1;
     min-width: 0;
@@ -215,86 +223,24 @@
     display: flex;
     align-items: center;
     pointer-events: none;
-    overflow: hidden;
     z-index: 1;
-    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
   }
 
-  .hint-text {
+  .hint-fixed {
     color: #A0B3C9;
     font-size: 0.95rem;
     white-space: nowrap;
-    display: inline-block;
-    transform: translateY(0);
-    opacity: 1;
-    transition: transform 0.25s ease, opacity 0.25s ease;
+    flex-shrink: 0;
   }
 
-  .hint-text.slide-out {
-    transform: translateY(-14px);
-    opacity: 0;
-  }
-
-  .hint-text.slide-in-prep {
-    transform: translateY(14px);
-    opacity: 0;
-    transition: none;
-  }
-
-  .search-card .btn-primary {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: #FF6B35;
-    color: #fff;
-    padding: 12px 24px;
-    border-radius: 50px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.2s ease;
-  }
-
-  .search-card .btn-primary:hover {
-    background: #e85a2a;
-  }
-
-  .search-results {
-    display: none;
-    position: absolute;
-    top: calc(100% + 10px);
-    left: 0;
-    right: 0;
-    background: #fff;
-    border-radius: 20px;
-    padding: 12px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.1);
-    z-index: 20;
-    max-height: 320px;
-    overflow-y: auto;
-  }
-
-  .search-results :global(.result-item) {
-    display: flex;
-    flex-direction: column;
-    padding: 12px 14px;
-    background: #F8FAFC;
-    border-radius: 12px;
-    margin-bottom: 6px;
-    text-decoration: none;
+  .wipe-word {
     color: #1B2A4A;
-  }
-
-  .search-results :global(.result-item:hover) {
-    background: #FFF0EA;
-  }
-
-  .search-results :global(.result-category) {
-    color: #FF6B35;
-    font-size: 0.78rem;
-    margin-top: 2px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    display: inline-block;
   }
 
   @media (max-width: 768px) {
@@ -307,8 +253,9 @@
       padding: 6px 6px 6px 16px;
     }
 
-    .hint-text {
-      font-size: 0.88rem;
+    .hint-fixed,
+    .wipe-word {
+      font-size: 0.85rem;
     }
   }
 </style>
