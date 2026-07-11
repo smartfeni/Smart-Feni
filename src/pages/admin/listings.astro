@@ -37,6 +37,7 @@ import { categories } from '../../data/services.js';
 
           <select id="statusFilter" class="filter-select">
             <option value="all">সব স্ট্যাটাস</option>
+            <option value="unreviewed">শুধু নতুন (আনরিভিউড)</option>
             <option value="pending">রিভিউ বাকি</option>
             <option value="active">সক্রিয়</option>
             <option value="rejected">বাতিল</option>
@@ -203,7 +204,10 @@ import { categories } from '../../data/services.js';
         <div style="flex:1;min-width:0;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <h3 style="font-size:0.98rem;font-weight:700;color:#1B2A4A;">${listing.title || '(শিরোনামহীন)'}</h3>
-            <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${status.bg};color:${status.color};">${status.text}</span>
+            <span style="display:flex;gap:6px;flex-shrink:0;">
+              ${!listing.is_reviewed ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#FF6B35;color:#fff;">নতুন</span>` : ''}
+              <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${status.bg};color:${status.color};">${status.text}</span>
+            </span>
           </div>
           <p style="font-size:0.82rem;color:#8FA0BC;margin-top:4px;">${categoryName} ${listing.type ? '· ' + listing.type : ''}</p>
           ${listing.description ? `<p style="font-size:0.85rem;color:#5A6E85;margin-top:6px;">${listing.description}</p>` : ''}
@@ -235,6 +239,14 @@ import { categories } from '../../data/services.js';
         actionsWrap.appendChild(rejectBtn);
       }
 
+      if (!listing.is_reviewed) {
+        const reviewedBtn = document.createElement('button');
+        reviewedBtn.textContent = 'রিভিউ করা হয়েছে';
+        reviewedBtn.style.cssText = 'background:#F4F7FC;color:#1B2A4A;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        reviewedBtn.addEventListener('click', () => markReviewed(listing.id));
+        actionsWrap.appendChild(reviewedBtn);
+      }
+
       const deleteBtn = document.createElement('button');
       deleteBtn.textContent = 'ডিলিট';
       deleteBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
@@ -251,6 +263,16 @@ import { categories } from '../../data/services.js';
       actionsWrap.appendChild(deleteBtn);
 
       return card;
+    }
+
+    async function markReviewed(id) {
+      // শুধু is_reviewed বদলাবে — status/visibility একদম অপরিবর্তিত থাকবে
+      const { error } = await supabase.from('listings').update({ is_reviewed: true }).eq('id', id);
+      if (error) {
+        alert('আপডেট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadListings();
     }
 
     async function updateStatus(id, status) {
@@ -274,13 +296,22 @@ import { categories } from '../../data/services.js';
     async function loadListings() {
       container.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
 
-      let query = supabase.from('listings').select('*').order('created_at', { ascending: false });
+      let query = supabase
+        .from('listings')
+        .select('*')
+        .order('is_reviewed', { ascending: true })
+        .order('created_at', { ascending: false });
 
       const category = categoryFilter.value;
       const status = statusFilter.value;
 
       if (category !== 'all') query = query.eq('category', category);
-      if (status !== 'all') query = query.eq('status', status);
+
+      if (status === 'unreviewed') {
+        query = query.eq('is_reviewed', false);
+      } else if (status !== 'all') {
+        query = query.eq('status', status);
+      }
 
       const { data, error } = await query;
 
