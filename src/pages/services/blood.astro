@@ -1,60 +1,84 @@
 ---
 // ============================================================
-// পেজ: রক্তদাতা সার্ভিস
+// পেজ: ব্লাড ডোনার লিস্ট
 // ব্র্যান্ড: স্মার্ট ফেনী
+// যেসব ইউজার প্রোফাইলে "ব্লাড ডোনার লিস্টে দেখাও" টগল অন করেছেন,
+// তাদের তালিকা এখানে দেখানো হয় (নাম, ব্লাড গ্রুপ, উপজেলা, ফোন)
 // ============================================================
 
-import BaseLayout from '../../components/layout/BaseLayout.astro';
+export const prerender = false;
 
-// TODO: ডাটাবেজ কানেক্ট হলে এখানে রেজিস্টার্ড ডোনারদের ডেটা fetch করে বসাতে হবে
-// যেমন: const donors = await db.donors.findAll();
-// প্রতিটা ডোনার অবজেক্টে থাকবে: { id, name, bloodGroup, address, phone }
-const donors = [];
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import { supabase } from '../../lib/supabase.js';
+
+const upazilas = [
+  'ফেনী সদর',
+  'ছাগলনাইয়া',
+  'দাগনভূঞা',
+  'পরশুরাম',
+  'ফুলগাজী',
+  'সোনাগাজী',
+];
+
+const { data: donorData } = await supabase
+  .from('profiles')
+  .select('full_name, phone, blood_group, upazila, avatar_url')
+  .eq('is_blood_donor', true)
+  .order('created_at', { ascending: false });
+
+const donors = donorData || [];
+
+const filters = [{ id: 'all', label: 'সব' }, ...upazilas.map((u) => ({ id: u, label: u }))];
 ---
 
-<BaseLayout title="রক্তদাতা সেবা | স্মার্ট ফেনী">
+<BaseLayout title="ব্লাড ডোনার | স্মার্ট ফেনী">
   <section class="page-header">
     <div class="container">
-      <h1>প্রয়োজনে <span class="accent">রক্তদাতা</span> খুঁজুন</h1>
-      <p>নিবন্ধিত রক্তদাতাদের তালিকা থেকে সরাসরি যোগাযোগ করুন, অথবা নিজে রক্তদাতা হিসেবে যুক্ত হোন</p>
-
-      <a href="/contact" class="btn-register">
-        <i class="fas fa-droplet"></i> রক্তদাতা হিসেবে রেজিস্ট্রেশন করুন
-      </a>
+      <span class="section-tag"><i class="fas fa-droplet"></i> ব্লাড ডোনার</span>
+      <h1>ফেনীর <span class="accent">রক্তদাতা</span> খুঁজুন</h1>
+      <p>জরুরি প্রয়োজনে ফেনীর স্বেচ্ছাসেবী রক্তদাতাদের সাথে সরাসরি যোগাযোগ করুন</p>
     </div>
   </section>
 
   <section class="donor-section">
     <div class="container">
-      <h2 class="section-heading">নিবন্ধিত রক্তদাতাগণ</h2>
+      <div class="filter-tabs" id="filterTabs">
+        {filters.map((f) => (
+          <button class={`filter-tab ${f.id === 'all' ? 'active' : ''}`} data-filter={f.id}>
+            {f.label}
+          </button>
+        ))}
+      </div>
 
       {donors.length === 0 ? (
         <div class="empty-state">
-          <div class="empty-icon">
-            <i class="fas fa-droplet"></i>
-          </div>
-          <h3>এখনো কোনো রক্তদাতা নিবন্ধিত হয়নি</h3>
-          <p>প্রথম রক্তদাতা হিসেবে নিবন্ধন করে অন্যের জীবন বাঁচাতে এগিয়ে আসুন</p>
-          <a href="/contact" class="btn-register-outline">
-            <i class="fas fa-plus"></i> এখনই নিবন্ধন করুন
-          </a>
+          <i class="fas fa-droplet"></i>
+          <p>এখনো কোনো রক্তদাতা তালিকাভুক্ত হননি</p>
+          <span>প্রোফাইল থেকে "ব্লাড ডোনার লিস্টে দেখাও" অন করে প্রথম রক্তদাতা হোন</span>
         </div>
       ) : (
-        <div class="donor-grid">
+        <div class="donor-grid" id="donorGrid">
           {donors.map((donor) => (
-            <div class="donor-card">
+            <div class="donor-card" data-upazila={donor.upazila || ''}>
               <div class="donor-card-top">
-                <span class="blood-badge">{donor.bloodGroup}</span>
+                <span class="donor-avatar">
+                  {donor.avatar_url ? (
+                    <img src={donor.avatar_url} alt={donor.full_name} />
+                  ) : (
+                    <i class="fas fa-circle-user"></i>
+                  )}
+                </span>
+                <span class="blood-badge">{donor.blood_group || '—'}</span>
               </div>
 
-              <h3 class="donor-name">{donor.name}</h3>
+              <h3 class="donor-name">{donor.full_name}</h3>
 
-              <p class="donor-address">
-                <i class="fas fa-location-dot"></i> {donor.address}
-              </p>
+              {donor.upazila && (
+                <p class="donor-location"><i class="fas fa-location-dot"></i> {donor.upazila}</p>
+              )}
 
-              <a href={`tel:${donor.phone}`} class="btn-call">
-                <i class="fas fa-phone"></i> {donor.phone}
+              <a href={`tel:${donor.phone}`} class="btn-contact">
+                <i class="fas fa-phone"></i> যোগাযোগ করুন
               </a>
             </div>
           ))}
@@ -74,7 +98,7 @@ const donors = [];
   .page-header h1 {
     font-size: 2.2rem;
     font-weight: 700;
-    margin: 0 0 8px;
+    margin: 12px 0 8px;
   }
 
   .page-header .accent {
@@ -84,98 +108,68 @@ const donors = [];
   .page-header p {
     color: #5A6E85;
     font-size: 1.05rem;
-    max-width: 560px;
-    margin: 0 auto 24px;
-  }
-
-  .btn-register {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: #FF6B35;
-    color: #fff;
-    text-decoration: none;
-    padding: 14px 28px;
-    border-radius: 40px;
-    font-weight: 700;
-    font-size: 0.95rem;
-    transition: all 0.2s ease;
-  }
-
-  .btn-register:hover {
-    background: #e85a28;
-    transform: translateY(-2px);
   }
 
   .donor-section {
-    padding: 40px 0 70px;
+    padding: 30px 0 70px;
     background: #F8FAFC;
   }
 
-  .section-heading {
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: #1B2A4A;
-    margin-bottom: 24px;
-  }
-
-  /* খালি অবস্থা */
-  .empty-state {
-    background: #fff;
-    border: 1px dashed #DCE4EC;
-    border-radius: 20px;
-    padding: 60px 24px;
-    text-align: center;
-  }
-
-  .empty-icon {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: #FFF0EA;
-    color: #FF6B35;
+  .filter-tabs {
     display: flex;
-    align-items: center;
+    gap: 10px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
     justify-content: center;
-    font-size: 1.6rem;
-    margin: 0 auto 16px;
   }
 
-  .empty-state h3 {
-    font-size: 1.1rem;
-    font-weight: 700;
+  .filter-tab {
+    background: #fff;
+    border: 1px solid #EEF3F9;
     color: #1B2A4A;
-    margin-bottom: 8px;
-  }
-
-  .empty-state p {
-    color: #5A6E85;
-    font-size: 0.95rem;
-    max-width: 400px;
-    margin: 0 auto 24px;
-  }
-
-  .btn-register-outline {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: transparent;
-    color: #FF6B35;
-    border: 1.5px solid #FF6B35;
-    text-decoration: none;
-    padding: 10px 22px;
+    padding: 10px 24px;
     border-radius: 40px;
     font-weight: 600;
     font-size: 0.9rem;
+    cursor: pointer;
     transition: all 0.2s ease;
   }
 
-  .btn-register-outline:hover {
-    background: #FF6B35;
-    color: #fff;
+  .filter-tab:hover {
+    border-color: #FF6B35;
   }
 
-  /* ডোনার কার্ড গ্রিড (ডাটাবেজ থেকে ডেটা আসলে এটা দেখাবে) */
+  .filter-tab.active {
+    background: #FF6B35;
+    color: #fff;
+    border-color: #FF6B35;
+  }
+
+  .empty-state {
+    text-align: center;
+    background: #fff;
+    border-radius: 20px;
+    padding: 50px 24px;
+    border: 1px dashed #E5EAF0;
+  }
+
+  .empty-state i {
+    font-size: 2rem;
+    color: #D7E0EC;
+    margin-bottom: 12px;
+  }
+
+  .empty-state p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+  }
+
+  .empty-state span {
+    color: #8FA0BC;
+    font-size: 0.85rem;
+  }
+
   .donor-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -195,45 +189,72 @@ const donors = [];
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
   }
 
+  .donor-card.hidden {
+    display: none;
+  }
+
   .donor-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
     margin-bottom: 14px;
   }
 
-  .blood-badge {
-    display: inline-flex;
+  .donor-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: #F4F7FC;
+    display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 48px;
-    background: rgba(255, 107, 53, 0.12);
-    color: #FF6B35;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .donor-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .donor-avatar i {
+    color: #B0BCCB;
+    font-size: 1.7rem;
+  }
+
+  .blood-badge {
+    background: #FFF0EA;
+    color: #D14343;
     font-weight: 800;
-    font-size: 1rem;
+    font-size: 0.95rem;
     padding: 6px 14px;
     border-radius: 12px;
+    white-space: nowrap;
   }
 
   .donor-name {
     font-size: 1.05rem;
     font-weight: 700;
     color: #1B2A4A;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
-  .donor-address {
-    font-size: 0.85rem;
+  .donor-location {
     color: #5A6E85;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
     display: flex;
     align-items: center;
-    gap: 5px;
-    margin-bottom: 16px;
+    gap: 6px;
   }
 
-  .donor-address i {
+  .donor-location i {
     color: #FF6B35;
     font-size: 0.75rem;
   }
 
-  .btn-call {
+  .btn-contact {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -249,7 +270,7 @@ const donors = [];
     transition: background 0.2s ease;
   }
 
-  .btn-call:hover {
+  .btn-contact:hover {
     background: #FF6B35;
   }
 
@@ -263,3 +284,24 @@ const donors = [];
     }
   }
 </style>
+
+<script>
+  const tabs = document.querySelectorAll('.filter-tab');
+  const cards = document.querySelectorAll('.donor-card');
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      tabs.forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+
+      const filter = tab.dataset.filter;
+      cards.forEach((card) => {
+        if (filter === 'all' || card.dataset.upazila === filter) {
+          card.classList.remove('hidden');
+        } else {
+          card.classList.add('hidden');
+        }
+      });
+    });
+  });
+</script>
