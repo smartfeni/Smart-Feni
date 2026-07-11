@@ -4,6 +4,7 @@
 // ব্র্যান্ড: স্মার্ট ফেনী
 // লগইন করা ইউজার নিজের তথ্য (নাম, ছবি, ব্লাড গ্রুপ, উপজেলা,
 // রিকভারি ইমেইল) এডিট করতে পারবে + পাসওয়ার্ড বদলাতে পারবে।
+// নতুন: "ব্লাড ডোনার লিস্টে দেখাও" টগল (ব্লাড গ্রুপ ছাড়া অন করা যাবে না)
 // ফোন নাম্বার এডিটেবল না (Auth-এর সাথে বাঁধা)।
 // ============================================================
 
@@ -87,6 +88,17 @@ const upazilas = [
                 </select>
               </div>
             </div>
+          </div>
+
+          <!-- ===== ব্লাড ডোনার টগল ===== -->
+          <div class="donor-toggle-row">
+            <div class="donor-toggle-text">
+              <span class="donor-toggle-label">ব্লাড ডোনার লিস্টে আমাকে দেখাও</span>
+              <span class="donor-toggle-hint" id="donorToggleHint">ব্লাড গ্রুপ সিলেক্ট করলে চালু করা যাবে</span>
+            </div>
+            <button type="button" class="donor-toggle-switch" id="donorToggleBtn" role="switch" aria-checked="false">
+              <span class="donor-toggle-knob"></span>
+            </button>
           </div>
 
           <button class="edit-submit" id="saveProfileBtn" type="button">
@@ -359,6 +371,77 @@ const upazilas = [
     background-position: right 14px center;
   }
 
+  /* ===== ব্লাড ডোনার টগল রো ===== */
+  .donor-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-top: 18px;
+  }
+
+  .donor-toggle-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .donor-toggle-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
+  .donor-toggle-hint {
+    font-size: 0.72rem;
+    color: #9AA8BC;
+  }
+
+  .donor-toggle-hint.hint-error {
+    color: #D14343;
+  }
+
+  .donor-toggle-switch {
+    flex-shrink: 0;
+    width: 46px;
+    height: 26px;
+    border-radius: 40px;
+    background: #DDE4EC;
+    border: none;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  .donor-toggle-switch.on {
+    background: #FF6B35;
+  }
+
+  .donor-toggle-switch:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
+  .donor-toggle-knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    transition: transform 0.2s ease;
+  }
+
+  .donor-toggle-switch.on .donor-toggle-knob {
+    transform: translateX(20px);
+  }
+
   .edit-submit {
     width: 100%;
     display: flex;
@@ -432,6 +515,11 @@ const upazilas = [
   let currentUserId = null;
   let currentUserEmail = null;
 
+  // ব্লাড ডোনার টগল
+  const donorToggleBtn = document.getElementById('donorToggleBtn');
+  const donorToggleHint = document.getElementById('donorToggleHint');
+  let isDonorOn = false;
+
   const currentPasswordInput = document.getElementById('currentPassword');
   const newPasswordInput = document.getElementById('newPassword');
   const confirmPasswordInput = document.getElementById('confirmPassword');
@@ -462,6 +550,22 @@ const upazilas = [
     }
   }
 
+  function setDonorToggle(on) {
+    isDonorOn = on;
+    donorToggleBtn?.classList.toggle('on', on);
+    donorToggleBtn?.setAttribute('aria-checked', String(on));
+  }
+
+  function updateDonorHint() {
+    const hasBloodGroup = !!bloodGroupSelect?.value;
+    if (donorToggleHint) {
+      donorToggleHint.textContent = hasBloodGroup
+        ? 'জরুরি প্রয়োজনে অন্যরা আপনার তথ্য দেখতে পাবে'
+        : 'ব্লাড গ্রুপ সিলেক্ট করলে চালু করা যাবে';
+      donorToggleHint.classList.remove('hint-error');
+    }
+  }
+
   // ===== পেজ লোড হলে সেশন চেক + প্রোফাইল লোড =====
   async function init() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -477,7 +581,7 @@ const upazilas = [
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('full_name, phone, recovery_email, blood_group, upazila, avatar_url')
+      .select('full_name, phone, recovery_email, blood_group, upazila, avatar_url, is_blood_donor')
       .eq('id', currentUserId)
       .single();
 
@@ -488,6 +592,8 @@ const upazilas = [
     if (emailInput) emailInput.value = profile.recovery_email || '';
     if (bloodGroupSelect) bloodGroupSelect.value = profile.blood_group || '';
     if (upazilaSelect) upazilaSelect.value = profile.upazila || '';
+    setDonorToggle(!!profile.is_blood_donor);
+    updateDonorHint();
 
     if (profile.avatar_url) {
       photoImg.src = profile.avatar_url;
@@ -496,6 +602,27 @@ const upazilas = [
   }
 
   init();
+
+  // ===== ব্লাড গ্রুপ বদলালে হিন্ট আপডেট, খালি করলে টগল অফ করে দাও =====
+  bloodGroupSelect?.addEventListener('change', () => {
+    updateDonorHint();
+    if (!bloodGroupSelect.value && isDonorOn) {
+      setDonorToggle(false);
+    }
+  });
+
+  // ===== টগল ক্লিক =====
+  donorToggleBtn?.addEventListener('click', () => {
+    if (!bloodGroupSelect?.value) {
+      if (donorToggleHint) {
+        donorToggleHint.textContent = 'আগে ব্লাড গ্রুপ সিলেক্ট করুন';
+        donorToggleHint.classList.add('hint-error');
+      }
+      return;
+    }
+    setDonorToggle(!isDonorOn);
+    updateDonorHint();
+  });
 
   // ===== ছবি প্রিভিউ =====
   photoInput?.addEventListener('change', () => {
@@ -537,6 +664,12 @@ const upazilas = [
       return;
     }
 
+    if (isDonorOn && !bloodGroupSelect?.value) {
+      showMsg(profileMessage, 'ব্লাড ডোনার লিস্টে দেখাতে হলে ব্লাড গ্রুপ সিলেক্ট করুন');
+      setDonorToggle(false);
+      return;
+    }
+
     setLoading(saveProfileBtn, true, 'সেভ হচ্ছে...');
 
     let avatarUrl = null;
@@ -549,6 +682,7 @@ const upazilas = [
       recovery_email: emailInput?.value?.trim() || null,
       blood_group: bloodGroupSelect?.value || null,
       upazila: upazilaSelect?.value || null,
+      is_blood_donor: isDonorOn,
     };
     if (avatarUrl) updates.avatar_url = avatarUrl;
 
