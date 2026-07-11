@@ -6,7 +6,19 @@
 // ব্যবহার করা হচ্ছে, যাতে ইউজারকে ইমেইল টাইপ করতে না হয়।
 // প্রোফাইল ছবি Supabase Storage-এর 'listing-images' বাকেটে
 // avatars/ ফোল্ডারে আপলোড হয়।
+// আপডেট: সাইনআপে ঐচ্ছিক রিকভারি ইমেইল, ব্লাড গ্রুপ, উপজেলা যোগ
 // ============================================================
+
+const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
+const upazilas = [
+  'ফেনী সদর',
+  'ছাগলনাইয়া',
+  'দাগনভূঞা',
+  'পরশুরাম',
+  'ফুলগাজী',
+  'সোনাগাজী',
+];
 ---
 
 <div class="auth-overlay" id="authOverlay">
@@ -67,7 +79,7 @@
           <span class="auth-photo-edit"><i class="fas fa-pen"></i></span>
         </label>
         <input type="file" id="photoInput" accept="image/*" style="display:none;" />
-        <span class="auth-photo-label">প্রোফাইল ছবি যোগ করুন (ঐচ্ছিক)</span>
+        <span class="auth-photo-label">প্রোফাইল ছবি যোগ করুন</span>
       </div>
 
       <label class="auth-label">পূর্ণ নাম</label>
@@ -87,6 +99,36 @@
         <i class="fas fa-lock auth-input-icon"></i>
         <input type="password" class="auth-input" id="signupPassword" placeholder="কমপক্ষে ৬ অক্ষর" />
         <i class="fas fa-eye auth-input-eye"></i>
+      </div>
+
+      <label class="auth-label">ইমেইল</label>
+      <div class="auth-input-wrap">
+        <i class="fas fa-envelope auth-input-icon"></i>
+        <input type="email" class="auth-input" id="signupEmail" placeholder="পাসওয়ার্ড রিকভারির জন্য ব্যবহার হবে" />
+      </div>
+
+      <div class="auth-field-row">
+        <div class="auth-field-col">
+          <label class="auth-label">ব্লাড গ্রুপ</label>
+          <div class="auth-select-wrap">
+            <i class="fas fa-droplet auth-input-icon"></i>
+            <select class="auth-input auth-select" id="signupBloodGroup">
+              <option value="">নির্বাচন করুন</option>
+              {bloodGroups.map((bg) => <option value={bg}>{bg}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div class="auth-field-col">
+          <label class="auth-label">উপজেলা</label>
+          <div class="auth-select-wrap">
+            <i class="fas fa-location-dot auth-input-icon"></i>
+            <select class="auth-input auth-select" id="signupUpazila">
+              <option value="">নির্বাচন করুন</option>
+              {upazilas.map((u) => <option value={u}>{u}</option>)}
+            </select>
+          </div>
+        </div>
       </div>
 
       <button class="auth-submit" id="signupSubmit" type="button">
@@ -264,6 +306,8 @@
     left: 16px;
     color: #B0BCCB;
     font-size: 0.9rem;
+    pointer-events: none;
+    z-index: 1;
   }
 
   .auth-input-eye {
@@ -291,6 +335,32 @@
     border-color: #FF6B35;
     background: #fff;
     box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
+  }
+
+  /* ===== ব্লাড গ্রুপ / উপজেলা রো ===== */
+  .auth-field-row {
+    display: flex;
+    gap: 12px;
+  }
+
+  .auth-field-col {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .auth-select-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .auth-select {
+    appearance: none;
+    cursor: pointer;
+    padding-right: 30px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235A6E85' stroke-width='1.5' fill='none' fill-rule='evenodd'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
   }
 
   .auth-forgot {
@@ -424,6 +494,11 @@
     .auth-modal {
       padding: 28px 22px 22px;
       border-radius: 22px;
+    }
+
+    .auth-field-row {
+      flex-direction: column;
+      gap: 0;
     }
   }
 </style>
@@ -576,11 +651,14 @@
     const name = document.getElementById('signupName')?.value?.trim();
     const phone = document.getElementById('signupPhone')?.value?.trim();
     const password = document.getElementById('signupPassword')?.value;
+    const recoveryEmail = document.getElementById('signupEmail')?.value?.trim();
+    const bloodGroup = document.getElementById('signupBloodGroup')?.value;
+    const upazila = document.getElementById('signupUpazila')?.value;
 
     clearMessage();
 
     if (!name || !phone || !password) {
-      showMessage('সব ঘর পূরণ করুন');
+      showMessage('নাম, ফোন নাম্বার ও পাসওয়ার্ড পূরণ করুন');
       return;
     }
     if (password.length < 6) {
@@ -609,8 +687,18 @@
     let avatarUrl = null;
     if (selectedPhotoFile && data.user) {
       avatarUrl = await uploadAvatar(data.user.id, selectedPhotoFile);
-      if (avatarUrl) {
-        await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('id', data.user.id);
+    }
+
+    // ছবি, রিকভারি ইমেইল, ব্লাড গ্রুপ, উপজেলা — একসাথে profiles টেবিলে সেভ
+    if (data.user) {
+      const updates = {};
+      if (avatarUrl) updates.avatar_url = avatarUrl;
+      if (recoveryEmail) updates.recovery_email = recoveryEmail;
+      if (bloodGroup) updates.blood_group = bloodGroup;
+      if (upazila) updates.upazila = upazila;
+
+      if (Object.keys(updates).length > 0) {
+        await supabase.from('profiles').update(updates).eq('id', data.user.id);
       }
     }
 
