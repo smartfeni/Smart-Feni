@@ -3,10 +3,9 @@
 // কম্পোনেন্ট: হেডার (ন্যাভবার) — মিনিমাল
 // ব্র্যান্ড: স্মার্ট ফেনী
 // লেআউট: লোকেশন (বাম) — লোগো+ট্যাগলাইন (মাঝে) — প্রোফাইল (ডান)
-// আপডেট: nav-links ("সেবাসমূহ"/"আমাদের সম্পর্কে"/"যোগাযোগ") সম্পূর্ণ
-//         সরিয়ে ফেলা হয়েছে — অপ্রয়োজনীয় ছিল, ক্যাটাগরি গ্রিড থেকেই
-//         সব সার্ভিসে যাওয়া যায়। মোবাইলে nav-links hide করার
-//         দরকারও আর নাই।
+// আপডেট: Supabase Auth সেশন কানেক্ট করা হয়েছে — পেজ লোড হলে
+//         আগে থেকে লগইন থাকলে প্রোফাইল দেখাবে, লগইন করা থাকলে
+//         প্রোফাইল বাটনে ক্লিক করলে লগআউট কনফার্ম করবে।
 // ============================================================
 
 import LocationSelector from '../ui/LocationSelector.astro';
@@ -30,7 +29,7 @@ import AuthModal from '../ui/AuthModal.astro';
           <img id="profileAvatarImg" src="" alt="প্রোফাইল ছবি" />
           <i class="fas fa-circle-user" id="profileDefaultIcon"></i>
         </span>
-        <span class="profile-label">প্রোফাইল</span>
+        <span class="profile-label" id="profileLabel">প্রোফাইল</span>
       </button>
     </div>
   </div>
@@ -215,24 +214,67 @@ import AuthModal from '../ui/AuthModal.astro';
 </style>
 
 <script>
-  const profileBtn = document.getElementById('profileBtn');
+  import { supabase } from '../../lib/supabase.js';
 
-  profileBtn?.addEventListener('click', () => {
-    window.openAuthModal?.('login');
+  const profileBtn = document.getElementById('profileBtn');
+  const avatarWrap = document.getElementById('profileAvatar');
+  const avatarImg = document.getElementById('profileAvatarImg');
+  const label = document.getElementById('profileLabel');
+
+  let isLoggedIn = false;
+
+  function showLoggedInState(name, avatarUrl) {
+    isLoggedIn = true;
+    if (avatarUrl) {
+      avatarImg.src = avatarUrl;
+      avatarWrap?.classList.add('has-photo');
+    }
+    if (label) {
+      label.textContent = name || 'প্রোফাইল';
+    }
+  }
+
+  function showLoggedOutState() {
+    isLoggedIn = false;
+    avatarImg.src = '';
+    avatarWrap?.classList.remove('has-photo');
+    if (label) {
+      label.textContent = 'প্রোফাইল';
+    }
+  }
+
+  // পেজ লোড হলে আগে থেকে সেশন আছে কিনা চেক করা (রিফ্রেশেও লগইন থাকবে)
+  async function restoreSession() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name, avatar_url')
+      .eq('id', session.user.id)
+      .single();
+
+    showLoggedInState(profile?.full_name, profile?.avatar_url);
+  }
+
+  restoreSession();
+
+  // প্রোফাইল বাটন — লগইন করা না থাকলে মোডাল খুলবে, থাকলে লগআউট জিজ্ঞেস করবে
+  profileBtn?.addEventListener('click', async () => {
+    if (isLoggedIn) {
+      const confirmLogout = confirm('আপনি কি লগআউট করতে চান?');
+      if (confirmLogout) {
+        await supabase.auth.signOut();
+        showLoggedOutState();
+      }
+    } else {
+      window.openAuthModal?.('login');
+    }
   });
 
-  const desktopAvatarWrap = document.getElementById('profileAvatar');
-  const desktopAvatarImg = document.getElementById('profileAvatarImg');
-  const desktopLabel = document.querySelector('.profile-label');
-
-  window.addEventListener('smartfeni:auth-demo-login', (e) => {
-    const { name, photo } = e.detail || {};
-    if (photo) {
-      desktopAvatarImg.src = photo;
-      desktopAvatarWrap?.classList.add('has-photo');
-    }
-    if (desktopLabel && name) {
-      desktopLabel.textContent = name;
-    }
+  // AuthModal থেকে সাইনআপ/লগইন সফল হলে এই ইভেন্ট আসবে
+  window.addEventListener('smartfeni:auth-changed', (e) => {
+    const { name, avatarUrl } = e.detail || {};
+    showLoggedInState(name, avatarUrl);
   });
 </script>
