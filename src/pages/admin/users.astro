@@ -1,0 +1,306 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — ইউজার ম্যানেজমেন্ট (/admin/users)
+// সব প্রোফাইল, প্রতিটার listing সংখ্যা, ব্লক/আনব্লক
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="ইউজার ম্যানেজমেন্ট | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>ইউজার ম্যানেজমেন্ট</h1>
+          <p class="admin-subtitle" id="resultCount"></p>
+        </div>
+
+        <div class="search-bar">
+          <i class="fas fa-magnifying-glass"></i>
+          <input type="text" id="searchInput" placeholder="নাম বা ফোন নম্বর দিয়ে খুঁজুন" />
+        </div>
+
+        <div id="usersContainer" class="users-container"></div>
+
+        <div id="emptyState" class="empty-state" style="display:none;">
+          <i class="fas fa-user-slash"></i>
+          <p>কোনো ইউজার পাওয়া যায়নি</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 20px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .search-bar {
+      position: relative;
+      margin-bottom: 22px;
+    }
+
+    .search-bar i {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #B0BCCB;
+      font-size: 0.85rem;
+    }
+
+    .search-bar input {
+      width: 100%;
+      padding: 13px 16px 13px 42px;
+      border-radius: 14px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+
+    .search-bar input:focus {
+      outline: none;
+      border-color: #FF6B35;
+    }
+
+    .users-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 80px 0;
+      color: #B0BCCB;
+    }
+
+    .empty-state i {
+      font-size: 2.4rem;
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const container = document.getElementById('usersContainer');
+    const emptyState = document.getElementById('emptyState');
+    const resultCount = document.getElementById('resultCount');
+    const searchInput = document.getElementById('searchInput');
+
+    let allUsers = [];
+    let currentUserId = null;
+
+    const roleLabels = {
+      admin: { text: 'অ্যাডমিন', bg: '#FFF0EA', color: '#FF6B35' },
+      moderator: { text: 'মডারেটর', bg: '#EAF2FF', color: '#2563EB' },
+      user: { text: 'ইউজার', bg: '#F4F7FC', color: '#5A6E85' },
+    };
+
+    function renderUser(user) {
+      const role = roleLabels[user.role] || roleLabels.user;
+      const isMe = user.id === currentUserId;
+
+      const card = document.createElement('div');
+      card.style.cssText = `background:#fff;border-radius:18px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;align-items:center;gap:14px;${user.is_blocked ? 'opacity:0.6;' : ''}`;
+
+      card.innerHTML = `
+        ${user.avatar_url
+          ? `<img src="${user.avatar_url}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;flex-shrink:0;" />`
+          : `<div style="width:52px;height:52px;border-radius:50%;background:#F4F7FC;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#B0BCCB;font-size:1.2rem;"><i class="fas fa-user"></i></div>`
+        }
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <h3 style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${user.full_name || '(নামহীন)'}</h3>
+            <span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:${role.bg};color:${role.color};">${role.text}</span>
+            ${isMe ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#F4F7FC;color:#8FA0BC;">আপনি</span>` : ''}
+            ${user.is_blocked ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#D14343;">ব্লকড</span>` : ''}
+          </div>
+          <p style="font-size:0.82rem;color:#8FA0BC;margin-top:3px;">
+            ${user.phone || ''}${user.upazila ? ' · ' + user.upazila : ''}${user.blood_group ? ' · ' + user.blood_group : ''}
+          </p>
+          <p style="font-size:0.78rem;color:#5A6E85;margin-top:4px;font-weight:600;">
+            <i class="fas fa-list-check" style="color:#FF6B35;"></i> ${user.listingCount} টি লিস্টিং পোস্ট করেছেন
+          </p>
+        </div>
+        <div class="user-action" style="flex-shrink:0;"></div>
+      `;
+
+      const actionWrap = card.querySelector('.user-action');
+
+      if (!isMe) {
+        const toggleBtn = document.createElement('button');
+        let confirming = false;
+
+        function setBtnState() {
+          if (user.is_blocked) {
+            toggleBtn.textContent = 'আনব্লক করুন';
+            toggleBtn.style.cssText = 'background:#EAFBF0;color:#1B7A3C;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+          } else {
+            toggleBtn.textContent = confirming ? 'নিশ্চিত?' : 'ব্লক করুন';
+            toggleBtn.style.cssText = confirming
+              ? 'background:#D14343;color:#fff;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;'
+              : 'background:#FFF0EA;color:#D14343;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+          }
+        }
+
+        setBtnState();
+
+        toggleBtn.addEventListener('click', () => {
+          if (user.is_blocked) {
+            toggleBlock(user.id, false);
+            return;
+          }
+          if (!confirming) {
+            confirming = true;
+            setBtnState();
+            return;
+          }
+          toggleBlock(user.id, true);
+        });
+
+        actionWrap.appendChild(toggleBtn);
+      }
+
+      return card;
+    }
+
+    async function toggleBlock(id, blockedState) {
+      const { error } = await supabase.from('profiles').update({ is_blocked: blockedState }).eq('id', id);
+      if (error) {
+        alert('আপডেট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadUsers();
+    }
+
+    function renderList(users) {
+      container.innerHTML = '';
+      resultCount.textContent = `মোট ${users.length} জন ইউজার`;
+
+      if (users.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+      emptyState.style.display = 'none';
+      users.forEach((u) => container.appendChild(renderUser(u)));
+    }
+
+    function applySearch() {
+      const q = searchInput.value.trim().toLowerCase();
+      if (!q) {
+        renderList(allUsers);
+        return;
+      }
+      const filtered = allUsers.filter((u) =>
+        (u.full_name || '').toLowerCase().includes(q) || (u.phone || '').includes(q)
+      );
+      renderList(filtered);
+    }
+
+    async function loadUsers() {
+      container.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
+
+      const [{ data: profiles, error: profileError }, { data: listings, error: listingError }] = await Promise.all([
+        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        supabase.from('listings').select('user_id'),
+      ]);
+
+      if (profileError) {
+        container.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${profileError.message}</p>`;
+        return;
+      }
+
+      const countMap = {};
+      (listings || []).forEach((l) => {
+        countMap[l.user_id] = (countMap[l.user_id] || 0) + 1;
+      });
+
+      allUsers = (profiles || []).map((p) => ({ ...p, listingCount: countMap[p.id] || 0 }));
+      applySearch();
+    }
+
+    searchInput.addEventListener('input', applySearch);
+
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      currentUserId = e.detail.session.user.id;
+      loadUsers();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
