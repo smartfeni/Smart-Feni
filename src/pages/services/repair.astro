@@ -2,24 +2,14 @@
 // ============================================================
 // পেজ: রিপেয়ার সার্ভিস
 // ব্র্যান্ড: স্মার্ট ফেনী
+// Supabase থেকে রিয়েল লিস্টিং ডেটা fetch করা হয় (mock ডেটা বাদ)
 // ============================================================
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
+import AddListingModal from '../../components/ui/AddListingModal.astro';
+import { supabase } from '../../lib/supabase.js';
 
-// প্লেসহোল্ডার ডেটা — পরে ডাটাবেজ থেকে আসবে, আপাতত mock ডেটা দিয়ে UI সাজানো হচ্ছে
-const technicians = [
-  { id: 1, type: 'electrician', typeName: 'ইলেকট্রিশিয়ান', service: 'ওয়্যারিং ও সুইচ মেরামত', upazila: 'ফেনী সদর', name: 'রফিকুল ইসলাম', rating: 4.8, reviews: 24 },
-  { id: 2, type: 'plumbing', typeName: 'প্লাম্বিং', service: 'পাইপ লিকেজ ও ওয়াটার হিটার', upazila: 'বাড্ডা', name: 'কামাল হোসেন', rating: 4.6, reviews: 18 },
-  { id: 3, type: 'ac-fridge', typeName: 'এসি/ফ্রিজ', service: 'এসি সার্ভিসিং ও গ্যাস রিফিল', upazila: 'দাগনভূঞা', name: 'আব্দুল করিম', rating: 4.3, reviews: 31 },
-  { id: 4, type: 'mobile-computer', typeName: 'মোবাইল/কম্পিউটার', service: 'স্ক্রিন ও সফটওয়্যার সমস্যা', upazila: 'পরশুরাম', name: 'শাহাদাত হোসেন', rating: 4.9, reviews: 12 },
-  { id: 5, type: 'furniture', typeName: 'ফার্নিচার/কাঠমিস্ত্রি', service: 'আসবাবপত্র মেরামত', upazila: 'ফুলগাজী', name: 'জসিম উদ্দিন', rating: 4.5, reviews: 9 },
-  { id: 6, type: 'appliance', typeName: 'গৃহস্থালি যন্ত্রপাতি', service: 'ওয়াশিং মেশিন ও মাইক্রোওয়েভ', upazila: 'সোনাগাজী', name: 'নুরুল আমিন', rating: 4.2, reviews: 15 },
-  { id: 7, type: 'gas-stove', typeName: 'গ্যাসের চুলা', service: 'চুলা মেরামত ও বার্নার পরিবর্তন', upazila: 'ফেনী সদর', name: 'মিজানুর রহমান', rating: 4.7, reviews: 21 },
-  { id: 8, type: 'electrician', typeName: 'ইলেকট্রিশিয়ান', service: 'লাইট ফিটিং ও মিটার সমস্যা', upazila: 'ছাগলনাইয়া', name: 'ফরহাদ হোসেন', rating: 4.4, reviews: 7 },
-];
-
-const filters = [
-  { id: 'all', label: 'সব' },
+const typeOptions = [
   { id: 'electrician', label: 'ইলেকট্রিশিয়ান' },
   { id: 'plumbing', label: 'প্লাম্বিং' },
   { id: 'ac-fridge', label: 'এসি/ফ্রিজ' },
@@ -28,6 +18,8 @@ const filters = [
   { id: 'appliance', label: 'গৃহস্থালি যন্ত্রপাতি' },
   { id: 'gas-stove', label: 'গ্যাসের চুলা' },
 ];
+
+const typeNameMap = Object.fromEntries(typeOptions.map((t) => [t.id, t.label]));
 
 const typeIcons = {
   electrician: 'fa-bolt',
@@ -38,6 +30,17 @@ const typeIcons = {
   appliance: 'fa-blender',
   'gas-stove': 'fa-fire',
 };
+
+const { data: technicians } = await supabase
+  .from('listings')
+  .select('*')
+  .eq('category', 'repair')
+  .eq('status', 'active')
+  .order('created_at', { ascending: false });
+
+const listings = technicians || [];
+
+const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 ---
 
 <BaseLayout title="রিপেয়ার সার্ভিস | স্মার্ট ফেনী">
@@ -59,52 +62,58 @@ const typeIcons = {
         ))}
       </div>
 
-      <div class="repair-grid" id="repairGrid">
-        {technicians.map((tech) => (
-          <div class="repair-card" data-type={tech.type}>
-            <div class="repair-card-top">
-              <span class={`type-badge type-${tech.type}`}>{tech.typeName}</span>
-              <span class="location-tag">
-                <i class="fas fa-location-dot"></i> {tech.upazila}
-              </span>
-            </div>
-
-            <div class="repair-icon">
-              <i class={`fas ${typeIcons[tech.type]}`}></i>
-            </div>
-
-            <h3 class="repair-service">{tech.service}</h3>
-
-            <div class="owner-row">
-              <div class="owner-avatar">{tech.name.charAt(0)}</div>
-              <div class="owner-info">
-                <p class="owner-name">{tech.name}</p>
-                <div class="rating">
-                  <i class="fas fa-star"></i>
-                  <span>{tech.rating}</span>
-                  <span class="review-count">({tech.reviews} রিভিউ)</span>
-                </div>
+      {listings.length === 0 ? (
+        <div class="empty-state">
+          <i class="fas fa-toolbox"></i>
+          <p>এখনো কোনো টেকনিশিয়ান লিস্টিং যোগ হয়নি</p>
+          <span>প্রথম লিস্টিং যোগ করুন নিচের বাটনে ক্লিক করে</span>
+        </div>
+      ) : (
+        <div class="repair-grid" id="repairGrid">
+          {listings.map((tech) => (
+            <div class="repair-card" data-type={tech.type}>
+              <div class="repair-card-top">
+                <span class={`type-badge type-${tech.type}`}>{typeNameMap[tech.type] || tech.type}</span>
+                <span class="location-tag">
+                  <i class="fas fa-location-dot"></i> {tech.upazila}
+                </span>
               </div>
-            </div>
 
-            <a href="/contact" class="btn-contact">
-              <i class="fas fa-phone"></i> যোগাযোগ করুন
-            </a>
-          </div>
-        ))}
-      </div>
+              {tech.images && tech.images.length > 0 ? (
+                <img src={tech.images[0]} alt={tech.title} class="repair-photo" />
+              ) : (
+                <div class="repair-icon">
+                  <i class={`fas ${typeIcons[tech.type] || 'fa-screwdriver-wrench'}`}></i>
+                </div>
+              )}
+
+              <h3 class="repair-service">{tech.title}</h3>
+              {tech.description && <p class="repair-desc">{tech.description}</p>}
+              {tech.price && (
+                <p class="repair-price"><i class="fas fa-coins"></i> {tech.price}</p>
+              )}
+
+              <a href={`tel:${tech.contact_phone}`} class="btn-contact">
+                <i class="fas fa-phone"></i> যোগাযোগ করুন
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div class="provider-cta">
         <div class="provider-cta-text">
           <h3><i class="fas fa-bullhorn"></i> আপনি কি একজন টেকনিশিয়ান বা মেরামতকারী?</h3>
-          <p>সার্ভিস প্রোভাইডার হিসেবে বিজ্ঞাপন দিতে আমাদের সাথে যোগাযোগ করুন</p>
+          <p>সার্ভিস প্রোভাইডার হিসেবে বিনামূল্যে লিস্টিং দিন</p>
         </div>
-        <a href="tel:01712345678" class="provider-cta-btn">
-          <i class="fas fa-phone-volume"></i> 01712-345678
-        </a>
+        <button class="provider-cta-btn" id="openAddListing" type="button">
+          <i class="fas fa-plus"></i> লিস্টিং যোগ করুন
+        </button>
       </div>
     </div>
   </section>
+
+  <AddListingModal category="repair" typeOptions={typeOptions} />
 </BaseLayout>
 
 <style>
@@ -164,6 +173,31 @@ const typeIcons = {
     border-color: #FF6B35;
   }
 
+  .empty-state {
+    text-align: center;
+    background: #fff;
+    border-radius: 20px;
+    padding: 50px 24px;
+    border: 1px dashed #E5EAF0;
+  }
+
+  .empty-state i {
+    font-size: 2rem;
+    color: #D7E0EC;
+    margin-bottom: 12px;
+  }
+
+  .empty-state p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+  }
+
+  .empty-state span {
+    color: #8FA0BC;
+    font-size: 0.85rem;
+  }
+
   .repair-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -203,40 +237,13 @@ const typeIcons = {
     white-space: nowrap;
   }
 
-  .type-electrician {
-    background: rgba(253, 203, 110, 0.18);
-    color: #B8860B;
-  }
-
-  .type-plumbing {
-    background: rgba(9, 132, 227, 0.12);
-    color: #0984E3;
-  }
-
-  .type-ac-fridge {
-    background: rgba(0, 184, 148, 0.12);
-    color: #00B894;
-  }
-
-  .type-mobile-computer {
-    background: rgba(108, 92, 231, 0.12);
-    color: #6C5CE7;
-  }
-
-  .type-furniture {
-    background: rgba(214, 132, 62, 0.15);
-    color: #A0522D;
-  }
-
-  .type-appliance {
-    background: rgba(0, 168, 204, 0.12);
-    color: #0099B8;
-  }
-
-  .type-gas-stove {
-    background: rgba(255, 107, 53, 0.12);
-    color: #FF6B35;
-  }
+  .type-electrician { background: rgba(253, 203, 110, 0.18); color: #B8860B; }
+  .type-plumbing { background: rgba(9, 132, 227, 0.12); color: #0984E3; }
+  .type-ac-fridge { background: rgba(0, 184, 148, 0.12); color: #00B894; }
+  .type-mobile-computer { background: rgba(108, 92, 231, 0.12); color: #6C5CE7; }
+  .type-furniture { background: rgba(214, 132, 62, 0.15); color: #A0522D; }
+  .type-appliance { background: rgba(0, 168, 204, 0.12); color: #0099B8; }
+  .type-gas-stove { background: rgba(255, 107, 53, 0.12); color: #FF6B35; }
 
   .location-tag {
     font-size: 0.75rem;
@@ -260,55 +267,32 @@ const typeIcons = {
     margin-bottom: 12px;
   }
 
+  .repair-photo {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    border-radius: 14px;
+    margin-bottom: 12px;
+  }
+
   .repair-service {
     font-size: 1.05rem;
     font-weight: 700;
-    margin-bottom: 16px;
+    margin-bottom: 6px;
   }
 
-  .owner-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 16px;
-    padding-top: 14px;
-    border-top: 1px solid #EEF3F9;
+  .repair-desc {
+    color: #5A6E85;
+    font-size: 0.85rem;
+    margin-bottom: 10px;
+    line-height: 1.5;
   }
 
-  .owner-avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: #1B2A4A;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .repair-price {
+    color: #FF6B35;
     font-weight: 700;
     font-size: 0.9rem;
-    flex-shrink: 0;
-  }
-
-  .owner-name {
-    font-size: 0.85rem;
-    font-weight: 600;
-    margin-bottom: 2px;
-  }
-
-  .rating {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.75rem;
-    color: #5A6E85;
-  }
-
-  .rating i {
-    color: #FDCB6E;
-  }
-
-  .review-count {
-    color: #A0AFC0;
+    margin-bottom: 16px;
   }
 
   .btn-contact {
@@ -368,12 +352,14 @@ const typeIcons = {
     gap: 10px;
     background: #FF6B35;
     color: #fff;
+    border: none;
     text-decoration: none;
     padding: 14px 28px;
     border-radius: 40px;
     font-weight: 700;
     font-size: 1rem;
     white-space: nowrap;
+    cursor: pointer;
     transition: background 0.2s ease;
   }
 
@@ -416,5 +402,9 @@ const typeIcons = {
         }
       });
     });
+  });
+
+  document.getElementById('openAddListing')?.addEventListener('click', () => {
+    window.openListingModal?.();
   });
 </script>
