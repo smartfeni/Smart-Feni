@@ -1,0 +1,275 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন ড্যাশবোর্ড (/admin)
+// শুধু admin/moderator role অ্যাক্সেস করতে পারবে — adminGuard.js দিয়ে
+// ক্লায়েন্ট-সাইডে চেক হয়, আসল নিরাপত্তা Supabase RLS policy-তে
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="অ্যাডমিন ড্যাশবোর্ড | স্মার্ট ফেনী">
+  <div class="admin-page">
+    <div class="container">
+
+      <!-- ===== লোডিং স্টেট (গার্ড চেক চলাকালীন) ===== -->
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <!-- ===== আসল কন্টেন্ট (গার্ড পাস হলে দেখা যাবে) ===== -->
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <div class="admin-header">
+          <div>
+            <h1>অ্যাডমিন ড্যাশবোর্ড</h1>
+            <p class="admin-role-badge" id="roleBadge"></p>
+          </div>
+        </div>
+
+        <!-- ===== স্ট্যাটস কার্ড ===== -->
+        <div class="admin-stats">
+          <div class="stat-card">
+            <i class="fas fa-users"></i>
+            <div>
+              <span class="stat-number" id="statUsers">—</span>
+              <span class="stat-label">মোট ইউজার</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <i class="fas fa-list-check"></i>
+            <div>
+              <span class="stat-number" id="statListings">—</span>
+              <span class="stat-label">মোট লিস্টিং</span>
+            </div>
+          </div>
+          <div class="stat-card highlight">
+            <i class="fas fa-hourglass-half"></i>
+            <div>
+              <span class="stat-number" id="statPending">—</span>
+              <span class="stat-label">রিভিউ বাকি</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== নেভিগেশন কার্ড ===== -->
+        <div class="admin-nav-grid">
+          <a href="/admin/listings" class="admin-nav-card">
+            <i class="fas fa-list-check"></i>
+            <h3>লিস্টিং ম্যানেজমেন্ট</h3>
+            <p>সব ক্যাটাগরির লিস্টিং দেখুন, approve/reject/delete করুন</p>
+          </a>
+
+          <a href="/admin/users" class="admin-nav-card">
+            <i class="fas fa-users"></i>
+            <h3>ইউজার ম্যানেজমেন্ট</h3>
+            <p>প্রোফাইল দেখুন, প্রয়োজনে ব্লক/আনব্লক করুন</p>
+          </a>
+
+          <a href="/admin/featured-photo" class="admin-nav-card">
+            <i class="fas fa-image"></i>
+            <h3>ফিচার্ড ফটো</h3>
+            <p>হোমপেজের ফিচার্ড ফটো আপলোড/পরিবর্তন করুন</p>
+          </a>
+
+          <a href="/admin/moderators" class="admin-nav-card" id="moderatorNavCard" style="display:none;">
+            <i class="fas fa-user-shield"></i>
+            <h3>মডারেটর ম্যানেজমেন্ট</h3>
+            <p>নতুন মডারেটর যোগ করুন বা সরিয়ে দিন</p>
+          </a>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 48px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .admin-header {
+      margin-bottom: 32px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-role-badge {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #FF6B35;
+      background: #FFF0EA;
+      padding: 4px 14px;
+      border-radius: 40px;
+      text-transform: capitalize;
+    }
+
+    .admin-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+
+    .stat-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    .stat-card i {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+
+    .stat-card.highlight i {
+      background: #FFE9DC;
+    }
+
+    .stat-number {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      line-height: 1.2;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.78rem;
+      color: #8FA0BC;
+      font-weight: 600;
+    }
+
+    .admin-nav-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+    }
+
+    .admin-nav-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 26px;
+      text-decoration: none;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      transition: all 0.2s ease;
+    }
+
+    .admin-nav-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+    }
+
+    .admin-nav-card i {
+      font-size: 1.6rem;
+      color: #FF6B35;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .admin-nav-card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 6px;
+    }
+
+    .admin-nav-card p {
+      font-size: 0.85rem;
+      color: #5A6E85;
+    }
+
+    @media (max-width: 768px) {
+      .admin-stats {
+        grid-template-columns: 1fr;
+      }
+      .admin-nav-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    async function loadStats() {
+      const [{ count: userCount }, { count: listingCount }, { count: pendingCount }] = await Promise.all([
+        supabase.from('profiles').select('*', { count: 'exact', head: true }),
+        supabase.from('listings').select('*', { count: 'exact', head: true }),
+        supabase.from('listings').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      ]);
+
+      const statUsers = document.getElementById('statUsers');
+      const statListings = document.getElementById('statListings');
+      const statPending = document.getElementById('statPending');
+
+      if (statUsers) statUsers.textContent = userCount ?? '0';
+      if (statListings) statListings.textContent = listingCount ?? '0';
+      if (statPending) statPending.textContent = pendingCount ?? '0';
+    }
+
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      const { role } = e.detail;
+
+      const roleBadge = document.getElementById('roleBadge');
+      if (roleBadge) roleBadge.textContent = role === 'admin' ? 'অ্যাডমিন' : 'মডারেটর';
+
+      if (role === 'admin') {
+        const modCard = document.getElementById('moderatorNavCard');
+        if (modCard) modCard.style.display = '';
+      }
+
+      loadStats();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
