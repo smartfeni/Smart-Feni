@@ -1,7 +1,7 @@
 ---
 // ============================================================
 // পেজ: অ্যাডমিন — ইউজার ম্যানেজমেন্ট (/admin/users)
-// সব প্রোফাইল, প্রতিটার listing সংখ্যা, ব্লক/আনব্লক
+// সব প্রোফাইল, প্রতিটার listing সংখ্যা (ক্লিক করলে expand), ব্লক/আনব্লক
 // ============================================================
 
 export const prerender = false;
@@ -156,6 +156,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
+    import { categories } from '../../data/services.js';
+
+    const categoryNameMap = Object.fromEntries(categories.map((c) => [c.id, c.name]));
 
     const container = document.getElementById('usersContainer');
     const emptyState = document.getElementById('emptyState');
@@ -171,34 +174,79 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       user: { text: 'ইউজার', bg: '#F4F7FC', color: '#5A6E85' },
     };
 
+    const listingStatusLabels = {
+      pending: { text: 'রিভিউ বাকি', bg: '#FFF3E0', color: '#B36B00' },
+      active: { text: 'সক্রিয়', color: '#1B7A3C', bg: '#EAFBF0' },
+      rejected: { text: 'বাতিল', color: '#D14343', bg: '#FFF0EA' },
+    };
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
     function renderUser(user) {
       const role = roleLabels[user.role] || roleLabels.user;
       const isMe = user.id === currentUserId;
 
       const card = document.createElement('div');
-      card.style.cssText = `background:#fff;border-radius:18px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;align-items:center;gap:14px;${user.is_blocked ? 'opacity:0.6;' : ''}`;
+      card.style.cssText = `background:#fff;border-radius:18px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);${user.is_blocked ? 'opacity:0.6;' : ''}`;
 
       card.innerHTML = `
-        ${user.avatar_url
-          ? `<img src="${user.avatar_url}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;flex-shrink:0;" />`
-          : `<div style="width:52px;height:52px;border-radius:50%;background:#F4F7FC;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#B0BCCB;font-size:1.2rem;"><i class="fas fa-user"></i></div>`
-        }
-        <div style="flex:1;min-width:0;">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <h3 style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${user.full_name || '(নামহীন)'}</h3>
-            <span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:${role.bg};color:${role.color};">${role.text}</span>
-            ${isMe ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#F4F7FC;color:#8FA0BC;">আপনি</span>` : ''}
-            ${user.is_blocked ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#D14343;">ব্লকড</span>` : ''}
+        <div style="display:flex;align-items:center;gap:14px;">
+          ${user.avatar_url
+            ? `<img src="${user.avatar_url}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;flex-shrink:0;" />`
+            : `<div style="width:52px;height:52px;border-radius:50%;background:#F4F7FC;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#B0BCCB;font-size:1.2rem;"><i class="fas fa-user"></i></div>`
+          }
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <h3 style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${user.full_name || '(নামহীন)'}</h3>
+              <span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:${role.bg};color:${role.color};">${role.text}</span>
+              ${isMe ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#F4F7FC;color:#8FA0BC;">আপনি</span>` : ''}
+              ${user.is_blocked ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#D14343;">ব্লকড</span>` : ''}
+            </div>
+            <p style="font-size:0.82rem;color:#8FA0BC;margin-top:3px;">
+              ${user.phone || ''}${user.upazila ? ' · ' + user.upazila : ''}${user.blood_group ? ' · ' + user.blood_group : ''}
+            </p>
+            <button class="listing-count-toggle" style="font-size:0.78rem;color:#5A6E85;margin-top:4px;font-weight:600;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
+              <i class="fas fa-list-check" style="color:#FF6B35;"></i> ${user.listingCount} টি লিস্টিং পোস্ট করেছেন
+              ${user.listingCount > 0 ? '<i class="fas fa-chevron-down" style="font-size:0.65rem;margin-left:4px;"></i>' : ''}
+            </button>
           </div>
-          <p style="font-size:0.82rem;color:#8FA0BC;margin-top:3px;">
-            ${user.phone || ''}${user.upazila ? ' · ' + user.upazila : ''}${user.blood_group ? ' · ' + user.blood_group : ''}
-          </p>
-          <p style="font-size:0.78rem;color:#5A6E85;margin-top:4px;font-weight:600;">
-            <i class="fas fa-list-check" style="color:#FF6B35;"></i> ${user.listingCount} টি লিস্টিং পোস্ট করেছেন
-          </p>
+          <div class="user-action" style="flex-shrink:0;"></div>
         </div>
-        <div class="user-action" style="flex-shrink:0;"></div>
+        <div class="listing-detail-panel" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #F0F3F8;"></div>
       `;
+
+      const detailPanel = card.querySelector('.listing-detail-panel');
+      const countToggle = card.querySelector('.listing-count-toggle');
+
+      if (user.listingCount > 0) {
+        countToggle.addEventListener('click', () => {
+          const isOpen = detailPanel.style.display !== 'none';
+          detailPanel.style.display = isOpen ? 'none' : 'flex';
+          detailPanel.style.flexDirection = 'column';
+          detailPanel.style.gap = '8px';
+
+          if (!isOpen && !detailPanel.dataset.filled) {
+            user.userListings.forEach((l) => {
+              const st = listingStatusLabels[l.status] || listingStatusLabels.pending;
+              const row = document.createElement('div');
+              row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;background:#FBFCFE;padding:10px 12px;border-radius:12px;';
+              row.innerHTML = `
+                <div style="min-width:0;">
+                  <p style="font-size:0.85rem;font-weight:700;color:#1B2A4A;">${l.title || '(শিরোনামহীন)'}</p>
+                  <p style="font-size:0.76rem;color:#8FA0BC;">${categoryNameMap[l.category] || l.category} · ${formatDate(l.created_at)}</p>
+                </div>
+                <span style="font-size:0.7rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;background:${st.bg};color:${st.color};">${st.text}</span>
+              `;
+              detailPanel.appendChild(row);
+            });
+            detailPanel.dataset.filled = 'true';
+          }
+        });
+      }
 
       const actionWrap = card.querySelector('.user-action');
 
@@ -277,7 +325,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
       const [{ data: profiles, error: profileError }, { data: listings, error: listingError }] = await Promise.all([
         supabase.from('profiles').select('*').order('created_at', { ascending: false }),
-        supabase.from('listings').select('user_id'),
+        supabase.from('listings').select('id, user_id, title, category, status, price, upazila, created_at').order('created_at', { ascending: false }),
       ]);
 
       if (profileError) {
@@ -286,11 +334,18 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       }
 
       const countMap = {};
+      const listingsByUser = {};
       (listings || []).forEach((l) => {
         countMap[l.user_id] = (countMap[l.user_id] || 0) + 1;
+        if (!listingsByUser[l.user_id]) listingsByUser[l.user_id] = [];
+        listingsByUser[l.user_id].push(l);
       });
 
-      allUsers = (profiles || []).map((p) => ({ ...p, listingCount: countMap[p.id] || 0 }));
+      allUsers = (profiles || []).map((p) => ({
+        ...p,
+        listingCount: countMap[p.id] || 0,
+        userListings: listingsByUser[p.id] || [],
+      }));
       applySearch();
     }
 
