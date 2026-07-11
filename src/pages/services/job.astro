@@ -2,73 +2,106 @@
 // ============================================================
 // পেজ: চাকরির খবর সার্ভিস
 // ব্র্যান্ড: স্মার্ট ফেনী
+// Supabase থেকে রিয়েল লিস্টিং ডেটা fetch করা হয় (mock ডেটা বাদ)
 // ============================================================
 
-import BaseLayout from '../../components/layout/BaseLayout.astro';
+export const prerender = false;
 
-// প্লেসহোল্ডার ডেটা — পরে ডাটাবেজ থেকে আসবে, আপাতত mock ডেটা দিয়ে UI সাজানো হচ্ছে
-const jobs = [
-  { id: 1, type: 'fulltime', typeName: 'ফুল-টাইম', title: 'সফটওয়্যার ইঞ্জিনিয়ার', company: 'বিকাশ লিমিটেড', salary: '৩৫,০০০ - ৫০,০০০', upazila: 'ফেনী সদর', experience: '২-৩ বছর', deadline: '৩০ জুলাই' },
-  { id: 2, type: 'parttime', typeName: 'পার্ট-টাইম', title: 'গ্রাফিক ডিজাইনার', company: 'ক্রিয়েটিভ স্টুডিও', salary: '১৫,০০০ - ২০,০০০', upazila: 'ছাগলনাইয়া', experience: '১ বছর', deadline: '২৫ জুলাই' },
-  { id: 3, type: 'internship', typeName: 'ইন্টার্নশিপ', title: 'মার্কেটিং ইন্টার্ন', company: 'দাগনভূঞা এগ্রো', salary: '৮,০০০', upazila: 'দাগনভূঞা', experience: 'ফ্রেশার', deadline: '১৫ আগস্ট' },
-  { id: 4, type: 'fulltime', typeName: 'ফুল-টাইম', title: 'একাউন্ট্যান্ট', company: 'পরশুরাম ট্রেডার্স', salary: '২৫,০০০ - ৩০,০০০', upazila: 'পরশুরাম', experience: '৩-৫ বছর', deadline: '৫ আগস্ট' },
-  { id: 5, type: 'fulltime', typeName: 'ফুল-টাইম', title: 'সেলস এক্সিকিউটিভ', company: 'ফুলগাজী ফার্মা', salary: '২০,০০০ - ২৫,০০০', upazila: 'ফুলগাজী', experience: '১-২ বছর', deadline: '২০ জুলাই' },
-  { id: 6, type: 'parttime', typeName: 'পার্ট-টাইম', title: 'কন্টেন্ট রাইটার', company: 'সোনাগাজী মিডিয়া', salary: '১২,০০০ - ১৮,০০০', upazila: 'সোনাগাজী', experience: 'ফ্রেশার', deadline: '১০ আগস্ট' },
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import AddListingModal from '../../components/ui/AddListingModal.astro';
+import { supabase } from '../../lib/supabase.js';
+
+const typeOptions = [
+  { id: 'fulltime', label: 'ফুল-টাইম' },
+  { id: 'parttime', label: 'পার্ট-টাইম' },
+  { id: 'internship', label: 'ইন্টার্নশিপ' },
 ];
+
+const typeNameMap = Object.fromEntries(typeOptions.map((t) => [t.id, t.label]));
+
+const { data: jobListings } = await supabase
+  .from('listings')
+  .select('*')
+  .eq('category', 'job')
+  .eq('status', 'active')
+  .order('created_at', { ascending: false });
+
+const listings = jobListings || [];
+
+const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 ---
 
 <BaseLayout title="চাকরির খবর | স্মার্ট ফেনী">
   <section class="page-header">
     <div class="container">
+      <span class="section-tag"><i class="fas fa-briefcase"></i> কর্মসংস্থান</span>
       <h1>ফেনীতে <span class="accent">চাকরির খবর</span></h1>
       <p>সরকারি-বেসরকারি প্রতিষ্ঠানের সর্বশেষ নিয়োগ বিজ্ঞপ্তি — এক জায়গায়</p>
-
-      <a href="/contact" class="btn-post-ad">
-        <i class="fas fa-plus"></i> চাকরি পোস্ট করুন
-      </a>
     </div>
   </section>
 
   <section class="job-section">
     <div class="container">
-      <div class="job-grid">
-        {jobs.map((job) => (
-          <div class="job-card">
-            <div class="job-card-top">
-              <span class={`type-badge type-${job.type}`}>{job.typeName}</span>
-              <span class="location-tag">
-                <i class="fas fa-location-dot"></i> {job.upazila}
-              </span>
-            </div>
-
-            <div class="job-icon">
-              <i class="fas fa-briefcase"></i>
-            </div>
-
-            <h3 class="job-title">{job.title}</h3>
-
-            <div class="job-meta">
-              <span class="meta-item"><i class="fas fa-user-clock"></i> {job.experience}</span>
-              <span class="meta-item"><i class="fas fa-calendar-days"></i> {job.deadline}</span>
-            </div>
-
-            <p class="salary-amount">৳{job.salary} <span>/ মাস</span></p>
-
-            <div class="company-row">
-              <div class="company-avatar">{job.company.charAt(0)}</div>
-              <div class="company-info">
-                <p class="company-name">{job.company}</p>
-              </div>
-            </div>
-
-            <a href="/contact" class="btn-apply">
-              <i class="fas fa-paper-plane"></i> আবেদন করুন
-            </a>
-          </div>
+      <div class="filter-tabs" id="filterTabs">
+        {filters.map((f) => (
+          <button class={`filter-tab ${f.id === 'all' ? 'active' : ''}`} data-filter={f.id}>
+            {f.label}
+          </button>
         ))}
+      </div>
+
+      {listings.length === 0 ? (
+        <div class="empty-state">
+          <i class="fas fa-briefcase"></i>
+          <p>এখনো কোনো চাকরির বিজ্ঞপ্তি যোগ হয়নি</p>
+          <span>প্রথম বিজ্ঞপ্তি যোগ করুন নিচের বাটনে ক্লিক করে</span>
+        </div>
+      ) : (
+        <div class="job-grid" id="jobGrid">
+          {listings.map((job) => (
+            <div class="job-card" data-type={job.type}>
+              <div class="job-card-top">
+                <span class={`type-badge type-${job.type}`}>{typeNameMap[job.type] || job.type}</span>
+                <span class="location-tag">
+                  <i class="fas fa-location-dot"></i> {job.upazila}
+                </span>
+              </div>
+
+              {job.images && job.images.length > 0 ? (
+                <img src={job.images[0]} alt={job.title} class="job-photo" />
+              ) : (
+                <div class="job-icon">
+                  <i class="fas fa-briefcase"></i>
+                </div>
+              )}
+
+              <h3 class="job-title">{job.title}</h3>
+              {job.description && <p class="job-desc">{job.description}</p>}
+              {job.price && (
+                <p class="salary-amount"><i class="fas fa-coins"></i> {job.price}</p>
+              )}
+
+              <a href={`tel:${job.contact_phone}`} class="btn-apply">
+                <i class="fas fa-paper-plane"></i> যোগাযোগ করুন
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div class="provider-cta">
+        <div class="provider-cta-text">
+          <h3><i class="fas fa-bullhorn"></i> আপনার প্রতিষ্ঠানে নিয়োগ চলছে?</h3>
+          <p>বিনামূল্যে চাকরির বিজ্ঞপ্তি পোস্ট করুন</p>
+        </div>
+        <button class="provider-cta-btn" id="openAddListing" type="button">
+          <i class="fas fa-plus"></i> বিজ্ঞপ্তি যোগ করুন
+        </button>
       </div>
     </div>
   </section>
+
+  <AddListingModal category="job" typeOptions={typeOptions} />
 </BaseLayout>
 
 <style>
@@ -81,7 +114,7 @@ const jobs = [
   .page-header h1 {
     font-size: 2.2rem;
     font-weight: 700;
-    margin: 0 0 8px;
+    margin: 12px 0 8px;
   }
 
   .page-header .accent {
@@ -91,31 +124,66 @@ const jobs = [
   .page-header p {
     color: #5A6E85;
     font-size: 1.05rem;
-    margin-bottom: 24px;
-  }
-
-  .btn-post-ad {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: #FF6B35;
-    color: #fff;
-    text-decoration: none;
-    padding: 14px 28px;
-    border-radius: 40px;
-    font-weight: 700;
-    font-size: 0.95rem;
-    transition: all 0.2s ease;
-  }
-
-  .btn-post-ad:hover {
-    background: #e85a28;
-    transform: translateY(-2px);
   }
 
   .job-section {
-    padding: 40px 0 70px;
+    padding: 30px 0 70px;
     background: #F8FAFC;
+  }
+
+  .filter-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .filter-tab {
+    background: #fff;
+    border: 1px solid #EEF3F9;
+    color: #1B2A4A;
+    padding: 10px 24px;
+    border-radius: 40px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .filter-tab:hover {
+    border-color: #FF6B35;
+  }
+
+  .filter-tab.active {
+    background: #FF6B35;
+    color: #fff;
+    border-color: #FF6B35;
+  }
+
+  .empty-state {
+    text-align: center;
+    background: #fff;
+    border-radius: 20px;
+    padding: 50px 24px;
+    border: 1px dashed #E5EAF0;
+  }
+
+  .empty-state i {
+    font-size: 2rem;
+    color: #D7E0EC;
+    margin-bottom: 12px;
+  }
+
+  .empty-state p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+  }
+
+  .empty-state span {
+    color: #8FA0BC;
+    font-size: 0.85rem;
   }
 
   .job-grid {
@@ -137,11 +205,16 @@ const jobs = [
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
   }
 
+  .job-card.hidden {
+    display: none;
+  }
+
   .job-card-top {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 16px;
+    gap: 8px;
   }
 
   .type-badge {
@@ -149,6 +222,7 @@ const jobs = [
     font-weight: 700;
     padding: 4px 12px;
     border-radius: 20px;
+    white-space: nowrap;
   }
 
   .type-fulltime {
@@ -172,6 +246,7 @@ const jobs = [
     display: flex;
     align-items: center;
     gap: 4px;
+    white-space: nowrap;
   }
 
   .job-icon {
@@ -187,71 +262,33 @@ const jobs = [
     margin-bottom: 12px;
   }
 
-  .job-title {
-    font-size: 1.05rem;
-    font-weight: 700;
+  .job-photo {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    border-radius: 14px;
     margin-bottom: 12px;
   }
 
-  .job-meta {
-    display: flex;
-    gap: 14px;
-    margin-bottom: 14px;
-    flex-wrap: wrap;
+  .job-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin-bottom: 6px;
   }
 
-  .meta-item {
-    font-size: 0.8rem;
+  .job-desc {
     color: #5A6E85;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .meta-item i {
-    color: #FF6B35;
-    font-size: 0.75rem;
+    font-size: 0.85rem;
+    margin-bottom: 10px;
+    line-height: 1.5;
+    white-space: pre-line;
   }
 
   .salary-amount {
-    font-size: 1.3rem;
-    font-weight: 700;
     color: #FF6B35;
-    margin-bottom: 16px;
-  }
-
-  .salary-amount span {
-    font-size: 0.8rem;
-    font-weight: 500;
-    color: #A0AFC0;
-  }
-
-  .company-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 16px;
-    padding-top: 14px;
-    border-top: 1px solid #EEF3F9;
-  }
-
-  .company-avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: #1B2A4A;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     font-weight: 700;
     font-size: 0.9rem;
-    flex-shrink: 0;
-  }
-
-  .company-name {
-    font-size: 0.85rem;
-    font-weight: 600;
+    margin-bottom: 16px;
   }
 
   .btn-apply {
@@ -274,6 +311,58 @@ const jobs = [
     background: #FF6B35;
   }
 
+  .provider-cta {
+    margin-top: 50px;
+    background: #1B2A4A;
+    border-radius: 24px;
+    padding: 36px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+
+  .provider-cta-text h3 {
+    color: #fff;
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .provider-cta-text h3 i {
+    color: #FF6B35;
+  }
+
+  .provider-cta-text p {
+    color: #C4CEDD;
+    font-size: 0.9rem;
+  }
+
+  .provider-cta-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #FF6B35;
+    color: #fff;
+    border: none;
+    text-decoration: none;
+    padding: 14px 28px;
+    border-radius: 40px;
+    font-weight: 700;
+    font-size: 1rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  .provider-cta-btn:hover {
+    background: #e85a2a;
+  }
+
   @media (max-width: 768px) {
     .job-grid {
       grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -282,5 +371,36 @@ const jobs = [
     .page-header h1 {
       font-size: 1.7rem;
     }
+
+    .provider-cta {
+      flex-direction: column;
+      text-align: center;
+      padding: 28px 24px;
+    }
   }
 </style>
+
+<script>
+  const tabs = document.querySelectorAll('.filter-tab');
+  const cards = document.querySelectorAll('.job-card');
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      tabs.forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+
+      const filter = tab.dataset.filter;
+      cards.forEach((card) => {
+        if (filter === 'all' || card.dataset.type === filter) {
+          card.classList.remove('hidden');
+        } else {
+          card.classList.add('hidden');
+        }
+      });
+    });
+  });
+
+  document.getElementById('openAddListing')?.addEventListener('click', () => {
+    window.openListingModal?.();
+  });
+</script>
