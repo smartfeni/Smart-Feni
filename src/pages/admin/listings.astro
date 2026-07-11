@@ -1,0 +1,315 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — লিস্টিং ম্যানেজমেন্ট (/admin/listings)
+// সব ক্যাটাগরির লিস্টিং একসাথে দেখা, ফিল্টার, approve/reject/delete
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import { categories } from '../../data/services.js';
+---
+
+<BaseLayout title="লিস্টিং ম্যানেজমেন্ট | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>লিস্টিং ম্যানেজমেন্ট</h1>
+          <p class="admin-subtitle" id="resultCount"></p>
+        </div>
+
+        <!-- ===== ফিল্টার ===== -->
+        <div class="filter-bar">
+          <select id="categoryFilter" class="filter-select">
+            <option value="all">সব ক্যাটাগরি</option>
+            {categories.map((c) => <option value={c.id}>{c.name}</option>)}
+          </select>
+
+          <select id="statusFilter" class="filter-select">
+            <option value="all">সব স্ট্যাটাস</option>
+            <option value="pending">রিভিউ বাকি</option>
+            <option value="active">সক্রিয়</option>
+            <option value="rejected">বাতিল</option>
+          </select>
+        </div>
+
+        <!-- ===== লিস্টিং কার্ড কন্টেইনার (JS দিয়ে ফিল হবে) ===== -->
+        <div id="listingsContainer" class="listings-container"></div>
+
+        <div id="emptyState" class="empty-state" style="display:none;">
+          <i class="fas fa-inbox"></i>
+          <p>কোনো লিস্টিং পাওয়া যায়নি</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 20px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .filter-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .filter-select {
+      padding: 11px 16px;
+      border-radius: 12px;
+      border: 1.5px solid #E5EAF0;
+      background: #fff;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #1B2A4A;
+      cursor: pointer;
+      flex: 1;
+      min-width: 140px;
+    }
+
+    .listings-container {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 80px 0;
+      color: #B0BCCB;
+    }
+
+    .empty-state i {
+      font-size: 2.4rem;
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { categories } from '../../data/services.js';
+
+    const categoryNameMap = Object.fromEntries(categories.map((c) => [c.id, c.name]));
+
+    const container = document.getElementById('listingsContainer');
+    const emptyState = document.getElementById('emptyState');
+    const resultCount = document.getElementById('resultCount');
+    const categoryFilter = document.getElementById('categoryFilter');
+    const statusFilter = document.getElementById('statusFilter');
+
+    const statusLabels = {
+      pending: { text: 'রিভিউ বাকি', bg: '#FFF3E0', color: '#B36B00' },
+      active: { text: 'সক্রিয়', color: '#1B7A3C', bg: '#EAFBF0' },
+      rejected: { text: 'বাতিল', color: '#D14343', bg: '#FFF0EA' },
+    };
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    // ============================================================
+    // প্রতিটা লিস্টিং কার্ড রেন্ডার — ইনলাইন স্টাইল ব্যবহার করা হচ্ছে
+    // কারণ Astro-র scoped CSS ডাইনামিক ইনজেক্টেড HTML-এ কাজ করে না
+    // (প্রজেক্টের পুরনো known issue)
+    // ============================================================
+    function renderCard(listing) {
+      const status = statusLabels[listing.status] || statusLabels.pending;
+      const categoryName = categoryNameMap[listing.category] || listing.category;
+      const thumb = Array.isArray(listing.images) && listing.images.length > 0 ? listing.images[0] : null;
+
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;gap:14px;';
+
+      card.innerHTML = `
+        ${thumb
+          ? `<img src="${thumb}" style="width:76px;height:76px;border-radius:14px;object-fit:cover;flex-shrink:0;" />`
+          : `<div style="width:76px;height:76px;border-radius:14px;background:#F4F7FC;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#B0BCCB;font-size:1.4rem;"><i class="fas fa-image"></i></div>`
+        }
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <h3 style="font-size:0.98rem;font-weight:700;color:#1B2A4A;">${listing.title || '(শিরোনামহীন)'}</h3>
+            <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${status.bg};color:${status.color};">${status.text}</span>
+          </div>
+          <p style="font-size:0.82rem;color:#8FA0BC;margin-top:4px;">${categoryName} ${listing.type ? '· ' + listing.type : ''}</p>
+          ${listing.description ? `<p style="font-size:0.85rem;color:#5A6E85;margin-top:6px;">${listing.description}</p>` : ''}
+          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:0.8rem;color:#5A6E85;">
+            ${listing.price ? `<span><i class="fas fa-tag" style="color:#FF6B35;"></i> ${listing.price}</span>` : ''}
+            ${listing.upazila ? `<span><i class="fas fa-location-dot" style="color:#FF6B35;"></i> ${listing.upazila}</span>` : ''}
+            ${listing.contact_phone ? `<span><i class="fas fa-phone" style="color:#FF6B35;"></i> ${listing.contact_phone}</span>` : ''}
+            <span><i class="fas fa-clock" style="color:#FF6B35;"></i> ${formatDate(listing.created_at)}</span>
+          </div>
+          <div class="card-actions" style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"></div>
+        </div>
+      `;
+
+      const actionsWrap = card.querySelector('.card-actions');
+
+      if (listing.status !== 'active') {
+        const approveBtn = document.createElement('button');
+        approveBtn.textContent = 'Approve করুন';
+        approveBtn.style.cssText = 'background:#1B7A3C;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        approveBtn.addEventListener('click', () => updateStatus(listing.id, 'active'));
+        actionsWrap.appendChild(approveBtn);
+      }
+
+      if (listing.status !== 'rejected') {
+        const rejectBtn = document.createElement('button');
+        rejectBtn.textContent = 'Reject করুন';
+        rejectBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        rejectBtn.addEventListener('click', () => updateStatus(listing.id, 'rejected'));
+        actionsWrap.appendChild(rejectBtn);
+      }
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'ডিলিট';
+      deleteBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+      let confirming = false;
+      deleteBtn.addEventListener('click', () => {
+        if (!confirming) {
+          confirming = true;
+          deleteBtn.textContent = 'নিশ্চিত করুন?';
+          deleteBtn.style.cssText = 'background:#D14343;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+          return;
+        }
+        deleteListing(listing.id);
+      });
+      actionsWrap.appendChild(deleteBtn);
+
+      return card;
+    }
+
+    async function updateStatus(id, status) {
+      const { error } = await supabase.from('listings').update({ status }).eq('id', id);
+      if (error) {
+        alert('আপডেট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadListings();
+    }
+
+    async function deleteListing(id) {
+      const { error } = await supabase.from('listings').delete().eq('id', id);
+      if (error) {
+        alert('ডিলিট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadListings();
+    }
+
+    async function loadListings() {
+      container.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
+
+      let query = supabase.from('listings').select('*').order('created_at', { ascending: false });
+
+      const category = categoryFilter.value;
+      const status = statusFilter.value;
+
+      if (category !== 'all') query = query.eq('category', category);
+      if (status !== 'all') query = query.eq('status', status);
+
+      const { data, error } = await query;
+
+      if (error) {
+        container.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      const listings = data || [];
+      resultCount.textContent = `মোট ${listings.length} টি লিস্টিং`;
+
+      container.innerHTML = '';
+
+      if (listings.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+
+      emptyState.style.display = 'none';
+      listings.forEach((listing) => container.appendChild(renderCard(listing)));
+    }
+
+    categoryFilter.addEventListener('change', loadListings);
+    statusFilter.addEventListener('change', loadListings);
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadListings();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
