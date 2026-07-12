@@ -3,6 +3,7 @@
 // পেজ: রিসাইকেল মার্কেটপ্লেস (পুরাতন জিনিস বিক্রয়)
 // ব্র্যান্ড: স্মার্ট ফেনী
 // Supabase থেকে রিয়েল লিস্টিং ডেটা fetch করা হয় (mock ডেটা বাদ)
+// শুধু সার্চ বক্স (ফিল্টার ট্যাব বাদ) + কম্প্যাক্ট কার্ড + Detail Modal
 // ============================================================
 
 export const prerender = false;
@@ -37,8 +38,6 @@ const { data: recycleListings } = await supabase
   .order('created_at', { ascending: false });
 
 const listings = recycleListings || [];
-
-const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 ---
 
 <BaseLayout title="রিসাইকেল মার্কেটপ্লেস | স্মার্ট ফেনী">
@@ -47,7 +46,7 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
       <span class="section-tag"><i class="fas fa-recycle"></i> রিসাইকেল মার্কেট</span>
       <h1>পুরাতন জিনিস <span class="accent">কেনা-বেচা</span></h1>
       <p>মোবাইল, বাইক, ইলেকট্রনিক্স, আসবাবপত্র — খুঁজুন অথবা বিক্রি করুন সহজে</p>
-      <button class="post-item-link" id="openAddListing" type="button">
+      <button class="cta-box" id="openAddListing" type="button">
         <i class="fas fa-plus"></i> পুরাতন জিনিস বিক্রি করতে চান?
       </button>
     </div>
@@ -60,14 +59,6 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
         <input type="text" id="searchInput" placeholder="মোবাইল, বাইক বা যেকোনো কিছু খুঁজুন..." />
       </div>
 
-      <div class="filter-tabs" id="filterTabs">
-        {filters.map((f) => (
-          <button class={`filter-tab ${f.id === 'all' ? 'active' : ''}`} data-filter={f.id}>
-            {f.label}
-          </button>
-        ))}
-      </div>
-
       {listings.length === 0 ? (
         <div class="empty-state">
           <i class="fas fa-box-open"></i>
@@ -77,19 +68,13 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
       ) : (
         <>
           <div class="recycle-grid" id="recycleGrid">
-            {listings.map((item) => (
-              <div
+            {listings.map((item, i) => (
+              <button
+                type="button"
                 class="recycle-card"
-                data-type={item.type}
+                data-index={i}
                 data-search={`${item.title || ''} ${item.description || ''}`.toLowerCase()}
               >
-                <div class="recycle-card-top">
-                  <span class={`type-badge type-${item.type}`}>{typeNameMap[item.type] || item.type}</span>
-                  <span class="location-tag">
-                    <i class="fas fa-location-dot"></i> {item.upazila}
-                  </span>
-                </div>
-
                 {item.images && item.images.length > 0 ? (
                   <img src={item.images[0]} alt={item.title} class="recycle-photo" />
                 ) : (
@@ -98,16 +83,13 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
                   </div>
                 )}
 
-                <h3 class="recycle-title">{item.title}</h3>
-                {item.description && <p class="recycle-desc">{item.description}</p>}
-                {item.price && (
-                  <p class="recycle-price"><i class="fas fa-coins"></i> {item.price}</p>
-                )}
-
-                <a href={`tel:${item.contact_phone}`} class="btn-contact">
-                  <i class="fas fa-phone"></i> যোগাযোগ করুন
-                </a>
-              </div>
+                <div class="recycle-card-body">
+                  <span class={`type-badge type-${item.type}`}>{typeNameMap[item.type] || item.type}</span>
+                  <h3 class="recycle-title">{item.title}</h3>
+                  {item.price && <p class="recycle-price">৳{item.price}</p>}
+                  <p class="location-tag"><i class="fas fa-location-dot"></i> {item.upazila}</p>
+                </div>
+              </button>
             ))}
           </div>
 
@@ -117,7 +99,31 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
     </div>
   </section>
 
+  <!-- ===== Detail Modal ===== -->
+  <div class="detail-overlay" id="detailOverlay">
+    <div class="detail-modal">
+      <button class="detail-close" id="detailClose" aria-label="বন্ধ করুন">
+        <i class="fas fa-xmark"></i>
+      </button>
+
+      <div id="detailImageWrap"></div>
+
+      <div class="detail-body">
+        <span class="type-badge" id="detailType"></span>
+        <h2 class="detail-title" id="detailTitle"></h2>
+        <p class="detail-price" id="detailPrice"></p>
+        <p class="detail-location"><i class="fas fa-location-dot"></i> <span id="detailUpazila"></span></p>
+        <p class="detail-desc" id="detailDesc"></p>
+        <a href="#" class="btn-contact" id="detailContact">
+          <i class="fas fa-phone"></i> যোগাযোগ করুন
+        </a>
+      </div>
+    </div>
+  </div>
+
   <AddListingModal category="recycle" typeOptions={typeOptions} />
+
+  <script type="application/json" id="listingsData" set:html={JSON.stringify(listings)} />
 </BaseLayout>
 
 <style>
@@ -140,24 +146,29 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
   .page-header p {
     color: #5A6E85;
     font-size: 1.05rem;
-    margin-bottom: 14px;
+    margin-bottom: 20px;
   }
 
-  .post-item-link {
+  .cta-box {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    background: none;
-    border: none;
+    gap: 8px;
+    background: #FFF0EA;
+    border: 1.5px solid #FFD3BC;
     color: #FF6B35;
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
+    padding: 12px 26px;
+    border-radius: 40px;
     cursor: pointer;
-    padding: 4px 0;
+    transition: all 0.2s ease;
   }
 
-  .post-item-link:hover {
-    text-decoration: underline;
+  .cta-box:hover {
+    background: #FF6B35;
+    color: #fff;
+    border-color: #FF6B35;
+    transform: translateY(-2px);
   }
 
   .recycle-section {
@@ -167,7 +178,7 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 
   .search-box {
     max-width: 480px;
-    margin: 0 auto 20px;
+    margin: 0 auto 32px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -189,36 +200,6 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
     font-family: inherit;
     background: transparent;
     color: #1B2A4A;
-  }
-
-  .filter-tabs {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 32px;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  .filter-tab {
-    background: #fff;
-    border: 1px solid #EEF3F9;
-    color: #1B2A4A;
-    padding: 10px 24px;
-    border-radius: 40px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .filter-tab:hover {
-    border-color: #FF6B35;
-  }
-
-  .filter-tab.active {
-    background: #FF6B35;
-    color: #fff;
-    border-color: #FF6B35;
   }
 
   .empty-state {
@@ -248,16 +229,20 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 
   .recycle-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
   }
 
   .recycle-card {
     background: #fff;
-    border-radius: 20px;
-    padding: 20px;
+    border-radius: 18px;
     border: 1px solid #EEF3F9;
-    transition: all 0.25s ease;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    transition: all 0.2s ease;
+    font-family: inherit;
   }
 
   .recycle-card:hover {
@@ -269,76 +254,171 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
     display: none;
   }
 
-  .recycle-card-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    gap: 8px;
-  }
-
-  .type-badge {
-    font-size: 0.7rem;
-    font-weight: 700;
-    padding: 4px 12px;
-    border-radius: 20px;
-    white-space: nowrap;
-  }
-
-  .type-mobile { background: rgba(9, 132, 227, 0.12); color: #0984E3; }
-  .type-bike { background: rgba(0, 184, 148, 0.12); color: #00B894; }
-  .type-electronics { background: rgba(108, 92, 231, 0.12); color: #6C5CE7; }
-  .type-furniture { background: rgba(214, 132, 62, 0.15); color: #A0522D; }
-  .type-other { background: rgba(253, 203, 110, 0.18); color: #B7791F; }
-
-  .location-tag {
-    font-size: 0.75rem;
-    color: #7A8EA5;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    white-space: nowrap;
-  }
-
   .recycle-icon {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
+    width: 100%;
+    height: 100px;
     background: #FFF0EA;
     color: #FF6B35;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.4rem;
-    margin-bottom: 12px;
+    font-size: 1.8rem;
   }
 
   .recycle-photo {
     width: 100%;
-    height: 140px;
+    height: 100px;
     object-fit: cover;
-    border-radius: 14px;
-    margin-bottom: 12px;
+  }
+
+  .recycle-card-body {
+    padding: 14px;
+  }
+
+  .type-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    margin-bottom: 6px;
+    background: #F4F7FC;
+    color: #5A6E85;
   }
 
   .recycle-title {
-    font-size: 1.05rem;
+    font-size: 0.9rem;
     font-weight: 700;
-    margin-bottom: 6px;
-  }
-
-  .recycle-desc {
-    color: #5A6E85;
-    font-size: 0.85rem;
-    margin-bottom: 10px;
-    line-height: 1.5;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .recycle-price {
-    color: #FF6B35;
+    font-size: 0.95rem;
     font-weight: 700;
+    color: #FF6B35;
+    margin-bottom: 4px;
+  }
+
+  .location-tag {
+    font-size: 0.72rem;
+    color: #8FA0BC;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .no-results {
+    text-align: center;
+    color: #A0AFC0;
+    font-size: 0.95rem;
+    padding: 40px 0;
+  }
+
+  /* ===== Detail Modal ===== */
+  .detail-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow-y: auto;
+  }
+
+  .detail-overlay.open {
+    display: flex;
+  }
+
+  .detail-modal {
+    position: relative;
+    background: #fff;
+    width: 100%;
+    max-width: 460px;
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
+    margin: auto;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .detail-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    background: rgba(255,255,255,0.9);
+    border: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: #5A6E85;
+    font-size: 0.95rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+  }
+
+  .detail-close:hover {
+    background: #FF6B35;
+    color: #fff;
+  }
+
+  #detailImageWrap img {
+    width: 100%;
+    height: 220px;
+    object-fit: cover;
+    display: block;
+  }
+
+  #detailImageWrap .detail-icon-fallback {
+    width: 100%;
+    height: 180px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+  }
+
+  .detail-body {
+    padding: 26px 26px 30px;
+  }
+
+  .detail-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin: 8px 0 6px;
+  }
+
+  .detail-price {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #FF6B35;
+    margin-bottom: 10px;
+  }
+
+  .detail-location {
+    font-size: 0.85rem;
+    color: #8FA0BC;
+    margin-bottom: 14px;
+  }
+
+  .detail-desc {
     font-size: 0.9rem;
-    margin-bottom: 16px;
+    color: #5A6E85;
+    line-height: 1.6;
+    margin-bottom: 24px;
+    white-space: pre-line;
   }
 
   .btn-contact {
@@ -350,10 +430,10 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
     background: #1B2A4A;
     color: #fff;
     text-decoration: none;
-    padding: 12px;
+    padding: 14px;
     border-radius: 40px;
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     transition: background 0.2s ease;
   }
 
@@ -361,18 +441,7 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
     background: #FF6B35;
   }
 
-  .no-results {
-    text-align: center;
-    color: #A0AFC0;
-    font-size: 0.95rem;
-    padding: 40px 0;
-  }
-
   @media (max-width: 768px) {
-    .recycle-grid {
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    }
-
     .page-header h1 {
       font-size: 1.7rem;
     }
@@ -380,22 +449,36 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 </style>
 
 <script>
-  const tabs = document.querySelectorAll('.filter-tab');
+  const typeNameMap = {
+    mobile: 'মোবাইল',
+    bike: 'বাইক',
+    electronics: 'ইলেকট্রনিক্স',
+    furniture: 'আসবাবপত্র',
+    other: 'অন্যান্য',
+  };
+
+  const typeIcons = {
+    mobile: 'fa-mobile-screen',
+    bike: 'fa-motorcycle',
+    electronics: 'fa-plug',
+    furniture: 'fa-couch',
+    other: 'fa-box',
+  };
+
+  const dataEl = document.getElementById('listingsData');
+  const listings = dataEl ? JSON.parse(dataEl.textContent) : [];
+
   const cards = document.querySelectorAll('.recycle-card');
   const searchInput = document.getElementById('searchInput');
   const noResults = document.getElementById('noResults');
 
-  let activeFilter = 'all';
-
-  function applyFilters() {
-    const keyword = (searchInput?.value || '').trim().toLowerCase();
+  searchInput?.addEventListener('input', () => {
+    const keyword = searchInput.value.trim().toLowerCase();
     let visibleCount = 0;
 
     cards.forEach((card) => {
-      const matchesType = activeFilter === 'all' || card.dataset.type === activeFilter;
-      const matchesKeyword = keyword === '' || (card.dataset.search || '').includes(keyword);
-
-      if (matchesType && matchesKeyword) {
+      const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
+      if (matches) {
         card.classList.remove('hidden');
         visibleCount++;
       } else {
@@ -406,18 +489,53 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
     if (noResults) {
       noResults.style.display = visibleCount === 0 ? 'block' : 'none';
     }
-  }
+  });
 
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      tabs.forEach((t) => t.classList.remove('active'));
-      tab.classList.add('active');
-      activeFilter = tab.dataset.filter;
-      applyFilters();
+  // ===== Detail Modal =====
+  const detailOverlay = document.getElementById('detailOverlay');
+  const detailClose = document.getElementById('detailClose');
+  const detailImageWrap = document.getElementById('detailImageWrap');
+  const detailType = document.getElementById('detailType');
+  const detailTitle = document.getElementById('detailTitle');
+  const detailPrice = document.getElementById('detailPrice');
+  const detailUpazila = document.getElementById('detailUpazila');
+  const detailDesc = document.getElementById('detailDesc');
+  const detailContact = document.getElementById('detailContact');
+
+  cards.forEach((card) => {
+    card.addEventListener('click', () => {
+      const item = listings[Number(card.dataset.index)];
+      if (!item) return;
+
+      if (item.images && item.images.length > 0) {
+        detailImageWrap.innerHTML = `<img src="${item.images[0]}" alt="${item.title || ''}" />`;
+      } else {
+        detailImageWrap.innerHTML = `<div class="detail-icon-fallback"><i class="fas ${typeIcons[item.type] || 'fa-box'}"></i></div>`;
+      }
+
+      detailType.textContent = typeNameMap[item.type] || item.type || '';
+      detailTitle.textContent = item.title || '';
+      detailPrice.textContent = item.price ? `৳${item.price}` : '';
+      detailPrice.style.display = item.price ? 'block' : 'none';
+      detailUpazila.textContent = item.upazila || '';
+      detailDesc.textContent = item.description || '';
+      detailDesc.style.display = item.description ? 'block' : 'none';
+      detailContact.href = `tel:${item.contact_phone || ''}`;
+
+      detailOverlay.classList.add('open');
+      document.body.style.overflow = 'hidden';
     });
   });
 
-  searchInput?.addEventListener('input', applyFilters);
+  function closeDetail() {
+    detailOverlay.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  detailClose?.addEventListener('click', closeDetail);
+  detailOverlay?.addEventListener('click', (e) => {
+    if (e.target === detailOverlay) closeDetail();
+  });
 
   document.getElementById('openAddListing')?.addEventListener('click', () => {
     window.openListingModal?.();
