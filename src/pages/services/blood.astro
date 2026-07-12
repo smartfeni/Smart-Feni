@@ -2,9 +2,9 @@
 // ============================================================
 // পেজ: ব্লাড ডোনার লিস্ট
 // ব্র্যান্ড: স্মার্ট ফেনী
-// যেসব ইউজার প্রোফাইলে "ব্লাড ডোনার লিস্টে দেখাও" টগল অন করেছেন,
-// তাদের তালিকা এখানে Supabase থেকে লাইভ fetch করে দেখানো হয়।
-// SSR পেজ (hybrid/static+adapter দরকার) — prerender = false আবশ্যক।
+// ফিল্টার: ব্লাড গ্রুপ অনুযায়ী
+// সর্টিং: ইউজারের সেভ করা উপজেলা (localStorage) অনুযায়ী প্রথমে দেখাবে
+// SSR পেজ — prerender = false আবশ্যক।
 // ============================================================
 
 export const prerender = false;
@@ -12,14 +12,7 @@ export const prerender = false;
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import { supabase } from '../../lib/supabase.js';
 
-const upazilas = [
-  'ফেনী সদর',
-  'ছাগলনাইয়া',
-  'দাগনভূঞা',
-  'পরশুরাম',
-  'ফুলগাজী',
-  'সোনাগাজী',
-];
+const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
 const { data: donorData } = await supabase
   .from('profiles')
@@ -29,7 +22,7 @@ const { data: donorData } = await supabase
 
 const donors = donorData || [];
 
-const filters = [{ id: 'all', label: 'সব' }, ...upazilas.map((u) => ({ id: u, label: u }))];
+const filters = [{ id: 'all', label: 'সব' }, ...bloodGroups.map((bg) => ({ id: bg, label: bg }))];
 ---
 
 <BaseLayout title="ব্লাড ডোনার | স্মার্ট ফেনী">
@@ -66,7 +59,7 @@ const filters = [{ id: 'all', label: 'সব' }, ...upazilas.map((u) => ({ id: u
       ) : (
         <div class="donor-grid" id="donorGrid">
           {donors.map((donor) => (
-            <div class="donor-card" data-upazila={donor.upazila || ''}>
+            <div class="donor-card" data-blood-group={donor.blood_group || ''} data-upazila-name={donor.upazila || ''}>
               <div class="donor-card-top">
                 <span class="donor-avatar">
                   {donor.avatar_url ? (
@@ -336,7 +329,19 @@ const filters = [{ id: 'all', label: 'সব' }, ...upazilas.map((u) => ({ id: u
 </style>
 
 <script>
+  // ===== উপজেলা slug (localStorage) ↔ বাংলা নাম ম্যাপিং =====
+  const UPAZILA_SLUG_TO_NAME = {
+    'feni-sadar': 'ফেনী সদর',
+    'chhagalnaiya': 'ছাগলনাইয়া',
+    'daganbhuiyan': 'দাগনভূঞা',
+    'parshuram': 'পরশুরাম',
+    'fulgazi': 'ফুলগাজী',
+    'sonagazi': 'সোনাগাজী',
+  };
+
+  // ===== ফিল্টার ট্যাব (ব্লাড গ্রুপ) =====
   const tabs = document.querySelectorAll('.filter-tab');
+  const grid = document.getElementById('donorGrid');
   const cards = document.querySelectorAll('.donor-card');
 
   tabs.forEach((tab) => {
@@ -345,7 +350,7 @@ const filters = [{ id: 'all', label: 'সব' }, ...upazilas.map((u) => ({ id: u
       tab.classList.add('active');
       const filter = tab.dataset.filter;
       cards.forEach((card) => {
-        if (filter === 'all' || card.dataset.upazila === filter) {
+        if (filter === 'all' || card.dataset.bloodGroup === filter) {
           card.classList.remove('hidden');
         } else {
           card.classList.add('hidden');
@@ -353,4 +358,25 @@ const filters = [{ id: 'all', label: 'সব' }, ...upazilas.map((u) => ({ id: u
       });
     });
   });
+
+  // ===== ইউজারের সেভ করা উপজেলা অনুযায়ী কার্ড re-order =====
+  function reorderByLocation() {
+    if (!grid) return;
+    const savedSlug = localStorage.getItem('smartfeni_upazila');
+    if (!savedSlug) return;
+
+    const savedName = UPAZILA_SLUG_TO_NAME[savedSlug];
+    if (!savedName) return;
+
+    const cardArray = Array.from(grid.querySelectorAll('.donor-card'));
+    const matching = cardArray.filter((c) => c.dataset.upazilaName === savedName);
+    const rest = cardArray.filter((c) => c.dataset.upazilaName !== savedName);
+
+    if (matching.length === 0) return;
+
+    // matching কার্ডগুলো আগে, বাকিগুলো পরে — DOM-এ পুনরায় সাজানো
+    [...matching, ...rest].forEach((card) => grid.appendChild(card));
+  }
+
+  reorderByLocation();
 </script>
