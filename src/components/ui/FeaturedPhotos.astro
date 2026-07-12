@@ -3,10 +3,11 @@
 // কম্পোনেন্ট: ফিচার্ড ফটো স্লাইডশো
 // featured_photos টেবিল থেকে ক্রমানুসারে ছবি এনে প্রতি ৫ সেকেন্ডে
 // crossfade করে বদলায়। কোনো ছবি না থাকলে fallback static ছবি দেখায়।
+// বাগফিক্স: আগে define:vars + dynamic import ব্যবহার হচ্ছিল যা Astro/Vite
+// bundle করে না, ফলে import silently fail করছিল — এখন static import
 // ============================================================
 
 const fallbackSrc = '/featured/featured-photo.jpg';
-const SLIDE_INTERVAL_MS = 5000;
 ---
 
 <section class="featured-photo-section">
@@ -59,8 +60,12 @@ const SLIDE_INTERVAL_MS = 5000;
   }
 </style>
 
-<script define:vars={{ SLIDE_INTERVAL_MS }}>
-  import('../../lib/supabase.js').then(async ({ supabase }) => {
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const SLIDE_INTERVAL_MS = 5000;
+
+  async function initSlideshow() {
     const BUCKET = 'listing-images';
     const layerA = document.querySelector('[data-slide-a]');
     const layerB = document.querySelector('[data-slide-b]');
@@ -71,7 +76,7 @@ const SLIDE_INTERVAL_MS = 5000;
       .select('storage_path')
       .order('sort_order', { ascending: true });
 
-    if (error || !photos || photos.length === 0) return;
+    if (error || !photos || photos.length === 0) return; // fallback ছবিই থাকবে
 
     const urls = photos.map((p) => supabase.storage.from(BUCKET).getPublicUrl(p.storage_path).data.publicUrl);
 
@@ -88,11 +93,12 @@ const SLIDE_INTERVAL_MS = 5000;
       });
     }
 
+    // প্রথম ছবি সরাসরি দেখানো
     await preload(urls[0]);
     activeLayer.src = urls[0];
     activeLayer.classList.add('visible');
 
-    if (urls.length <= 1) return;
+    if (urls.length <= 1) return; // একটাই ছবি হলে স্লাইডশো লাগবে না
 
     async function showNext() {
       currentIndex = (currentIndex + 1) % urls.length;
@@ -109,5 +115,7 @@ const SLIDE_INTERVAL_MS = 5000;
     }
 
     setInterval(showNext, SLIDE_INTERVAL_MS);
-  });
+  }
+
+  initSlideshow();
 </script>
