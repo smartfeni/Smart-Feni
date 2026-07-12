@@ -1,0 +1,322 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — মডারেটর ম্যানেজমেন্ট (/admin/moderators)
+// শুধু role='admin' এই পেজ দেখতে পাবে (moderator-রাও না)
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="মডারেটর ম্যানেজমেন্ট | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>মডারেটর ম্যানেজমেন্ট</h1>
+          <p class="admin-subtitle">শুধু অ্যাডমিন এই পেজ ব্যবহার করতে পারবেন</p>
+        </div>
+
+        <!-- ===== বর্তমান মডারেটর/অ্যাডমিন লিস্ট ===== -->
+        <div class="section-block">
+          <p class="section-title">বর্তমান অ্যাডমিন ও মডারেটর</p>
+          <div id="currentModsContainer" class="mods-container"></div>
+        </div>
+
+        <!-- ===== নতুন মডারেটর যোগ করা ===== -->
+        <div class="section-block">
+          <p class="section-title">নতুন মডারেটর যোগ করুন</p>
+          <div class="search-bar">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="text" id="searchInput" placeholder="নাম বা ফোন নম্বর দিয়ে খুঁজুন" />
+          </div>
+          <div id="searchResults" class="search-results"></div>
+        </div>
+
+        <p id="actionMessage" class="action-message"></p>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 24px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .section-block {
+      margin-bottom: 28px;
+    }
+
+    .section-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #5A6E85;
+      margin-bottom: 12px;
+    }
+
+    .mods-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .search-bar {
+      position: relative;
+      margin-bottom: 14px;
+    }
+
+    .search-bar i {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #B0BCCB;
+      font-size: 0.85rem;
+    }
+
+    .search-bar input {
+      width: 100%;
+      padding: 13px 16px 13px 42px;
+      border-radius: 14px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+
+    .search-bar input:focus {
+      outline: none;
+      border-color: #FF6B35;
+    }
+
+    .search-results {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .action-message {
+      text-align: center;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+
+    .action-message.success {
+      color: #1B7A3C;
+    }
+
+    .action-message.error {
+      color: #D14343;
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const currentModsContainer = document.getElementById('currentModsContainer');
+    const searchInput = document.getElementById('searchInput');
+    const searchResults = document.getElementById('searchResults');
+    const actionMessage = document.getElementById('actionMessage');
+
+    let currentUserId = null;
+
+    function showActionMessage(text, type) {
+      actionMessage.textContent = text;
+      actionMessage.className = `action-message ${type}`;
+      setTimeout(() => {
+        actionMessage.textContent = '';
+        actionMessage.className = 'action-message';
+      }, 4000);
+    }
+
+    function renderPersonRow(person, { showRemove }) {
+      const row = document.createElement('div');
+      row.style.cssText = 'background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;align-items:center;gap:12px;';
+
+      const isMe = person.id === currentUserId;
+      const roleText = person.role === 'admin' ? 'অ্যাডমিন' : 'মডারেটর';
+      const roleBg = person.role === 'admin' ? '#FFF0EA' : '#EAF2FF';
+      const roleColor = person.role === 'admin' ? '#FF6B35' : '#2563EB';
+
+      row.innerHTML = `
+        ${person.avatar_url
+          ? `<img src="${person.avatar_url}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;" />`
+          : `<div style="width:44px;height:44px;border-radius:50%;background:#F4F7FC;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#B0BCCB;"><i class="fas fa-user"></i></div>`
+        }
+        <div style="flex:1;min-width:0;">
+          <p style="font-size:0.9rem;font-weight:700;color:#1B2A4A;">${person.full_name || '(নামহীন)'} ${isMe ? '<span style="color:#8FA0BC;font-weight:600;">(আপনি)</span>' : ''}</p>
+          <p style="font-size:0.8rem;color:#8FA0BC;">${person.phone || ''}</p>
+        </div>
+        <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:${roleBg};color:${roleColor};flex-shrink:0;">${roleText}</span>
+        <div class="row-action" style="flex-shrink:0;"></div>
+      `;
+
+      const actionWrap = row.querySelector('.row-action');
+
+      if (showRemove && person.role === 'moderator') {
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = 'সরিয়ে দিন';
+        removeBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:7px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+        removeBtn.addEventListener('click', () => updateRole(person.id, 'user', `${person.full_name} কে মডারেটর থেকে সরানো হয়েছে`));
+        actionWrap.appendChild(removeBtn);
+      }
+
+      if (!showRemove && person.role === 'user') {
+        const addBtn = document.createElement('button');
+        addBtn.textContent = 'মডারেটর করুন';
+        addBtn.style.cssText = 'background:#EAF2FF;color:#2563EB;border:none;padding:7px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+        addBtn.addEventListener('click', () => updateRole(person.id, 'moderator', `${person.full_name} কে মডারেটর করা হয়েছে`));
+        actionWrap.appendChild(addBtn);
+      }
+
+      return row;
+    }
+
+    async function updateRole(id, newRole, successText) {
+      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', id);
+      if (error) {
+        showActionMessage('আপডেট ব্যর্থ: ' + error.message, 'error');
+        return;
+      }
+      showActionMessage(successText, 'success');
+      loadCurrentMods();
+      if (searchInput.value.trim()) runSearch();
+    }
+
+    async function loadCurrentMods() {
+      currentModsContainer.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:20px 0;">লোড হচ্ছে...</p>';
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .in('role', ['admin', 'moderator'])
+        .order('role', { ascending: true });
+
+      if (error) {
+        currentModsContainer.innerHTML = `<p style="color:#D14343;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      currentModsContainer.innerHTML = '';
+      (data || []).forEach((p) => currentModsContainer.appendChild(renderPersonRow(p, { showRemove: true })));
+    }
+
+    async function runSearch() {
+      const q = searchInput.value.trim();
+      if (!q) {
+        searchResults.innerHTML = '';
+        return;
+      }
+
+      searchResults.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:12px 0;">খোঁজা হচ্ছে...</p>';
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .or(`full_name.ilike.%${q}%,phone.ilike.%${q}%`)
+        .limit(10);
+
+      if (error) {
+        searchResults.innerHTML = `<p style="color:#D14343;">খোঁজা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      searchResults.innerHTML = '';
+      const results = data || [];
+
+      if (results.length === 0) {
+        searchResults.innerHTML = '<p style="text-align:center;color:#B0BCCB;padding:12px 0;">কেউ পাওয়া যায়নি</p>';
+        return;
+      }
+
+      results.forEach((p) => searchResults.appendChild(renderPersonRow(p, { showRemove: false })));
+    }
+
+    let searchTimeout;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(runSearch, 350);
+    });
+
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      // শুধু 'admin' role এই পেজ ব্যবহার করতে পারবে, moderator না
+      if (e.detail.role !== 'admin') {
+        window.location.href = '/admin';
+        return;
+      }
+      currentUserId = e.detail.session.user.id;
+      loadCurrentMods();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
