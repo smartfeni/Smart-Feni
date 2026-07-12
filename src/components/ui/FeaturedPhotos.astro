@@ -1,22 +1,20 @@
 ---
 // ============================================================
-// কম্পোনেন্ট: ফিচার্ড ফটো (শুধু ছবি, কোনো টাইটেল/ক্যাপশন টেক্সট নাই)
-// ছবি Supabase Storage থেকে ডায়নামিকভাবে লোড হয়
-// (/admin/featured-photo থেকে আপলোড করলেই সাথে সাথে বদলায়, rebuild লাগে না)
-// public/featured/featured-photo.jpg fallback হিসেবে থাকছে (JS লোড হওয়ার
-// আগ পর্যন্ত বা Storage fetch ব্যর্থ হলে দেখাবে)
-// আপডেট: dual-image crossfade — নতুন ছবি ধীরে fade-in হয়, হঠাৎ swap না
-// করে, যাতে glitch/flash চোখে না পড়ে
+// কম্পোনেন্ট: ফিচার্ড ফটো স্লাইডশো
+// featured_photos টেবিল থেকে ক্রমানুসারে ছবি এনে প্রতি ৫ সেকেন্ডে
+// crossfade করে বদলায়। কোনো ছবি না থাকলে fallback static ছবি দেখায়।
 // ============================================================
 
 const fallbackSrc = '/featured/featured-photo.jpg';
+const SLIDE_INTERVAL_MS = 5000;
 ---
 
 <section class="featured-photo-section">
   <div class="container">
     <div class="photo-card">
       <img class="photo-layer photo-base" src={fallbackSrc} alt="স্মার্ট ফেনী কমিউনিটি ফটো" loading="lazy" />
-      <img id="featuredPhotoOverlay" class="photo-layer photo-overlay" alt="" />
+      <img class="photo-layer photo-slide" data-slide-a alt="" />
+      <img class="photo-layer photo-slide" data-slide-b alt="" />
     </div>
   </div>
 </section>
@@ -43,14 +41,14 @@ const fallbackSrc = '/featured/featured-photo.jpg';
     display: block;
   }
 
-  .photo-overlay {
+  .photo-slide {
     position: absolute;
     inset: 0;
     opacity: 0;
-    transition: opacity 0.5s ease;
+    transition: opacity 0.6s ease;
   }
 
-  .photo-overlay.loaded {
+  .photo-slide.visible {
     opacity: 1;
   }
 
@@ -61,31 +59,55 @@ const fallbackSrc = '/featured/featured-photo.jpg';
   }
 </style>
 
-<script>
-  import { supabase } from '../../lib/supabase.js';
+<script define:vars={{ SLIDE_INTERVAL_MS }}>
+  import('../../lib/supabase.js').then(async ({ supabase }) => {
+    const BUCKET = 'listing-images';
+    const layerA = document.querySelector('[data-slide-a]');
+    const layerB = document.querySelector('[data-slide-b]');
+    if (!layerA || !layerB) return;
 
-  const BUCKET = 'listing-images';
-  const STORAGE_PATH = 'site/featured-photo.jpg';
+    const { data: photos, error } = await supabase
+      .from('featured_photos')
+      .select('storage_path')
+      .order('sort_order', { ascending: true });
 
-  async function loadDynamicFeaturedPhoto() {
-    const overlay = document.getElementById('featuredPhotoOverlay');
-    if (!overlay) return;
+    if (error || !photos || photos.length === 0) return;
 
-    const { data: fileList } = await supabase.storage.from(BUCKET).list('site', {
-      search: 'featured-photo.jpg',
-    });
+    const urls = photos.map((p) => supabase.storage.from(BUCKET).getPublicUrl(p.storage_path).data.publicUrl);
 
-    const fileInfo = fileList?.find((f) => f.name === 'featured-photo.jpg');
-    if (!fileInfo) return; // এখনো কোনো কাস্টম ছবি আপলোড হয়নি, fallback-ই থাকবে
+    let currentIndex = 0;
+    let activeLayer = layerA;
+    let inactiveLayer = layerB;
 
-    const { data } = supabase.storage.from(BUCKET).getPublicUrl(STORAGE_PATH);
-    const cacheBust = fileInfo.updated_at ? new Date(fileInfo.updated_at).getTime() : Date.now();
+    function preload(url) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+        img.src = url;
+      });
+    }
 
-    overlay.onload = () => {
-      overlay.classList.add('loaded');
-    };
-    overlay.src = `${data.publicUrl}?v=${cacheBust}`;
-  }
+    await preload(urls[0]);
+    activeLayer.src = urls[0];
+    activeLayer.classList.add('visible');
 
-  loadDynamicFeaturedPhoto();
+    if (urls.length <= 1) return;
+
+    async function showNext() {
+      currentIndex = (currentIndex + 1) % urls.length;
+      const nextUrl = urls[currentIndex];
+
+      await preload(nextUrl);
+      inactiveLayer.src = nextUrl;
+      inactiveLayer.classList.add('visible');
+      activeLayer.classList.remove('visible');
+
+      const temp = activeLayer;
+      activeLayer = inactiveLayer;
+      inactiveLayer = temp;
+    }
+
+    setInterval(showNext, SLIDE_INTERVAL_MS);
+  });
 </script>
