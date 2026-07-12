@@ -2,13 +2,15 @@
 // ============================================================
 // পেজ: চাকরির খবর সার্ভিস
 // ব্র্যান্ড: স্মার্ট ফেনী
-// Supabase থেকে রিয়েল লিস্টিং ডেটা fetch করা হয় (mock ডেটা বাদ)
+// recycle প্যাটার্ন: হেডার CTA, সার্চ বক্স, কম্প্যাক্ট কার্ড,
+// শেয়ারড ডিটেইলস মডাল, লোকেশন সর্ট
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import AddListingModal from '../../components/ui/AddListingModal.astro';
+import ListingDetailModal from '../../components/ui/ListingDetailModal.astro';
 import { supabase } from '../../lib/supabase.js';
 
 const typeOptions = [
@@ -27,8 +29,6 @@ const { data: jobListings } = await supabase
   .order('created_at', { ascending: false });
 
 const listings = jobListings || [];
-
-const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 ---
 
 <BaseLayout title="চাকরির খবর | স্মার্ট ফেনী">
@@ -37,7 +37,7 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
       <span class="section-tag"><i class="fas fa-briefcase"></i> কর্মসংস্থান</span>
       <h1>ফেনীতে <span class="accent">চাকরির খবর</span></h1>
       <p>সরকারি-বেসরকারি প্রতিষ্ঠানের সর্বশেষ নিয়োগ বিজ্ঞপ্তি — এক জায়গায়</p>
-      <button class="post-job-link" id="openAddListing" type="button">
+      <button class="cta-box" id="openAddListing" type="button">
         <i class="fas fa-plus"></i> চাকরি পোস্ট করুন
       </button>
     </div>
@@ -45,12 +45,9 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 
   <section class="job-section">
     <div class="container">
-      <div class="filter-tabs" id="filterTabs">
-        {filters.map((f) => (
-          <button class={`filter-tab ${f.id === 'all' ? 'active' : ''}`} data-filter={f.id}>
-            {f.label}
-          </button>
-        ))}
+      <div class="search-box">
+        <i class="fas fa-magnifying-glass"></i>
+        <input type="text" id="searchInput" placeholder="পদবী, প্রতিষ্ঠান বা যেকোনো কিছু খুঁজুন..." />
       </div>
 
       {listings.length === 0 ? (
@@ -60,40 +57,41 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
           <span>প্রথম বিজ্ঞপ্তি যোগ করুন উপরের বাটনে ক্লিক করে</span>
         </div>
       ) : (
-        <div class="job-grid" id="jobGrid">
-          {listings.map((job) => (
-            <div class="job-card" data-type={job.type}>
-              <div class="job-card-top">
-                <span class={`type-badge type-${job.type}`}>{typeNameMap[job.type] || job.type}</span>
-                <span class="location-tag">
-                  <i class="fas fa-location-dot"></i> {job.upazila}
-                </span>
-              </div>
+        <>
+          <div class="job-grid" id="jobGrid">
+            {listings.map((item, i) => (
+              <button
+                type="button"
+                class="job-card"
+                data-detail-index={i}
+                data-upazila-name={item.upazila || ''}
+                data-search={`${item.title || ''} ${item.description || ''} ${typeNameMap[item.type] || ''}`.toLowerCase()}
+              >
+                {item.images && item.images.length > 0 ? (
+                  <img src={item.images[0]} alt={item.title} class="job-photo" />
+                ) : (
+                  <div class="job-icon">
+                    <i class="fas fa-briefcase"></i>
+                  </div>
+                )}
 
-              {job.images && job.images.length > 0 ? (
-                <img src={job.images[0]} alt={job.title} class="job-photo" />
-              ) : (
-                <div class="job-icon">
-                  <i class="fas fa-briefcase"></i>
+                <div class="job-card-body">
+                  <span class="type-badge">{typeNameMap[item.type] || item.type}</span>
+                  <h3 class="job-title">{item.title}</h3>
+                  <p class="salary-amount">{item.price ? `৳${item.price}` : 'আলোচনা সাপেক্ষে'}</p>
+                  <p class="location-tag"><i class="fas fa-location-dot"></i> {item.upazila}</p>
                 </div>
-              )}
+              </button>
+            ))}
+          </div>
 
-              <h3 class="job-title">{job.title}</h3>
-              {job.description && <p class="job-desc">{job.description}</p>}
-              <p class="salary-amount">
-                <i class="fas fa-coins"></i> {job.price ? job.price : 'আলোচনা সাপেক্ষে'}
-              </p>
-
-              <a href={`tel:${job.contact_phone}`} class="btn-apply">
-                <i class="fas fa-paper-plane"></i> যোগাযোগ করুন
-              </a>
-            </div>
-          ))}
-        </div>
+          <p class="no-results" id="noResults" style="display:none;">কোনো ফলাফল পাওয়া যায়নি</p>
+        </>
       )}
     </div>
   </section>
 
+  <ListingDetailModal />
   <AddListingModal
     category="job"
     typeOptions={typeOptions}
@@ -101,6 +99,8 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
     priceLabel="বেতন"
     companyLabel="প্রতিষ্ঠান"
   />
+
+  <script type="application/json" id="listingsData" set:html={JSON.stringify(listings)} />
 </BaseLayout>
 
 <style>
@@ -123,24 +123,29 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
   .page-header p {
     color: #5A6E85;
     font-size: 1.05rem;
-    margin-bottom: 14px;
+    margin-bottom: 20px;
   }
 
-  .post-job-link {
+  .cta-box {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    background: none;
-    border: none;
+    gap: 8px;
+    background: #FFF0EA;
+    border: 1.5px solid #FFD3BC;
     color: #FF6B35;
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
+    padding: 12px 26px;
+    border-radius: 40px;
     cursor: pointer;
-    padding: 4px 0;
+    transition: all 0.2s ease;
   }
 
-  .post-job-link:hover {
-    text-decoration: underline;
+  .cta-box:hover {
+    background: #FF6B35;
+    color: #fff;
+    border-color: #FF6B35;
+    transform: translateY(-2px);
   }
 
   .job-section {
@@ -148,34 +153,30 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
     background: #F8FAFC;
   }
 
-  .filter-tabs {
+  .search-box {
+    max-width: 480px;
+    margin: 0 auto 32px;
     display: flex;
+    align-items: center;
     gap: 10px;
-    margin-bottom: 32px;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  .filter-tab {
     background: #fff;
     border: 1px solid #EEF3F9;
-    color: #1B2A4A;
-    padding: 10px 24px;
     border-radius: 40px;
-    font-weight: 600;
+    padding: 12px 20px;
+  }
+
+  .search-box i {
+    color: #A0AFC0;
+  }
+
+  .search-box input {
+    border: none;
+    outline: none;
+    flex: 1;
     font-size: 0.9rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .filter-tab:hover {
-    border-color: #FF6B35;
-  }
-
-  .filter-tab.active {
-    background: #FF6B35;
-    color: #fff;
-    border-color: #FF6B35;
+    font-family: inherit;
+    background: transparent;
+    color: #1B2A4A;
   }
 
   .empty-state {
@@ -205,16 +206,20 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 
   .job-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
   }
 
   .job-card {
     background: #fff;
-    border-radius: 20px;
-    padding: 20px;
+    border-radius: 18px;
     border: 1px solid #EEF3F9;
-    transition: all 0.25s ease;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    transition: all 0.2s ease;
+    font-family: inherit;
   }
 
   .job-card:hover {
@@ -226,113 +231,73 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
     display: none;
   }
 
-  .job-card-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    gap: 8px;
-  }
-
-  .type-badge {
-    font-size: 0.7rem;
-    font-weight: 700;
-    padding: 4px 12px;
-    border-radius: 20px;
-    white-space: nowrap;
-  }
-
-  .type-fulltime {
-    background: rgba(0, 184, 148, 0.12);
-    color: #00B894;
-  }
-
-  .type-parttime {
-    background: rgba(9, 132, 227, 0.12);
-    color: #0984E3;
-  }
-
-  .type-internship {
-    background: rgba(108, 92, 231, 0.12);
-    color: #6C5CE7;
-  }
-
-  .location-tag {
-    font-size: 0.75rem;
-    color: #7A8EA5;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    white-space: nowrap;
-  }
-
   .job-icon {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
+    width: 100%;
+    aspect-ratio: 4 / 3;
     background: #FFF0EA;
     color: #FF6B35;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.4rem;
-    margin-bottom: 12px;
+    font-size: 1.8rem;
   }
 
   .job-photo {
     width: 100%;
-    height: 140px;
+    aspect-ratio: 4 / 3;
     object-fit: cover;
-    border-radius: 14px;
-    margin-bottom: 12px;
+    object-position: center;
+    display: block;
+  }
+
+  .job-card-body {
+    padding: 14px;
+  }
+
+  .type-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    margin-bottom: 6px;
+    background: #F4F7FC;
+    color: #5A6E85;
   }
 
   .job-title {
-    font-size: 1.05rem;
+    font-size: 0.9rem;
     font-weight: 700;
-    margin-bottom: 6px;
-  }
-
-  .job-desc {
-    color: #5A6E85;
-    font-size: 0.85rem;
-    margin-bottom: 10px;
-    line-height: 1.5;
-    white-space: pre-line;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .salary-amount {
-    color: #FF6B35;
+    font-size: 0.95rem;
     font-weight: 700;
-    font-size: 0.9rem;
-    margin-bottom: 16px;
+    color: #FF6B35;
+    margin-bottom: 4px;
   }
 
-  .btn-apply {
+  .location-tag {
+    font-size: 0.72rem;
+    color: #8FA0BC;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 8px;
-    width: 100%;
-    background: #1B2A4A;
-    color: #fff;
-    text-decoration: none;
-    padding: 12px;
-    border-radius: 40px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    transition: background 0.2s ease;
+    gap: 4px;
   }
 
-  .btn-apply:hover {
-    background: #FF6B35;
+  .no-results {
+    text-align: center;
+    color: #A0AFC0;
+    font-size: 0.95rem;
+    padding: 40px 0;
   }
 
   @media (max-width: 768px) {
-    .job-grid {
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    }
-
     .page-header h1 {
       font-size: 1.7rem;
     }
@@ -340,26 +305,48 @@ const filters = [{ id: 'all', label: 'সব' }, ...typeOptions];
 </style>
 
 <script>
-  const tabs = document.querySelectorAll('.filter-tab');
+  import { initListingDetailModal } from '../../lib/listingDetailModal.js';
+  import { reorderByUserLocation } from '../../lib/locationSort.js';
+
+  const typeNameMap = {
+    fulltime: 'ফুল-টাইম',
+    parttime: 'পার্ট-টাইম',
+    internship: 'ইন্টার্নশিপ',
+  };
+
+  const typeIcons = {
+    fulltime: 'fa-briefcase',
+    parttime: 'fa-briefcase',
+    internship: 'fa-briefcase',
+  };
+
+  const dataEl = document.getElementById('listingsData');
+  const listings = dataEl ? JSON.parse(dataEl.textContent) : [];
+
+  const grid = document.getElementById('jobGrid');
   const cards = document.querySelectorAll('.job-card');
+  const searchInput = document.getElementById('searchInput');
+  const noResults = document.getElementById('noResults');
 
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      tabs.forEach((t) => t.classList.remove('active'));
-      tab.classList.add('active');
+  searchInput?.addEventListener('input', () => {
+    const keyword = searchInput.value.trim().toLowerCase();
+    let visibleCount = 0;
 
-      const filter = tab.dataset.filter;
-      cards.forEach((card) => {
-        if (filter === 'all' || card.dataset.type === filter) {
-          card.classList.remove('hidden');
-        } else {
-          card.classList.add('hidden');
-        }
-      });
+    cards.forEach((card) => {
+      const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
+      if (matches) {
+        card.classList.remove('hidden');
+        visibleCount++;
+      } else {
+        card.classList.add('hidden');
+      }
     });
+
+    if (noResults) {
+      noResults.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
   });
 
-  document.getElementById('openAddListing')?.addEventListener('click', () => {
-    window.openListingModal?.();
-  });
+  initListingDetailModal({ listings, typeNameMap, typeIcons, cardSelector: '.job-card' });
+  reorderByUserLocation(grid, 'upazilaName');
 </script>
