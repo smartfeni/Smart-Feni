@@ -1,9 +1,10 @@
 ---
 // ============================================================
-// পেজ: অ্যাডমিন — ফিচার্ড ফটো আপলোড (/admin/featured-photo)
-// আপলোড করা ছবি ব্রাউজারেই ক্যানভাস দিয়ে 1600x900 (16:9) এ রিসাইজ/ক্রপ
-// করে JPEG বানিয়ে Supabase Storage-এ ফিক্সড পাথে (site/featured-photo.jpg)
-// আপলোড হয় — homepage কোড কখনো বদলাতে হবে না
+// পেজ: অ্যাডমিন — ফিচার্ড ফটো স্লাইডশো ম্যানেজমেন্ট (/admin/featured-photo)
+// একাধিক ছবি রাখা যায়, প্রতিটা আপলোডে ক্যানভাসে 1600x900 ক্রপ হয়ে
+// Supabase Storage-এ (site/featured/) সেভ হয় এবং featured_photos
+// টেবিলে সারি + sort_order যোগ হয়। হোমপেজে ৫ সেকেন্ড পরপর ক্রমানুসারে
+// crossfade স্লাইডশো হিসেবে দেখা যায়।
 // ============================================================
 
 export const prerender = false;
@@ -25,39 +26,37 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
 
         <div class="admin-header">
-          <h1>ফিচার্ড ফটো</h1>
-          <p class="admin-subtitle">হোমপেজের ফিচার্ড ফটো এখান থেকে বদলান — আপলোড করলেই সাথে সাথে সাইটে দেখাবে</p>
+          <h1>ফিচার্ড ফটো স্লাইডশো</h1>
+          <p class="admin-subtitle">একাধিক ছবি যোগ করুন — হোমপেজে ৫ সেকেন্ড পরপর ক্রমানুসারে বদলাবে</p>
         </div>
 
-        <!-- ===== বর্তমান ছবি প্রিভিউ ===== -->
-        <div class="preview-card">
-          <p class="preview-label">বর্তমান ছবি</p>
-          <div class="preview-frame">
-            <img id="currentPhoto" src="" alt="বর্তমান ফিচার্ড ফটো" />
-            <div id="previewLoading" class="preview-loading"><i class="fas fa-spinner fa-spin"></i></div>
-          </div>
-        </div>
-
-        <!-- ===== নতুন ছবি আপলোড ===== -->
+        <!-- ===== আপলোড ===== -->
         <div class="upload-card">
-          <label for="fileInput" class="upload-drop" id="uploadDrop">
+          <label for="fileInput" class="upload-drop">
             <i class="fas fa-cloud-arrow-up"></i>
-            <p>নতুন ছবি বেছে নিতে এখানে ট্যাপ করুন</p>
+            <p>নতুন ছবি যোগ করতে ট্যাপ করুন</p>
             <span>যেকোনো সাইজ/ফরম্যাট চলবে — auto 1600×900 এ ক্রপ হয়ে যাবে</span>
           </label>
           <input type="file" id="fileInput" accept="image/*" style="display:none;" />
 
           <div id="newPreviewWrap" style="display:none;">
-            <p class="preview-label">নতুন ছবি (ক্রপকৃত প্রিভিউ)</p>
             <div class="preview-frame">
               <canvas id="cropCanvas" width="1600" height="900"></canvas>
             </div>
             <button id="uploadBtn" class="upload-btn">
-              <i class="fas fa-check"></i> <span id="uploadBtnText">আপলোড করুন</span>
+              <i class="fas fa-plus"></i> <span id="uploadBtnText">লিস্টে যোগ করুন</span>
             </button>
           </div>
 
           <p id="uploadMessage" class="upload-message"></p>
+        </div>
+
+        <!-- ===== বর্তমান ছবির গ্রিড (অর্ডার সহ) ===== -->
+        <p class="section-title">স্লাইডশো ক্রম (উপর থেকে নিচে যেভাবে দেখাবে)</p>
+        <div id="photosContainer" class="photos-container"></div>
+        <div id="emptyState" class="empty-state" style="display:none;">
+          <i class="fas fa-images"></i>
+          <p>এখনো কোনো ছবি যোগ করা হয়নি — হোমপেজে ডিফল্ট fallback ছবি দেখাবে</p>
         </div>
 
       </div>
@@ -126,19 +125,12 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       font-weight: 600;
     }
 
-    .preview-card, .upload-card {
+    .upload-card {
       background: #fff;
       border-radius: 20px;
       padding: 20px;
       box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
-      margin-bottom: 18px;
-    }
-
-    .preview-label {
-      font-size: 0.8rem;
-      font-weight: 700;
-      color: #5A6E85;
-      margin-bottom: 10px;
+      margin-bottom: 28px;
     }
 
     .preview-frame {
@@ -148,23 +140,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       border-radius: 16px;
       overflow: hidden;
       background: #F4F7FC;
+      margin-bottom: 12px;
     }
 
-    .preview-frame img, .preview-frame canvas {
+    .preview-frame canvas {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
-    }
-
-    .preview-loading {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #B0BCCB;
-      font-size: 1.4rem;
     }
 
     .upload-drop {
@@ -214,7 +197,6 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       font-weight: 700;
       font-size: 0.95rem;
       cursor: pointer;
-      margin-top: 14px;
     }
 
     .upload-btn:disabled {
@@ -236,6 +218,33 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .upload-message.error {
       color: #D14343;
     }
+
+    .section-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #5A6E85;
+      margin-bottom: 12px;
+    }
+
+    .photos-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 50px 0;
+      color: #B0BCCB;
+      text-align: center;
+    }
+
+    .empty-state i {
+      font-size: 2rem;
+    }
   </style>
 
   <script>
@@ -243,37 +252,25 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     import { supabase } from '../../lib/supabase.js';
 
     const BUCKET = 'listing-images';
-    const STORAGE_PATH = 'site/featured-photo.jpg';
+    const FOLDER = 'site/featured';
 
-    const currentPhotoImg = document.getElementById('currentPhoto');
-    const previewLoading = document.getElementById('previewLoading');
     const fileInput = document.getElementById('fileInput');
     const newPreviewWrap = document.getElementById('newPreviewWrap');
     const cropCanvas = document.getElementById('cropCanvas');
     const uploadBtn = document.getElementById('uploadBtn');
     const uploadBtnText = document.getElementById('uploadBtnText');
     const uploadMessage = document.getElementById('uploadMessage');
+    const photosContainer = document.getElementById('photosContainer');
+    const emptyState = document.getElementById('emptyState');
 
     let croppedBlob = null;
+    let photos = [];
 
-    function getPublicUrlWithCacheBust() {
-      const { data } = supabase.storage.from(BUCKET).getPublicUrl(STORAGE_PATH);
-      return `${data.publicUrl}?t=${Date.now()}`;
+    function publicUrl(path) {
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
     }
 
-    function loadCurrentPhoto() {
-      currentPhotoImg.onload = () => {
-        previewLoading.style.display = 'none';
-      };
-      currentPhotoImg.onerror = () => {
-        previewLoading.innerHTML = '<i class="fas fa-image"></i>';
-      };
-      currentPhotoImg.src = getPublicUrlWithCacheBust();
-    }
-
-    // ============================================================
-    // ছবি সিলেক্ট করলেই ক্যানভাসে 1600x900 (cover-fit) ক্রপ করা হয়
-    // ============================================================
     fileInput.addEventListener('change', () => {
       const file = fileInput.files?.[0];
       if (!file) return;
@@ -281,21 +278,17 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const img = new Image();
       img.onload = () => {
         const ctx = cropCanvas.getContext('2d');
-        const targetW = 1600;
-        const targetH = 900;
+        const targetW = 1600, targetH = 900;
         const targetRatio = targetW / targetH;
         const imgRatio = img.width / img.height;
 
         let sx, sy, sWidth, sHeight;
-
         if (imgRatio > targetRatio) {
-          // ছবি বেশি চওড়া — উচ্চতা অনুযায়ী ক্রপ, মাঝ থেকে
           sHeight = img.height;
           sWidth = sHeight * targetRatio;
           sx = (img.width - sWidth) / 2;
           sy = 0;
         } else {
-          // ছবি বেশি লম্বা — প্রস্থ অনুযায়ী ক্রপ, মাঝ থেকে
           sWidth = img.width;
           sHeight = sWidth / targetRatio;
           sx = 0;
@@ -303,10 +296,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         }
 
         ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-
-        cropCanvas.toBlob((blob) => {
-          croppedBlob = blob;
-        }, 'image/jpeg', 0.85);
+        cropCanvas.toBlob((blob) => { croppedBlob = blob; }, 'image/jpeg', 0.85);
 
         newPreviewWrap.style.display = 'block';
         uploadMessage.textContent = '';
@@ -321,33 +311,137 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       uploadBtn.disabled = true;
       uploadBtnText.textContent = 'আপলোড হচ্ছে...';
 
-      const { error } = await supabase.storage
+      const path = `${FOLDER}/${Date.now()}.jpg`;
+
+      const { error: uploadError } = await supabase.storage
         .from(BUCKET)
-        .upload(STORAGE_PATH, croppedBlob, { upsert: true, contentType: 'image/jpeg' });
+        .upload(path, croppedBlob, { contentType: 'image/jpeg' });
+
+      if (uploadError) {
+        uploadMessage.textContent = 'আপলোড ব্যর্থ: ' + uploadError.message;
+        uploadMessage.className = 'upload-message error';
+        uploadBtn.disabled = false;
+        uploadBtnText.textContent = 'লিস্টে যোগ করুন';
+        return;
+      }
+
+      const nextOrder = photos.length > 0 ? Math.max(...photos.map((p) => p.sort_order)) + 1 : 0;
+
+      const { error: dbError } = await supabase
+        .from('featured_photos')
+        .insert({ storage_path: path, sort_order: nextOrder });
 
       uploadBtn.disabled = false;
-      uploadBtnText.textContent = 'আপলোড করুন';
+      uploadBtnText.textContent = 'লিস্টে যোগ করুন';
 
-      if (error) {
-        uploadMessage.textContent = 'আপলোড ব্যর্থ: ' + error.message;
+      if (dbError) {
+        uploadMessage.textContent = 'সেভ ব্যর্থ: ' + dbError.message;
         uploadMessage.className = 'upload-message error';
         return;
       }
 
-      uploadMessage.textContent = 'সফলভাবে আপলোড হয়েছে! হোমপেজে রিফ্রেশ করলেই নতুন ছবি দেখা যাবে।';
+      uploadMessage.textContent = 'ছবি স্লাইডশোতে যোগ হয়েছে!';
       uploadMessage.className = 'upload-message success';
-
       newPreviewWrap.style.display = 'none';
       fileInput.value = '';
       croppedBlob = null;
 
-      previewLoading.style.display = 'flex';
-      previewLoading.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      loadCurrentPhoto();
+      loadPhotos();
     });
 
+    function renderPhotoRow(photo, index) {
+      const row = document.createElement('div');
+      row.style.cssText = 'background:#fff;border-radius:16px;padding:12px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;align-items:center;gap:12px;';
+
+      row.innerHTML = `
+        <img src="${publicUrl(photo.storage_path)}" style="width:80px;height:45px;border-radius:10px;object-fit:cover;flex-shrink:0;" />
+        <div style="flex:1;min-width:0;font-size:0.8rem;color:#8FA0BC;font-weight:600;">ক্রম #${index + 1}</div>
+        <div class="row-controls" style="display:flex;gap:6px;flex-shrink:0;"></div>
+      `;
+
+      const controls = row.querySelector('.row-controls');
+
+      const upBtn = document.createElement('button');
+      upBtn.innerHTML = '<i class="fas fa-chevron-up"></i>';
+      upBtn.disabled = index === 0;
+      upBtn.style.cssText = `background:#F4F7FC;color:#1B2A4A;border:none;width:34px;height:34px;border-radius:10px;font-size:0.8rem;cursor:pointer;${index === 0 ? 'opacity:0.4;cursor:not-allowed;' : ''}`;
+      upBtn.addEventListener('click', () => moveOrder(index, -1));
+
+      const downBtn = document.createElement('button');
+      downBtn.innerHTML = '<i class="fas fa-chevron-down"></i>';
+      downBtn.disabled = index === photos.length - 1;
+      downBtn.style.cssText = `background:#F4F7FC;color:#1B2A4A;border:none;width:34px;height:34px;border-radius:10px;font-size:0.8rem;cursor:pointer;${index === photos.length - 1 ? 'opacity:0.4;cursor:not-allowed;' : ''}`;
+      downBtn.addEventListener('click', () => moveOrder(index, 1));
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+      deleteBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;width:34px;height:34px;border-radius:10px;font-size:0.8rem;cursor:pointer;';
+      let confirming = false;
+      deleteBtn.addEventListener('click', () => {
+        if (!confirming) {
+          confirming = true;
+          deleteBtn.style.cssText = 'background:#D14343;color:#fff;border:none;width:34px;height:34px;border-radius:10px;font-size:0.8rem;cursor:pointer;';
+          deleteBtn.innerHTML = '<i class="fas fa-check"></i>';
+          return;
+        }
+        deletePhoto(photo);
+      });
+
+      controls.appendChild(upBtn);
+      controls.appendChild(downBtn);
+      controls.appendChild(deleteBtn);
+
+      return row;
+    }
+
+    async function moveOrder(index, direction) {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= photos.length) return;
+
+      const current = photos[index];
+      const target = photos[targetIndex];
+
+      await Promise.all([
+        supabase.from('featured_photos').update({ sort_order: target.sort_order }).eq('id', current.id),
+        supabase.from('featured_photos').update({ sort_order: current.sort_order }).eq('id', target.id),
+      ]);
+
+      loadPhotos();
+    }
+
+    async function deletePhoto(photo) {
+      await supabase.storage.from(BUCKET).remove([photo.storage_path]);
+      await supabase.from('featured_photos').delete().eq('id', photo.id);
+      loadPhotos();
+    }
+
+    async function loadPhotos() {
+      photosContainer.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:20px 0;">লোড হচ্ছে...</p>';
+
+      const { data, error } = await supabase
+        .from('featured_photos')
+        .select('*')
+        .order('sort_order', { ascending: true });
+
+      if (error) {
+        photosContainer.innerHTML = `<p style="color:#D14343;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      photos = data || [];
+      photosContainer.innerHTML = '';
+
+      if (photos.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+
+      emptyState.style.display = 'none';
+      photos.forEach((p, i) => photosContainer.appendChild(renderPhotoRow(p, i)));
+    }
+
     window.addEventListener('smartfeni:admin-ready', () => {
-      loadCurrentPhoto();
+      loadPhotos();
     });
 
     initAdminGuard();
