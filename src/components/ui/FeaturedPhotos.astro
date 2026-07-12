@@ -1,20 +1,19 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: ফিচার্ড ফটো (শুধু ছবি, কোনো টাইটেল/ক্যাপশন টেক্সট নাই)
-// ব্যবহার: /public/featured/featured-photo.jpg বদলালেই ছবি বদলাবে
-// ছবির সাইজ: 1600x900px (16:9), JPG/WebP, 400KB এর নিচে
-// টেক্সট লাগলে ছবির ভেতরেই বসিয়ে দিও (Canva দিয়ে)
+// আপডেট: এখন ছবি Supabase Storage থেকে ডায়নামিকভাবে লোড হয়
+// (/admin/featured-photo থেকে আপলোড করলেই সাথে সাথে বদলায়, rebuild লাগে না)
+// public/featured/featured-photo.jpg শুধু fallback হিসেবে থাকছে
+// (JS লোড হওয়ার আগ পর্যন্ত বা Storage fetch ব্যর্থ হলে দেখাবে)
 // ============================================================
 
-const photo = {
-  src: '/featured/featured-photo.jpg',
-};
+const fallbackSrc = '/featured/featured-photo.jpg';
 ---
 
 <section class="featured-photo-section">
   <div class="container">
     <div class="photo-card">
-      <img src={photo.src} alt="স্মার্ট ফেনী কমিউনিটি ফটো" loading="lazy" />
+      <img id="featuredPhotoImg" src={fallbackSrc} alt="স্মার্ট ফেনী কমিউনিটি ফটো" loading="lazy" />
     </div>
   </div>
 </section>
@@ -47,3 +46,33 @@ const photo = {
     }
   }
 </style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const BUCKET = 'listing-images';
+  const STORAGE_PATH = 'site/featured-photo.jpg';
+
+  async function loadDynamicFeaturedPhoto() {
+    const img = document.getElementById('featuredPhotoImg');
+    if (!img) return;
+
+    const { data: fileList } = await supabase.storage.from(BUCKET).list('site', {
+      search: 'featured-photo.jpg',
+    });
+
+    const fileInfo = fileList?.find((f) => f.name === 'featured-photo.jpg');
+    if (!fileInfo) return; // এখনো কোনো কাস্টম ছবি আপলোড হয়নি, fallback-ই থাকবে
+
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(STORAGE_PATH);
+    const cacheBust = fileInfo.updated_at ? new Date(fileInfo.updated_at).getTime() : Date.now();
+
+    const newImg = new Image();
+    newImg.onload = () => {
+      img.src = `${data.publicUrl}?v=${cacheBust}`;
+    };
+    newImg.src = `${data.publicUrl}?v=${cacheBust}`;
+  }
+
+  loadDynamicFeaturedPhoto();
+</script>
