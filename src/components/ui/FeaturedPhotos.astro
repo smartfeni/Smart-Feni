@@ -1,10 +1,12 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: ফিচার্ড ফটো (শুধু ছবি, কোনো টাইটেল/ক্যাপশন টেক্সট নাই)
-// আপডেট: এখন ছবি Supabase Storage থেকে ডায়নামিকভাবে লোড হয়
+// ছবি Supabase Storage থেকে ডায়নামিকভাবে লোড হয়
 // (/admin/featured-photo থেকে আপলোড করলেই সাথে সাথে বদলায়, rebuild লাগে না)
-// public/featured/featured-photo.jpg শুধু fallback হিসেবে থাকছে
-// (JS লোড হওয়ার আগ পর্যন্ত বা Storage fetch ব্যর্থ হলে দেখাবে)
+// public/featured/featured-photo.jpg fallback হিসেবে থাকছে (JS লোড হওয়ার
+// আগ পর্যন্ত বা Storage fetch ব্যর্থ হলে দেখাবে)
+// আপডেট: dual-image crossfade — নতুন ছবি ধীরে fade-in হয়, হঠাৎ swap না
+// করে, যাতে glitch/flash চোখে না পড়ে
 // ============================================================
 
 const fallbackSrc = '/featured/featured-photo.jpg';
@@ -13,7 +15,8 @@ const fallbackSrc = '/featured/featured-photo.jpg';
 <section class="featured-photo-section">
   <div class="container">
     <div class="photo-card">
-      <img id="featuredPhotoImg" src={fallbackSrc} alt="স্মার্ট ফেনী কমিউনিটি ফটো" loading="lazy" />
+      <img class="photo-layer photo-base" src={fallbackSrc} alt="স্মার্ট ফেনী কমিউনিটি ফটো" loading="lazy" />
+      <img id="featuredPhotoOverlay" class="photo-layer photo-overlay" alt="" />
     </div>
   </div>
 </section>
@@ -33,11 +36,22 @@ const fallbackSrc = '/featured/featured-photo.jpg';
     background: #F4F7FC;
   }
 
-  .photo-card img {
+  .photo-layer {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+
+  .photo-overlay {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+  }
+
+  .photo-overlay.loaded {
+    opacity: 1;
   }
 
   @media (max-width: 480px) {
@@ -54,8 +68,8 @@ const fallbackSrc = '/featured/featured-photo.jpg';
   const STORAGE_PATH = 'site/featured-photo.jpg';
 
   async function loadDynamicFeaturedPhoto() {
-    const img = document.getElementById('featuredPhotoImg');
-    if (!img) return;
+    const overlay = document.getElementById('featuredPhotoOverlay');
+    if (!overlay) return;
 
     const { data: fileList } = await supabase.storage.from(BUCKET).list('site', {
       search: 'featured-photo.jpg',
@@ -67,11 +81,10 @@ const fallbackSrc = '/featured/featured-photo.jpg';
     const { data } = supabase.storage.from(BUCKET).getPublicUrl(STORAGE_PATH);
     const cacheBust = fileInfo.updated_at ? new Date(fileInfo.updated_at).getTime() : Date.now();
 
-    const newImg = new Image();
-    newImg.onload = () => {
-      img.src = `${data.publicUrl}?v=${cacheBust}`;
+    overlay.onload = () => {
+      overlay.classList.add('loaded');
     };
-    newImg.src = `${data.publicUrl}?v=${cacheBust}`;
+    overlay.src = `${data.publicUrl}?v=${cacheBust}`;
   }
 
   loadDynamicFeaturedPhoto();
