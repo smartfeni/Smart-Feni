@@ -1,8 +1,8 @@
 import { defineConfig } from 'astro/config';
-import vercel from '@astrojs/vercel/serverless';
+import vercel from '@astrojs/vercel';
 
 export default defineConfig({
-  output: 'server',
+  output: 'static',
   adapter: vercel(),
   site: 'https://smart-feni-murex.vercel.app',
   trailingSlash: 'ignore',
