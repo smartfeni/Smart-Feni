@@ -7,6 +7,13 @@
 // আইটেম অবজেক্টে এই ফিল্ডগুলো থাকা দরকার: title, price, upazila, description,
 // contact_phone, type, images (array)। ভিন্ন ফিল্ড নাম হলে কল করার আগে
 // ডেটা normalize করে নিতে হবে।
+//
+// আপডেট: কল বাটনে data-item-name অ্যাট্রিবিউট বসানো হচ্ছে (আইটেমের title),
+// যাতে গ্লোবাল অ্যানালিটিক্স ট্র্যাকার (BaseLayout.astro) বুঝতে পারে
+// ঠিক কোন লিস্টিং/আইটেমে কল ক্লিক হয়েছে (item-level ট্র্যাকিং)।
+// এটা করলে courier, repair, housing, job, recycle — এই সবগুলো পেজে
+// একসাথে item-level কল ট্র্যাকিং চালু হয়ে যায়, কারণ সবাই এই শেয়ারড
+// মডাল ব্যবহার করে।
 // ============================================================
 
 const IMG_FRAME_STYLE =
@@ -55,6 +62,9 @@ export function initListingDetailModal({
       detailDesc.textContent = item.description || '';
       detailDesc.style.display = item.description ? 'block' : 'none';
       detailContact.href = `tel:${item.contact_phone || ''}`;
+
+      // ===== অ্যানালিটিক্স: কোন আইটেমে কল যাচ্ছে সেটা বসানো =====
+      detailContact.setAttribute('data-item-name', item.title || '');
 
       detailOverlay.classList.add('open');
       document.body.style.overflow = 'hidden';
