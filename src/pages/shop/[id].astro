@@ -1,0 +1,368 @@
+---
+// ============================================================
+// পেজ: পাবলিক শপ পেজ (/shop/[id])
+// একটা নির্দিষ্ট শপের সব প্রোডাক্ট দেখায়, সার্চ + Detail Modal সহ
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import ListingDetailModal from '../../components/ui/ListingDetailModal.astro';
+import { supabase } from '../../lib/supabase.js';
+
+const { id } = Astro.params;
+
+const { data: shopProfile, error: shopError } = await supabase
+  .from('profiles')
+  .select('id, shop_name, shop_tagline, shop_image, shop_active, is_shop_owner')
+  .eq('id', id)
+  .single();
+
+if (shopError) {
+  console.error('shop profile fetch error:', shopError.message);
+}
+
+const notFound = !shopProfile || !shopProfile.is_shop_owner || shopProfile.shop_active === false;
+
+let listings = [];
+if (!notFound) {
+  const { data: productListings } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('category', 'online-shop')
+    .eq('user_id', id)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false });
+
+  listings = productListings || [];
+}
+---
+
+<BaseLayout title={notFound ? 'শপ পাওয়া যায়নি | স্মার্ট ফেনী' : `${shopProfile.shop_name} | স্মার্ট ফেনী`}>
+  {notFound ? (
+    <section class="shop-not-found">
+      <div class="container">
+        <i class="fas fa-store-slash"></i>
+        <p>এই শপটি খুঁজে পাওয়া যায়নি</p>
+        <a href="/services/online-shop" class="back-link"><i class="fas fa-arrow-left"></i> সব শপ দেখুন</a>
+      </div>
+    </section>
+  ) : (
+    <>
+      <section class="shop-header-section">
+        <div class="container">
+          <a href="/services/online-shop" class="back-link"><i class="fas fa-arrow-left"></i> সব শপ</a>
+
+          <div class="shop-header">
+            {shopProfile.shop_image ? (
+              <img src={shopProfile.shop_image} alt={shopProfile.shop_name} class="shop-header-photo" />
+            ) : (
+              <div class="shop-header-icon">
+                <i class="fas fa-store"></i>
+              </div>
+            )}
+
+            <div>
+              <h1>{shopProfile.shop_name}</h1>
+              {shopProfile.shop_tagline && <p class="shop-header-tagline">{shopProfile.shop_tagline}</p>}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="products-section">
+        <div class="container">
+          <div class="search-box">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="text" id="searchInput" placeholder="প্রোডাক্ট খুঁজুন..." />
+          </div>
+
+          {listings.length === 0 ? (
+            <div class="empty-state">
+              <i class="fas fa-box-open"></i>
+              <p>এখনো কোনো প্রোডাক্ট যোগ হয়নি</p>
+            </div>
+          ) : (
+            <>
+              <div class="product-grid" id="productGrid">
+                {listings.map((item, i) => (
+                  <button
+                    type="button"
+                    class="product-card"
+                    data-detail-index={i}
+                    data-search={`${item.title || ''} ${item.description || ''}`.toLowerCase()}
+                  >
+                    {item.images && item.images.length > 0 ? (
+                      <img src={item.images[0]} alt={item.title} class="product-photo" />
+                    ) : (
+                      <div class="product-icon">
+                        <i class="fas fa-box"></i>
+                      </div>
+                    )}
+
+                    <div class="product-card-body">
+                      <h3 class="product-title">{item.title}</h3>
+                      {item.price && <p class="product-price">৳{item.price}</p>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <p class="no-results" id="noResults" style="display:none;">কোনো ফলাফল পাওয়া যায়নি</p>
+            </>
+          )}
+        </div>
+      </section>
+
+      <ListingDetailModal />
+
+      <script type="application/json" id="listingsData" set:html={JSON.stringify(listings)} />
+    </>
+  )}
+</BaseLayout>
+
+<style>
+  .shop-not-found {
+    padding: 100px 0;
+    text-align: center;
+    color: #B0BCCB;
+  }
+
+  .shop-not-found i {
+    font-size: 3rem;
+    margin-bottom: 16px;
+  }
+
+  .shop-not-found p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 16px;
+  }
+
+  .shop-header-section {
+    padding: 40px 0 30px;
+    background: #fff;
+  }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #5A6E85;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.88rem;
+    margin-bottom: 20px;
+  }
+
+  .back-link:hover {
+    color: #FF6B35;
+  }
+
+  .shop-header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .shop-header-photo {
+    width: 84px;
+    height: 84px;
+    border-radius: 20px;
+    object-fit: contain;
+    background: #F4F7FC;
+    flex-shrink: 0;
+  }
+
+  .shop-header-icon {
+    width: 84px;
+    height: 84px;
+    border-radius: 20px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    flex-shrink: 0;
+  }
+
+  .shop-header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+  }
+
+  .shop-header-tagline {
+    font-size: 0.9rem;
+    color: #5A6E85;
+  }
+
+  .products-section {
+    padding: 30px 0 70px;
+    background: #F8FAFC;
+  }
+
+  .search-box {
+    max-width: 480px;
+    margin: 0 auto 32px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid #EEF3F9;
+    border-radius: 40px;
+    padding: 12px 20px;
+  }
+
+  .search-box i {
+    color: #A0AFC0;
+  }
+
+  .search-box input {
+    border: none;
+    outline: none;
+    flex: 1;
+    font-size: 0.9rem;
+    font-family: inherit;
+    background: transparent;
+    color: #1B2A4A;
+  }
+
+  .empty-state {
+    text-align: center;
+    background: #fff;
+    border-radius: 20px;
+    padding: 50px 24px;
+    border: 1px dashed #E5EAF0;
+  }
+
+  .empty-state i {
+    font-size: 2rem;
+    color: #D7E0EC;
+    margin-bottom: 12px;
+  }
+
+  .empty-state p {
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+  }
+
+  .product-card {
+    background: #fff;
+    border-radius: 18px;
+    border: 1px solid #EEF3F9;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    transition: all 0.2s ease;
+    font-family: inherit;
+  }
+
+  .product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+  }
+
+  .product-card.hidden {
+    display: none;
+  }
+
+  .product-icon {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+  }
+
+  .product-photo {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: contain;
+    object-position: center;
+    display: block;
+    background: #F4F7FC;
+  }
+
+  .product-card-body {
+    padding: 14px;
+  }
+
+  .product-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .product-price {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #FF6B35;
+  }
+
+  .no-results {
+    text-align: center;
+    color: #A0AFC0;
+    font-size: 0.95rem;
+    padding: 40px 0;
+  }
+
+  @media (max-width: 768px) {
+    .shop-header h1 {
+      font-size: 1.25rem;
+    }
+  }
+</style>
+
+<script>
+  import { initListingDetailModal } from '../../lib/listingDetailModal.js';
+
+  const dataEl = document.getElementById('listingsData');
+  const listings = dataEl ? JSON.parse(dataEl.textContent) : [];
+
+  const cards = document.querySelectorAll('.product-card');
+  const searchInput = document.getElementById('searchInput');
+  const noResults = document.getElementById('noResults');
+
+  searchInput?.addEventListener('input', () => {
+    const keyword = searchInput.value.trim().toLowerCase();
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
+      if (matches) {
+        card.classList.remove('hidden');
+        visibleCount++;
+      } else {
+        card.classList.add('hidden');
+      }
+    });
+
+    if (noResults) {
+      noResults.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
+  });
+
+  initListingDetailModal({
+    listings,
+    typeNameMap: {},
+    typeIcons: {},
+    cardSelector: '.product-card',
+  });
+</script>
