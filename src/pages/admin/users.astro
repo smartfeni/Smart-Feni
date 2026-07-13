@@ -167,6 +167,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     let allUsers = [];
     let currentUserId = null;
+    let currentUserRole = null;
 
     const roleLabels = {
       admin: { text: 'অ্যাডমিন', bg: '#FFF0EA', color: '#FF6B35' },
@@ -184,6 +185,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       if (!iso) return '';
       const d = new Date(iso);
       return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    // moderator target user কে ব্লক/আনব্লক করার অনুমতি রাখে কিনা
+    function canManageBlock(targetUser) {
+      if (currentUserRole === 'admin') return true;
+      if (currentUserRole === 'moderator') return targetUser.role === 'user';
+      return false;
     }
 
     function renderUser(user) {
@@ -251,37 +259,45 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const actionWrap = card.querySelector('.user-action');
 
       if (!isMe) {
-        const toggleBtn = document.createElement('button');
-        let confirming = false;
+        if (canManageBlock(user)) {
+          const toggleBtn = document.createElement('button');
+          let confirming = false;
 
-        function setBtnState() {
-          if (user.is_blocked) {
-            toggleBtn.textContent = 'আনব্লক করুন';
-            toggleBtn.style.cssText = 'background:#EAFBF0;color:#1B7A3C;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
-          } else {
-            toggleBtn.textContent = confirming ? 'নিশ্চিত?' : 'ব্লক করুন';
-            toggleBtn.style.cssText = confirming
-              ? 'background:#D14343;color:#fff;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;'
-              : 'background:#FFF0EA;color:#D14343;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+          function setBtnState() {
+            if (user.is_blocked) {
+              toggleBtn.textContent = 'আনব্লক করুন';
+              toggleBtn.style.cssText = 'background:#EAFBF0;color:#1B7A3C;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+            } else {
+              toggleBtn.textContent = confirming ? 'নিশ্চিত?' : 'ব্লক করুন';
+              toggleBtn.style.cssText = confirming
+                ? 'background:#D14343;color:#fff;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;'
+                : 'background:#FFF0EA;color:#D14343;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+            }
           }
+
+          setBtnState();
+
+          toggleBtn.addEventListener('click', () => {
+            if (user.is_blocked) {
+              toggleBlock(user.id, false);
+              return;
+            }
+            if (!confirming) {
+              confirming = true;
+              setBtnState();
+              return;
+            }
+            toggleBlock(user.id, true);
+          });
+
+          actionWrap.appendChild(toggleBtn);
+        } else if (currentUserRole === 'moderator' && (user.role === 'admin' || user.role === 'moderator')) {
+          // moderator কে admin/moderator এর উপর অনুমতি নেই — disabled label
+          const label = document.createElement('span');
+          label.textContent = 'অনুমতি নেই';
+          label.style.cssText = 'font-size:0.76rem;color:#B0BCCB;font-weight:600;padding:8px 12px;white-space:nowrap;';
+          actionWrap.appendChild(label);
         }
-
-        setBtnState();
-
-        toggleBtn.addEventListener('click', () => {
-          if (user.is_blocked) {
-            toggleBlock(user.id, false);
-            return;
-          }
-          if (!confirming) {
-            confirming = true;
-            setBtnState();
-            return;
-          }
-          toggleBlock(user.id, true);
-        });
-
-        actionWrap.appendChild(toggleBtn);
       }
 
       return card;
@@ -353,6 +369,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     window.addEventListener('smartfeni:admin-ready', (e) => {
       currentUserId = e.detail.session.user.id;
+      currentUserRole = e.detail.role;
       loadUsers();
     });
 
