@@ -1,362 +1,321 @@
 ---
 // ============================================================
-// পেজ: আইনি পরামর্শ সেবা
-// ডিজাইন: health.astro-এর প্যাটার্ন অনুসরণ করা হয়েছে (হিরো → ফর্ম কার্ড)
-// ফ্লো: পরিচিতি → ফর্ম → সাবমিট হলে /api/legal-request এ POST →
-//       Supabase-এ সেভ + Resend ইমেইল + Telegram নোটিফিকেশন
+// পেজ: অ্যাডমিন — আইনি পরামর্শ অনুরোধ (/admin/legal-requests)
+// legal.astro ফর্ম থেকে জমা হওয়া সব অনুরোধ এখানে লিস্ট আকারে
+// দেখা যাবে, স্ট্যাটাস আপডেট করা যাবে (pending → contacted → resolved)
 // ============================================================
-import BaseLayout from '../../components/layout/BaseLayout.astro';
 
-const problemTypes = [
-  { value: 'family', label: 'পারিবারিক (তালাক, ভরণপোষণ, উত্তরাধিকার)' },
-  { value: 'property', label: 'সম্পত্তি (জমি, দলিল, দখল)' },
-  { value: 'criminal', label: 'ফৌজদারি (মামলা, হয়রানি)' },
-  { value: 'business', label: 'ব্যবসায়িক (চুক্তি, পাওনা আদায়)' },
-  { value: 'other', label: 'অন্যান্য' },
-];
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
 ---
 
-<BaseLayout title="আইনি পরামর্শ - স্মার্ট ফেনী" description="ফেনীর মানুষের আইনি জটিলতা নিয়ে সরাসরি অভিজ্ঞ আইনজীবীর পরামর্শ নিন">
-  <section class="legal-hero">
+<BaseLayout title="আইনি অনুরোধ | অ্যাডমিন">
+  <div class="admin-page">
     <div class="container">
-      <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> হোমে ফিরুন</a>
 
-      <div class="hero-icon">
-        <i class="fas fa-scale-balanced"></i>
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
       </div>
-      <span class="section-tag">আইনি পরামর্শ</span>
-      <h1>ঘরে বসেই <span class="accent">আইনজীবীর পরামর্শ</span> নিন</h1>
-      <p class="hero-desc">
-        ফেনীর মানুষের পারিবারিক, সম্পত্তি, ফৌজদারি কিংবা ব্যবসায়িক যেকোনো আইনি জটিলতা নিয়ে এখন
-        সরাসরি অভিজ্ঞ আইনজীবীদের পরামর্শ নেওয়া যাবে। নিচের ফর্মটি পূরণ করুন — আমরা আপনার সমস্যা
-        অনুযায়ী সংশ্লিষ্ট আইনজীবীর কাছে পাঠিয়ে দেব, তিনি নিজে আপনাকে কল করে পরামর্শ দেবেন।
-      </p>
-    </div>
-  </section>
 
-  <section class="consult-form-section">
-    <div class="container">
-      <div class="form-card">
-        <div class="form-header">
-          <h2>পরামর্শের জন্য ফর্ম পূরণ করুন</h2>
-          <p>নিচের তথ্য দিন, আমরা যত দ্রুত সম্ভব সংশ্লিষ্ট আইনজীবীর কাছে পৌঁছে দেব</p>
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>আইনি পরামর্শ অনুরোধ</h1>
+          <p class="admin-subtitle" id="resultCount">লোড হচ্ছে...</p>
         </div>
 
-        <form id="legalConsultForm">
-          <div class="form-group">
-            <label for="fullName">আপনার নাম <span class="required">*</span></label>
-            <input type="text" id="fullName" name="fullName" placeholder="যেমন: মোহাম্মদ করিম" required />
+        <div class="filter-bar">
+          <div class="search-bar">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="text" id="searchInput" placeholder="নাম বা মোবাইল নম্বর খুঁজুন" />
           </div>
 
-          <div class="form-group">
-            <label for="mobileNumber">মোবাইল নম্বর <span class="required">*</span></label>
-            <input type="tel" id="mobileNumber" name="mobileNumber" placeholder="০১৭XXXXXXXX" pattern="[0-9]{11}" required />
-          </div>
-
-          <div class="form-group">
-            <label for="problemType">সমস্যার ধরন <span class="required">*</span></label>
-            <select id="problemType" name="problemType" required>
-              <option value="" disabled selected>নির্বাচন করুন</option>
-              {problemTypes.map((pt) => <option value={pt.value}>{pt.label}</option>)}
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label for="problemDetails">আপনার সমস্যার বিস্তারিত <span class="required">*</span></label>
-            <textarea id="problemDetails" name="problemDetails" rows="5" placeholder="আপনার আইনি সমস্যা বিস্তারিতভাবে লিখুন — ঘটনা কী, কতদিন ধরে চলছে ইত্যাদি" required></textarea>
-          </div>
-
-          <button type="submit" class="btn-primary submit-btn" id="submitBtn">
-            <i class="fas fa-paper-plane"></i> <span id="submitBtnText">পরামর্শের জন্য পাঠান</span>
-          </button>
-
-          <p id="formError" class="form-error"></p>
-
-          <p class="privacy-note">
-            <i class="fas fa-lock"></i> আপনার তথ্য সম্পূর্ণ গোপন রাখা হবে এবং শুধুমাত্র সংশ্লিষ্ট আইনজীবীর সাথেই শেয়ার করা হবে
-          </p>
-        </form>
-
-        <div id="successMessage" class="success-message">
-          <i class="fas fa-circle-check"></i>
-          <h3>ধন্যবাদ!</h3>
-          <p>আপনার তথ্য আমাদের কাছে পৌঁছে গেছে। শীঘ্রই সংশ্লিষ্ট আইনজীবী আপনাকে কল করবেন।</p>
-          <button type="button" class="btn-outline" id="newRequestBtn">আরেকটি অনুরোধ পাঠান</button>
+          <select id="statusFilter" class="filter-select">
+            <option value="">সব স্ট্যাটাস</option>
+            <option value="pending">নতুন</option>
+            <option value="contacted">যোগাযোগ করা হয়েছে</option>
+            <option value="resolved">সমাধান হয়েছে</option>
+          </select>
         </div>
+
+        <div id="requestsContainer" class="requests-container"></div>
+
+        <div class="empty-state" id="emptyState" style="display:none;">
+          <i class="fas fa-scale-balanced"></i>
+          <p>কোনো অনুরোধ পাওয়া যায়নি</p>
+        </div>
+
       </div>
     </div>
-  </section>
-</BaseLayout>
+  </div>
 
-<script>
-  const form = document.getElementById('legalConsultForm') as HTMLFormElement;
-  const successMessage = document.getElementById('successMessage');
-  const newRequestBtn = document.getElementById('newRequestBtn');
-  const submitBtn = document.getElementById('submitBtn') as HTMLButtonElement;
-  const submitBtnText = document.getElementById('submitBtnText');
-  const formError = document.getElementById('formError');
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    if (formError) formError.textContent = '';
-
-    const data = {
-      fullName: (document.getElementById('fullName') as HTMLInputElement).value,
-      mobileNumber: (document.getElementById('mobileNumber') as HTMLInputElement).value,
-      problemType: (document.getElementById('problemType') as HTMLSelectElement).value,
-      problemDetails: (document.getElementById('problemDetails') as HTMLTextAreaElement).value,
-    };
-
-    submitBtn.disabled = true;
-    if (submitBtnText) submitBtnText.textContent = 'পাঠানো হচ্ছে...';
-
-    try {
-      const res = await fetch('/api/legal-request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-
-      const result = await res.json();
-
-      if (!res.ok) {
-        throw new Error(result.error || 'সাবমিট করতে সমস্যা হয়েছে');
-      }
-
-      form.style.display = 'none';
-      successMessage!.style.display = 'block';
-    } catch (err: any) {
-      if (formError) formError.textContent = err.message || 'সাবমিট করতে সমস্যা হয়েছে, আবার চেষ্টা করুন';
-      submitBtn.disabled = false;
-      if (submitBtnText) submitBtnText.textContent = 'পরামর্শের জন্য পাঠান';
-    }
-  });
-
-  newRequestBtn!.addEventListener('click', () => {
-    form.reset();
-    form.style.display = 'block';
-    successMessage!.style.display = 'none';
-    submitBtn.disabled = false;
-    if (submitBtnText) submitBtnText.textContent = 'পরামর্শের জন্য পাঠান';
-  });
-</script>
-
-<style>
-  /* ===== হিরো ===== */
-  .legal-hero {
-    padding: 32px 0 8px;
-    text-align: center;
-  }
-
-  .back-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: #5A6E85;
-    text-decoration: none;
-    font-size: 0.9rem;
-    font-weight: 500;
-    margin-bottom: 24px;
-    float: left;
-  }
-
-  .back-link:hover {
-    color: #FF6B35;
-  }
-
-  .hero-icon {
-    width: 76px;
-    height: 76px;
-    background: #FFF0EA;
-    border-radius: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 auto 16px;
-    clear: both;
-  }
-
-  .hero-icon i {
-    font-size: 2rem;
-    color: #FF6B35;
-  }
-
-  .legal-hero h1 {
-    font-size: 2.2rem;
-    font-weight: 700;
-    margin: 8px auto 16px;
-    max-width: 600px;
-    line-height: 1.3;
-  }
-
-  .legal-hero .accent {
-    color: #FF6B35;
-  }
-
-  .hero-desc {
-    color: #5A6E85;
-    font-size: 1.05rem;
-    max-width: 620px;
-    margin: 0 auto;
-  }
-
-  /* ===== ফর্ম সেকশন ===== */
-  .consult-form-section {
-    padding: 32px 0 60px;
-  }
-
-  .form-card {
-    max-width: 620px;
-    margin: 0 auto;
-    background: #fff;
-    border-radius: 28px;
-    padding: 36px 32px;
-    box-shadow: 0 12px 40px rgba(27, 42, 74, 0.08);
-    border: 1px solid #EEF3F9;
-  }
-
-  .form-header {
-    text-align: center;
-    margin-bottom: 28px;
-  }
-
-  .form-header h2 {
-    font-size: 1.4rem;
-    font-weight: 700;
-    margin-bottom: 6px;
-  }
-
-  .form-header p {
-    color: #5A6E85;
-    font-size: 0.92rem;
-  }
-
-  .form-group {
-    margin-bottom: 20px;
-  }
-
-  .form-group label {
-    display: block;
-    font-weight: 600;
-    font-size: 0.9rem;
-    margin-bottom: 8px;
-    color: #1B2A4A;
-  }
-
-  .required {
-    color: #FF6B35;
-  }
-
-  .form-group input,
-  .form-group textarea,
-  .form-group select {
-    width: 100%;
-    border: 1.5px solid #EEF3F9;
-    background: #F8FAFC;
-    border-radius: 14px;
-    padding: 13px 16px;
-    font-size: 0.95rem;
-    font-family: inherit;
-    color: #1B2A4A;
-    outline: none;
-    transition: border-color 0.2s ease;
-    resize: vertical;
-  }
-
-  .form-group select {
-    appearance: none;
-    cursor: pointer;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235A6E85' stroke-width='1.5' fill='none' fill-rule='evenodd'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 16px center;
-    padding-right: 36px;
-  }
-
-  .form-group input:focus,
-  .form-group textarea:focus,
-  .form-group select:focus {
-    border-color: #FF6B35;
-    background-color: #fff;
-  }
-
-  .form-group input::placeholder,
-  .form-group textarea::placeholder {
-    color: #A0B3C9;
-  }
-
-  .submit-btn {
-    width: 100%;
-    justify-content: center;
-    margin-top: 4px;
-  }
-
-  .submit-btn:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-  }
-
-  .form-error {
-    color: #D14343;
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-align: center;
-    margin-top: 12px;
-  }
-
-  .privacy-note {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    color: #A0B3C9;
-    font-size: 0.8rem;
-    margin-top: 16px;
-    text-align: center;
-  }
-
-  /* ===== সফল হওয়ার মেসেজ ===== */
-  .success-message {
-    display: none;
-    text-align: center;
-    padding: 20px 0;
-  }
-
-  .success-message i {
-    font-size: 3rem;
-    color: #22C55E;
-    margin-bottom: 12px;
-  }
-
-  .success-message h3 {
-    font-size: 1.3rem;
-    font-weight: 700;
-    margin-bottom: 8px;
-  }
-
-  .success-message p {
-    color: #5A6E85;
-    max-width: 400px;
-    margin: 0 auto 20px;
-  }
-
-  @media (max-width: 768px) {
-    .legal-hero h1 {
-      font-size: 1.7rem;
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
     }
 
-    .form-card {
-      padding: 28px 20px;
-      border-radius: 20px;
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
 
     .back-link {
-      float: none;
-      margin-bottom: 16px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
     }
 
-    .hero-icon {
-      clear: none;
+    .back-link:hover {
+      color: #FF6B35;
     }
-  }
-</style>
+
+    .admin-header {
+      margin-bottom: 18px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .filter-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+    }
+
+    .search-bar {
+      position: relative;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .search-bar i {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #B0BCCB;
+      font-size: 0.85rem;
+    }
+
+    .search-bar input {
+      width: 100%;
+      padding: 13px 16px 13px 42px;
+      border-radius: 14px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+
+    .search-bar input:focus {
+      outline: none;
+      border-color: #FF6B35;
+    }
+
+    .filter-select {
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #1B2A4A;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .filter-select:focus {
+      outline: none;
+      border-color: #FF6B35;
+    }
+
+    .requests-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 80px 0;
+      color: #B0BCCB;
+    }
+
+    .empty-state i {
+      font-size: 2.4rem;
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const container = document.getElementById('requestsContainer');
+    const emptyState = document.getElementById('emptyState');
+    const resultCount = document.getElementById('resultCount');
+    const searchInput = document.getElementById('searchInput');
+    const statusFilter = document.getElementById('statusFilter');
+
+    let allRequests = [];
+
+    const problemTypeLabels = {
+      family: 'পারিবারিক',
+      property: 'সম্পত্তি',
+      criminal: 'ফৌজদারি',
+      business: 'ব্যবসায়িক',
+      other: 'অন্যান্য',
+    };
+
+    const statusLabels = {
+      pending: { text: 'নতুন', bg: '#FFF3E0', color: '#B36B00' },
+      contacted: { text: 'যোগাযোগ করা হয়েছে', bg: '#EAF2FF', color: '#2563EB' },
+      resolved: { text: 'সমাধান হয়েছে', bg: '#EAFBF0', color: '#1B7A3C' },
+    };
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function renderRequest(req) {
+      const status = statusLabels[req.status] || statusLabels.pending;
+
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:18px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);';
+
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+          <div style="min-width:0;flex:1;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <h3 style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${req.full_name}</h3>
+              <span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#FF6B35;">${problemTypeLabels[req.problem_type] || req.problem_type}</span>
+            </div>
+            <p style="font-size:0.82rem;color:#8FA0BC;margin-top:3px;">
+              <i class="fas fa-phone" style="font-size:0.72rem;"></i> ${req.mobile_number} · ${formatDate(req.created_at)}
+            </p>
+            <p style="font-size:0.85rem;color:#4A5B6E;margin-top:8px;line-height:1.5;">${req.problem_details}</p>
+          </div>
+          <a href="tel:+880${req.mobile_number.slice(1)}" data-item-name="${req.full_name}" style="background:#FF6B35;color:#fff;border:none;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none;">
+            <i class="fas fa-phone"></i>
+          </a>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid #F0F3F8;flex-wrap:wrap;">
+          <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:${status.bg};color:${status.color};margin-right:auto;">${status.text}</span>
+          ${req.status !== 'contacted' ? `<button class="status-btn" data-status="contacted" style="background:#EAF2FF;color:#2563EB;border:none;padding:7px 12px;border-radius:10px;font-size:0.75rem;font-weight:700;cursor:pointer;">যোগাযোগ করা হয়েছে</button>` : ''}
+          ${req.status !== 'resolved' ? `<button class="status-btn" data-status="resolved" style="background:#EAFBF0;color:#1B7A3C;border:none;padding:7px 12px;border-radius:10px;font-size:0.75rem;font-weight:700;cursor:pointer;">সমাধান হয়েছে</button>` : ''}
+        </div>
+      `;
+
+      card.querySelectorAll('.status-btn').forEach((btn) => {
+        btn.addEventListener('click', () => updateStatus(req.id, btn.dataset.status));
+      });
+
+      return card;
+    }
+
+    async function updateStatus(id, newStatus) {
+      const { error } = await supabase.from('legal_requests').update({ status: newStatus }).eq('id', id);
+      if (error) {
+        alert('আপডেট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadRequests();
+    }
+
+    function renderList(requests) {
+      container.innerHTML = '';
+      resultCount.textContent = `মোট ${requests.length} টি অনুরোধ`;
+
+      if (requests.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+      emptyState.style.display = 'none';
+      requests.forEach((r) => container.appendChild(renderRequest(r)));
+    }
+
+    function applyFilters() {
+      const q = searchInput.value.trim().toLowerCase();
+      const statusVal = statusFilter.value;
+
+      let filtered = allRequests;
+      if (statusVal) {
+        filtered = filtered.filter((r) => r.status === statusVal);
+      }
+      if (q) {
+        filtered = filtered.filter((r) =>
+          (r.full_name || '').toLowerCase().includes(q) || (r.mobile_number || '').includes(q)
+        );
+      }
+      renderList(filtered);
+    }
+
+    async function loadRequests() {
+      container.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
+
+      const { data, error } = await supabase
+        .from('legal_requests')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        container.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      allRequests = data || [];
+      applyFilters();
+    }
+
+    searchInput.addEventListener('input', applyFilters);
+    statusFilter.addEventListener('change', applyFilters);
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadRequests();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
