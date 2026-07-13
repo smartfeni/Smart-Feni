@@ -2,28 +2,35 @@
 // ============================================================
 // পেজ: হারানো-পাওয়া সেবা
 // ব্র্যান্ড: স্মার্ট ফেনী
-// স্ট্রাকচার: ২টা ট্যাব (হারানো বিজ্ঞপ্তি / পাওয়া গিয়েছে)
-// প্রতিটার উপরে "+ বিজ্ঞপ্তি দিন" বাটন (এখন শুধু UI মডাল, backend পরে যুক্ত হবে)
+// ২টা ট্যাব (হারানো/পাওয়া), Supabase লাইভ ডেটা, ডিটেইলস মডাল,
+// লোকেশন সর্ট। সার্চ বক্স নাই।
 // ============================================================
 
+export const prerender = false;
+
 import BaseLayout from '../../components/layout/BaseLayout.astro';
+import AddListingModal from '../../components/ui/AddListingModal.astro';
+import ListingDetailModal from '../../components/ui/ListingDetailModal.astro';
+import { supabase } from '../../lib/supabase.js';
 
-// প্লেসহোল্ডার ডেটা — পরে ডাটাবেজ থেকে আসবে
-const lostItems = [
-  { id: 1, title: 'হারানো স্মার্টফোন', desc: 'কালো রঙের স্যামসাং ফোন, স্ক্রিনে হালকা ফাটা দাগ আছে', upazila: 'ফেনী সদর', time: '২ দিন আগে' },
-  { id: 2, title: 'হারানো মানিব্যাগ', desc: 'বাদামি চামড়ার মানিব্যাগ, ভেতরে NID কার্ড ছিল', upazila: 'ছাগলনাইয়া', time: '৪ দিন আগে' },
-  { id: 3, title: 'হারানো পোষা বিড়াল', desc: 'সাদা-কমলা মিশ্রিত রঙের বিড়াল, গলায় লাল বেল্ট', upazila: 'দাগনভূঞা', time: '১ দিন আগে' },
-  { id: 4, title: 'হারানো কলেজ আইডি কার্ড', desc: 'ফেনী সরকারি কলেজের স্টুডেন্ট আইডি', upazila: 'ফেনী সদর', time: '৫ দিন আগে' },
-  { id: 5, title: 'হারানো কানের দুল', desc: 'সোনার ছোট দুল, পারিবারিক স্মৃতি হিসেবে গুরুত্বপূর্ণ', upazila: 'সোনাগাজী', time: '৩ দিন আগে' },
+const typeOptions = [
+  { id: 'lost', label: 'হারিয়ে গিয়েছে' },
+  { id: 'found', label: 'পাওয়া গিয়েছে' },
 ];
 
-const foundItems = [
-  { id: 1, title: 'পাওয়া মোবাইল ফোন', desc: 'সিএনজিতে একটা আইফোন পাওয়া গেছে', upazila: 'ফুলগাজী', time: '১ দিন আগে' },
-  { id: 2, title: 'পাওয়া চাবির রিং', desc: '৪টা চাবি সহ একটা রিং, বাজার এলাকায় পাওয়া', upazila: 'পরশুরাম', time: '৩ দিন আগে' },
-  { id: 3, title: 'পাওয়া কুকুরছানা', desc: 'বাদামি রঙের ছোট কুকুরছানা, খুবই বন্ধুত্বপূর্ণ', upazila: 'ফেনী সদর', time: '২ দিন আগে' },
-  { id: 4, title: 'পাওয়া ব্যাগ', desc: 'কালো স্কুল ব্যাগ, ভেতরে বই-খাতা আছে', upazila: 'দাগনভূঞা', time: '৬ দিন আগে' },
-  { id: 5, title: 'পাওয়া চশমা', desc: 'কালো ফ্রেমের চশমা, বাসস্ট্যান্ড এলাকায় পাওয়া', upazila: 'ছাগলনাইয়া', time: '৪ দিন আগে' },
-];
+const typeNameMap = Object.fromEntries(typeOptions.map((t) => [t.id, t.label]));
+const typeIcons = { lost: 'fa-magnifying-glass', found: 'fa-hand-holding-heart' };
+
+const { data: lfListings } = await supabase
+  .from('listings')
+  .select('*')
+  .eq('category', 'lost-found')
+  .eq('status', 'active')
+  .order('created_at', { ascending: false });
+
+const listings = lfListings || [];
+const lostItems = listings.filter((i) => i.type === 'lost');
+const foundItems = listings.filter((i) => i.type === 'found');
 ---
 
 <BaseLayout title="হারানো-পাওয়া সেবা | স্মার্ট ফেনী">
@@ -44,53 +51,75 @@ const foundItems = [
 
       <!-- হারানো ট্যাব -->
       <div class="tab-panel active" id="panel-lost">
-        <button class="btn-post" onclick="alert('বিজ্ঞপ্তি ফর্ম শীঘ্রই যুক্ত হবে')">
+        <button class="btn-post" id="openLostCta" type="button">
           <i class="fas fa-plus"></i> হারানো বিজ্ঞপ্তি দিন
         </button>
 
-        <div class="item-grid">
-          {lostItems.map((item) => (
-            <div class="item-card lost-card">
-              <span class="status-badge lost-badge">হারানো</span>
-              <h3>{item.title}</h3>
-              <p class="item-desc">{item.desc}</p>
-              <div class="item-meta">
-                <span><i class="fas fa-location-dot"></i> {item.upazila}</span>
-                <span><i class="fas fa-clock"></i> {item.time}</span>
-              </div>
-              <a href="/contact" class="btn-contact">
-                <i class="fas fa-phone"></i> যোগাযোগ করুন
-              </a>
-            </div>
-          ))}
-        </div>
+        {lostItems.length === 0 ? (
+          <div class="empty-state">
+            <i class="fas fa-magnifying-glass"></i>
+            <p>এখনো কোনো হারানো বিজ্ঞপ্তি নেই</p>
+          </div>
+        ) : (
+          <div class="item-grid" id="lostGrid">
+            {lostItems.map((item, i) => (
+              <button
+                type="button"
+                class="item-card lost-card"
+                data-detail-index={i}
+                data-upazila-name={item.upazila || ''}
+              >
+                <span class="status-badge lost-badge">হারানো</span>
+                <h3>{item.title}</h3>
+                {item.description && <p class="item-desc">{item.description}</p>}
+                <div class="item-meta">
+                  <span><i class="fas fa-location-dot"></i> {item.upazila}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <!-- পাওয়া ট্যাব -->
       <div class="tab-panel" id="panel-found">
-        <button class="btn-post" onclick="alert('বিজ্ঞপ্তি ফর্ম শীঘ্রই যুক্ত হবে')">
+        <button class="btn-post" id="openFoundCta" type="button">
           <i class="fas fa-plus"></i> পাওয়ার বিজ্ঞপ্তি দিন
         </button>
 
-        <div class="item-grid">
-          {foundItems.map((item) => (
-            <div class="item-card found-card">
-              <span class="status-badge found-badge">পাওয়া গিয়েছে</span>
-              <h3>{item.title}</h3>
-              <p class="item-desc">{item.desc}</p>
-              <div class="item-meta">
-                <span><i class="fas fa-location-dot"></i> {item.upazila}</span>
-                <span><i class="fas fa-clock"></i> {item.time}</span>
-              </div>
-              <a href="/contact" class="btn-contact">
-                <i class="fas fa-phone"></i> যোগাযোগ করুন
-              </a>
-            </div>
-          ))}
-        </div>
+        {foundItems.length === 0 ? (
+          <div class="empty-state">
+            <i class="fas fa-hand-holding-heart"></i>
+            <p>এখনো কোনো পাওয়ার বিজ্ঞপ্তি নেই</p>
+          </div>
+        ) : (
+          <div class="item-grid" id="foundGrid">
+            {foundItems.map((item, i) => (
+              <button
+                type="button"
+                class="item-card found-card"
+                data-detail-index={i}
+                data-upazila-name={item.upazila || ''}
+              >
+                <span class="status-badge found-badge">পাওয়া গিয়েছে</span>
+                <h3>{item.title}</h3>
+                {item.description && <p class="item-desc">{item.description}</p>}
+                <div class="item-meta">
+                  <span><i class="fas fa-location-dot"></i> {item.upazila}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   </section>
+
+  <ListingDetailModal />
+  <AddListingModal category="lost-found" typeOptions={typeOptions} titleLabel="আইটেমের নাম" priceLabel="" />
+
+  <script type="application/json" id="lostData" set:html={JSON.stringify(lostItems)} />
+  <script type="application/json" id="foundData" set:html={JSON.stringify(foundItems)} />
 </BaseLayout>
 
 <style>
@@ -184,6 +213,25 @@ const foundItems = [
     background: #FF6B35;
   }
 
+  .empty-state {
+    text-align: center;
+    background: #fff;
+    border-radius: 20px;
+    padding: 50px 24px;
+    border: 1px dashed #E5EAF0;
+  }
+
+  .empty-state i {
+    font-size: 2rem;
+    color: #D7E0EC;
+    margin-bottom: 12px;
+  }
+
+  .empty-state p {
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
   .item-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -197,6 +245,10 @@ const foundItems = [
     border: 1px solid #EEF3F9;
     position: relative;
     transition: all 0.25s ease;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    width: 100%;
   }
 
   .item-card:hover {
@@ -235,6 +287,11 @@ const foundItems = [
     color: #5A6E85;
     margin-bottom: 14px;
     line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 
   .item-meta {
@@ -242,7 +299,6 @@ const foundItems = [
     justify-content: space-between;
     font-size: 0.78rem;
     color: #7A8EA5;
-    margin-bottom: 16px;
     flex-wrap: wrap;
     gap: 6px;
   }
@@ -250,27 +306,6 @@ const foundItems = [
   .item-meta i {
     color: #FF6B35;
     margin-right: 4px;
-  }
-
-  .btn-contact {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    width: 100%;
-    background: #F8FAFC;
-    color: #1B2A4A;
-    text-decoration: none;
-    padding: 10px;
-    border-radius: 40px;
-    font-weight: 600;
-    font-size: 0.85rem;
-    transition: background 0.2s ease;
-  }
-
-  .btn-contact:hover {
-    background: #FFF0EA;
-    color: #FF6B35;
   }
 
   @media (max-width: 480px) {
@@ -291,19 +326,49 @@ const foundItems = [
 </style>
 
 <script>
+  import { supabase } from '../../lib/supabase.js';
+  import { initListingDetailModal } from '../../lib/listingDetailModal.js';
+  import { reorderByUserLocation } from '../../lib/locationSort.js';
+
+  // ট্যাব সুইচ
   const tabs = document.querySelectorAll('.tab');
   const panels = document.querySelectorAll('.tab-panel');
 
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
       const target = tab.getAttribute('data-tab');
-
       tabs.forEach((t) => t.classList.remove('active'));
       tab.classList.add('active');
-
       panels.forEach((panel) => {
         panel.classList.toggle('active', panel.id === `panel-${target}`);
       });
     });
   });
+
+  // দুইটা গ্রিড আলাদাভাবে লোকেশন-সর্ট
+  reorderByUserLocation(document.getElementById('lostGrid'), 'upazilaName');
+  reorderByUserLocation(document.getElementById('foundGrid'), 'upazilaName');
+
+  // ডিটেইলস মডাল — lost ও found দুইটা আলাদা ডেটাসেট, তাই আলাদাভাবে init
+  const typeNameMap = { lost: 'হারানো', found: 'পাওয়া গিয়েছে' };
+  const typeIcons = { lost: 'fa-magnifying-glass', found: 'fa-hand-holding-heart' };
+
+  const lostData = JSON.parse(document.getElementById('lostData')?.textContent || '[]');
+  const foundData = JSON.parse(document.getElementById('foundData')?.textContent || '[]');
+
+  initListingDetailModal({ listings: lostData, typeNameMap, typeIcons, cardSelector: '#lostGrid .item-card' });
+  initListingDetailModal({ listings: foundData, typeNameMap, typeIcons, cardSelector: '#foundGrid .item-card' });
+
+  // পোস্ট বাটন: লগইন চেক + প্রিসেট টাইপ
+  async function openWithPreset(presetType) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      window.openListingModal?.(presetType);
+    } else {
+      window.openAuthModal?.('login');
+    }
+  }
+
+  document.getElementById('openLostCta')?.addEventListener('click', () => openWithPreset('lost'));
+  document.getElementById('openFoundCta')?.addEventListener('click', () => openWithPreset('found'));
 </script>
