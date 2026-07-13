@@ -1,0 +1,159 @@
+---
+// ============================================================
+// কম্পোনেন্ট: জনপ্রিয় ক্যাটাগরি কার্ড (CategoryCard.astro থেকে ভ্যারিয়েন্ট)
+// ফিচার: টপে ফায়ার ব্যাজ, আলাদা localStorage কাউন্ট কী, ইউনিক বর্ডার/শ্যাডো
+// ============================================================
+
+export interface Props {
+  cat: {
+    id: string;
+    name: string;
+    icon: string;
+    desc: string;
+    slug: string;
+    color?: string;
+  };
+}
+
+const { cat } = Astro.props;
+
+const palette = [
+  '#FF6B35',
+  '#6C5CE7',
+  '#00B894',
+  '#0984E3',
+  '#E84393',
+  '#FDCB6E',
+  '#00CEC9',
+  '#D63031',
+];
+
+function hashColor(str: string) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % palette.length;
+  return palette[index];
+}
+
+const themeColor = cat.color || hashColor(cat.id || cat.name);
+
+function hexToRgba(hex: string, alpha: number) {
+  const parsed = hex.replace('#', '');
+  const r = parseInt(parsed.substring(0, 2), 16);
+  const g = parseInt(parsed.substring(2, 4), 16);
+  const b = parseInt(parsed.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+const iconBg = hexToRgba(themeColor, 0.12);
+---
+
+<a
+  href={`/services/${cat.slug}`}
+  class="category-card-popular"
+  style={`--theme-color: ${themeColor}; --icon-bg: ${iconBg};`}
+  data-category-id={cat.id}
+  data-category-name={cat.name}
+>
+  <span class="popular-badge">🔥 জনপ্রিয়</span>
+  <div class="card-icon">
+    <i class={`fas ${cat.icon}`}></i>
+  </div>
+  <h4>{cat.name}</h4>
+  <p>{cat.desc}</p>
+</a>
+
+<style>
+  .category-card-popular {
+    position: relative;
+    background: #fff;
+    padding: 32px 16px 24px;
+    border-radius: 20px;
+    text-align: center;
+    text-decoration: none;
+    color: #1B2A4A;
+    border: 1.5px solid #FFD9C7;
+    box-shadow: 0 6px 18px rgba(255, 107, 53, 0.1);
+    transition: all 0.25s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .category-card-popular:hover {
+    transform: translateY(-4px);
+    border-color: var(--theme-color);
+    box-shadow: 0 14px 30px rgba(255, 107, 53, 0.18);
+  }
+
+  .popular-badge {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #FF6B35, #FF8C5A);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 999px;
+    white-space: nowrap;
+    box-shadow: 0 4px 10px rgba(255, 107, 53, 0.35);
+  }
+
+  .card-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--icon-bg);
+    color: var(--theme-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    margin-bottom: 14px;
+    transition: transform 0.25s ease;
+  }
+
+  .category-card-popular:hover .card-icon {
+    transform: scale(1.08);
+  }
+
+  .category-card-popular h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0 0 4px;
+    line-height: 1.3;
+  }
+
+  .category-card-popular p {
+    font-size: 0.75rem;
+    color: #7A8EA5;
+    margin: 0;
+    line-height: 1.4;
+  }
+</style>
+
+<script>
+  import { trackEvent } from '../../lib/analytics.js';
+
+  document.querySelectorAll('.category-card-popular').forEach(card => {
+    card.addEventListener('click', function(e) {
+      const id = this.dataset.categoryId;
+      const name = this.dataset.categoryName;
+      if (!id) return;
+
+      // ===== জনপ্রিয় কার্ডের আলাদা localStorage কাউন্ট কী =====
+      const counts = JSON.parse(localStorage.getItem('service_counts_popular') || '{}');
+      counts[id] = (counts[id] || 0) + 1;
+      localStorage.setItem('service_counts_popular', JSON.stringify(counts));
+      console.log(`[জনপ্রিয়] ${name} (${id}) এর ক্লিক: ${counts[id]}`);
+
+      // ===== অ্যানালিটিক্স =====
+      const savedUpazila = localStorage.getItem('smartfeni_upazila');
+      trackEvent('category_click', { category: id, upazila: savedUpazila || null, is_popular: true });
+    });
+  });
+</script>
