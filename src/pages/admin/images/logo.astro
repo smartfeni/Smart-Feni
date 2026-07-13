@@ -1,0 +1,378 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — লোগো ম্যানেজমেন্ট (/admin/images/logo)
+// সাইটের প্রধান লোগো (transparency-সহ PNG) আপলোড — সবসময় ফিক্সড
+// পাথে (site/logo.png) upsert হয়, site_images টেবিলে 'logo' key-তে
+// ট্র্যাক হয়। Header/Footer/AuthModal এই key থেকে dynamically লোগো
+// লোড করে।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="লোগো | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin/images" class="back-link"><i class="fas fa-arrow-left"></i> ছবি ম্যানেজমেন্ট</a>
+
+        <div class="admin-header">
+          <h1>লোগো</h1>
+          <p class="admin-subtitle">সাইটের প্রধান লোগো বদলান — Header, Footer, লগইন সব জায়গায় সাথে সাথে আপডেট হবে</p>
+        </div>
+
+        <!-- ===== বর্তমান লোগো ===== -->
+        <div class="preview-card">
+          <p class="preview-label">বর্তমান লোগো</p>
+          <div class="logo-preview-frame">
+            <img id="currentLogo" src="" alt="বর্তমান লোগো" />
+            <div id="previewLoading" class="preview-loading"><i class="fas fa-spinner fa-spin"></i></div>
+          </div>
+        </div>
+
+        <!-- ===== নতুন লোগো আপলোড ===== -->
+        <div class="upload-card">
+          <label for="fileInput" class="upload-drop">
+            <i class="fas fa-cloud-arrow-up"></i>
+            <p>নতুন লোগো বেছে নিতে ট্যাপ করুন</p>
+            <span>স্বচ্ছ (transparent) ব্যাকগ্রাউন্ড PNG ভালো ফল দেবে — আসল অনুপাত অক্ষত রাখা হবে</span>
+          </label>
+          <input type="file" id="fileInput" accept="image/*" style="display:none;" />
+
+          <div id="newPreviewWrap" style="display:none;">
+            <p class="preview-label">নতুন লোগো প্রিভিউ</p>
+            <div class="logo-preview-frame">
+              <canvas id="previewCanvas"></canvas>
+            </div>
+            <button id="uploadBtn" class="upload-btn">
+              <i class="fas fa-check"></i> <span id="uploadBtnText">লোগো আপডেট করুন</span>
+            </button>
+          </div>
+
+          <p id="uploadMessage" class="upload-message"></p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 24px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .preview-card, .upload-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      margin-bottom: 18px;
+    }
+
+    .preview-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #5A6E85;
+      margin-bottom: 10px;
+    }
+
+    .logo-preview-frame {
+      position: relative;
+      width: 100%;
+      height: 160px;
+      border-radius: 16px;
+      overflow: hidden;
+      background:
+        linear-gradient(45deg, #F0F3F8 25%, transparent 25%),
+        linear-gradient(-45deg, #F0F3F8 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #F0F3F8 75%),
+        linear-gradient(-45deg, transparent 75%, #F0F3F8 75%);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-preview-frame img, .logo-preview-frame canvas {
+      max-width: 80%;
+      max-height: 80%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .preview-loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #B0BCCB;
+      font-size: 1.4rem;
+    }
+
+    .upload-drop {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 40px 20px;
+      border: 2px dashed #D7E0EC;
+      border-radius: 16px;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.2s ease;
+    }
+
+    .upload-drop:hover {
+      border-color: #FF6B35;
+    }
+
+    .upload-drop i {
+      font-size: 1.8rem;
+      color: #FF6B35;
+    }
+
+    .upload-drop p {
+      font-weight: 700;
+      color: #1B2A4A;
+      font-size: 0.9rem;
+    }
+
+    .upload-drop span {
+      font-size: 0.78rem;
+      color: #8FA0BC;
+    }
+
+    .upload-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #FF6B35;
+      color: #fff;
+      border: none;
+      padding: 14px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      margin-top: 14px;
+    }
+
+    .upload-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .upload-message {
+      text-align: center;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-top: 12px;
+    }
+
+    .upload-message.success {
+      color: #1B7A3C;
+    }
+
+    .upload-message.error {
+      color: #D14343;
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../../lib/adminGuard.js';
+    import { supabase } from '../../../lib/supabase.js';
+
+    const BUCKET = 'listing-images';
+    const STORAGE_PATH = 'site/logo.png';
+    const IMAGE_KEY = 'logo';
+    const MAX_DIMENSION = 800; // এর বেশি বড় লোগোর দরকার নাই, ফাইল সাইজ কম রাখতে
+
+    const currentLogoImg = document.getElementById('currentLogo');
+    const previewLoading = document.getElementById('previewLoading');
+    const fileInput = document.getElementById('fileInput');
+    const newPreviewWrap = document.getElementById('newPreviewWrap');
+    const previewCanvas = document.getElementById('previewCanvas');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const uploadBtnText = document.getElementById('uploadBtnText');
+    const uploadMessage = document.getElementById('uploadMessage');
+
+    let processedBlob = null;
+
+    function publicUrlWithCacheBust() {
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(STORAGE_PATH);
+      return `${data.publicUrl}?t=${Date.now()}`;
+    }
+
+    async function loadCurrentLogo() {
+      const { data } = await supabase
+        .from('site_images')
+        .select('storage_path, updated_at')
+        .eq('image_key', IMAGE_KEY)
+        .maybeSingle();
+
+      if (!data) {
+        currentLogoImg.src = '/logo.png';
+        previewLoading.style.display = 'none';
+        return;
+      }
+
+      currentLogoImg.onload = () => { previewLoading.style.display = 'none'; };
+      currentLogoImg.onerror = () => { previewLoading.innerHTML = '<i class="fas fa-image"></i>'; };
+      currentLogoImg.src = publicUrlWithCacheBust();
+    }
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width;
+        let h = img.height;
+
+        if (w > MAX_DIMENSION || h > MAX_DIMENSION) {
+          if (w > h) {
+            h = Math.round((h / w) * MAX_DIMENSION);
+            w = MAX_DIMENSION;
+          } else {
+            w = Math.round((w / h) * MAX_DIMENSION);
+            h = MAX_DIMENSION;
+          }
+        }
+
+        previewCanvas.width = w;
+        previewCanvas.height = h;
+        const ctx = previewCanvas.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+
+        previewCanvas.toBlob((blob) => {
+          processedBlob = blob;
+        }, 'image/png');
+
+        newPreviewWrap.style.display = 'block';
+        uploadMessage.textContent = '';
+        uploadMessage.className = 'upload-message';
+      };
+      img.src = URL.createObjectURL(file);
+    });
+
+    uploadBtn.addEventListener('click', async () => {
+      if (!processedBlob) return;
+
+      uploadBtn.disabled = true;
+      uploadBtnText.textContent = 'আপলোড হচ্ছে...';
+
+      const { error: uploadError } = await supabase.storage
+        .from(BUCKET)
+        .upload(STORAGE_PATH, processedBlob, { upsert: true, contentType: 'image/png' });
+
+      if (uploadError) {
+        uploadMessage.textContent = 'আপলোড ব্যর্থ: ' + uploadError.message;
+        uploadMessage.className = 'upload-message error';
+        uploadBtn.disabled = false;
+        uploadBtnText.textContent = 'লোগো আপডেট করুন';
+        return;
+      }
+
+      const { error: dbError } = await supabase
+        .from('site_images')
+        .upsert({ image_key: IMAGE_KEY, storage_path: STORAGE_PATH, updated_at: new Date().toISOString() });
+
+      uploadBtn.disabled = false;
+      uploadBtnText.textContent = 'লোগো আপডেট করুন';
+
+      if (dbError) {
+        uploadMessage.textContent = 'সেভ ব্যর্থ: ' + dbError.message;
+        uploadMessage.className = 'upload-message error';
+        return;
+      }
+
+      uploadMessage.textContent = 'লোগো সফলভাবে আপডেট হয়েছে!';
+      uploadMessage.className = 'upload-message success';
+      newPreviewWrap.style.display = 'none';
+      fileInput.value = '';
+      processedBlob = null;
+
+      previewLoading.style.display = 'flex';
+      previewLoading.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      loadCurrentLogo();
+    });
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadCurrentLogo();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
