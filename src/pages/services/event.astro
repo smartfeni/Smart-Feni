@@ -1,28 +1,384 @@
 ---
-import BaseLayout from '../../components/layout/BaseLayout.astro';
----
-<BaseLayout title="ইভেন্ট সেবা">
-  <div class="container" style="padding-top:60px; min-height:70vh;">
-    <h1 style="font-size:2.8rem; margin-bottom:20px;">🎉 ইভেন্ট সেবা</h1>
-    <p style="font-size:1.2rem; color:#4A5B6E; max-width:700px; margin-bottom:40px;">
-      ইভেন্ট প্ল্যানিং, ডেকোরেশন, ক্যাটারিং—সব আয়োজন সংক্রান্ত সেবা এখানে।
-    </p>
-    
-    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(250px,1fr)); gap:20px;">
-      <div style="background:#fff; padding:20px; border-radius:16px; border:1px solid #EEE;">
-        <h4>🎂 বার্থডে প্ল্যানার</h4>
-        <p style="color:#5A6E85; font-size:0.9rem;">ফুল ডেকোরেশন + কেক</p>
-        <span style="background:#EFF5FF; padding:4px 16px; border-radius:40px; font-size:0.8rem;">১৫,০০০ টাকা থেকে</span>
-      </div>
-      <div style="background:#fff; padding:20px; border-radius:16px; border:1px solid #EEE;">
-        <h4>💒 ওয়েডিং প্ল্যানার</h4>
-        <p style="color:#5A6E85; font-size:0.9rem;">কমপ্লিট প্যাকেজ</p>
-        <span style="background:#EFF5FF; padding:4px 16px; border-radius:40px; font-size:0.8rem;">১০+ বছর অভিজ্ঞতা</span>
-      </div>
-    </div>
+// ============================================================
+// পেজ: ইভেন্ট ম্যানেজমেন্ট
+// ব্র্যান্ড: স্মার্ট ফেনী
+// শেয়ারড ListingDetailModal কম্পোনেন্ট ও locationSort ইউটিলিটি ব্যবহার
+// করছে (recycle/home-food এর প্যাটার্ন অনুসরণ করে)
+// ============================================================
 
-    <div style="margin-top:50px;">
-      <a href="/" class="btn-outline"><i class="fas fa-arrow-left"></i> ল্যান্ডিং পেজে ফিরে যান</a>
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import AddListingModal from '../../components/ui/AddListingModal.astro';
+import ListingDetailModal from '../../components/ui/ListingDetailModal.astro';
+import { supabase } from '../../lib/supabase.js';
+
+const typeOptions = [
+  { id: 'wedding', label: 'বিয়ে' },
+  { id: 'birthday', label: 'জন্মদিন' },
+  { id: 'waz-mahfil', label: 'ওয়াজ মাহফিল' },
+  { id: 'catering', label: 'ক্যাটারিং' },
+  { id: 'decoration', label: 'ডেকোরেশন' },
+  { id: 'photography', label: 'ফটোগ্রাফি/ভিডিওগ্রাফি' },
+  { id: 'sound-stage', label: 'সাউন্ড ও স্টেজ' },
+  { id: 'other', label: 'অন্যান্য' },
+];
+
+const typeNameMap = Object.fromEntries(typeOptions.map((t) => [t.id, t.label]));
+
+const typeIcons = {
+  wedding: 'fa-rings-wedding',
+  birthday: 'fa-cake-candles',
+  'waz-mahfil': 'fa-mosque',
+  catering: 'fa-utensils',
+  decoration: 'fa-star',
+  photography: 'fa-camera',
+  'sound-stage': 'fa-volume-high',
+  other: 'fa-champagne-glasses',
+};
+
+const { data: eventListings } = await supabase
+  .from('listings')
+  .select('*')
+  .eq('category', 'event')
+  .eq('status', 'active')
+  .order('created_at', { ascending: false });
+
+const listings = eventListings || [];
+---
+
+<BaseLayout title="ইভেন্ট ম্যানেজমেন্ট | স্মার্ট ফেনী">
+  <section class="page-header">
+    <div class="container">
+      <span class="section-tag"><i class="fas fa-champagne-glasses"></i> ইভেন্ট ম্যানেজমেন্ট</span>
+      <h1>আপনার <span class="accent">ইভেন্ট</span> আয়োজনে</h1>
+      <p>বিয়ে, জন্মদিন, ওয়াজ মাহফিল, ক্যাটারিং, ডেকোরেশন — সব আয়োজন এক জায়গায়</p>
+      <button class="cta-box" id="openAddListing" type="button">
+        <i class="fas fa-plus"></i> ইভেন্ট সার্ভিস দেন? লিস্টিং যোগ করুন
+      </button>
     </div>
-  </div>
+  </section>
+
+  <section class="event-section">
+    <div class="container">
+      <div class="search-box">
+        <i class="fas fa-magnifying-glass"></i>
+        <input type="text" id="searchInput" placeholder="বিয়ে, ক্যাটারিং বা যেকোনো সার্ভিস খুঁজুন..." />
+      </div>
+
+      {listings.length === 0 ? (
+        <div class="empty-state">
+          <i class="fas fa-champagne-glasses"></i>
+          <p>এখনো কোনো ইভেন্ট সার্ভিস লিস্টিং যোগ হয়নি</p>
+          <span>প্রথম লিস্টিং যোগ করুন উপরের বাটনে ক্লিক করে</span>
+        </div>
+      ) : (
+        <>
+          <div class="event-grid" id="eventGrid">
+            {listings.map((item, i) => (
+              <button
+                type="button"
+                class="event-card"
+                data-detail-index={i}
+                data-upazila-name={item.upazila || ''}
+                data-search={`${item.title || ''} ${item.description || ''} ${item.upazila || ''}`.toLowerCase()}
+              >
+                {item.images && item.images.length > 0 ? (
+                  <img src={item.images[0]} alt={item.title} class="event-photo" />
+                ) : (
+                  <div class="event-icon">
+                    <i class={`fas ${typeIcons[item.type] || 'fa-champagne-glasses'}`}></i>
+                  </div>
+                )}
+
+                <div class="event-card-body">
+                  <span class="type-badge">{typeNameMap[item.type] || item.type}</span>
+                  <h3 class="event-title">{item.title}</h3>
+                  {item.price && <p class="event-price">৳{item.price}</p>}
+                  <p class="location-tag"><i class="fas fa-location-dot"></i> {item.upazila}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <p class="no-results" id="noResults" style="display:none;">কোনো ফলাফল পাওয়া যায়নি</p>
+        </>
+      )}
+    </div>
+  </section>
+
+  <ListingDetailModal />
+  <AddListingModal
+    category="event"
+    typeOptions={typeOptions}
+    titleLabel="সার্ভিসের নাম"
+    priceLabel="প্যাকেজ/রেট"
+  />
+
+  <script type="application/json" id="listingsData" set:html={JSON.stringify(listings)} />
 </BaseLayout>
+
+<style>
+  .page-header {
+    padding: 60px 0 30px;
+    background: #fff;
+    text-align: center;
+  }
+
+  .page-header h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    margin: 12px 0 8px;
+  }
+
+  .page-header .accent {
+    color: #FF6B35;
+  }
+
+  .page-header p {
+    color: #5A6E85;
+    font-size: 1.05rem;
+    margin-bottom: 20px;
+  }
+
+  .cta-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #FFF0EA;
+    border: 1.5px solid #FFD3BC;
+    color: #FF6B35;
+    font-weight: 700;
+    font-size: 0.92rem;
+    padding: 12px 26px;
+    border-radius: 40px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .cta-box:hover {
+    background: #FF6B35;
+    color: #fff;
+    border-color: #FF6B35;
+    transform: translateY(-2px);
+  }
+
+  .event-section {
+    padding: 30px 0 70px;
+    background: #F8FAFC;
+  }
+
+  .search-box {
+    max-width: 480px;
+    margin: 0 auto 32px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid #EEF3F9;
+    border-radius: 40px;
+    padding: 12px 20px;
+  }
+
+  .search-box i {
+    color: #A0AFC0;
+  }
+
+  .search-box input {
+    border: none;
+    outline: none;
+    flex: 1;
+    font-size: 0.9rem;
+    font-family: inherit;
+    background: transparent;
+    color: #1B2A4A;
+  }
+
+  .empty-state {
+    text-align: center;
+    background: #fff;
+    border-radius: 20px;
+    padding: 50px 24px;
+    border: 1px dashed #E5EAF0;
+  }
+
+  .empty-state i {
+    font-size: 2rem;
+    color: #D7E0EC;
+    margin-bottom: 12px;
+  }
+
+  .empty-state p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+  }
+
+  .empty-state span {
+    color: #8FA0BC;
+    font-size: 0.85rem;
+  }
+
+  .event-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+  }
+
+  .event-card {
+    background: #fff;
+    border-radius: 18px;
+    border: 1px solid #EEF3F9;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    transition: all 0.2s ease;
+    font-family: inherit;
+  }
+
+  .event-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+  }
+
+  .event-card.hidden {
+    display: none;
+  }
+
+  .event-icon {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+  }
+
+  .event-photo {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    object-position: center;
+    display: block;
+  }
+
+  .event-card-body {
+    padding: 14px;
+  }
+
+  .type-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    margin-bottom: 6px;
+    background: #F4F7FC;
+    color: #5A6E85;
+  }
+
+  .event-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .event-price {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #FF6B35;
+    margin-bottom: 4px;
+  }
+
+  .location-tag {
+    font-size: 0.72rem;
+    color: #8FA0BC;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .no-results {
+    text-align: center;
+    color: #A0AFC0;
+    font-size: 0.95rem;
+    padding: 40px 0;
+  }
+
+  @media (max-width: 768px) {
+    .page-header h1 {
+      font-size: 1.7rem;
+    }
+  }
+</style>
+
+<script>
+  import { initListingDetailModal } from '../../lib/listingDetailModal.js';
+  import { reorderByUserLocation } from '../../lib/locationSort.js';
+
+  const typeNameMap = {
+    wedding: 'বিয়ে',
+    birthday: 'জন্মদিন',
+    'waz-mahfil': 'ওয়াজ মাহফিল',
+    catering: 'ক্যাটারিং',
+    decoration: 'ডেকোরেশন',
+    photography: 'ফটোগ্রাফি/ভিডিওগ্রাফি',
+    'sound-stage': 'সাউন্ড ও স্টেজ',
+    other: 'অন্যান্য',
+  };
+
+  const typeIcons = {
+    wedding: 'fa-rings-wedding',
+    birthday: 'fa-cake-candles',
+    'waz-mahfil': 'fa-mosque',
+    catering: 'fa-utensils',
+    decoration: 'fa-star',
+    photography: 'fa-camera',
+    'sound-stage': 'fa-volume-high',
+    other: 'fa-champagne-glasses',
+  };
+
+  const dataEl = document.getElementById('listingsData');
+  const listings = dataEl ? JSON.parse(dataEl.textContent) : [];
+
+  const grid = document.getElementById('eventGrid');
+  const cards = document.querySelectorAll('.event-card');
+  const searchInput = document.getElementById('searchInput');
+  const noResults = document.getElementById('noResults');
+
+  searchInput?.addEventListener('input', () => {
+    const keyword = searchInput.value.trim().toLowerCase();
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
+      if (matches) {
+        card.classList.remove('hidden');
+        visibleCount++;
+      } else {
+        card.classList.add('hidden');
+      }
+    });
+
+    if (noResults) {
+      noResults.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
+  });
+
+  // ডিটেইলস মডাল (শেয়ারড লজিক)
+  initListingDetailModal({ listings, typeNameMap, typeIcons, cardSelector: '.event-card' });
+
+  // ইউজারের সেভ করা উপজেলা অনুযায়ী কার্ড re-order (শেয়ারড লজিক)
+  reorderByUserLocation(grid, 'upazilaName');
+
+  document.getElementById('openAddListing')?.addEventListener('click', () => {
+    window.openListingModal?.();
+  });
+</script>
