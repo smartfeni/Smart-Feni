@@ -1,0 +1,641 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — অ্যানালিটিক্স (/admin/analytics)
+// Supabase events টেবিল থেকে বিজনেস-স্পেসিফিক মেট্রিক্স দেখায়:
+// উপজেলা-ভিত্তিক ট্রাফিক, ক্যাটাগরি এনগেজমেন্ট, কল ক্লিক, সাইনআপ/লগইন।
+// জেনারেল ট্রাফিক (pageview/session/bounce) GA4 ড্যাশবোর্ডে দেখতে হবে,
+// এই পেজে শুধু GA4-এর লিংক দেওয়া আছে।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="অ্যানালিটিক্স | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>অ্যানালিটিক্স</h1>
+          <p class="admin-subtitle">সাইনআপ, কল ক্লিক, উপজেলা ও ক্যাটাগরি এনগেজমেন্ট</p>
+        </div>
+
+        <!-- ===== GA4 লিংক নোট ===== -->
+        <a href="https://analytics.google.com" target="_blank" rel="noopener" class="ga4-note">
+          <i class="fas fa-chart-line"></i>
+          <span>Pageview, session, bounce rate, ট্রাফিক সোর্স — এসব দেখতে GA4 ড্যাশবোর্ডে যান</span>
+          <i class="fas fa-arrow-up-right-from-square"></i>
+        </a>
+
+        <!-- ===== ফিল্টার বার ===== -->
+        <div class="filter-bar">
+          <div class="search-bar">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="text" id="searchInput" placeholder="ইভেন্ট, ক্যাটাগরি বা উপজেলা খুঁজুন" />
+          </div>
+
+          <select id="rangeFilter" class="filter-select">
+            <option value="1">আজ</option>
+            <option value="7" selected>গত ৭ দিন</option>
+            <option value="30">গত ৩০ দিন</option>
+            <option value="0">সব সময়</option>
+          </select>
+
+          <select id="upazilaFilter" class="filter-select">
+            <option value="">সব উপজেলা</option>
+            <option value="feni-sadar">ফেনী সদর</option>
+            <option value="chhagalnaiya">ছাগলনাইয়া</option>
+            <option value="daganbhuiyan">দাগনভূঞা</option>
+            <option value="parshuram">পরশুরাম</option>
+            <option value="fulgazi">ফুলগাজী</option>
+            <option value="sonagazi">সোনাগাজী</option>
+          </select>
+        </div>
+
+        <!-- ===== স্ট্যাট কার্ড ===== -->
+        <div class="admin-stats">
+          <div class="stat-card">
+            <i class="fas fa-chart-simple"></i>
+            <div>
+              <span class="stat-number" id="statTotal">—</span>
+              <span class="stat-label">মোট ইভেন্ট</span>
+            </div>
+          </div>
+          <div class="stat-card highlight">
+            <i class="fas fa-phone"></i>
+            <div>
+              <span class="stat-number" id="statCalls">—</span>
+              <span class="stat-label">কল বাটন ক্লিক</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <i class="fas fa-user-plus"></i>
+            <div>
+              <span class="stat-number" id="statSignups">—</span>
+              <span class="stat-label">সাইনআপ</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <i class="fas fa-right-to-bracket"></i>
+            <div>
+              <span class="stat-number" id="statLogins">—</span>
+              <span class="stat-label">লগইন</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== ব্রেকডাউন — উপজেলা ও ক্যাটাগরি ===== -->
+        <div class="breakdown-grid">
+          <div class="breakdown-card">
+            <h3><i class="fas fa-location-dot"></i> উপজেলা-ভিত্তিক এনগেজমেন্ট</h3>
+            <div id="upazilaBreakdown" class="breakdown-list"></div>
+            <p id="upazilaEmpty" class="breakdown-empty" style="display:none;">এই সময়ে কোনো ডেটা নেই</p>
+          </div>
+
+          <div class="breakdown-card">
+            <h3><i class="fas fa-grip"></i> ক্যাটাগরি এনগেজমেন্ট</h3>
+            <div id="categoryBreakdown" class="breakdown-list"></div>
+            <p id="categoryEmpty" class="breakdown-empty" style="display:none;">এই সময়ে কোনো ডেটা নেই</p>
+          </div>
+        </div>
+
+        <!-- ===== সাম্প্রতিক ইভেন্ট টেবিল ===== -->
+        <div class="events-table-card">
+          <h3><i class="fas fa-list"></i> সাম্প্রতিক ইভেন্ট</h3>
+          <div class="events-table-wrap">
+            <table class="events-table">
+              <thead>
+                <tr>
+                  <th>সময়</th>
+                  <th>ইভেন্ট</th>
+                  <th>ক্যাটাগরি</th>
+                  <th>উপজেলা</th>
+                </tr>
+              </thead>
+              <tbody id="eventsTableBody"></tbody>
+            </table>
+          </div>
+          <p id="eventsEmpty" class="breakdown-empty" style="display:none;">কোনো ইভেন্ট পাওয়া যায়নি</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 18px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    /* ===== GA4 নোট বার ===== */
+    .ga4-note {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #EFF5FF;
+      color: #1B2A4A;
+      padding: 12px 16px;
+      border-radius: 14px;
+      text-decoration: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+
+    .ga4-note i:first-child {
+      color: #0984E3;
+    }
+
+    .ga4-note span {
+      flex: 1;
+    }
+
+    .ga4-note i:last-child {
+      font-size: 0.7rem;
+      color: #8FA0BC;
+    }
+
+    /* ===== ফিল্টার বার ===== */
+    .filter-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+    }
+
+    .search-bar {
+      position: relative;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .search-bar i {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #B0BCCB;
+      font-size: 0.85rem;
+    }
+
+    .search-bar input {
+      width: 100%;
+      padding: 12px 16px 12px 42px;
+      border-radius: 14px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.88rem;
+      background: #fff;
+    }
+
+    .search-bar input:focus {
+      outline: none;
+      border-color: #FF6B35;
+    }
+
+    .filter-select {
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #1B2A4A;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .filter-select:focus {
+      outline: none;
+      border-color: #FF6B35;
+    }
+
+    /* ===== স্ট্যাট কার্ড ===== */
+    .admin-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+
+    .stat-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    .stat-card i {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    .stat-card.highlight i {
+      background: #FFE9DC;
+    }
+
+    .stat-number {
+      display: block;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      line-height: 1.2;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.72rem;
+      color: #8FA0BC;
+      font-weight: 600;
+    }
+
+    /* ===== ব্রেকডাউন কার্ড ===== */
+    .breakdown-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 28px;
+    }
+
+    .breakdown-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 22px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    .breakdown-card h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .breakdown-card h3 i {
+      color: #FF6B35;
+    }
+
+    .breakdown-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .breakdown-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .breakdown-row-label {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #1B2A4A;
+      width: 110px;
+      flex-shrink: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .breakdown-bar-track {
+      flex: 1;
+      height: 10px;
+      background: #F4F7FC;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .breakdown-bar-fill {
+      height: 100%;
+      background: #FF6B35;
+      border-radius: 10px;
+    }
+
+    .breakdown-row-count {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #5A6E85;
+      width: 32px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .breakdown-empty {
+      font-size: 0.82rem;
+      color: #8FA0BC;
+      text-align: center;
+      padding: 12px 0;
+    }
+
+    /* ===== ইভেন্ট টেবিল ===== */
+    .events-table-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 22px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    .events-table-card h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .events-table-card h3 i {
+      color: #FF6B35;
+    }
+
+    .events-table-wrap {
+      overflow-x: auto;
+    }
+
+    .events-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    .events-table th {
+      text-align: left;
+      padding: 10px 12px;
+      color: #8FA0BC;
+      font-weight: 700;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      border-bottom: 1.5px solid #F4F7FC;
+      white-space: nowrap;
+    }
+
+    .events-table td {
+      padding: 10px 12px;
+      color: #1B2A4A;
+      border-bottom: 1px solid #F8FAFC;
+      white-space: nowrap;
+    }
+
+    .event-tag {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 40px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+
+    @media (max-width: 768px) {
+      .admin-stats {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .breakdown-grid {
+        grid-template-columns: 1fr;
+      }
+      .filter-bar {
+        flex-direction: column;
+      }
+      .breakdown-row-label {
+        width: 80px;
+      }
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const upazilaNames = {
+      'feni-sadar': 'ফেনী সদর',
+      'chhagalnaiya': 'ছাগলনাইয়া',
+      'daganbhuiyan': 'দাগনভূঞা',
+      'parshuram': 'পরশুরাম',
+      'fulgazi': 'ফুলগাজী',
+      'sonagazi': 'সোনাগাজী',
+    };
+
+    const eventLabels = {
+      call_button_click: 'কল ক্লিক',
+      signup_click: 'সাইনআপ',
+      login_click: 'লগইন',
+      category_click: 'ক্যাটাগরি ক্লিক',
+      upazila_selected: 'উপজেলা সিলেক্ট',
+    };
+
+    let allEvents = [];
+
+    const searchInput = document.getElementById('searchInput');
+    const rangeFilter = document.getElementById('rangeFilter');
+    const upazilaFilter = document.getElementById('upazilaFilter');
+
+    async function loadEvents() {
+      const days = parseInt(rangeFilter.value, 10);
+      let query = supabase.from('events').select('*').order('created_at', { ascending: false }).limit(1000);
+
+      if (days > 0) {
+        const since = new Date();
+        since.setDate(since.getDate() - days);
+        query = query.gte('created_at', since.toISOString());
+      }
+
+      const upazila = upazilaFilter.value;
+      if (upazila) {
+        query = query.eq('upazila', upazila);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('ইভেন্ট লোড এরর:', error.message);
+        allEvents = [];
+      } else {
+        allEvents = data || [];
+      }
+
+      render();
+    }
+
+    function getFilteredEvents() {
+      const term = (searchInput.value || '').trim().toLowerCase();
+      if (!term) return allEvents;
+      return allEvents.filter((ev) => {
+        const eventName = (eventLabels[ev.event_name] || ev.event_name || '').toLowerCase();
+        const category = (ev.category || '').toLowerCase();
+        const upazila = (upazilaNames[ev.upazila] || ev.upazila || '').toLowerCase();
+        return eventName.includes(term) || category.includes(term) || upazila.includes(term);
+      });
+    }
+
+    function renderStats(events) {
+      document.getElementById('statTotal').textContent = events.length;
+      document.getElementById('statCalls').textContent = events.filter((e) => e.event_name === 'call_button_click').length;
+      document.getElementById('statSignups').textContent = events.filter((e) => e.event_name === 'signup_click').length;
+      document.getElementById('statLogins').textContent = events.filter((e) => e.event_name === 'login_click').length;
+    }
+
+    function renderBreakdown(events, key, containerId, emptyId, nameMap = {}) {
+      const container = document.getElementById(containerId);
+      const emptyEl = document.getElementById(emptyId);
+
+      const counts = {};
+      events.forEach((ev) => {
+        const value = ev[key];
+        if (!value) return;
+        counts[value] = (counts[value] || 0) + 1;
+      });
+
+      const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+      if (entries.length === 0) {
+        container.innerHTML = '';
+        emptyEl.style.display = 'block';
+        return;
+      }
+
+      emptyEl.style.display = 'none';
+      const maxCount = entries[0][1];
+
+      container.innerHTML = entries.map(([value, count]) => {
+        const label = nameMap[value] || value;
+        const pct = Math.round((count / maxCount) * 100);
+        return `
+          <div class="breakdown-row">
+            <span class="breakdown-row-label">${label}</span>
+            <div class="breakdown-bar-track"><div class="breakdown-bar-fill" style="width:${pct}%"></div></div>
+            <span class="breakdown-row-count">${count}</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderEventsTable(events) {
+      const tbody = document.getElementById('eventsTableBody');
+      const emptyEl = document.getElementById('eventsEmpty');
+      const recent = events.slice(0, 50);
+
+      if (recent.length === 0) {
+        tbody.innerHTML = '';
+        emptyEl.style.display = 'block';
+        return;
+      }
+
+      emptyEl.style.display = 'none';
+      tbody.innerHTML = recent.map((ev) => {
+        const time = new Date(ev.created_at).toLocaleString('bn-BD', {
+          day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+        });
+        const label = eventLabels[ev.event_name] || ev.event_name;
+        const category = ev.category || '—';
+        const upazila = upazilaNames[ev.upazila] || ev.upazila || '—';
+        return `
+          <tr>
+            <td>${time}</td>
+            <td><span class="event-tag">${label}</span></td>
+            <td>${category}</td>
+            <td>${upazila}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function render() {
+      const filtered = getFilteredEvents();
+      renderStats(filtered);
+      renderBreakdown(filtered, 'upazila', 'upazilaBreakdown', 'upazilaEmpty', upazilaNames);
+      renderBreakdown(filtered, 'category', 'categoryBreakdown', 'categoryEmpty');
+      renderEventsTable(filtered);
+    }
+
+    searchInput.addEventListener('input', render);
+    rangeFilter.addEventListener('change', loadEvents);
+    upazilaFilter.addEventListener('change', loadEvents);
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadEvents();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
