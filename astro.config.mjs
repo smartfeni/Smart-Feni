@@ -3,14 +3,7 @@ import vercel from '@astrojs/vercel/serverless';
 
 export default defineConfig({
   output: 'server',
-  adapter: vercel({
-    webAnalytics: {
-      enabled: false,
-    },
-    speedInsights: {
-      enabled: false,
-    },
-  }),
+  adapter: vercel(),
   site: 'https://smart-feni-murex.vercel.app',
   trailingSlash: 'ignore',
 });
