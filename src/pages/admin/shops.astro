@@ -1,0 +1,405 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — শপ ম্যানেজমেন্ট (/admin/shops)
+// নতুন শপ ওউনার অ্যাকাউন্ট তৈরি (/api/create-shop কল করে),
+// শপ active/deactivate, সিরিয়াল up/down
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="শপ ম্যানেজমেন্ট | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>শপ ম্যানেজমেন্ট</h1>
+          <p class="admin-subtitle" id="resultCount"></p>
+        </div>
+
+        <!-- ===== নতুন শপ তৈরির ফর্ম ===== -->
+        <div class="create-card">
+          <h2 class="create-title"><i class="fas fa-store"></i> নতুন শপ যোগ করুন</h2>
+
+          <p class="form-message" id="createMessage"></p>
+
+          <label class="form-label">শপের নাম</label>
+          <input type="text" class="form-input" id="shopNameInput" placeholder="যেমন: রহিম'স ক্লথিং শপ" />
+
+          <label class="form-label">ফোন নম্বর (লগইন আইডি হিসেবে ব্যবহার হবে)</label>
+          <input type="text" class="form-input" id="shopPhoneInput" placeholder="01xxxxxxxxx" />
+
+          <label class="form-label">পাসওয়ার্ড</label>
+          <input type="password" class="form-input" id="shopPasswordInput" placeholder="কমপক্ষে ৬ অক্ষর" />
+
+          <button class="create-btn" id="createShopBtn" type="button">
+            <i class="fas fa-plus"></i> <span id="createBtnText">শপ তৈরি করুন</span>
+          </button>
+        </div>
+
+        <!-- ===== শপ তালিকা ===== -->
+        <div id="shopsContainer" class="shops-container"></div>
+
+        <div id="emptyState" class="empty-state" style="display:none;">
+          <i class="fas fa-store-slash"></i>
+          <p>এখনো কোনো শপ যোগ করা হয়নি</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 24px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .create-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 24px 22px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      margin-bottom: 28px;
+    }
+
+    .create-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .create-title i {
+      color: #FF6B35;
+    }
+
+    .form-message {
+      display: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+
+    .form-message.show-error {
+      display: block;
+      background: #FFF0EA;
+      color: #D14343;
+    }
+
+    .form-message.show-success {
+      display: block;
+      background: #EAFBF0;
+      color: #1B7A3C;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #1B2A4A;
+      margin-bottom: 6px;
+      margin-top: 14px;
+    }
+
+    .form-label:first-of-type {
+      margin-top: 0;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.9rem;
+      font-family: inherit;
+      color: #1B2A4A;
+      background: #FBFCFE;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: #FF6B35;
+      background: #fff;
+    }
+
+    .create-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #FF6B35;
+      color: #fff;
+      border: none;
+      padding: 14px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 0.92rem;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+
+    .create-btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+
+    .shops-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 60px 0;
+      color: #B0BCCB;
+    }
+
+    .empty-state i {
+      font-size: 2.4rem;
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const container = document.getElementById('shopsContainer');
+    const emptyState = document.getElementById('emptyState');
+    const resultCount = document.getElementById('resultCount');
+
+    const createMessage = document.getElementById('createMessage');
+    const createBtn = document.getElementById('createShopBtn');
+    const createBtnText = document.getElementById('createBtnText');
+
+    function showMsg(text, type = 'error') {
+      createMessage.textContent = text;
+      createMessage.className = `form-message ${type === 'error' ? 'show-error' : 'show-success'}`;
+    }
+
+    function clearMsg() {
+      createMessage.textContent = '';
+      createMessage.className = 'form-message';
+    }
+
+    createBtn?.addEventListener('click', async () => {
+      clearMsg();
+
+      const shopName = document.getElementById('shopNameInput').value.trim();
+      const phone = document.getElementById('shopPhoneInput').value.trim();
+      const password = document.getElementById('shopPasswordInput').value;
+
+      if (!shopName || !phone || !password) {
+        showMsg('সব ঘর পূরণ করুন');
+        return;
+      }
+
+      createBtnText.textContent = 'তৈরি হচ্ছে...';
+      createBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/create-shop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shopName, phone, password }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          showMsg(result.error || 'শপ তৈরি ব্যর্থ');
+        } else {
+          showMsg('শপ সফলভাবে তৈরি হয়েছে ✓', 'success');
+          document.getElementById('shopNameInput').value = '';
+          document.getElementById('shopPhoneInput').value = '';
+          document.getElementById('shopPasswordInput').value = '';
+          loadShops();
+        }
+      } catch (err) {
+        showMsg('নেটওয়ার্ক ত্রুটি: ' + err.message);
+      }
+
+      createBtnText.textContent = 'শপ তৈরি করুন';
+      createBtn.disabled = false;
+    });
+
+    function renderShop(shop, index, total) {
+      const card = document.createElement('div');
+      card.style.cssText = `background:#fff;border-radius:16px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;align-items:center;gap:14px;${shop.shop_active ? '' : 'opacity:0.6;'}`;
+
+      card.innerHTML = `
+        <div style="width:44px;height:44px;border-radius:12px;background:#FFF0EA;color:#FF6B35;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">
+          <i class="fas fa-store"></i>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <p style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${shop.shop_name || '(নামহীন শপ)'}</p>
+          <p style="font-size:0.8rem;color:#8FA0BC;">${shop.phone || ''} ${shop.shop_active ? '' : '· নিষ্ক্রিয়'}</p>
+        </div>
+        <div class="shop-actions" style="display:flex;gap:6px;flex-shrink:0;"></div>
+      `;
+
+      const actions = card.querySelector('.shop-actions');
+
+      const upBtn = document.createElement('button');
+      upBtn.innerHTML = '<i class="fas fa-arrow-up"></i>';
+      upBtn.disabled = index === 0;
+      upBtn.style.cssText = `background:#F4F7FC;color:#1B2A4A;border:none;width:34px;height:34px;border-radius:10px;cursor:${index === 0 ? 'not-allowed' : 'pointer'};opacity:${index === 0 ? '0.4' : '1'};`;
+      upBtn.addEventListener('click', () => moveShop(shop, 'up'));
+      actions.appendChild(upBtn);
+
+      const downBtn = document.createElement('button');
+      downBtn.innerHTML = '<i class="fas fa-arrow-down"></i>';
+      downBtn.disabled = index === total - 1;
+      downBtn.style.cssText = `background:#F4F7FC;color:#1B2A4A;border:none;width:34px;height:34px;border-radius:10px;cursor:${index === total - 1 ? 'not-allowed' : 'pointer'};opacity:${index === total - 1 ? '0.4' : '1'};`;
+      downBtn.addEventListener('click', () => moveShop(shop, 'down'));
+      actions.appendChild(downBtn);
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.textContent = shop.shop_active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন';
+      toggleBtn.style.cssText = shop.shop_active
+        ? 'background:#FFF0EA;color:#D14343;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;'
+        : 'background:#EAFBF0;color:#1B7A3C;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+      toggleBtn.addEventListener('click', () => toggleActive(shop.id, !shop.shop_active));
+      actions.appendChild(toggleBtn);
+
+      return card;
+    }
+
+    let allShops = [];
+
+    async function moveShop(shop, direction) {
+      const idx = allShops.findIndex((s) => s.id === shop.id);
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= allShops.length) return;
+
+      const other = allShops[swapIdx];
+      const tempOrder = shop.shop_order;
+
+      await Promise.all([
+        supabase.from('profiles').update({ shop_order: other.shop_order }).eq('id', shop.id),
+        supabase.from('profiles').update({ shop_order: tempOrder }).eq('id', other.id),
+      ]);
+
+      loadShops();
+    }
+
+    async function toggleActive(id, newState) {
+      const { error } = await supabase.from('profiles').update({ shop_active: newState }).eq('id', id);
+      if (error) {
+        alert('আপডেট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadShops();
+    }
+
+    async function loadShops() {
+      container.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('is_shop_owner', true)
+        .order('shop_order', { ascending: true });
+
+      if (error) {
+        container.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      allShops = data || [];
+      resultCount.textContent = `মোট ${allShops.length} টি শপ`;
+      container.innerHTML = '';
+
+      if (allShops.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+
+      emptyState.style.display = 'none';
+      allShops.forEach((shop, i) => container.appendChild(renderShop(shop, i, allShops.length)));
+    }
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadShops();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
