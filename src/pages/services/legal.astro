@@ -1,28 +1,362 @@
 ---
+// ============================================================
+// পেজ: আইনি পরামর্শ সেবা
+// ডিজাইন: health.astro-এর প্যাটার্ন অনুসরণ করা হয়েছে (হিরো → ফর্ম কার্ড)
+// ফ্লো: পরিচিতি → ফর্ম → সাবমিট হলে /api/legal-request এ POST →
+//       Supabase-এ সেভ + Resend ইমেইল + Telegram নোটিফিকেশন
+// ============================================================
 import BaseLayout from '../../components/layout/BaseLayout.astro';
----
-<BaseLayout title="আইনি সেবা">
-  <div class="container" style="padding-top:60px; min-height:70vh;">
-    <h1 style="font-size:2.8rem; margin-bottom:20px;">⚖️ আইনি সেবা</h1>
-    <p style="font-size:1.2rem; color:#4A5B6E; max-width:700px; margin-bottom:40px;">
-      আইনি পরামর্শ, নথি তৈরি, মামলা সংক্রান্ত সেবা—সব এখানে।
-    </p>
-    
-    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(250px,1fr)); gap:20px;">
-      <div style="background:#fff; padding:20px; border-radius:16px; border:1px solid #EEE;">
-        <h4>📜 আইনি পরামর্শ</h4>
-        <p style="color:#5A6E85; font-size:0.9rem;">অ্যাডভোকেট রহমান</p>
-        <span style="background:#EFF5FF; padding:4px 16px; border-radius:40px; font-size:0.8rem;">১০+ বছর</span>
-      </div>
-      <div style="background:#fff; padding:20px; border-radius:16px; border:1px solid #EEE;">
-        <h4>📄 নথি তৈরি</h4>
-        <p style="color:#5A6E85; font-size:0.9rem;">জমি, চুক্তি, উইল</p>
-        <span style="background:#EFF5FF; padding:4px 16px; border-radius:40px; font-size:0.8rem;">অনলাইন সার্ভিস</span>
-      </div>
-    </div>
 
-    <div style="margin-top:50px;">
-      <a href="/" class="btn-outline"><i class="fas fa-arrow-left"></i> ল্যান্ডিং পেজে ফিরে যান</a>
+const problemTypes = [
+  { value: 'family', label: 'পারিবারিক (তালাক, ভরণপোষণ, উত্তরাধিকার)' },
+  { value: 'property', label: 'সম্পত্তি (জমি, দলিল, দখল)' },
+  { value: 'criminal', label: 'ফৌজদারি (মামলা, হয়রানি)' },
+  { value: 'business', label: 'ব্যবসায়িক (চুক্তি, পাওনা আদায়)' },
+  { value: 'other', label: 'অন্যান্য' },
+];
+---
+
+<BaseLayout title="আইনি পরামর্শ - স্মার্ট ফেনী" description="ফেনীর মানুষের আইনি জটিলতা নিয়ে সরাসরি অভিজ্ঞ আইনজীবীর পরামর্শ নিন">
+  <section class="legal-hero">
+    <div class="container">
+      <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> হোমে ফিরুন</a>
+
+      <div class="hero-icon">
+        <i class="fas fa-scale-balanced"></i>
+      </div>
+      <span class="section-tag">আইনি পরামর্শ</span>
+      <h1>ঘরে বসেই <span class="accent">আইনজীবীর পরামর্শ</span> নিন</h1>
+      <p class="hero-desc">
+        ফেনীর মানুষের পারিবারিক, সম্পত্তি, ফৌজদারি কিংবা ব্যবসায়িক যেকোনো আইনি জটিলতা নিয়ে এখন
+        সরাসরি অভিজ্ঞ আইনজীবীদের পরামর্শ নেওয়া যাবে। নিচের ফর্মটি পূরণ করুন — আমরা আপনার সমস্যা
+        অনুযায়ী সংশ্লিষ্ট আইনজীবীর কাছে পাঠিয়ে দেব, তিনি নিজে আপনাকে কল করে পরামর্শ দেবেন।
+      </p>
     </div>
-  </div>
+  </section>
+
+  <section class="consult-form-section">
+    <div class="container">
+      <div class="form-card">
+        <div class="form-header">
+          <h2>পরামর্শের জন্য ফর্ম পূরণ করুন</h2>
+          <p>নিচের তথ্য দিন, আমরা যত দ্রুত সম্ভব সংশ্লিষ্ট আইনজীবীর কাছে পৌঁছে দেব</p>
+        </div>
+
+        <form id="legalConsultForm">
+          <div class="form-group">
+            <label for="fullName">আপনার নাম <span class="required">*</span></label>
+            <input type="text" id="fullName" name="fullName" placeholder="যেমন: মোহাম্মদ করিম" required />
+          </div>
+
+          <div class="form-group">
+            <label for="mobileNumber">মোবাইল নম্বর <span class="required">*</span></label>
+            <input type="tel" id="mobileNumber" name="mobileNumber" placeholder="০১৭XXXXXXXX" pattern="[0-9]{11}" required />
+          </div>
+
+          <div class="form-group">
+            <label for="problemType">সমস্যার ধরন <span class="required">*</span></label>
+            <select id="problemType" name="problemType" required>
+              <option value="" disabled selected>নির্বাচন করুন</option>
+              {problemTypes.map((pt) => <option value={pt.value}>{pt.label}</option>)}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="problemDetails">আপনার সমস্যার বিস্তারিত <span class="required">*</span></label>
+            <textarea id="problemDetails" name="problemDetails" rows="5" placeholder="আপনার আইনি সমস্যা বিস্তারিতভাবে লিখুন — ঘটনা কী, কতদিন ধরে চলছে ইত্যাদি" required></textarea>
+          </div>
+
+          <button type="submit" class="btn-primary submit-btn" id="submitBtn">
+            <i class="fas fa-paper-plane"></i> <span id="submitBtnText">পরামর্শের জন্য পাঠান</span>
+          </button>
+
+          <p id="formError" class="form-error"></p>
+
+          <p class="privacy-note">
+            <i class="fas fa-lock"></i> আপনার তথ্য সম্পূর্ণ গোপন রাখা হবে এবং শুধুমাত্র সংশ্লিষ্ট আইনজীবীর সাথেই শেয়ার করা হবে
+          </p>
+        </form>
+
+        <div id="successMessage" class="success-message">
+          <i class="fas fa-circle-check"></i>
+          <h3>ধন্যবাদ!</h3>
+          <p>আপনার তথ্য আমাদের কাছে পৌঁছে গেছে। শীঘ্রই সংশ্লিষ্ট আইনজীবী আপনাকে কল করবেন।</p>
+          <button type="button" class="btn-outline" id="newRequestBtn">আরেকটি অনুরোধ পাঠান</button>
+        </div>
+      </div>
+    </div>
+  </section>
 </BaseLayout>
+
+<script>
+  const form = document.getElementById('legalConsultForm') as HTMLFormElement;
+  const successMessage = document.getElementById('successMessage');
+  const newRequestBtn = document.getElementById('newRequestBtn');
+  const submitBtn = document.getElementById('submitBtn') as HTMLButtonElement;
+  const submitBtnText = document.getElementById('submitBtnText');
+  const formError = document.getElementById('formError');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    if (formError) formError.textContent = '';
+
+    const data = {
+      fullName: (document.getElementById('fullName') as HTMLInputElement).value,
+      mobileNumber: (document.getElementById('mobileNumber') as HTMLInputElement).value,
+      problemType: (document.getElementById('problemType') as HTMLSelectElement).value,
+      problemDetails: (document.getElementById('problemDetails') as HTMLTextAreaElement).value,
+    };
+
+    submitBtn.disabled = true;
+    if (submitBtnText) submitBtnText.textContent = 'পাঠানো হচ্ছে...';
+
+    try {
+      const res = await fetch('/api/legal-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || 'সাবমিট করতে সমস্যা হয়েছে');
+      }
+
+      form.style.display = 'none';
+      successMessage!.style.display = 'block';
+    } catch (err: any) {
+      if (formError) formError.textContent = err.message || 'সাবমিট করতে সমস্যা হয়েছে, আবার চেষ্টা করুন';
+      submitBtn.disabled = false;
+      if (submitBtnText) submitBtnText.textContent = 'পরামর্শের জন্য পাঠান';
+    }
+  });
+
+  newRequestBtn!.addEventListener('click', () => {
+    form.reset();
+    form.style.display = 'block';
+    successMessage!.style.display = 'none';
+    submitBtn.disabled = false;
+    if (submitBtnText) submitBtnText.textContent = 'পরামর্শের জন্য পাঠান';
+  });
+</script>
+
+<style>
+  /* ===== হিরো ===== */
+  .legal-hero {
+    padding: 32px 0 8px;
+    text-align: center;
+  }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #5A6E85;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-bottom: 24px;
+    float: left;
+  }
+
+  .back-link:hover {
+    color: #FF6B35;
+  }
+
+  .hero-icon {
+    width: 76px;
+    height: 76px;
+    background: #FFF0EA;
+    border-radius: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 16px;
+    clear: both;
+  }
+
+  .hero-icon i {
+    font-size: 2rem;
+    color: #FF6B35;
+  }
+
+  .legal-hero h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    margin: 8px auto 16px;
+    max-width: 600px;
+    line-height: 1.3;
+  }
+
+  .legal-hero .accent {
+    color: #FF6B35;
+  }
+
+  .hero-desc {
+    color: #5A6E85;
+    font-size: 1.05rem;
+    max-width: 620px;
+    margin: 0 auto;
+  }
+
+  /* ===== ফর্ম সেকশন ===== */
+  .consult-form-section {
+    padding: 32px 0 60px;
+  }
+
+  .form-card {
+    max-width: 620px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 28px;
+    padding: 36px 32px;
+    box-shadow: 0 12px 40px rgba(27, 42, 74, 0.08);
+    border: 1px solid #EEF3F9;
+  }
+
+  .form-header {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+
+  .form-header h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .form-header p {
+    color: #5A6E85;
+    font-size: 0.92rem;
+  }
+
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  .form-group label {
+    display: block;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    color: #1B2A4A;
+  }
+
+  .required {
+    color: #FF6B35;
+  }
+
+  .form-group input,
+  .form-group textarea,
+  .form-group select {
+    width: 100%;
+    border: 1.5px solid #EEF3F9;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 13px 16px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    color: #1B2A4A;
+    outline: none;
+    transition: border-color 0.2s ease;
+    resize: vertical;
+  }
+
+  .form-group select {
+    appearance: none;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235A6E85' stroke-width='1.5' fill='none' fill-rule='evenodd'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 16px center;
+    padding-right: 36px;
+  }
+
+  .form-group input:focus,
+  .form-group textarea:focus,
+  .form-group select:focus {
+    border-color: #FF6B35;
+    background-color: #fff;
+  }
+
+  .form-group input::placeholder,
+  .form-group textarea::placeholder {
+    color: #A0B3C9;
+  }
+
+  .submit-btn {
+    width: 100%;
+    justify-content: center;
+    margin-top: 4px;
+  }
+
+  .submit-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+
+  .form-error {
+    color: #D14343;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-align: center;
+    margin-top: 12px;
+  }
+
+  .privacy-note {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: #A0B3C9;
+    font-size: 0.8rem;
+    margin-top: 16px;
+    text-align: center;
+  }
+
+  /* ===== সফল হওয়ার মেসেজ ===== */
+  .success-message {
+    display: none;
+    text-align: center;
+    padding: 20px 0;
+  }
+
+  .success-message i {
+    font-size: 3rem;
+    color: #22C55E;
+    margin-bottom: 12px;
+  }
+
+  .success-message h3 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .success-message p {
+    color: #5A6E85;
+    max-width: 400px;
+    margin: 0 auto 20px;
+  }
+
+  @media (max-width: 768px) {
+    .legal-hero h1 {
+      font-size: 1.7rem;
+    }
+
+    .form-card {
+      padding: 28px 20px;
+      border-radius: 20px;
+    }
+
+    .back-link {
+      float: none;
+      margin-bottom: 16px;
+    }
+
+    .hero-icon {
+      clear: none;
+    }
+  }
+</style>
