@@ -1,67 +1,42 @@
 ---
 // ============================================================
-// পেজ: অনলাইন শপ (মাল্টি-ভেন্ডর মার্কেটপ্লেস)
+// পেজ: অনলাইন শপ (মাল্টি-ভেন্ডর মার্কেটপ্লেস — শপ গ্রিড)
 // ব্র্যান্ড: স্মার্ট ফেনী
-// প্রতিটা প্রোডাক্টের সাথে শপের নাম দেখানো হয় (profiles জয়েন করে)
-// শুধু shop_active=true এমন শপের প্রোডাক্ট দেখানো হয়
-// ছবি ফ্রেমিং: aspect-ratio 4/3, object-fit contain (শেয়ারড ডিটেইল
-// মোডাল সিস্টেমের সাথে সামঞ্জস্যপূর্ণ)
-// ডিবাগ: query error থাকলে empty-state এ দেখাবে
+// এখানে প্রোডাক্ট না, শপগুলো দেখানো হয়। ক্লিক করলে সেই শপের
+// নিজস্ব পেজে (/shop/[id]) যাবে যেখানে তার প্রোডাক্ট আছে।
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
-import ListingDetailModal from '../../components/ui/ListingDetailModal.astro';
 import { supabase } from '../../lib/supabase.js';
 
-const { data: productListings, error: listingsError } = await supabase
-  .from('listings')
-  .select('*')
-  .eq('category', 'online-shop')
-  .eq('status', 'active')
-  .order('created_at', { ascending: false });
+const { data: shopProfiles, error: shopsError } = await supabase
+  .from('profiles')
+  .select('id, shop_name, shop_tagline, shop_image, shop_order')
+  .eq('is_shop_owner', true)
+  .eq('shop_active', true)
+  .order('shop_order', { ascending: true });
 
-if (listingsError) {
-  console.error('online-shop listings fetch error:', listingsError.message);
+if (shopsError) {
+  console.error('online-shop shops fetch error:', shopsError.message);
 }
 
-const rawProducts = productListings || [];
+const shops = shopProfiles || [];
 
-// সেই সব প্রোডাক্টের ওউনার আইডি নিয়ে profiles থেকে শপের তথ্য আনা হচ্ছে
-const ownerIds = [...new Set(rawProducts.map((p) => p.user_id))];
+// প্রতিটা শপের প্রোডাক্ট সংখ্যা গণনা করার জন্য
+let productCounts = {};
+if (shops.length > 0) {
+  const { data: allProducts } = await supabase
+    .from('listings')
+    .select('user_id')
+    .eq('category', 'online-shop')
+    .eq('status', 'active');
 
-let shopMap = {};
-let profilesError = null;
-if (ownerIds.length > 0) {
-  const { data: shopProfiles, error: pError } = await supabase
-    .from('profiles')
-    .select('id, shop_name, shop_active, shop_order')
-    .in('id', ownerIds);
-
-  profilesError = pError;
-
-  if (pError) {
-    console.error('online-shop profiles fetch error:', pError.message);
-  }
-
-  (shopProfiles || []).forEach((s) => {
-    shopMap[s.id] = s;
+  (allProducts || []).forEach((p) => {
+    productCounts[p.user_id] = (productCounts[p.user_id] || 0) + 1;
   });
 }
-
-// শুধু সক্রিয় শপের প্রোডাক্ট রাখা হচ্ছে, আর শপের নাম যোগ করা হচ্ছে
-const listings = rawProducts
-  .filter((p) => shopMap[p.user_id]?.shop_active !== false)
-  .map((p) => ({
-    ...p,
-    shopName: shopMap[p.user_id]?.shop_name || 'অনলাইন শপ',
-    shopOrder: shopMap[p.user_id]?.shop_order ?? 0,
-  }))
-  .sort((a, b) => a.shopOrder - b.shopOrder);
-
-const debugMessage = listingsError?.message || profilesError?.message || null;
-const debugRawCount = rawProducts.length;
 ---
 
 <BaseLayout title="অনলাইন শপ | স্মার্ট ফেনী">
@@ -77,44 +52,40 @@ const debugRawCount = rawProducts.length;
     <div class="container">
       <div class="search-box">
         <i class="fas fa-magnifying-glass"></i>
-        <input type="text" id="searchInput" placeholder="প্রোডাক্ট বা শপের নাম খুঁজুন..." />
+        <input type="text" id="searchInput" placeholder="শপের নাম খুঁজুন..." />
       </div>
 
-      {listings.length === 0 ? (
+      {shops.length === 0 ? (
         <div class="empty-state">
           <i class="fas fa-store-slash"></i>
-          <p>এখনো কোনো প্রোডাক্ট যোগ হয়নি</p>
-          <span>নিবন্ধিত শপগুলো শীঘ্রই তাদের প্রোডাক্ট যোগ করবে</span>
-          <p style="color:#D14343;font-size:0.75rem;margin-top:14px;">
-            ডিবাগ — raw প্রোডাক্ট পাওয়া গেছে: {debugRawCount} টি
-            {debugMessage && <> · এরর: {debugMessage}</>}
-          </p>
+          <p>এখনো কোনো শপ নিবন্ধিত হয়নি</p>
+          <span>শীঘ্রই নতুন শপ যুক্ত হবে</span>
         </div>
       ) : (
         <>
           <div class="shop-grid" id="shopGrid">
-            {listings.map((item, i) => (
-              <button
-                type="button"
+            {shops.map((shop) => (
+              <a
+                href={`/shop/${shop.id}`}
                 class="shop-card"
-                data-detail-index={i}
-                data-search={`${item.title || ''} ${item.description || ''} ${item.shopName || ''}`.toLowerCase()}
+                data-search={(shop.shop_name || '').toLowerCase()}
               >
-                {item.images && item.images.length > 0 ? (
-                  <img src={item.images[0]} alt={item.title} class="shop-photo" />
+                {shop.shop_image ? (
+                  <img src={shop.shop_image} alt={shop.shop_name} class="shop-photo" />
                 ) : (
                   <div class="shop-icon">
-                    <i class="fas fa-box"></i>
+                    <i class="fas fa-store"></i>
                   </div>
                 )}
 
                 <div class="shop-card-body">
-                  <span class="shop-badge"><i class="fas fa-store"></i> {item.shopName}</span>
-                  <h3 class="shop-title">{item.title}</h3>
-                  {item.price && <p class="shop-price">৳{item.price}</p>}
-                  {item.upazila && <p class="location-tag"><i class="fas fa-location-dot"></i> {item.upazila}</p>}
+                  <h3 class="shop-title">{shop.shop_name || 'অনলাইন শপ'}</h3>
+                  {shop.shop_tagline && <p class="shop-tagline">{shop.shop_tagline}</p>}
+                  <p class="product-count">
+                    <i class="fas fa-box"></i> {productCounts[shop.id] || 0} টি প্রোডাক্ট
+                  </p>
                 </div>
-              </button>
+              </a>
             ))}
           </div>
 
@@ -123,10 +94,6 @@ const debugRawCount = rawProducts.length;
       )}
     </div>
   </section>
-
-  <ListingDetailModal />
-
-  <script type="application/json" id="listingsData" set:html={JSON.stringify(listings)} />
 </BaseLayout>
 
 <style>
@@ -210,20 +177,18 @@ const debugRawCount = rawProducts.length;
 
   .shop-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 18px;
   }
 
   .shop-card {
     background: #fff;
     border-radius: 18px;
     border: 1px solid #EEF3F9;
-    padding: 0;
-    text-align: left;
-    cursor: pointer;
     overflow: hidden;
+    text-decoration: none;
+    display: block;
     transition: all 0.2s ease;
-    font-family: inherit;
   }
 
   .shop-card:hover {
@@ -243,7 +208,7 @@ const debugRawCount = rawProducts.length;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.8rem;
+    font-size: 2rem;
   }
 
   .shop-photo {
@@ -256,45 +221,38 @@ const debugRawCount = rawProducts.length;
   }
 
   .shop-card-body {
-    padding: 14px;
-  }
-
-  .shop-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.65rem;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: 20px;
-    margin-bottom: 6px;
-    background: #F4F7FC;
-    color: #5A6E85;
+    padding: 16px;
   }
 
   .shop-title {
-    font-size: 0.9rem;
+    font-size: 1rem;
     font-weight: 700;
     color: #1B2A4A;
     margin-bottom: 4px;
+  }
+
+  .shop-tagline {
+    font-size: 0.8rem;
+    color: #5A6E85;
+    margin-bottom: 10px;
+    line-height: 1.4;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 
-  .shop-price {
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: #FF6B35;
-    margin-bottom: 4px;
-  }
-
-  .location-tag {
-    font-size: 0.72rem;
+  .product-count {
+    font-size: 0.75rem;
     color: #8FA0BC;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
+  }
+
+  .product-count i {
+    color: #FF6B35;
   }
 
   .no-results {
@@ -312,11 +270,6 @@ const debugRawCount = rawProducts.length;
 </style>
 
 <script>
-  import { initListingDetailModal } from '../../lib/listingDetailModal.js';
-
-  const dataEl = document.getElementById('listingsData');
-  const listings = dataEl ? JSON.parse(dataEl.textContent) : [];
-
   const cards = document.querySelectorAll('.shop-card');
   const searchInput = document.getElementById('searchInput');
   const noResults = document.getElementById('noResults');
@@ -338,13 +291,5 @@ const debugRawCount = rawProducts.length;
     if (noResults) {
       noResults.style.display = visibleCount === 0 ? 'block' : 'none';
     }
-  });
-
-  // ডিটেইলস মডাল (শেয়ারড লজিক)
-  initListingDetailModal({
-    listings,
-    typeNameMap: {},
-    typeIcons: {},
-    cardSelector: '.shop-card',
   });
 </script>
