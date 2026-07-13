@@ -6,6 +6,7 @@
 // শুধু shop_active=true এমন শপের প্রোডাক্ট দেখানো হয়
 // ছবি ফ্রেমিং: aspect-ratio 4/3, object-fit contain (শেয়ারড ডিটেইল
 // মোডাল সিস্টেমের সাথে সামঞ্জস্যপূর্ণ)
+// ডিবাগ: query error থাকলে empty-state এ দেখাবে
 // ============================================================
 
 export const prerender = false;
@@ -31,14 +32,17 @@ const rawProducts = productListings || [];
 const ownerIds = [...new Set(rawProducts.map((p) => p.user_id))];
 
 let shopMap = {};
+let profilesError = null;
 if (ownerIds.length > 0) {
-  const { data: shopProfiles, error: profilesError } = await supabase
+  const { data: shopProfiles, error: pError } = await supabase
     .from('profiles')
     .select('id, shop_name, shop_active, shop_order')
     .in('id', ownerIds);
 
-  if (profilesError) {
-    console.error('online-shop profiles fetch error:', profilesError.message);
+  profilesError = pError;
+
+  if (pError) {
+    console.error('online-shop profiles fetch error:', pError.message);
   }
 
   (shopProfiles || []).forEach((s) => {
@@ -55,6 +59,9 @@ const listings = rawProducts
     shopOrder: shopMap[p.user_id]?.shop_order ?? 0,
   }))
   .sort((a, b) => a.shopOrder - b.shopOrder);
+
+const debugMessage = listingsError?.message || profilesError?.message || null;
+const debugRawCount = rawProducts.length;
 ---
 
 <BaseLayout title="অনলাইন শপ | স্মার্ট ফেনী">
@@ -78,6 +85,10 @@ const listings = rawProducts
           <i class="fas fa-store-slash"></i>
           <p>এখনো কোনো প্রোডাক্ট যোগ হয়নি</p>
           <span>নিবন্ধিত শপগুলো শীঘ্রই তাদের প্রোডাক্ট যোগ করবে</span>
+          <p style="color:#D14343;font-size:0.75rem;margin-top:14px;">
+            ডিবাগ — raw প্রোডাক্ট পাওয়া গেছে: {debugRawCount} টি
+            {debugMessage && <> · এরর: {debugMessage}</>}
+          </p>
         </div>
       ) : (
         <>
