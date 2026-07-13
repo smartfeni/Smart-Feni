@@ -6,6 +6,8 @@
 //         + beforeinstallprompt ইভেন্ট গ্লোবালি ক্যাচ করে রাখা হয়েছে
 //         যাতে Footer.astro-র ইনস্টল বাটন থেকে ব্যবহার করা যায়
 //         + Google Analytics (GA4) বেস ট্র্যাকিং স্ক্রিপ্ট যোগ করা হয়েছে
+//         + গ্লোবাল কল বাটন (tel:) ক্লিক ট্র্যাকিং যোগ করা হয়েছে —
+//           সব পেজে অটোমেটিক কাজ করে, প্রতি পেজে আলাদা কোড লাগে না
 // ============================================================
 
 import Header from './Header.astro';
@@ -184,6 +186,36 @@ const GA_MEASUREMENT_ID = 'G-RWTRLNTCD6';
     window.addEventListener('appinstalled', () => {
       window.deferredInstallPrompt = null;
       window.dispatchEvent(new CustomEvent('smartfeni:install-done'));
+    });
+  </script>
+
+  <script>
+    // ============================================================
+    // গ্লোবাল কল বাটন (tel:) ক্লিক ট্র্যাকিং
+    // সাইটের যেকোনো পেজের যেকোনো <a href="tel:..."> লিংকে ক্লিক হলেই
+    // অটোমেটিক ধরা পড়ে, প্রতিটা পেজে আলাদা কোড বসানোর দরকার নেই।
+    // ক্যাটাগরি বের করা হয় URL path থেকে (/services/home-food → home-food)।
+    // item-লেভেল ডিটেইল (যেমন কোন শপ) দরকার হলে বাটনে data-shop-name
+    // অ্যাট্রিবিউট বসালে সেটাও অটোমেটিক পাঠানো হবে।
+    // ============================================================
+    import('/src/lib/analytics.js').then(({ trackEvent }) => {
+      document.addEventListener('click', (e) => {
+        const link = e.target.closest('a[href^="tel:"]');
+        if (!link) return;
+
+        // URL থেকে ক্যাটাগরি বের করা: /services/home-food → home-food
+        const pathParts = window.location.pathname.split('/').filter(Boolean);
+        const category = pathParts[pathParts.length - 1] || 'home';
+
+        const shopName = link.getAttribute('data-shop-name') || null;
+        const upazila = localStorage.getItem('smartfeni_upazila');
+
+        trackEvent('call_button_click', {
+          category,
+          upazila: upazila || null,
+          ...(shopName ? { shop_name: shopName } : {}),
+        });
+      });
     });
   </script>
 </body>
