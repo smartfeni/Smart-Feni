@@ -3,7 +3,7 @@ import vercel from '@astrojs/vercel';
 import llmsTxt from '@waldheimdev/astro-ai-llms-txt';
 
 export default defineConfig({
-  output: 'static',
+  output: 'server',
   adapter: vercel(),
   site: 'https://smart-feni-murex.vercel.app',
   trailingSlash: 'ignore',
