@@ -5,9 +5,10 @@
 //   ১. Supabase-এর legal_requests টেবিলে সেভ করে
 //   ২. Resend দিয়ে ইমেইল নোটিফিকেশন পাঠায় (NOTIFY_EMAIL-এ)
 //   ৩. Telegram Bot দিয়ে ইনস্ট্যান্ট মেসেজ পাঠায়
-// ইমেইল/টেলিগ্রাম ব্যর্থ হলেও Supabase সেভ সফল হলে ইউজারকে
-// success দেখানো হয় — নোটিফিকেশন ফেইলিউর যেন ইউজার এক্সপেরিয়েন্স
-// নষ্ট না করে (ফায়ার-অ্যান্ড-ফরগেট স্টাইলে হ্যান্ডল করা)।
+// বাগফিক্স: sendEmail/sendTelegram এখন response.ok চেক করে এবং
+// রেসপন্স বডি console.error-এ লগ করে — আগে fetch() এর network-level
+// এরর ছাড়া কিছু ধরা পড়ত না, তাই Resend/Telegram API-level এরর
+// (যেমন ভুল API key, পারমিশন সমস্যা) সাইলেন্টলি চাপা পড়ে যাচ্ছিল।
 // ============================================================
 
 export const prerender = false;
@@ -33,10 +34,13 @@ const problemTypeLabels: Record<string, string> = {
 };
 
 async function sendEmail(data: { fullName: string; mobileNumber: string; problemType: string; problemDetails: string }) {
-  if (!RESEND_API_KEY || !NOTIFY_EMAIL) return;
+  if (!RESEND_API_KEY || !NOTIFY_EMAIL) {
+    console.error('Resend env var মিসিং — RESEND_API_KEY বা NOTIFY_EMAIL সেট করা নাই');
+    return;
+  }
 
   try {
-    await fetch('https://api.resend.com/emails', {
+    const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${RESEND_API_KEY}`,
@@ -55,13 +59,24 @@ async function sendEmail(data: { fullName: string; mobileNumber: string; problem
         `,
       }),
     });
+
+    const resBody = await res.text();
+
+    if (!res.ok) {
+      console.error(`Resend API এরর (status ${res.status}):`, resBody);
+    } else {
+      console.log('Resend ইমেইল পাঠানো সফল:', resBody);
+    }
   } catch (err) {
-    console.error('Resend ইমেইল পাঠাতে ব্যর্থ:', err);
+    console.error('Resend fetch ব্যর্থ (নেটওয়ার্ক সমস্যা):', err);
   }
 }
 
 async function sendTelegram(data: { fullName: string; mobileNumber: string; problemType: string; problemDetails: string }) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+    console.error('Telegram env var মিসিং — TELEGRAM_BOT_TOKEN বা TELEGRAM_CHAT_ID সেট করা নাই');
+    return;
+  }
 
   const text =
     `⚖️ *নতুন আইনি পরামর্শ অনুরোধ*\n\n` +
@@ -71,7 +86,7 @@ async function sendTelegram(data: { fullName: string; mobileNumber: string; prob
     `📝 বিস্তারিত:\n${data.problemDetails}`;
 
   try {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -80,8 +95,14 @@ async function sendTelegram(data: { fullName: string; mobileNumber: string; prob
         parse_mode: 'Markdown',
       }),
     });
+
+    const resBody = await res.text();
+
+    if (!res.ok) {
+      console.error(`Telegram API এরর (status ${res.status}):`, resBody);
+    }
   } catch (err) {
-    console.error('Telegram মেসেজ পাঠাতে ব্যর্থ:', err);
+    console.error('Telegram fetch ব্যর্থ (নেটওয়ার্ক সমস্যা):', err);
   }
 }
 
