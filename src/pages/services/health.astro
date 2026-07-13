@@ -1,9 +1,9 @@
 ---
 // ============================================================
-// পেজ: স্বাস্থ্য পরামর্শ সেবা (মিনিমাল ভার্সন)
+// পেজ: স্বাস্থ্য পরামর্শ সেবা
 // ফ্লো: পরিচিতি → পরামর্শের ফর্ম
-// ফর্ম সাবমিট → এখন UI-only (success message দেখাবে)
-// ব্যাকএন্ড লিংক করলে handleSubmit ফাংশনে fetch() যোগ করলেই হবে
+// আপডেট: ফর্ম এখন /api/health-request এ POST করে — Supabase-এ সেভ +
+//         Resend ইমেইল + Telegram নোটিফিকেশন (আগে UI-only ছিল)
 // ============================================================
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 ---
@@ -50,9 +50,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             <textarea id="problemDetails" name="problemDetails" rows="5" placeholder="আপনার স্বাস্থ্য সমস্যা বিস্তারিতভাবে লিখুন — কতদিন ধরে সমস্যা, কী ধরনের উপসর্গ ইত্যাদি" required></textarea>
           </div>
 
-          <button type="submit" class="btn-primary submit-btn">
-            <i class="fas fa-paper-plane"></i> পরামর্শের জন্য পাঠান
+          <button type="submit" class="btn-primary submit-btn" id="submitBtn">
+            <i class="fas fa-paper-plane"></i> <span id="submitBtnText">পরামর্শের জন্য পাঠান</span>
           </button>
+
+          <p id="formError" class="form-error"></p>
 
           <p class="privacy-note">
             <i class="fas fa-lock"></i> আপনার তথ্য সম্পূর্ণ গোপন রাখা হবে এবং শুধুমাত্র সংশ্লিষ্ট ডাক্তারের সাথেই শেয়ার করা হবে
@@ -74,30 +76,52 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   const form = document.getElementById('healthConsultForm') as HTMLFormElement;
   const successMessage = document.getElementById('successMessage');
   const newRequestBtn = document.getElementById('newRequestBtn');
+  const submitBtn = document.getElementById('submitBtn') as HTMLButtonElement;
+  const submitBtnText = document.getElementById('submitBtnText');
+  const formError = document.getElementById('formError');
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    // ============================================================
-    // TODO: ব্যাকএন্ড লিংক করার সময় এখানে fetch() দিয়ে ডাটা পাঠাবে
-    // যেমন: Firestore-এ সেভ করা, বা Apps Script/API-তে POST করা।
-    // এখন শুধু UI-তে success message দেখানো হচ্ছে।
-    // ============================================================
+    if (formError) formError.textContent = '';
+
     const data = {
       fullName: (document.getElementById('fullName') as HTMLInputElement).value,
       mobileNumber: (document.getElementById('mobileNumber') as HTMLInputElement).value,
       problemDetails: (document.getElementById('problemDetails') as HTMLTextAreaElement).value,
     };
-    console.log('স্বাস্থ্য পরামর্শ অনুরোধ (UI-only, ব্যাকএন্ড পরে যুক্ত হবে):', data);
 
-    form.style.display = 'none';
-    successMessage!.style.display = 'block';
+    submitBtn.disabled = true;
+    if (submitBtnText) submitBtnText.textContent = 'পাঠানো হচ্ছে...';
+
+    try {
+      const res = await fetch('/api/health-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || 'সাবমিট করতে সমস্যা হয়েছে');
+      }
+
+      form.style.display = 'none';
+      successMessage!.style.display = 'block';
+    } catch (err: any) {
+      if (formError) formError.textContent = err.message || 'সাবমিট করতে সমস্যা হয়েছে, আবার চেষ্টা করুন';
+      submitBtn.disabled = false;
+      if (submitBtnText) submitBtnText.textContent = 'পরামর্শের জন্য পাঠান';
+    }
   });
 
   newRequestBtn!.addEventListener('click', () => {
     form.reset();
     form.style.display = 'block';
     successMessage!.style.display = 'none';
+    submitBtn.disabled = false;
+    if (submitBtnText) submitBtnText.textContent = 'পরামর্শের জন্য পাঠান';
   });
 </script>
 
@@ -237,6 +261,19 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     width: 100%;
     justify-content: center;
     margin-top: 4px;
+  }
+
+  .submit-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+
+  .form-error {
+    color: #D14343;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-align: center;
+    margin-top: 12px;
   }
 
   .privacy-note {
