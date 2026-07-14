@@ -4,6 +4,9 @@
 // ব্র্যান্ড: স্মার্ট ফেনী
 // লেআউট: লোকেশন (বাম) — লোগো+ট্যাগলাইন (মাঝে) — প্রোফাইল (ডান)
 // আপডেট: confirm() পপআপ বাদ দিয়ে ProfileMenu ড্রপডাউন যোগ করা হলো
+// আপডেট ২: উপজেলা-ভিত্তিক হেডার ব্যাকগ্রাউন্ড ইমেজ যোগ করা হলো
+// (site_images টেবিল থেকে, smartfeni:upazila-changed ইভেন্ট শুনে
+// লাইভ বদলায়, কিছু না থাকলে আগের প্লেইন সাদা হেডারই থাকবে)
 // ============================================================
 
 import LocationSelector from '../ui/LocationSelector.astro';
@@ -11,7 +14,8 @@ import AuthModal from '../ui/AuthModal.astro';
 import ProfileMenu from '../ui/ProfileMenu.astro';
 ---
 
-<nav class="navbar">
+<nav class="navbar" id="siteNavbar">
+  <div class="navbar-bg-overlay"></div>
   <div class="container navbar-inner">
     <div class="navbar-left">
       <LocationSelector />
@@ -43,10 +47,25 @@ import ProfileMenu from '../ui/ProfileMenu.astro';
   .navbar {
     padding: 10px 0;
     background: rgba(255, 255, 255, 0.98);
+    background-size: cover;
+    background-position: center;
     position: sticky;
     top: 0;
     z-index: 999;
     border-bottom: 1px solid rgba(27, 42, 74, 0.06);
+    transition: background-image 0.3s ease;
+  }
+
+  .navbar-bg-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.9);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .navbar.has-bg-image {
+    background-color: transparent;
   }
 
   .navbar-inner {
@@ -55,6 +74,7 @@ import ProfileMenu from '../ui/ProfileMenu.astro';
     align-items: center;
     gap: 10px;
     position: relative;
+    z-index: 1;
   }
 
   .navbar-left {
@@ -284,5 +304,60 @@ import ProfileMenu from '../ui/ProfileMenu.astro';
   // ProfileMenu থেকে লগ আউট হলে এই ইভেন্ট আসবে
   window.addEventListener('smartfeni:logged-out', () => {
     showLoggedOutState();
+  });
+
+  // ============================================================
+  // উপজেলা-ভিত্তিক হেডার ব্যাকগ্রাউন্ড ইমেজ
+  // site_images টেবিল থেকে header_<slug> খোঁজা হয়, না পেলে
+  // header_default, সেটাও না থাকলে প্লেইন সাদা হেডারই থাকবে
+  // ============================================================
+  const navbar = document.getElementById('siteNavbar');
+  const BUCKET = 'listing-images';
+  const STORAGE_KEY = 'smartfeni_upazila';
+
+  function publicUrl(path) {
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  }
+
+  async function loadHeaderBg(upazilaSlug) {
+    if (!navbar) return;
+
+    let record = null;
+
+    if (upazilaSlug) {
+      const { data } = await supabase
+        .from('site_images')
+        .select('storage_path')
+        .eq('image_key', `header_${upazilaSlug}`)
+        .maybeSingle();
+      record = data;
+    }
+
+    if (!record) {
+      const { data } = await supabase
+        .from('site_images')
+        .select('storage_path')
+        .eq('image_key', 'header_default')
+        .maybeSingle();
+      record = data;
+    }
+
+    if (record?.storage_path) {
+      navbar.style.backgroundImage = `url('${publicUrl(record.storage_path)}')`;
+      navbar.classList.add('has-bg-image');
+    } else {
+      navbar.style.backgroundImage = '';
+      navbar.classList.remove('has-bg-image');
+    }
+  }
+
+  // প্রথম লোডে সেভ করা উপজেলা দিয়ে হেডার ব্যাকগ্রাউন্ড সেট করা
+  const savedUpazila = localStorage.getItem(STORAGE_KEY);
+  loadHeaderBg(savedUpazila);
+
+  // উপজেলা বদলালে (LocationSelector থেকে) লাইভ আপডেট
+  window.addEventListener('smartfeni:upazila-changed', (e) => {
+    loadHeaderBg(e.detail?.upazila);
   });
 </script>
