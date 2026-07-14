@@ -1,12 +1,4 @@
 ---
-// ============================================================
-// পেজ: অ্যাডমিন — ক্যাটাগরি কার্ড ছবি (/admin/images/categories)
-// ১৮টা ক্যাটাগরির প্রতিটার জন্য একটা করে ছবি আপলোড/বদলানো যায়।
-// প্রতি ক্যাটাগরিতে ১টাই ছবি থাকে (overwrite/upsert), 1024x1024 স্কয়ার
-// ক্রপ হয়ে Supabase Storage-এ (site/categories/) সেভ হয় এবং
-// category_images টেবিলে upsert হয়।
-// ============================================================
-
 export const prerender = false;
 
 import BaseLayout from '../../../components/layout/BaseLayout.astro';
@@ -39,6 +31,9 @@ import { categories } from '../../../data/services.js';
                 <div class="thumb-placeholder" data-placeholder>
                   <i class={`fas ${cat.icon}`}></i>
                 </div>
+                <button type="button" class="thumb-delete-btn" data-delete-btn style="display:none;">
+                  <i class="fas fa-trash"></i>
+                </button>
                 <label class="thumb-upload-btn">
                   <i class="fas fa-camera"></i>
                   <input type="file" accept="image/*" data-file-input style="display:none;" />
@@ -190,6 +185,29 @@ import { categories } from '../../../data/services.js';
       box-shadow: 0 3px 8px rgba(255, 107, 53, 0.4);
     }
 
+    .thumb-delete-btn {
+      position: absolute;
+      left: 6px;
+      top: 6px;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.9);
+      color: #D14343;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.68rem;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15);
+    }
+
+    .thumb-delete-btn.confirming {
+      background: #D14343;
+      color: #fff;
+    }
+
     .thumb-name {
       font-size: 0.72rem;
       font-weight: 600;
@@ -313,6 +331,26 @@ import { categories } from '../../../data/services.js';
       return `${data.publicUrl}?t=${bust}`;
     }
 
+    function showThumb(card, path, updatedAt) {
+      const thumbImg = card.querySelector('[data-thumb]');
+      const placeholder = card.querySelector('[data-placeholder]');
+      const deleteBtn = card.querySelector('[data-delete-btn]');
+      thumbImg.src = publicUrl(path, updatedAt);
+      thumbImg.style.display = 'block';
+      placeholder.style.display = 'none';
+      deleteBtn.style.display = 'flex';
+    }
+
+    function hideThumb(card) {
+      const thumbImg = card.querySelector('[data-thumb]');
+      const placeholder = card.querySelector('[data-placeholder]');
+      const deleteBtn = card.querySelector('[data-delete-btn]');
+      thumbImg.style.display = 'none';
+      thumbImg.src = '';
+      placeholder.style.display = 'flex';
+      deleteBtn.style.display = 'none';
+    }
+
     function openCropModal(slug, name, file) {
       pendingSlug = slug;
       cropModalTitle.textContent = `${name} — ছবি ক্রপ করুন`;
@@ -388,29 +426,62 @@ import { categories } from '../../../data/services.js';
         return;
       }
 
-      // থাম্বনেইল আপডেট
       const card = document.querySelector(`.category-upload-card[data-slug="${pendingSlug}"]`);
-      if (card) {
-        const thumbImg = card.querySelector('[data-thumb]');
-        const placeholder = card.querySelector('[data-placeholder]');
-        thumbImg.src = publicUrl(path, nowIso);
-        thumbImg.style.display = 'block';
-        placeholder.style.display = 'none';
-      }
+      if (card) showThumb(card, path, nowIso);
 
       closeCropModal();
     });
+
+    async function deleteImage(card, slug) {
+      const { data: row } = await supabase
+        .from('category_images')
+        .select('storage_path')
+        .eq('category_slug', slug)
+        .single();
+
+      if (row?.storage_path) {
+        await supabase.storage.from(BUCKET).remove([row.storage_path]);
+      }
+
+      await supabase.from('category_images').delete().eq('category_slug', slug);
+
+      hideThumb(card);
+    }
 
     function setupCard(card) {
       const slug = card.dataset.slug;
       const name = card.querySelector('.thumb-name').textContent;
       const fileInput = card.querySelector('[data-file-input]');
+      const deleteBtn = card.querySelector('[data-delete-btn]');
 
       fileInput.addEventListener('change', () => {
         const file = fileInput.files?.[0];
         if (!file) return;
         openCropModal(slug, name, file);
         fileInput.value = '';
+      });
+
+      let confirming = false;
+      let resetTimer = null;
+
+      deleteBtn.addEventListener('click', () => {
+        if (!confirming) {
+          confirming = true;
+          deleteBtn.classList.add('confirming');
+          deleteBtn.innerHTML = '<i class="fas fa-check"></i>';
+          resetTimer = setTimeout(() => {
+            confirming = false;
+            deleteBtn.classList.remove('confirming');
+            deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+          }, 3000);
+          return;
+        }
+
+        clearTimeout(resetTimer);
+        confirming = false;
+        deleteBtn.classList.remove('confirming');
+        deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+        deleteImage(card, slug);
       });
     }
 
@@ -424,11 +495,7 @@ import { categories } from '../../../data/services.js';
       data.forEach((row) => {
         const card = document.querySelector(`.category-upload-card[data-slug="${row.category_slug}"]`);
         if (!card) return;
-        const thumbImg = card.querySelector('[data-thumb]');
-        const placeholder = card.querySelector('[data-placeholder]');
-        thumbImg.src = publicUrl(row.storage_path, row.updated_at);
-        thumbImg.style.display = 'block';
-        placeholder.style.display = 'none';
+        showThumb(card, row.storage_path, row.updated_at);
       });
     }
 
