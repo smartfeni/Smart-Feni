@@ -1,0 +1,443 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — ক্যাটাগরি কার্ড ছবি (/admin/images/categories)
+// ১৮টা ক্যাটাগরির প্রতিটার জন্য একটা করে ছবি আপলোড/বদলানো যায়।
+// প্রতি ক্যাটাগরিতে ১টাই ছবি থাকে (overwrite/upsert), 1024x1024 স্কয়ার
+// ক্রপ হয়ে Supabase Storage-এ (site/categories/) সেভ হয় এবং
+// category_images টেবিলে upsert হয়।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../../components/layout/BaseLayout.astro';
+import { categories } from '../../../data/services.js';
+---
+
+<BaseLayout title="ক্যাটাগরি কার্ড ছবি | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin/images" class="back-link"><i class="fas fa-arrow-left"></i> ছবি ম্যানেজমেন্ট</a>
+
+        <div class="admin-header">
+          <h1>ক্যাটাগরি কার্ড ছবি</h1>
+          <p class="admin-subtitle">প্রতিটা ক্যাটাগরির জন্য একটা ছবি আপলোড করুন — হোমপেজে কার্ডে দেখাবে (না থাকলে আগের আইকন ডিজাইন থাকবে)</p>
+        </div>
+
+        <div class="category-upload-grid" id="categoryUploadGrid">
+          {categories.map((cat) => (
+            <div class="category-upload-card" data-slug={cat.slug}>
+              <div class="thumb-wrap">
+                <img class="thumb-img" data-thumb style="display:none;" alt={cat.name} />
+                <div class="thumb-placeholder" data-placeholder>
+                  <i class={`fas ${cat.icon}`}></i>
+                </div>
+                <label class="thumb-upload-btn">
+                  <i class="fas fa-camera"></i>
+                  <input type="file" accept="image/*" data-file-input style="display:none;" />
+                </label>
+              </div>
+              <p class="thumb-name">{cat.name}</p>
+            </div>
+          ))}
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ক্রপ মডাল (সব ক্যাটাগরির জন্য শেয়ার্ড, একটাই) ===== -->
+  <div id="cropModal" class="crop-modal" style="display:none;">
+    <div class="crop-modal-inner">
+      <p class="crop-modal-title" id="cropModalTitle">ছবি ক্রপ করুন</p>
+      <div class="crop-frame">
+        <canvas id="cropCanvas" width="1024" height="1024"></canvas>
+      </div>
+      <div class="crop-modal-actions">
+        <button id="cropCancelBtn" class="crop-btn crop-btn-cancel">বাতিল</button>
+        <button id="cropConfirmBtn" class="crop-btn crop-btn-confirm">
+          <span id="cropConfirmText">আপলোড করুন</span>
+        </button>
+      </div>
+      <p id="cropMessage" class="crop-message"></p>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 24px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .category-upload-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .category-upload-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 10px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      text-align: center;
+    }
+
+    .thumb-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #F4F7FC;
+      margin-bottom: 8px;
+    }
+
+    .thumb-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .thumb-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #C3CEDE;
+      font-size: 1.6rem;
+    }
+
+    .thumb-upload-btn {
+      position: absolute;
+      right: 6px;
+      bottom: 6px;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #FF6B35;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      cursor: pointer;
+      box-shadow: 0 3px 8px rgba(255, 107, 53, 0.4);
+    }
+
+    .thumb-name {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #1B2A4A;
+      line-height: 1.3;
+      margin: 0;
+    }
+
+    /* ===== ক্রপ মডাল ===== */
+    .crop-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+
+    .crop-modal-inner {
+      background: #fff;
+      border-radius: 20px;
+      padding: 20px;
+      width: 100%;
+      max-width: 360px;
+    }
+
+    .crop-modal-title {
+      font-weight: 700;
+      color: #1B2A4A;
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+
+    .crop-frame {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 16px;
+      overflow: hidden;
+      background: #F4F7FC;
+      margin-bottom: 14px;
+    }
+
+    .crop-frame canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .crop-modal-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .crop-btn {
+      flex: 1;
+      padding: 12px;
+      border-radius: 12px;
+      border: none;
+      font-weight: 700;
+      font-size: 0.88rem;
+      cursor: pointer;
+    }
+
+    .crop-btn-cancel {
+      background: #F4F7FC;
+      color: #5A6E85;
+    }
+
+    .crop-btn-confirm {
+      background: #FF6B35;
+      color: #fff;
+    }
+
+    .crop-btn-confirm:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .crop-message {
+      text-align: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+
+    .crop-message.success { color: #1B7A3C; }
+    .crop-message.error { color: #D14343; }
+
+    @media (max-width: 480px) {
+      .category-upload-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../../lib/adminGuard.js';
+    import { supabase } from '../../../lib/supabase.js';
+
+    const BUCKET = 'listing-images';
+    const FOLDER = 'site/categories';
+
+    const cropModal = document.getElementById('cropModal');
+    const cropModalTitle = document.getElementById('cropModalTitle');
+    const cropCanvas = document.getElementById('cropCanvas');
+    const cropCancelBtn = document.getElementById('cropCancelBtn');
+    const cropConfirmBtn = document.getElementById('cropConfirmBtn');
+    const cropConfirmText = document.getElementById('cropConfirmText');
+    const cropMessage = document.getElementById('cropMessage');
+
+    let pendingSlug = null;
+    let pendingBlob = null;
+
+    function publicUrl(path, updatedAt) {
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      const bust = updatedAt ? new Date(updatedAt).getTime() : Date.now();
+      return `${data.publicUrl}?t=${bust}`;
+    }
+
+    function openCropModal(slug, name, file) {
+      pendingSlug = slug;
+      cropModalTitle.textContent = `${name} — ছবি ক্রপ করুন`;
+      cropMessage.textContent = '';
+      cropMessage.className = 'crop-message';
+
+      const img = new Image();
+      img.onload = () => {
+        const ctx = cropCanvas.getContext('2d');
+        const target = 1024;
+        const imgRatio = img.width / img.height;
+
+        let sx, sy, sSize;
+        if (imgRatio > 1) {
+          sSize = img.height;
+          sx = (img.width - sSize) / 2;
+          sy = 0;
+        } else {
+          sSize = img.width;
+          sx = 0;
+          sy = (img.height - sSize) / 2;
+        }
+
+        ctx.clearRect(0, 0, target, target);
+        ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, target, target);
+        cropCanvas.toBlob((blob) => { pendingBlob = blob; }, 'image/jpeg', 0.85);
+      };
+      img.src = URL.createObjectURL(file);
+
+      cropModal.style.display = 'flex';
+    }
+
+    function closeCropModal() {
+      cropModal.style.display = 'none';
+      pendingSlug = null;
+      pendingBlob = null;
+    }
+
+    cropCancelBtn.addEventListener('click', closeCropModal);
+
+    cropConfirmBtn.addEventListener('click', async () => {
+      if (!pendingBlob || !pendingSlug) return;
+
+      cropConfirmBtn.disabled = true;
+      cropConfirmText.textContent = 'আপলোড হচ্ছে...';
+
+      const path = `${FOLDER}/${pendingSlug}.jpg`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, pendingBlob, { contentType: 'image/jpeg', upsert: true });
+
+      if (uploadError) {
+        cropMessage.textContent = 'আপলোড ব্যর্থ: ' + uploadError.message;
+        cropMessage.className = 'crop-message error';
+        cropConfirmBtn.disabled = false;
+        cropConfirmText.textContent = 'আপলোড করুন';
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+
+      const { error: dbError } = await supabase
+        .from('category_images')
+        .upsert({ category_slug: pendingSlug, storage_path: path, updated_at: nowIso }, { onConflict: 'category_slug' });
+
+      cropConfirmBtn.disabled = false;
+      cropConfirmText.textContent = 'আপলোড করুন';
+
+      if (dbError) {
+        cropMessage.textContent = 'সেভ ব্যর্থ: ' + dbError.message;
+        cropMessage.className = 'crop-message error';
+        return;
+      }
+
+      // থাম্বনেইল আপডেট
+      const card = document.querySelector(`.category-upload-card[data-slug="${pendingSlug}"]`);
+      if (card) {
+        const thumbImg = card.querySelector('[data-thumb]');
+        const placeholder = card.querySelector('[data-placeholder]');
+        thumbImg.src = publicUrl(path, nowIso);
+        thumbImg.style.display = 'block';
+        placeholder.style.display = 'none';
+      }
+
+      closeCropModal();
+    });
+
+    function setupCard(card) {
+      const slug = card.dataset.slug;
+      const name = card.querySelector('.thumb-name').textContent;
+      const fileInput = card.querySelector('[data-file-input]');
+
+      fileInput.addEventListener('change', () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        openCropModal(slug, name, file);
+        fileInput.value = '';
+      });
+    }
+
+    async function loadExistingImages() {
+      const { data, error } = await supabase
+        .from('category_images')
+        .select('category_slug, storage_path, updated_at');
+
+      if (error || !data) return;
+
+      data.forEach((row) => {
+        const card = document.querySelector(`.category-upload-card[data-slug="${row.category_slug}"]`);
+        if (!card) return;
+        const thumbImg = card.querySelector('[data-thumb]');
+        const placeholder = card.querySelector('[data-placeholder]');
+        thumbImg.src = publicUrl(row.storage_path, row.updated_at);
+        thumbImg.style.display = 'block';
+        placeholder.style.display = 'none';
+      });
+    }
+
+    document.querySelectorAll('.category-upload-card').forEach(setupCard);
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadExistingImages();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
