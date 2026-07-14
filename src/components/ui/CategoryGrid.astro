@@ -1,13 +1,14 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: ক্যাটাগরি গ্রিড
-// আপডেট: courier, car-rental, online-shop এখন "জনপ্রিয়" সেকশনে
-//         আলাদা কার্ড স্টাইল ও আলাদা ক্লিক-কাউন্ট দিয়ে দেখানো হয়
+// আপডেট: category_images টেবিল থেকে সব ক্যাটাগরির ছবি একবারে (bulk)
+//         fetch করে প্রতিটা কার্ডে imageUrl পাস করা হচ্ছে
 // ============================================================
 
 import { categories } from '../../data/services.js';
 import CategoryCard from '../shared/CategoryCard.astro';
 import CategoryCardPopular from '../shared/CategoryCardPopular.astro';
+import { supabase } from '../../lib/supabase.js';
 
 const popularSlugs = ['courier', 'car-rental', 'online-shop'];
 
@@ -16,6 +17,25 @@ const popularCategories = popularSlugs
   .filter(Boolean);
 
 const otherCategories = categories.filter(c => !popularSlugs.includes(c.slug));
+
+const BUCKET = 'listing-images';
+const categoryImageMap: Record<string, string> = {};
+
+try {
+  const { data, error } = await supabase
+    .from('category_images')
+    .select('category_slug, storage_path, updated_at');
+
+  if (!error && data) {
+    data.forEach((row) => {
+      const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(row.storage_path);
+      const bust = row.updated_at ? new Date(row.updated_at).getTime() : Date.now();
+      categoryImageMap[row.category_slug] = `${urlData.publicUrl}?t=${bust}`;
+    });
+  }
+} catch (e) {
+  // fetch ব্যর্থ হলে সব ক্যাটাগরি fallback আইকন ডিজাইনেই থাকবে, পেজ ভাঙবে না
+}
 ---
 
 <section class="category-section">
@@ -26,13 +46,13 @@ const otherCategories = categories.filter(c => !popularSlugs.includes(c.slug));
     </div>
     <div class="category-grid category-grid-popular" id="categoryGridPopular">
       {popularCategories.map((cat) => (
-        <CategoryCardPopular cat={cat} />
+        <CategoryCardPopular cat={cat} imageUrl={categoryImageMap[cat.slug]} />
       ))}
     </div>
 
     <div class="category-grid" id="categoryGrid">
       {otherCategories.map((cat) => (
-        <CategoryCard cat={cat} />
+        <CategoryCard cat={cat} imageUrl={categoryImageMap[cat.slug]} />
       ))}
     </div>
 
