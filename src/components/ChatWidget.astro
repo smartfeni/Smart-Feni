@@ -1,9 +1,8 @@
 ---
 // src/components/ChatWidget.astro
 // Smart Feni AI চ্যাট উইজেট
-// আপডেট: rule-based keyword matching সরিয়ে সরাসরি /api/chat
-//         এন্ডপয়েন্টে (Gemini) কল করা হচ্ছে — প্রতিটা মেসেজে AI উত্তর দেয়
-//         + "টাইপ করছে..." লোডিং ইন্ডিকেটর যোগ করা হয়েছে
+// আপডেট: conversation history (sessionStorage-এ persist), লিংক কার্ড রেন্ডারিং,
+//         থাম্বস আপ/ডাউন ফিডব্যাক, "নতুন চ্যাট" বাটন, এবং আরো premium UI
 ---
 
 <div id="sf-chat-root">
@@ -18,12 +17,29 @@
 
   <div id="sf-chat-panel">
     <header id="sf-chat-header">
-      <span>স্মার্ট ফেনী সহায়ক</span>
-      <button id="sf-chat-panel-close" type="button" aria-label="বন্ধ করুন">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M18 6 6 18M6 6l12 12"/>
-        </svg>
-      </button>
+      <div id="sf-chat-header-left">
+        <span id="sf-chat-avatar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+          </svg>
+        </span>
+        <div id="sf-chat-header-text">
+          <span id="sf-chat-title">স্মার্ট ফেনী সহায়ক</span>
+          <span id="sf-chat-subtitle">সাধারণত সাথে সাথে উত্তর দেয়</span>
+        </div>
+      </div>
+      <div id="sf-chat-header-actions">
+        <button id="sf-chat-reset" type="button" aria-label="নতুন চ্যাট শুরু করুন" title="নতুন চ্যাট শুরু করুন">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
+          </svg>
+        </button>
+        <button id="sf-chat-panel-close" type="button" aria-label="বন্ধ করুন">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
     </header>
 
     <div id="sf-chat-messages"></div>
@@ -67,6 +83,7 @@
     justify-content: center;
     cursor: pointer;
     box-shadow: 0 8px 24px rgba(255, 107, 53, 0.35);
+    transition: transform 0.15s ease;
   }
   #sf-chat-toggle svg { width: 26px; height: 26px; }
   #sf-chat-toggle:active { transform: scale(0.95); }
@@ -75,30 +92,76 @@
     position: fixed;
     bottom: 88px;
     right: 20px;
-    width: min(340px, calc(100vw - 32px));
-    height: min(480px, calc(100vh - 140px));
+    width: min(360px, calc(100vw - 32px));
+    height: min(520px, calc(100vh - 140px));
     background: #fff;
-    border-radius: 14px;
+    border-radius: 16px;
     box-shadow: 0 10px 40px rgba(0,0,0,0.25);
     display: none;
     flex-direction: column;
     overflow: hidden;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
   }
 
   #sf-chat-panel.sf-open {
     display: flex;
   }
+  #sf-chat-panel.sf-open.sf-anim-in {
+    opacity: 1;
+    transform: translateY(0);
+  }
 
   #sf-chat-header {
-    background: #1B2A4A;
+    background: linear-gradient(135deg, #1B2A4A 0%, #223760 100%);
     color: #fff;
-    padding: 14px 16px;
-    font-weight: 600;
-    font-size: 15px;
+    padding: 12px 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
   }
+  #sf-chat-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  #sf-chat-avatar {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    border-radius: 50%;
+    background: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #sf-chat-avatar svg { width: 18px; height: 18px; }
+  #sf-chat-header-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.25;
+  }
+  #sf-chat-title {
+    font-weight: 600;
+    font-size: 14.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #sf-chat-subtitle {
+    font-size: 11px;
+    opacity: 0.75;
+  }
+  #sf-chat-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  #sf-chat-reset,
   #sf-chat-panel-close {
     background: transparent;
     border: none;
@@ -108,9 +171,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 4px;
+    padding: 6px;
+    border-radius: 8px;
   }
-  #sf-chat-panel-close svg { width: 18px; height: 18px; }
+  #sf-chat-reset:hover,
+  #sf-chat-panel-close:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+  #sf-chat-reset svg,
+  #sf-chat-panel-close svg { width: 17px; height: 17px; }
 
   #sf-chat-messages {
     flex: 1;
@@ -118,14 +185,21 @@
     padding: 14px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     background: #F8FAFC;
   }
 
+  .sf-msg-row {
+    display: flex;
+    flex-direction: column;
+    max-width: 86%;
+  }
+  .sf-msg-row.sf-row-user { align-self: flex-end; align-items: flex-end; }
+  .sf-msg-row.sf-row-bot { align-self: flex-start; align-items: flex-start; }
+
   .sf-msg {
-    max-width: 82%;
     padding: 9px 12px;
-    border-radius: 12px;
+    border-radius: 14px;
     font-size: 14px;
     line-height: 1.45;
     white-space: pre-line;
@@ -133,17 +207,64 @@
   .sf-msg-bot {
     background: #fff;
     border: 1px solid #e5e5e0;
-    align-self: flex-start;
     border-bottom-left-radius: 4px;
   }
   .sf-msg-user {
     background: #FF6B35;
     color: #fff;
-    align-self: flex-end;
     border-bottom-right-radius: 4px;
   }
   .sf-msg-user a { color: #fff; }
   .sf-msg-bot a { color: #FF6B35; font-weight: 600; }
+
+  .sf-msg-time {
+    font-size: 10.5px;
+    color: #9aa0aa;
+    margin-top: 3px;
+    padding: 0 4px;
+  }
+
+  .sf-link-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 6px;
+    padding: 10px 12px;
+    background: #FFF0EA;
+    border: 1px solid #FFD9C4;
+    border-radius: 10px;
+    text-decoration: none;
+    color: #1B2A4A !important;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.15s ease;
+  }
+  .sf-link-card:hover { background: #FFE0CC; }
+  .sf-link-card svg { width: 16px; height: 16px; color: #FF6B35; flex-shrink: 0; }
+
+  .sf-feedback {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+    padding: 0 2px;
+  }
+  .sf-fb-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 3px;
+    border-radius: 6px;
+    color: #b8bcc4;
+    display: flex;
+    align-items: center;
+  }
+  .sf-fb-btn svg { width: 14px; height: 14px; }
+  .sf-fb-btn:hover { background: #eee; color: #667; }
+  .sf-fb-btn.sf-fb-active-up { color: #2e9e5b; }
+  .sf-fb-btn.sf-fb-active-down { color: #d9534f; }
+  .sf-fb-btn:disabled { cursor: default; }
+  .sf-fb-btn:disabled:not(.sf-fb-active-up):not(.sf-fb-active-down) { opacity: 0.35; }
 
   .sf-msg-typing {
     display: flex;
@@ -221,6 +342,14 @@
 </style>
 
 <script>
+  type Sender = "bot" | "user";
+  interface StoredMsg {
+    sender: Sender;
+    text: string;
+    time: number;
+    feedback?: "up" | "down" | null;
+  }
+
   const QUICK_REPLIES = [
     "ফার্মেসি অর্ডার কিভাবে করব?",
     "ডেলিভারি চার্জ কত?",
@@ -228,10 +357,14 @@
     "যোগাযোগ নাম্বার কী?",
   ];
 
+  const STORAGE_KEY = "sf_chat_messages_v1";
+  const GREETING = "আসসালামু আলাইকুম! আমি স্মার্ট ফেনী সহায়ক। কিছু জিজ্ঞাসা করুন অথবা নিচের বাটন থেকে বেছে নিন।";
+
   document.addEventListener("DOMContentLoaded", () => {
     const toggle = document.getElementById("sf-chat-toggle")!;
     const panel = document.getElementById("sf-chat-panel")!;
     const panelClose = document.getElementById("sf-chat-panel-close")!;
+    const resetBtn = document.getElementById("sf-chat-reset")!;
     const iconChat = document.getElementById("sf-icon-chat")!;
     const iconClose = document.getElementById("sf-icon-close")!;
     const messages = document.getElementById("sf-chat-messages")!;
@@ -242,40 +375,147 @@
 
     let opened = false;
     let isSending = false;
+    let store: StoredMsg[] = loadStore();
 
-    function setOpen(next: boolean) {
-      opened = next;
-      panel.classList.toggle("sf-open", opened);
-      iconChat.style.display = opened ? "none" : "block";
-      iconClose.style.display = opened ? "block" : "none";
-      if (opened && messages.children.length === 0) {
-        addMessage(
-          "আসসালামু আলাইকুম! আমি স্মার্ট ফেনী সহায়ক। কিছু জিজ্ঞাসা করুন অথবা নিচের বাটন থেকে বেছে নিন।",
-          "bot"
-        );
+    function loadStore(): StoredMsg[] {
+      try {
+        const raw = sessionStorage.getItem(STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
       }
     }
 
-    function addMessage(text: string, sender: "bot" | "user") {
-      const div = document.createElement("div");
-      div.className = `sf-msg sf-msg-${sender}`;
-      div.textContent = text;
-      messages.appendChild(div);
+    function saveStore() {
+      try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+      } catch {
+        // storage unavailable — chat still works, just won't persist
+      }
+    }
+
+    function formatTime(ts: number) {
+      return new Date(ts).toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" });
+    }
+
+    // পূর্ববর্তী মেসেজ থেকে Gemini history ফরম্যাটে রূপান্তর
+    function buildHistoryPayload() {
+      return store
+        .filter((m) => m.text && m.text.trim().length > 0)
+        .slice(-20)
+        .map((m) => ({ role: m.sender === "user" ? "user" : "model", text: m.text }));
+    }
+
+    // বট রিপ্লাই থেকে [LINK]শিরোনাম|/services/slug প্যাটার্ন বের করে আলাদা করা
+    function extractLink(text: string): { clean: string; label: string | null; href: string | null } {
+      const match = text.match(/\[LINK\]([^|\n]+)\|(\/[a-zA-Z0-9\-\/]+)/);
+      if (!match) return { clean: text, label: null, href: null };
+      const clean = text.replace(match[0], "").trim();
+      return { clean, label: match[1].trim(), href: match[2].trim() };
+    }
+
+    function renderMessage(msg: StoredMsg, index: number) {
+      const row = document.createElement("div");
+      row.className = `sf-msg-row sf-row-${msg.sender}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = `sf-msg sf-msg-${msg.sender}`;
+
+      if (msg.sender === "bot") {
+        const { clean, label, href } = extractLink(msg.text);
+        bubble.textContent = clean;
+        row.appendChild(bubble);
+
+        if (label && href) {
+          const card = document.createElement("a");
+          card.className = "sf-link-card";
+          card.href = href;
+          card.innerHTML = `<span>${label}</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>`;
+          row.appendChild(card);
+        }
+
+        const time = document.createElement("div");
+        time.className = "sf-msg-time";
+        time.textContent = formatTime(msg.time);
+        row.appendChild(time);
+
+        const fb = document.createElement("div");
+        fb.className = "sf-feedback";
+        const upBtn = document.createElement("button");
+        upBtn.type = "button";
+        upBtn.className = "sf-fb-btn";
+        upBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10v11M15 5.88 14 10h6.29a2 2 0 0 1 1.94 2.5l-1.83 7A2 2 0 0 1 18.46 21H8a2 2 0 0 1-2-2v-8a2 2 0 0 1 .59-1.42L12 4a2 2 0 0 1 3 1.88Z"/></svg>`;
+        const downBtn = document.createElement("button");
+        downBtn.type = "button";
+        downBtn.className = "sf-fb-btn";
+        downBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 14V3M9 18.12 10 14H3.71a2 2 0 0 1-1.94-2.5l1.83-7A2 2 0 0 1 5.54 3H16a2 2 0 0 1 2 2v8a2 2 0 0 1-.59 1.42L12 20a2 2 0 0 1-3-1.88Z"/></svg>`;
+
+        function applyFbState() {
+          upBtn.classList.toggle("sf-fb-active-up", msg.feedback === "up");
+          downBtn.classList.toggle("sf-fb-active-down", msg.feedback === "down");
+          upBtn.disabled = !!msg.feedback;
+          downBtn.disabled = !!msg.feedback;
+        }
+        applyFbState();
+
+        upBtn.addEventListener("click", () => {
+          if (msg.feedback) return;
+          msg.feedback = "up";
+          store[index] = msg;
+          saveStore();
+          applyFbState();
+        });
+        downBtn.addEventListener("click", () => {
+          if (msg.feedback) return;
+          msg.feedback = "down";
+          store[index] = msg;
+          saveStore();
+          applyFbState();
+        });
+
+        fb.appendChild(upBtn);
+        fb.appendChild(downBtn);
+        row.appendChild(fb);
+      } else {
+        bubble.textContent = msg.text;
+        row.appendChild(bubble);
+        const time = document.createElement("div");
+        time.className = "sf-msg-time";
+        time.textContent = formatTime(msg.time);
+        row.appendChild(time);
+      }
+
+      messages.appendChild(row);
+    }
+
+    function renderAll() {
+      messages.innerHTML = "";
+      store.forEach((m, i) => renderMessage(m, i));
       messages.scrollTop = messages.scrollHeight;
-      return div;
+    }
+
+    function addMessage(text: string, sender: Sender) {
+      const msg: StoredMsg = { sender, text, time: Date.now(), feedback: null };
+      store.push(msg);
+      saveStore();
+      renderMessage(msg, store.length - 1);
+      messages.scrollTop = messages.scrollHeight;
     }
 
     function showTyping() {
       const div = document.createElement("div");
-      div.className = "sf-msg sf-msg-bot sf-msg-typing";
-      div.id = "sf-typing-indicator";
-      div.innerHTML = "<span></span><span></span><span></span>";
+      div.className = "sf-msg-row sf-row-bot";
+      div.id = "sf-typing-row";
+      div.innerHTML = `<div class="sf-msg sf-msg-bot sf-msg-typing"><span></span><span></span><span></span></div>`;
       messages.appendChild(div);
       messages.scrollTop = messages.scrollHeight;
     }
 
     function hideTyping() {
-      document.getElementById("sf-typing-indicator")?.remove();
+      document.getElementById("sf-typing-row")?.remove();
     }
 
     function setSending(next: boolean) {
@@ -287,8 +527,32 @@
       });
     }
 
+    function setOpen(next: boolean) {
+      opened = next;
+      panel.classList.toggle("sf-open", opened);
+      iconChat.style.display = opened ? "none" : "block";
+      iconClose.style.display = opened ? "block" : "none";
+      if (opened) {
+        requestAnimationFrame(() => panel.classList.add("sf-anim-in"));
+        if (store.length === 0) {
+          addMessage(GREETING, "bot");
+        }
+      } else {
+        panel.classList.remove("sf-anim-in");
+      }
+    }
+
+    function resetChat() {
+      store = [];
+      saveStore();
+      messages.innerHTML = "";
+      addMessage(GREETING, "bot");
+      input.focus();
+    }
+
     async function handleUserText(text: string) {
       if (!text.trim() || isSending) return;
+      const historyPayload = buildHistoryPayload();
       addMessage(text, "user");
       setSending(true);
       showTyping();
@@ -297,7 +561,7 @@
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify({ message: text, history: historyPayload }),
         });
         const data = await res.json();
         hideTyping();
@@ -326,8 +590,17 @@
       quickWrap.appendChild(btn);
     });
 
+    // পেজ লোডে আগের কথোপকথন থাকলে দেখানো (sessionStorage থেকে)
+    if (store.length > 0) {
+      renderAll();
+    }
+
     toggle.addEventListener("click", () => setOpen(!opened));
     panelClose.addEventListener("click", () => setOpen(false));
+    resetBtn.addEventListener("click", () => {
+      if (isSending) return;
+      resetChat();
+    });
 
     form.addEventListener("submit", (e) => {
       e.preventDefault();
