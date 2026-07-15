@@ -1,9 +1,11 @@
 // src/pages/api/chat.ts
 // Smart Feni AI চ্যাট এন্ডপয়েন্ট
-// ফাংশন: ইউজারের মেসেজ নিয়ে Gemini API-তে পাঠায়, পুরো সাইটের context
-//         সহ system prompt ব্যবহার করে সঠিক/প্রাসঙ্গিক উত্তর জেনারেট করে
+// ফাংশন: ইউজারের মেসেজ + কথোপকথনের ইতিহাস নিয়ে Gemini API-তে পাঠায়,
+//         পুরো সাইটের context সহ system prompt ব্যবহার করে প্রাসঙ্গিক উত্তর জেনারেট করে
 // নোট: GEMINI_API_KEY অবশ্যই Vercel dashboard-এ environment variable
 //       হিসেবে বসাতে হবে (PUBLIC_ prefix ছাড়া, শুধু সার্ভার-সাইড ব্যবহারের জন্য)
+// আপডেট: gemini-2.0-flash (বন্ধ হয়ে গেছে ১ জুন ২০২৬) থেকে gemini-2.5-flash-এ
+//         মাইগ্রেট করা হয়েছে + conversation history সাপোর্ট যোগ করা হয়েছে
 
 export const prerender = false;
 
@@ -49,15 +51,25 @@ const SYSTEM_CONTEXT = `
 
 উত্তর দেওয়ার নিয়ম:
 - সবসময় বাংলায় উত্তর দেবে, সংক্ষিপ্ত ও স্পষ্টভাবে (৩-৪ বাক্যের বেশি না)
-- প্রাসঙ্গিক হলে সেই ক্যাটাগরির লিংক উল্লেখ করবে
+- প্রাসঙ্গিক হলে সেই ক্যাটাগরির লিংক উল্লেখ করবে, এই ফরম্যাটে একদম আলাদা লাইনে: [LINK]শিরোনাম|/services/slug
+  (উদাহরণ: [LINK]ব্লাড ডোনার|/services/blood) — একই উত্তরে সর্বোচ্চ একটা লিংক দিবে, প্রাসঙ্গিক হলে
+- আগের কথোপকথন মনে রেখে প্রসঙ্গ বুঝে উত্তর দিবে (যেমন ইউজার "সেটার নাম্বার কী?" জিজ্ঞেস করলে বুঝবে আগের বার্তায় কোন বিষয় ছিল)
 - যা জানো না বা সাইটে নেই এমন কিছু বানিয়ে বলবে না — অনিশ্চিত হলে সরাসরি বলবে "এই বিষয়ে নিশ্চিত তথ্য নেই, সাইটের যোগাযোগ সেকশনে জিজ্ঞাসা করুন"
 - সাইটের বাইরের প্রশ্ন (যেমন সাধারণ জ্ঞান, রাজনীতি) হলে ভদ্রভাবে বলবে তুমি শুধু স্মার্ট ফেনী সংক্রান্ত প্রশ্নে সাহায্য করতে পারো
 `.trim();
+
+interface HistoryTurn {
+  role: 'user' | 'model';
+  text: string;
+}
+
+const MAX_HISTORY_TURNS = 10; // সর্বোচ্চ শেষ ১০টা টার্ন (backend safeguard)
 
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
     const userMessage: string = (body?.message ?? '').toString().trim();
+    const rawHistory = Array.isArray(body?.history) ? body.history : [];
 
     if (!userMessage) {
       return new Response(
@@ -66,9 +78,22 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
+    // history sanitize + trim
+    const history: HistoryTurn[] = rawHistory
+      .filter(
+        (h: any) =>
+          h &&
+          (h.role === 'user' || h.role === 'model') &&
+          typeof h.text === 'string' &&
+          h.text.trim().length > 0
+      )
+      .slice(-MAX_HISTORY_TURNS * 2)
+      .map((h: any) => ({ role: h.role, text: h.text.toString().trim() }));
+
     const apiKey = import.meta.env.GEMINI_API_KEY;
 
     if (!apiKey) {
+      console.error('Chat API: GEMINI_API_KEY missing in environment');
       return new Response(
         JSON.stringify({
           reply: 'দুঃখিত, এই মুহূর্তে সহায়ক সাময়িকভাবে বন্ধ আছে। অনুগ্রহ করে সরাসরি যোগাযোগ করুন।',
@@ -77,8 +102,19 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
+    const contents = [
+      ...history.map((h) => ({
+        role: h.role,
+        parts: [{ text: h.text }],
+      })),
+      {
+        role: 'user',
+        parts: [{ text: userMessage }],
+      },
+    ];
+
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -86,22 +122,18 @@ export const POST: APIRoute = async ({ request }) => {
           system_instruction: {
             parts: [{ text: SYSTEM_CONTEXT }],
           },
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: userMessage }],
-            },
-          ],
+          contents,
           generationConfig: {
             temperature: 0.4,
-            maxOutputTokens: 300,
+            maxOutputTokens: 400,
           },
         }),
       }
     );
 
     if (!geminiRes.ok) {
-      console.error('Gemini API error:', geminiRes.status, await geminiRes.text());
+      const errBody = await geminiRes.text();
+      console.error('Gemini API error:', geminiRes.status, errBody);
       return new Response(
         JSON.stringify({
           reply: 'দুঃখিত, এই মুহূর্তে উত্তর দিতে সমস্যা হচ্ছে। একটু পরে আবার চেষ্টা করুন অথবা সরাসরি যোগাযোগ করুন।',
