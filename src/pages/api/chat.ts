@@ -4,8 +4,9 @@
 //         পুরো সাইটের context সহ system prompt ব্যবহার করে প্রাসঙ্গিক উত্তর জেনারেট করে
 // নোট: GEMINI_API_KEY অবশ্যই Vercel dashboard-এ environment variable
 //       হিসেবে বসাতে হবে (PUBLIC_ prefix ছাড়া, শুধু সার্ভার-সাইড ব্যবহারের জন্য)
-// আপডেট: gemini-2.0-flash (বন্ধ হয়ে গেছে ১ জুন ২০২৬) থেকে gemini-2.5-flash-এ
-//         মাইগ্রেট করা হয়েছে + conversation history সাপোর্ট যোগ করা হয়েছে
+// আপডেট: gemini-2.0-flash (বন্ধ) → gemini-2.5-flash (নতুন key-তে 404) →
+//         gemini-3.1-flash-lite এ মাইগ্রেট করা হয়েছে (বর্তমানে ফ্রি-টায়ারে
+//         নতুন API key দিয়েও অ্যাক্সেসযোগ্য স্টেবল মডেল) + conversation history সাপোর্ট
 
 export const prerender = false;
 
@@ -64,6 +65,7 @@ interface HistoryTurn {
 }
 
 const MAX_HISTORY_TURNS = 10; // সর্বোচ্চ শেষ ১০টা টার্ন (backend safeguard)
+const MODEL_NAME = 'gemini-3.1-flash-lite';
 
 export const POST: APIRoute = async ({ request }) => {
   try {
@@ -114,7 +116,7 @@ export const POST: APIRoute = async ({ request }) => {
     ];
 
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
