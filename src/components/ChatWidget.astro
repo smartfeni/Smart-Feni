@@ -1,6 +1,9 @@
 ---
 // src/components/ChatWidget.astro
-// Rule-based FAQ chat widget for Smart Feni
+// Smart Feni AI চ্যাট উইজেট
+// আপডেট: rule-based keyword matching সরিয়ে সরাসরি /api/chat
+//         এন্ডপয়েন্টে (Gemini) কল করা হচ্ছে — প্রতিটা মেসেজে AI উত্তর দেয়
+//         + "টাইপ করছে..." লোডিং ইন্ডিকেটর যোগ করা হয়েছে
 ---
 
 <div id="sf-chat-root">
@@ -13,9 +16,14 @@
     </svg>
   </button>
 
-  <div id="sf-chat-panel" hidden>
+  <div id="sf-chat-panel">
     <header id="sf-chat-header">
       <span>স্মার্ট ফেনী সহায়ক</span>
+      <button id="sf-chat-panel-close" type="button" aria-label="বন্ধ করুন">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
     </header>
 
     <div id="sf-chat-messages"></div>
@@ -72,9 +80,13 @@
     background: #fff;
     border-radius: 14px;
     box-shadow: 0 10px 40px rgba(0,0,0,0.25);
-    display: flex;
+    display: none;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  #sf-chat-panel.sf-open {
+    display: flex;
   }
 
   #sf-chat-header {
@@ -83,7 +95,22 @@
     padding: 14px 16px;
     font-weight: 600;
     font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
+  #sf-chat-panel-close {
+    background: transparent;
+    border: none;
+    color: #fff;
+    opacity: 0.85;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+  }
+  #sf-chat-panel-close svg { width: 18px; height: 18px; }
 
   #sf-chat-messages {
     flex: 1;
@@ -118,6 +145,26 @@
   .sf-msg-user a { color: #fff; }
   .sf-msg-bot a { color: #FF6B35; font-weight: 600; }
 
+  .sf-msg-typing {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 11px 14px;
+  }
+  .sf-msg-typing span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #b8bcc4;
+    animation: sfBlink 1.2s infinite ease-in-out;
+  }
+  .sf-msg-typing span:nth-child(2) { animation-delay: 0.2s; }
+  .sf-msg-typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes sfBlink {
+    0%, 80%, 100% { opacity: 0.3; }
+    40% { opacity: 1; }
+  }
+
   #sf-chat-quick {
     display: flex;
     flex-wrap: wrap;
@@ -135,6 +182,7 @@
     cursor: pointer;
   }
   .sf-quick-btn:active { background: #FFE0CC; }
+  .sf-quick-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   #sf-chat-form {
     display: flex;
@@ -151,6 +199,7 @@
     outline: none;
   }
   #sf-chat-input:focus { border-color: #FF6B35; }
+  #sf-chat-input:disabled { background: #f5f5f5; }
   #sf-chat-form button[type="submit"] {
     width: 40px;
     background: #FF6B35;
@@ -162,6 +211,7 @@
     justify-content: center;
     cursor: pointer;
   }
+  #sf-chat-form button[type="submit"]:disabled { opacity: 0.5; cursor: not-allowed; }
   #sf-chat-form button[type="submit"] svg { width: 18px; height: 18px; }
 
   @media (max-width: 400px) {
@@ -171,62 +221,6 @@
 </style>
 
 <script>
-  type Rule = { keywords: string[]; reply: string };
-
-  const RULES: Rule[] = [
-    {
-      keywords: ["ফার্মেসি", "ওষুধ", "medicine", "pharmacy"],
-      reply: "ফার্মেসি ডেলিভারির জন্য ওষুধের নাম/ছবি হোয়াটসঅ্যাপ বা ইমো তে পাঠান। আমরা ফেনী সদরের যেকোনো ফার্মেসি থেকে সংগ্রহ করে পৌঁছে দিই।",
-    },
-    {
-      keywords: ["গ্রোসারি", "বাজার", "grocery", "মুদি"],
-      reply: "দৈনন্দিন বাজার/মুদি সামগ্রীর তালিকা পাঠালে আমরা কালেক্ট করে বাসায় পৌঁছে দিই। হোয়াটসঅ্যাপে লিস্ট পাঠাতে পারেন।",
-    },
-    {
-      keywords: ["রক্ত", "blood", "ব্লাড"],
-      reply: "রক্তদাতা খুঁজতে বা রক্তদানে আগ্রহী হলে আমাদের ব্লাড ডোনেশন সেকশনে গিয়ে গ্রুপ ও এলাকা উল্লেখ করুন।",
-    },
-    {
-      keywords: ["বাসা ভাড়া", "house rent", "ভাড়া", "flat"],
-      reply: "বাসা/ফ্ল্যাট ভাড়ার বিজ্ঞাপন দেখতে বা দিতে House Rent সেকশন ব্যবহার করুন।",
-    },
-    {
-      keywords: ["চাকরি", "job", "jobs"],
-      reply: "স্থানীয় চাকরির খবর পেতে বা পোস্ট করতে Jobs সেকশনে যান।",
-    },
-    {
-      keywords: ["হোম সার্ভিস", "মিস্ত্রি", "ইলেকট্রিশিয়ান", "প্লাম্বার", "home service"],
-      reply: "ইলেকট্রিশিয়ান, প্লাম্বার, মিস্ত্রি ইত্যাদি হোম সার্ভিসের জন্য Home Services সেকশনে অনুরোধ পাঠান।",
-    },
-    {
-      keywords: ["ইভেন্ট", "event", "অনুষ্ঠান"],
-      reply: "ফেনীর স্থানীয় ইভেন্ট দেখতে বা নিজের ইভেন্ট পোস্ট করতে Events সেকশনে যান।",
-    },
-    {
-      keywords: ["মার্কেটপ্লেস", "কেনাবেচা", "marketplace", "বিক্রি"],
-      reply: "কেনাবেচার জন্য Marketplace সেকশনে পণ্যের ছবি ও দাম দিয়ে পোস্ট করতে পারেন।",
-    },
-    {
-      keywords: ["ডেলিভারি চার্জ", "চার্জ কত", "delivery charge", "খরচ"],
-      reply: "ডেলিভারি চার্জ এলাকা ও দূরত্বের উপর নির্ভর করে। সঠিক চার্জ জানতে আপনার এলাকার নাম উল্লেখ করে হোয়াটসঅ্যাপে জিজ্ঞাসা করুন।",
-    },
-    {
-      keywords: ["এলাকা", "কভার", "সার্ভিস এরিয়া", "service area", "কোথায়"],
-      reply: "আমরা বর্তমানে ফেনী সদর এলাকায় সেবা দিচ্ছি। ধীরে ধীরে অন্যান্য এলাকায় সম্প্রসারিত হবে।",
-    },
-    {
-      keywords: ["অর্ডার", "কিভাবে", "কীভাবে", "order", "কল"],
-      reply: "অর্ডার করতে হোয়াটসঅ্যাপ বা ইমো তে মেসেজ পাঠান — কী লাগবে লিখুন, আমরা কনফার্ম করে ডেলিভারি দেব।",
-    },
-    {
-      keywords: ["যোগাযোগ", "নাম্বার", "ফোন", "contact", "number"],
-      reply: "যোগাযোগের জন্য ওয়েবসাইটের Contact সেকশন দেখুন অথবা হোয়াটসঅ্যাপ বাটনে ক্লিক করুন।",
-    },
-  ];
-
-  const FALLBACK =
-    "দুঃখিত, এই প্রশ্নের সঠিক উত্তর আমার কাছে নেই। অনুগ্রহ করে হোয়াটসঅ্যাপে সরাসরি জিজ্ঞাসা করুন, আমাদের টিম সাহায্য করবে।";
-
   const QUICK_REPLIES = [
     "ফার্মেসি অর্ডার কিভাবে করব?",
     "ডেলিভারি চার্জ কত?",
@@ -234,27 +228,33 @@
     "যোগাযোগ নাম্বার কী?",
   ];
 
-  function findReply(text: string): string {
-    const lower = text.toLowerCase().trim();
-    for (const rule of RULES) {
-      if (rule.keywords.some((k) => lower.includes(k.toLowerCase()))) {
-        return rule.reply;
-      }
-    }
-    return FALLBACK;
-  }
-
   document.addEventListener("DOMContentLoaded", () => {
     const toggle = document.getElementById("sf-chat-toggle")!;
     const panel = document.getElementById("sf-chat-panel")!;
+    const panelClose = document.getElementById("sf-chat-panel-close")!;
     const iconChat = document.getElementById("sf-icon-chat")!;
     const iconClose = document.getElementById("sf-icon-close")!;
     const messages = document.getElementById("sf-chat-messages")!;
     const form = document.getElementById("sf-chat-form") as HTMLFormElement;
     const input = document.getElementById("sf-chat-input") as HTMLInputElement;
+    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
     const quickWrap = document.getElementById("sf-chat-quick")!;
 
     let opened = false;
+    let isSending = false;
+
+    function setOpen(next: boolean) {
+      opened = next;
+      panel.classList.toggle("sf-open", opened);
+      iconChat.style.display = opened ? "none" : "block";
+      iconClose.style.display = opened ? "block" : "none";
+      if (opened && messages.children.length === 0) {
+        addMessage(
+          "আসসালামু আলাইকুম! আমি স্মার্ট ফেনী সহায়ক। কিছু জিজ্ঞাসা করুন অথবা নিচের বাটন থেকে বেছে নিন।",
+          "bot"
+        );
+      }
+    }
 
     function addMessage(text: string, sender: "bot" | "user") {
       const div = document.createElement("div");
@@ -262,13 +262,59 @@
       div.textContent = text;
       messages.appendChild(div);
       messages.scrollTop = messages.scrollHeight;
+      return div;
     }
 
-    function handleUserText(text: string) {
-      if (!text.trim()) return;
+    function showTyping() {
+      const div = document.createElement("div");
+      div.className = "sf-msg sf-msg-bot sf-msg-typing";
+      div.id = "sf-typing-indicator";
+      div.innerHTML = "<span></span><span></span><span></span>";
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function hideTyping() {
+      document.getElementById("sf-typing-indicator")?.remove();
+    }
+
+    function setSending(next: boolean) {
+      isSending = next;
+      input.disabled = next;
+      submitBtn.disabled = next;
+      quickWrap.querySelectorAll("button").forEach((b) => {
+        (b as HTMLButtonElement).disabled = next;
+      });
+    }
+
+    async function handleUserText(text: string) {
+      if (!text.trim() || isSending) return;
       addMessage(text, "user");
-      const reply = findReply(text);
-      setTimeout(() => addMessage(reply, "bot"), 300);
+      setSending(true);
+      showTyping();
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text }),
+        });
+        const data = await res.json();
+        hideTyping();
+        addMessage(
+          data?.reply || "দুঃখিত, উত্তর দিতে সমস্যা হয়েছে। আবার চেষ্টা করুন।",
+          "bot"
+        );
+      } catch (err) {
+        hideTyping();
+        addMessage(
+          "দুঃখিত, ইন্টারনেট সংযোগে সমস্যা হচ্ছে। একটু পরে আবার চেষ্টা করুন।",
+          "bot"
+        );
+      } finally {
+        setSending(false);
+        input.focus();
+      }
     }
 
     QUICK_REPLIES.forEach((q) => {
@@ -280,18 +326,8 @@
       quickWrap.appendChild(btn);
     });
 
-    toggle.addEventListener("click", () => {
-      opened = !opened;
-      panel.hidden = !opened;
-      iconChat.style.display = opened ? "none" : "block";
-      iconClose.style.display = opened ? "block" : "none";
-      if (opened && messages.children.length === 0) {
-        addMessage(
-          "আসসালামু আলাইকুম! আমি স্মার্ট ফেনী সহায়ক। নিচের বাটন থেকে বেছে নিন অথবা প্রশ্ন লিখুন।",
-          "bot"
-        );
-      }
-    });
+    toggle.addEventListener("click", () => setOpen(!opened));
+    panelClose.addEventListener("click", () => setOpen(false));
 
     form.addEventListener("submit", (e) => {
       e.preventDefault();
