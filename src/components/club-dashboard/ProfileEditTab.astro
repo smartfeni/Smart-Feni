@@ -1,0 +1,152 @@
+---
+---
+
+<div class="dash-card">
+  <h3><i class="fas fa-id-card"></i> ক্লাব প্রোফাইল</h3>
+  <p class="form-msg" id="profileMsg"></p>
+
+  <div class="photo-upload-circle" id="logoCircle">
+    <img id="logoPreview" src="" alt="লোগো" />
+    <i class="fas fa-people-group"></i>
+  </div>
+  <input type="file" id="logoInput" accept="image/*" style="display:none;" />
+  <p class="form-hint" style="text-align:center;margin-top:-10px;margin-bottom:14px;">লোগো বদলাতে ছবিতে ট্যাপ করুন</p>
+
+  <label class="form-label">কভার ছবি</label>
+  <input type="file" id="coverInput" accept="image/*" class="form-input" />
+
+  <label class="form-label">ক্লাবের নাম</label>
+  <input type="text" class="form-input" id="clubNameDisplay" disabled />
+  <p class="form-hint">নাম শুধু এডমিন বদলাতে পারবেন</p>
+
+  <label class="form-label">ট্যাগলাইন</label>
+  <input type="text" class="form-input" id="taglineInput" placeholder="এক লাইনের মটো" />
+
+  <label class="form-label">বিস্তারিত বিবরণ</label>
+  <textarea class="form-input" id="descriptionInput" rows="4"></textarea>
+
+  <label class="form-label">ফোন নম্বর</label>
+  <input type="text" class="form-input" id="phoneInput" />
+
+  <label class="form-label">ফেসবুক পেজ লিংক</label>
+  <input type="text" class="form-input" id="facebookInput" placeholder="https://facebook.com/..." />
+
+  <label class="form-label">ঠিকানা</label>
+  <input type="text" class="form-input" id="addressInput" />
+
+  <label class="form-label">প্রতিষ্ঠার সাল</label>
+  <input type="number" class="form-input" id="establishedInput" placeholder="যেমন: 2015" />
+
+  <label class="form-label">ম্যাপ লোকেশন (Latitude, Longitude)</label>
+  <div style="display:flex;gap:8px;">
+    <input type="text" class="form-input" id="latInput" placeholder="Latitude" />
+    <input type="text" class="form-input" id="lngInput" placeholder="Longitude" />
+  </div>
+  <p class="form-hint">গুগল ম্যাপে লোকেশনে লং-প্রেস করলে কোঅর্ডিনেট দেখাবে, কপি করে বসান</p>
+
+  <button class="primary-btn" id="saveProfileBtn" type="button">
+    <i class="fas fa-check"></i> <span>সেভ করুন</span>
+  </button>
+</div>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let clubId = null;
+  let selectedLogoFile = null;
+  let selectedCoverFile = null;
+
+  const msgEl = document.getElementById('profileMsg');
+  function showMsg(text, type = 'error') {
+    msgEl.textContent = text;
+    msgEl.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
+  }
+
+  document.getElementById('logoCircle')?.addEventListener('click', () => {
+    document.getElementById('logoInput').click();
+  });
+
+  document.getElementById('logoInput')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    selectedLogoFile = file;
+    const reader = new FileReader();
+    reader.onload = () => {
+      document.getElementById('logoPreview').src = reader.result;
+      document.getElementById('logoCircle').classList.add('has-photo');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('coverInput')?.addEventListener('change', (e) => {
+    selectedCoverFile = e.target.files?.[0] || null;
+  });
+
+  async function uploadImage(file, prefix) {
+    const ext = file.name.split('.').pop();
+    const path = `clubs/${prefix}-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
+    if (error) return null;
+    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
+    return data?.publicUrl || null;
+  }
+
+  document.getElementById('saveProfileBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('saveProfileBtn');
+    const span = btn.querySelector('span');
+    const original = span.textContent;
+    span.textContent = 'সেভ হচ্ছে...';
+    btn.disabled = true;
+
+    const updates = {
+      tagline: document.getElementById('taglineInput').value.trim(),
+      description: document.getElementById('descriptionInput').value.trim(),
+      phone: document.getElementById('phoneInput').value.trim(),
+      facebook_link: document.getElementById('facebookInput').value.trim(),
+      address: document.getElementById('addressInput').value.trim(),
+      established_year: document.getElementById('establishedInput').value ? parseInt(document.getElementById('establishedInput').value) : null,
+      latitude: document.getElementById('latInput').value ? parseFloat(document.getElementById('latInput').value) : null,
+      longitude: document.getElementById('lngInput').value ? parseFloat(document.getElementById('lngInput').value) : null,
+    };
+
+    if (selectedLogoFile) {
+      const url = await uploadImage(selectedLogoFile, `${clubId}-logo`);
+      if (url) updates.logo_image = url;
+    }
+    if (selectedCoverFile) {
+      const url = await uploadImage(selectedCoverFile, `${clubId}-cover`);
+      if (url) updates.cover_image = url;
+    }
+
+    const { error } = await supabase.from('clubs').update(updates).eq('id', clubId);
+
+    span.textContent = original;
+    btn.disabled = false;
+
+    if (error) {
+      showMsg('সেভ ব্যর্থ: ' + error.message);
+      return;
+    }
+    showMsg('প্রোফাইল সেভ হয়েছে ✓', 'success');
+  });
+
+  window.addEventListener('smartfeni:club-ready', (e) => {
+    const { clubId: id, club } = e.detail;
+    clubId = id;
+
+    document.getElementById('clubNameDisplay').value = club.name || '';
+    document.getElementById('taglineInput').value = club.tagline || '';
+    document.getElementById('descriptionInput').value = club.description || '';
+    document.getElementById('phoneInput').value = club.phone || '';
+    document.getElementById('facebookInput').value = club.facebook_link || '';
+    document.getElementById('addressInput').value = club.address || '';
+    document.getElementById('establishedInput').value = club.established_year || '';
+    document.getElementById('latInput').value = club.latitude || '';
+    document.getElementById('lngInput').value = club.longitude || '';
+
+    if (club.logo_image) {
+      document.getElementById('logoPreview').src = club.logo_image;
+      document.getElementById('logoCircle').classList.add('has-photo');
+    }
+  });
+</script>
