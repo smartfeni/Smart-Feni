@@ -2,6 +2,8 @@
 // ============================================================
 // পেজ: অ্যাডমিন — ইউজার ম্যানেজমেন্ট (/admin/users)
 // সব প্রোফাইল, প্রতিটার listing সংখ্যা (ক্লিক করলে expand), ব্লক/আনব্লক
+// আপডেট: "স্থায়ী ডিলিট" বাটন যোগ (শুধু admin, /api/delete-user কল করে)
+//         + লিস্টিং expand প্যানেলে প্রতিটা লিস্টিংয়ের পাশে ডিলিট আইকন
 // ============================================================
 
 export const prerender = false;
@@ -168,6 +170,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     let allUsers = [];
     let currentUserId = null;
     let currentUserRole = null;
+    let currentAccessToken = null;
 
     const roleLabels = {
       admin: { text: 'অ্যাডমিন', bg: '#FFF0EA', color: '#FF6B35' },
@@ -222,7 +225,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
               ${user.listingCount > 0 ? '<i class="fas fa-chevron-down" style="font-size:0.65rem;margin-left:4px;"></i>' : ''}
             </button>
           </div>
-          <div class="user-action" style="flex-shrink:0;"></div>
+          <div class="user-action" style="flex-shrink:0;display:flex;flex-direction:column;gap:6px;align-items:flex-end;"></div>
         </div>
         <div class="listing-detail-panel" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #F0F3F8;"></div>
       `;
@@ -237,21 +240,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           detailPanel.style.flexDirection = 'column';
           detailPanel.style.gap = '8px';
 
-          if (!isOpen && !detailPanel.dataset.filled) {
-            user.userListings.forEach((l) => {
-              const st = listingStatusLabels[l.status] || listingStatusLabels.pending;
-              const row = document.createElement('div');
-              row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;background:#FBFCFE;padding:10px 12px;border-radius:12px;';
-              row.innerHTML = `
-                <div style="min-width:0;">
-                  <p style="font-size:0.85rem;font-weight:700;color:#1B2A4A;">${l.title || '(শিরোনামহীন)'}</p>
-                  <p style="font-size:0.76rem;color:#8FA0BC;">${categoryNameMap[l.category] || l.category} · ${formatDate(l.created_at)}</p>
-                </div>
-                <span style="font-size:0.7rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;background:${st.bg};color:${st.color};">${st.text}</span>
-              `;
-              detailPanel.appendChild(row);
-            });
-            detailPanel.dataset.filled = 'true';
+          if (!isOpen) {
+            renderListingDetailRows(detailPanel, user);
           }
         });
       }
@@ -298,9 +288,99 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           label.style.cssText = 'font-size:0.76rem;color:#B0BCCB;font-weight:600;padding:8px 12px;white-space:nowrap;';
           actionWrap.appendChild(label);
         }
+
+        // ===== স্থায়ী ডিলিট — শুধু admin, শুধু সাধারণ ইউজারের জন্য =====
+        if (currentUserRole === 'admin' && user.role === 'user') {
+          const deleteBtn = document.createElement('button');
+          let deleteConfirming = false;
+
+          function setDeleteBtnState() {
+            deleteBtn.textContent = deleteConfirming ? 'নিশ্চিত? (স্থায়ী)' : 'স্থায়ী ডিলিট';
+            deleteBtn.style.cssText = 'background:transparent;color:#D14343;border:1.5px solid #FFD3D3;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+          }
+
+          setDeleteBtnState();
+
+          deleteBtn.addEventListener('click', () => {
+            if (!deleteConfirming) {
+              deleteConfirming = true;
+              setDeleteBtnState();
+              return;
+            }
+            permanentlyDeleteUser(user.id, deleteBtn);
+          });
+
+          actionWrap.appendChild(deleteBtn);
+        }
       }
 
       return card;
+    }
+
+    function renderListingDetailRows(detailPanel, user) {
+      detailPanel.innerHTML = '';
+      user.userListings.forEach((l) => {
+        const st = listingStatusLabels[l.status] || listingStatusLabels.pending;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;background:#FBFCFE;padding:10px 12px;border-radius:12px;';
+        row.innerHTML = `
+          <div style="min-width:0;">
+            <p style="font-size:0.85rem;font-weight:700;color:#1B2A4A;">${l.title || '(শিরোনামহীন)'}</p>
+            <p style="font-size:0.76rem;color:#8FA0BC;">${categoryNameMap[l.category] || l.category} · ${formatDate(l.created_at)}</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span style="font-size:0.7rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;background:${st.bg};color:${st.color};">${st.text}</span>
+            <button class="listing-delete-btn" style="background:#FFF0EA;color:#D14343;border:none;width:28px;height:28px;border-radius:8px;font-size:0.7rem;cursor:pointer;flex-shrink:0;"><i class="fas fa-trash"></i></button>
+          </div>
+        `;
+
+        const delBtn = row.querySelector('.listing-delete-btn');
+        let confirming = false;
+        delBtn.addEventListener('click', () => {
+          if (!confirming) {
+            confirming = true;
+            delBtn.style.background = '#D14343';
+            delBtn.style.color = '#fff';
+            delBtn.innerHTML = '<i class="fas fa-check"></i>';
+            return;
+          }
+          deleteListingFromPanel(l.id, user);
+        });
+
+        detailPanel.appendChild(row);
+      });
+    }
+
+    async function deleteListingFromPanel(listingId, user) {
+      const { error } = await supabase.from('listings').delete().eq('id', listingId);
+      if (error) {
+        alert('লিস্টিং ডিলিট ব্যর্থ: ' + error.message);
+        return;
+      }
+      user.userListings = user.userListings.filter((l) => l.id !== listingId);
+      user.listingCount = user.userListings.length;
+      loadUsers();
+    }
+
+    async function permanentlyDeleteUser(userId, btnEl) {
+      btnEl.textContent = 'ডিলিট হচ্ছে...';
+      btnEl.disabled = true;
+
+      const res = await fetch('/api/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId: userId, accessToken: currentAccessToken }),
+      });
+      const result = await res.json();
+
+      if (!res.ok) {
+        alert('ডিলিট ব্যর্থ: ' + (result.error || 'অজানা ত্রুটি'));
+        btnEl.textContent = 'স্থায়ী ডিলিট';
+        btnEl.disabled = false;
+        return;
+      }
+
+      loadUsers();
     }
 
     async function toggleBlock(id, blockedState) {
@@ -370,6 +450,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     window.addEventListener('smartfeni:admin-ready', (e) => {
       currentUserId = e.detail.session.user.id;
       currentUserRole = e.detail.role;
+      currentAccessToken = e.detail.session.access_token;
       loadUsers();
     });
 
