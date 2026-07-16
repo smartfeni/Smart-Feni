@@ -21,6 +21,12 @@
 //           schema যোগ করা হয়েছে। description-এ "সার্ভিস ডিরেক্টরি"
 //           শব্দ রাখা হয়েছে যাতে Google আমাদের e-commerce শপ (Smart
 //           Feni BD নামে আলাদা সাইট আছে) থেকে আলাদা বুঝতে পারে।
+// বাগফিক্স: ফাইলটা </main> এর আগে কাটা/অসম্পূর্ণ হয়ে গিয়েছিল (আগের
+//           একটা এক্সপোর্ট/সেভে) — Footer, ChatWidget, closing tags,
+//           beforeinstallprompt ও কল-ট্র্যাকিং script অনুপস্থিত ছিল,
+//           যার কারণে পুরো সাইট বিল্ড ফেইল করছিল। এখন পুরনো working
+//           ভার্সনের <body> অংশের সাথে নতুন SEO <head> মার্জ করে
+//           সম্পূর্ণ করা হলো।
 // ============================================================
 
 import Header from './Header.astro';
@@ -237,4 +243,59 @@ const localBusinessSchema = {
 <body>
   <Header />
   <main>
-    <slo
+    <slot /> <!-- পেজের কন্টেন্ট এখানে বসবে -->
+  </main>
+  <Footer />
+  <ChatWidget />
+
+  <script>
+    // ============================================================
+    // beforeinstallprompt ইভেন্ট গ্লোবালি ক্যাচ করে window-এ রাখা হচ্ছে,
+    // যাতে পেজের যেকোনো জায়গা (Footer-এর ইনস্টল বাটন) থেকে এটা
+    // ট্রিগার করা যায়। এই ইভেন্ট শুধু Android/Chrome-এ আসে।
+    // ============================================================
+    window.deferredInstallPrompt = null;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      window.deferredInstallPrompt = e;
+      window.dispatchEvent(new CustomEvent('smartfeni:install-available'));
+    });
+
+    window.addEventListener('appinstalled', () => {
+      window.deferredInstallPrompt = null;
+      window.dispatchEvent(new CustomEvent('smartfeni:install-done'));
+    });
+  </script>
+
+  <script>
+    // ============================================================
+    // গ্লোবাল কল বাটন (tel:) ক্লিক ট্র্যাকিং
+    // সাইটের যেকোনো পেজের যেকোনো <a href="tel:..."> লিংকে ক্লিক হলেই
+    // অটোমেটিক ধরা পড়ে, প্রতিটা পেজে আলাদা কোড বসানোর দরকার নেই।
+    // ক্যাটাগরি বের করা হয় URL path থেকে (/services/home-food → home-food)।
+    // item-লেভেল ডিটেইল (যেমন কোন শপ) দরকার হলে বাটনে data-shop-name
+    // অ্যাট্রিবিউট বসালে সেটাও অটোমেটিক পাঠানো হবে।
+    // ============================================================
+    import { trackEvent } from '../../lib/analytics.js';
+
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('a[href^="tel:"]');
+      if (!link) return;
+
+      // URL থেকে ক্যাটাগরি বের করা: /services/home-food → home-food
+      const pathParts = window.location.pathname.split('/').filter(Boolean);
+      const category = pathParts[pathParts.length - 1] || 'home';
+
+      const shopName = link.getAttribute('data-shop-name') || null;
+      const upazila = localStorage.getItem('smartfeni_upazila');
+
+      trackEvent('call_button_click', {
+        category,
+        upazila: upazila || null,
+        ...(shopName ? { shop_name: shopName } : {}),
+      });
+    });
+  </script>
+</body>
+</html>
