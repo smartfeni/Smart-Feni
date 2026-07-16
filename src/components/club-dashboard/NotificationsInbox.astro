@@ -1,0 +1,66 @@
+---
+---
+
+<div class="dash-card">
+  <h3><i class="fas fa-bell"></i> ইনবক্স — অন্য ক্লাবের আমন্ত্রণ</h3>
+  <div id="notifList"></div>
+  <p class="empty-note" id="notifEmpty" style="display:none;">এখনো কোনো নোটিফিকেশন নেই</p>
+</div>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let clubId = null;
+
+  async function loadNotifications() {
+    const { data } = await supabase
+      .from('club_notifications')
+      .select('*, sender:clubs!sender_club_id(name, logo_image), post:club_posts!source_post_id(title, description, event_date)')
+      .eq('receiver_club_id', clubId)
+      .order('created_at', { ascending: false });
+
+    const notifs = data || [];
+    const container = document.getElementById('notifList');
+    const emptyEl = document.getElementById('notifEmpty');
+    const unreadCount = notifs.filter((n) => !n.is_read).length;
+
+    const badge = document.getElementById('notifBadge');
+    if (badge) {
+      badge.style.display = unreadCount > 0 ? 'inline-block' : 'none';
+      badge.textContent = unreadCount;
+    }
+
+    container.innerHTML = '';
+    if (notifs.length === 0) {
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    notifs.forEach((n) => {
+      const card = document.createElement('div');
+      card.className = 'item-card';
+      card.style.cssText = n.is_read ? '' : 'border-color:#FFD3BC;background:#FFF8F4;';
+      card.innerHTML = `
+        ${n.sender?.logo_image ? `<img class="item-photo" src="${n.sender.logo_image}" alt="${n.sender.name}" />` : `<div class="item-photo-placeholder"><i class="fas fa-people-group"></i></div>`}
+        <div class="item-body">
+          <p class="item-title">${n.sender?.name || 'অজানা ক্লাব'} ${!n.is_read ? '<span style="color:#FF6B35;">• নতুন</span>' : ''}</p>
+          <p class="item-sub">${n.post?.title || ''} ${n.post?.event_date ? '· ' + new Date(n.post.event_date).toLocaleDateString('bn-BD') : ''}</p>
+        </div>
+      `;
+      card.addEventListener('click', () => markRead(n.id, n.is_read));
+      container.appendChild(card);
+    });
+  }
+
+  async function markRead(id, isRead) {
+    if (isRead) return;
+    await supabase.from('club_notifications').update({ is_read: true }).eq('id', id);
+    loadNotifications();
+  }
+
+  window.addEventListener('smartfeni:club-ready', (e) => {
+    clubId = e.detail.clubId;
+    loadNotifications();
+  });
+</script>
