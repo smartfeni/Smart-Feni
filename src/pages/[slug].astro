@@ -1,0 +1,97 @@
+---
+// ============================================================
+// পেজ: root-level catch-all (/[slug])
+// clubs টেবিলে slug লুকআপ করে ক্লাব প্রোফাইল রেন্ডার করে।
+// static ফাইল (about, contact, my-shop ইত্যাদি) সবসময় এই
+// dynamic route এর আগে prioritize হয় — তাই conflict হবে না।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../components/layout/BaseLayout.astro';
+import ClubProfile from '../components/club/ClubProfile.astro';
+import { supabase } from '../lib/supabase.js';
+
+const { slug } = Astro.params;
+
+const { data: club, error: clubError } = await supabase
+  .from('clubs')
+  .select('*')
+  .eq('slug', slug)
+  .eq('is_active', true)
+  .maybeSingle();
+
+if (clubError) {
+  console.error('club fetch error:', clubError.message);
+}
+
+let members = [];
+let posts = [];
+
+if (club) {
+  const [{ data: memberData }, { data: postData }] = await Promise.all([
+    supabase
+      .from('club_members')
+      .select('*')
+      .eq('club_id', club.id)
+      .order('position_order', { ascending: true }),
+    supabase
+      .from('club_posts')
+      .select('*')
+      .eq('club_id', club.id)
+      .order('created_at', { ascending: false }),
+  ]);
+  members = memberData || [];
+  posts = postData || [];
+}
+
+const pageTitle = club ? `${club.name} | স্মার্ট ফেনী` : 'পেজ পাওয়া যায়নি | স্মার্ট ফেনী';
+const pageDescription = club
+  ? club.tagline || club.description || `${club.name} — ফেনীর একটি ক্লাব`
+  : undefined;
+const ogImage = club ? club.cover_image || club.logo_image : undefined;
+---
+
+<BaseLayout
+  title={pageTitle}
+  description={pageDescription}
+  ogImage={ogImage}
+  canonicalPath={club ? `/${club.slug}` : undefined}
+>
+  {club ? (
+    <ClubProfile club={club} members={members} posts={posts} />
+  ) : (
+    <section class="not-found">
+      <div class="container">
+        <i class="fas fa-face-frown"></i>
+        <p>এই পেজটি খুঁজে পাওয়া যায়নি</p>
+        <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> হোমপেজে ফিরে যান</a>
+      </div>
+    </section>
+  )}
+</BaseLayout>
+
+<style>
+  .not-found {
+    padding: 120px 0;
+    text-align: center;
+    color: #B0BCCB;
+  }
+  .not-found i {
+    font-size: 3rem;
+    margin-bottom: 16px;
+  }
+  .not-found p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 16px;
+  }
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #FF6B35;
+    text-decoration: none;
+    font-weight: 700;
+  }
+</style>
