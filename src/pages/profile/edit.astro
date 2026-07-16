@@ -5,6 +5,9 @@
 // নতুন: courier-এর মতোই car-rental এর জন্য "গাড়ি ভাড়া সেটিংস"
 // কার্ড — অ্যাপ্রুভড লিস্টিং থাকলে অনলাইন/অফলাইন টগল, গাড়ির
 // ধরন/মডেল ও বিবরণ (সার্ভিস এরিয়া) এডিট করা যাবে।
+// আপডেট: ফোন নম্বর এখন বদলানো যায় — "নম্বর পরিবর্তন করুন" টগল করলে
+// নতুন নম্বর + বর্তমান পাসওয়ার্ড নিয়ে /api/change-phone কল করে।
+// সফল হলে সেশন invalid হতে পারে বলে সাইন-আউট করে হোমে পাঠিয়ে দেয়।
 // ============================================================
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
@@ -57,6 +60,29 @@ const upazilas = [
           <div class="edit-input-wrap">
             <i class="fas fa-phone edit-input-icon"></i>
             <input type="text" class="edit-input" id="editPhone" disabled />
+          </div>
+          <button type="button" class="phone-change-toggle" id="phoneChangeToggle">
+            <i class="fas fa-pen"></i> নম্বর পরিবর্তন করুন
+          </button>
+
+          <div class="phone-change-panel" id="phoneChangePanel" style="display:none;">
+            <p class="edit-message" id="phoneMessage"></p>
+
+            <label class="edit-label">নতুন ফোন নম্বর</label>
+            <div class="edit-input-wrap">
+              <i class="fas fa-phone edit-input-icon"></i>
+              <input type="text" class="edit-input" id="newPhoneInput" placeholder="01xxxxxxxxx" />
+            </div>
+
+            <label class="edit-label">বর্তমান পাসওয়ার্ড (যাচাইয়ের জন্য)</label>
+            <div class="edit-input-wrap">
+              <i class="fas fa-lock edit-input-icon"></i>
+              <input type="password" class="edit-input" id="phoneChangePassword" placeholder="••••••••" />
+            </div>
+
+            <button class="edit-submit edit-submit-secondary" id="savePhoneBtn" type="button">
+              <i class="fas fa-check"></i> <span>নম্বর বদলান</span>
+            </button>
           </div>
 
           <label class="edit-label">ইমেইল</label>
@@ -438,6 +464,40 @@ const upazilas = [
     background-position: right 14px center;
   }
 
+  /* ===== ফোন নম্বর পরিবর্তন ===== */
+  .phone-change-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    color: #FF6B35;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 8px 0 0;
+    cursor: pointer;
+  }
+
+  .phone-change-panel {
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 14px 14px 4px;
+    margin-top: 10px;
+  }
+
+  .phone-change-panel .edit-label {
+    margin-top: 8px;
+  }
+
+  .phone-change-panel .edit-label:first-of-type {
+    margin-top: 0;
+  }
+
+  .phone-change-panel .edit-submit {
+    margin-top: 16px;
+    margin-bottom: 4px;
+  }
+
   .donor-toggle-row {
     display: flex;
     align-items: center;
@@ -672,10 +732,19 @@ const upazilas = [
   let selectedPhotoFile = null;
   let currentUserId = null;
   let currentUserEmail = null;
+  let currentAccessToken = null;
 
   const donorToggleBtn = document.getElementById('donorToggleBtn');
   const donorToggleHint = document.getElementById('donorToggleHint');
   let isDonorOn = false;
+
+  // ===== ফোন নম্বর পরিবর্তন =====
+  const phoneChangeToggle = document.getElementById('phoneChangeToggle');
+  const phoneChangePanel = document.getElementById('phoneChangePanel');
+  const newPhoneInput = document.getElementById('newPhoneInput');
+  const phoneChangePasswordInput = document.getElementById('phoneChangePassword');
+  const phoneMessage = document.getElementById('phoneMessage');
+  const savePhoneBtn = document.getElementById('savePhoneBtn');
 
   // ===== রাইডার সেকশন (courier) =====
   const riderCard = document.getElementById('riderCard');
@@ -762,6 +831,7 @@ const upazilas = [
 
     currentUserId = session.user.id;
     currentUserEmail = session.user.email;
+    currentAccessToken = session.access_token;
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -912,6 +982,51 @@ const upazilas = [
     }
 
     showMsg(profileMessage, 'তথ্য সেভ হয়েছে ✓', 'success');
+  });
+
+  // ===== ফোন নম্বর পরিবর্তন =====
+  phoneChangeToggle?.addEventListener('click', () => {
+    const isOpen = phoneChangePanel.style.display !== 'none';
+    phoneChangePanel.style.display = isOpen ? 'none' : 'block';
+    clearMsg(phoneMessage);
+    if (!isOpen && newPhoneInput) {
+      newPhoneInput.value = '';
+      phoneChangePasswordInput.value = '';
+    }
+  });
+
+  savePhoneBtn?.addEventListener('click', async () => {
+    clearMsg(phoneMessage);
+
+    const newPhone = newPhoneInput?.value?.trim();
+    const password = phoneChangePasswordInput?.value;
+
+    if (!newPhone || !password) {
+      showMsg(phoneMessage, 'নতুন নম্বর ও বর্তমান পাসওয়ার্ড দিন');
+      return;
+    }
+
+    setLoading(savePhoneBtn, true, 'যাচাই হচ্ছে...');
+
+    const res = await fetch('/api/change-phone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: currentAccessToken, currentPassword: password, newPhone }),
+    });
+    const result = await res.json();
+
+    setLoading(savePhoneBtn, false);
+
+    if (!res.ok) {
+      showMsg(phoneMessage, result.error || 'নম্বর বদলানো যায়নি');
+      return;
+    }
+
+    showMsg(phoneMessage, 'নম্বর বদলানো হয়েছে ✓ আবার লগইন করতে হবে...', 'success');
+    setTimeout(async () => {
+      await supabase.auth.signOut();
+      window.location.href = '/';
+    }, 1800);
   });
 
   // ===== রাইডার অনলাইন/অফলাইন টগল =====
