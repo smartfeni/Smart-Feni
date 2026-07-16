@@ -1,0 +1,194 @@
+---
+---
+
+<div class="dash-card">
+  <h3><i class="fas fa-user-plus"></i> নতুন সদস্য/কমিটি মেম্বার যোগ করুন</h3>
+  <p class="form-msg" id="memberMsg"></p>
+
+  <div class="photo-upload-circle" id="memberPhotoCircle">
+    <img id="memberPhotoPreview" src="" alt="ছবি" />
+    <i class="fas fa-user"></i>
+  </div>
+  <input type="file" id="memberPhotoInput" accept="image/*" style="display:none;" />
+
+  <label class="form-label">নাম</label>
+  <input type="text" class="form-input" id="memberNameInput" />
+
+  <label class="form-label">জন্ম তারিখ (ঐচ্ছিক)</label>
+  <input type="date" class="form-input" id="memberDobInput" />
+
+  <label class="form-label" style="display:flex;align-items:center;gap:8px;margin-top:16px;">
+    <input type="checkbox" id="memberIsCommitteeInput" style="width:auto;" /> কমিটি সদস্য?
+  </label>
+
+  <div id="committeeFields" style="display:none;">
+    <label class="form-label">পদবি</label>
+    <input type="text" class="form-input" id="memberPositionInput" placeholder="যেমন: সভাপতি, সম্পাদক" />
+
+    <label class="form-label">ক্রম (উপরে দেখানোর জন্য, ছোট সংখ্যা আগে)</label>
+    <input type="number" class="form-input" id="memberOrderInput" placeholder="0" />
+  </div>
+
+  <button class="primary-btn" id="addMemberBtn" type="button">
+    <i class="fas fa-plus"></i> <span>যোগ করুন</span>
+  </button>
+</div>
+
+<div class="dash-card">
+  <h3><i class="fas fa-users-gear"></i> কমিটি তালিকা</h3>
+  <div id="committeeList"></div>
+  <p class="empty-note" id="committeeEmpty" style="display:none;">এখনো কোনো কমিটি সদস্য যোগ করা হয়নি</p>
+</div>
+
+<div class="dash-card">
+  <h3><i class="fas fa-user-group"></i> সাধারণ সদস্য তালিকা</h3>
+  <div id="membersList"></div>
+  <p class="empty-note" id="membersEmpty" style="display:none;">এখনো কোনো সদস্য যোগ করা হয়নি</p>
+</div>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let clubId = null;
+  let selectedPhotoFile = null;
+  let allMembers = [];
+
+  const msgEl = document.getElementById('memberMsg');
+  function showMsg(text, type = 'error') {
+    msgEl.textContent = text;
+    msgEl.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
+  }
+
+  document.getElementById('memberPhotoCircle')?.addEventListener('click', () => {
+    document.getElementById('memberPhotoInput').click();
+  });
+
+  document.getElementById('memberPhotoInput')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    selectedPhotoFile = file;
+    const reader = new FileReader();
+    reader.onload = () => {
+      document.getElementById('memberPhotoPreview').src = reader.result;
+      document.getElementById('memberPhotoCircle').classList.add('has-photo');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('memberIsCommitteeInput')?.addEventListener('change', (e) => {
+    document.getElementById('committeeFields').style.display = e.target.checked ? 'block' : 'none';
+  });
+
+  async function uploadPhoto(file) {
+    const ext = file.name.split('.').pop();
+    const path = `club-members/${clubId}-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
+    if (error) return null;
+    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
+    return data?.publicUrl || null;
+  }
+
+  document.getElementById('addMemberBtn')?.addEventListener('click', async () => {
+    const name = document.getElementById('memberNameInput').value.trim();
+    if (!name) {
+      showMsg('নাম দিন');
+      return;
+    }
+
+    const btn = document.getElementById('addMemberBtn');
+    const span = btn.querySelector('span');
+    span.textContent = 'যোগ হচ্ছে...';
+    btn.disabled = true;
+
+    let photoUrl = null;
+    if (selectedPhotoFile) photoUrl = await uploadPhoto(selectedPhotoFile);
+
+    const isCommittee = document.getElementById('memberIsCommitteeInput').checked;
+
+    const { error } = await supabase.from('club_members').insert({
+      club_id: clubId,
+      name,
+      photo: photoUrl,
+      dob: document.getElementById('memberDobInput').value || null,
+      is_committee: isCommittee,
+      position: isCommittee ? document.getElementById('memberPositionInput').value.trim() : null,
+      position_order: isCommittee ? (parseInt(document.getElementById('memberOrderInput').value) || 0) : 0,
+    });
+
+    span.textContent = 'যোগ করুন';
+    btn.disabled = false;
+
+    if (error) {
+      showMsg('যোগ করা ব্যর্থ: ' + error.message);
+      return;
+    }
+
+    showMsg('যোগ হয়েছে ✓', 'success');
+    document.getElementById('memberNameInput').value = '';
+    document.getElementById('memberDobInput').value = '';
+    document.getElementById('memberPositionInput').value = '';
+    document.getElementById('memberOrderInput').value = '';
+    document.getElementById('memberIsCommitteeInput').checked = false;
+    document.getElementById('committeeFields').style.display = 'none';
+    document.getElementById('memberPhotoCircle').classList.remove('has-photo');
+    selectedPhotoFile = null;
+
+    loadMembers();
+  });
+
+  function renderList(container, emptyEl, items) {
+    container.innerHTML = '';
+    if (items.length === 0) {
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    items.forEach((m) => {
+      const card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML = `
+        ${m.photo ? `<img class="item-photo" src="${m.photo}" alt="${m.name}" />` : `<div class="item-photo-placeholder"><i class="fas fa-user"></i></div>`}
+        <div class="item-body">
+          <p class="item-title">${m.name}</p>
+          <p class="item-sub">${m.position || (m.dob ? new Date(m.dob).toLocaleDateString('bn-BD') : '')}</p>
+        </div>
+        <div class="item-actions">
+          <button class="icon-btn delete"><i class="fas fa-trash"></i></button>
+        </div>
+      `;
+      card.querySelector('.delete').addEventListener('click', () => deleteMember(m.id));
+      container.appendChild(card);
+    });
+  }
+
+  async function deleteMember(id) {
+    if (!confirm('এই সদস্যকে মুছে ফেলতে চান?')) return;
+    const { error } = await supabase.from('club_members').delete().eq('id', id);
+    if (error) {
+      alert('ডিলিট ব্যর্থ: ' + error.message);
+      return;
+    }
+    loadMembers();
+  }
+
+  async function loadMembers() {
+    const { data } = await supabase
+      .from('club_members')
+      .select('*')
+      .eq('club_id', clubId)
+      .order('position_order', { ascending: true });
+
+    allMembers = data || [];
+    const committee = allMembers.filter((m) => m.is_committee);
+    const regular = allMembers.filter((m) => !m.is_committee);
+
+    renderList(document.getElementById('committeeList'), document.getElementById('committeeEmpty'), committee);
+    renderList(document.getElementById('membersList'), document.getElementById('membersEmpty'), regular);
+  }
+
+  window.addEventListener('smartfeni:club-ready', (e) => {
+    clubId = e.detail.clubId;
+    loadMembers();
+  });
+</script>
