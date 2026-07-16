@@ -4,6 +4,6 @@ import vercel from '@astrojs/vercel';
 export default defineConfig({
   output: 'static',
   adapter: vercel(),
-  site: 'https://smart-feni-murex.vercel.app',
+  site: 'https://smartfeni.com',
   trailingSlash: 'ignore',
 });
