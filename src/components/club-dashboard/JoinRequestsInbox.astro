@@ -1,0 +1,75 @@
+---
+---
+
+<div class="dash-card">
+  <h3><i class="fas fa-user-plus"></i> মেম্বারশিপ আবেদন</h3>
+  <div id="joinList"></div>
+  <p class="empty-note" id="joinEmpty" style="display:none;">এখনো কোনো আবেদন আসেনি</p>
+</div>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let clubId = null;
+
+  async function loadRequests() {
+    const { data } = await supabase
+      .from('club_join_requests')
+      .select('*')
+      .eq('club_id', clubId)
+      .order('created_at', { ascending: false });
+
+    const requests = data || [];
+    const container = document.getElementById('joinList');
+    const emptyEl = document.getElementById('joinEmpty');
+    const pendingCount = requests.filter((r) => r.status === 'pending').length;
+
+    const badge = document.getElementById('joinBadge');
+    if (badge) {
+      badge.style.display = pendingCount > 0 ? 'inline-block' : 'none';
+      badge.textContent = pendingCount;
+    }
+
+    container.innerHTML = '';
+    if (requests.length === 0) {
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    requests.forEach((r) => {
+      const card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML = `
+        <div class="item-photo-placeholder"><i class="fas fa-user"></i></div>
+        <div class="item-body">
+          <p class="item-title">${r.applicant_name} — ${r.phone}</p>
+          <p class="item-sub">${r.message || ''} ${r.status !== 'pending' ? '· ' + (r.status === 'accepted' ? 'গৃহীত' : 'বাতিল') : ''}</p>
+        </div>
+        <div class="item-actions">
+          ${r.status === 'pending' ? `
+            <button class="icon-btn edit accept-btn"><i class="fas fa-check"></i></button>
+            <button class="icon-btn delete reject-btn"><i class="fas fa-xmark"></i></button>
+          ` : ''}
+        </div>
+      `;
+      card.querySelector('.accept-btn')?.addEventListener('click', () => updateStatus(r.id, 'accepted'));
+      card.querySelector('.reject-btn')?.addEventListener('click', () => updateStatus(r.id, 'rejected'));
+      container.appendChild(card);
+    });
+  }
+
+  async function updateStatus(id, status) {
+    const { error } = await supabase.from('club_join_requests').update({ status }).eq('id', id);
+    if (error) {
+      alert('আপডেট ব্যর্থ: ' + error.message);
+      return;
+    }
+    loadRequests();
+  }
+
+  window.addEventListener('smartfeni:club-ready', (e) => {
+    clubId = e.detail.clubId;
+    loadRequests();
+  });
+</script>
