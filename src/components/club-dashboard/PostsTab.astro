@@ -1,0 +1,211 @@
+---
+---
+
+<div class="dash-card">
+  <h3><i class="fas fa-plus"></i> নতুন পোস্ট যোগ করুন</h3>
+  <p class="form-msg" id="postMsg"></p>
+
+  <label class="form-label">পোস্টের ধরন</label>
+  <select class="form-input" id="postTypeInput">
+    <option value="achievement">অর্জন</option>
+    <option value="event">ইভেন্ট</option>
+    <option value="gallery">গ্যালারি ছবি</option>
+    <option value="announcement">এনাউন্সমেন্ট</option>
+  </select>
+
+  <label class="form-label">টাইটেল</label>
+  <input type="text" class="form-input" id="postTitleInput" />
+
+  <label class="form-label" id="postDescLabel">বিবরণ</label>
+  <textarea class="form-input" id="postDescInput" rows="3"></textarea>
+
+  <div id="postDateField">
+    <label class="form-label">তারিখ</label>
+    <input type="date" class="form-input" id="postDateInput" />
+  </div>
+
+  <div id="postImageField">
+    <label class="form-label">ছবি</label>
+    <input type="file" class="form-input" id="postImageInput" accept="image/*" />
+  </div>
+
+  <button class="primary-btn" id="addPostBtn" type="button">
+    <i class="fas fa-plus"></i> <span>পোস্ট করুন</span>
+  </button>
+</div>
+
+<div class="dash-card">
+  <h3><i class="fas fa-newspaper"></i> আমার পোস্ট</h3>
+
+  <div class="myclub-tabs" id="postFilterTabs" style="margin-bottom:14px;">
+    <button class="myclub-tab active" data-type="achievement">অর্জন</button>
+    <button class="myclub-tab" data-type="event">ইভেন্ট</button>
+    <button class="myclub-tab" data-type="gallery">গ্যালারি</button>
+    <button class="myclub-tab" data-type="announcement">এনাউন্সমেন্ট</button>
+  </div>
+
+  <div id="postsList"></div>
+  <p class="empty-note" id="postsEmpty" style="display:none;">কোনো পোস্ট নেই</p>
+</div>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let clubId = null;
+  let clubName = '';
+  let selectedImageFile = null;
+  let allPosts = [];
+  let currentFilterType = 'achievement';
+
+  const msgEl = document.getElementById('postMsg');
+  function showMsg(text, type = 'error') {
+    msgEl.textContent = text;
+    msgEl.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
+  }
+
+  document.getElementById('postTypeInput')?.addEventListener('change', (e) => {
+    const type = e.target.value;
+    document.getElementById('postDateField').style.display = (type === 'achievement' || type === 'event') ? 'block' : 'none';
+    document.getElementById('postImageField').style.display = (type === 'announcement') ? 'none' : 'block';
+    document.getElementById('postDescLabel').textContent = type === 'announcement' ? 'বার্তা' : 'বিবরণ';
+  });
+
+  document.getElementById('postImageInput')?.addEventListener('change', (e) => {
+    selectedImageFile = e.target.files?.[0] || null;
+  });
+
+  async function uploadPostImage(file) {
+    const ext = file.name.split('.').pop();
+    const path = `club-posts/${clubId}-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
+    if (error) return null;
+    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
+    return data?.publicUrl || null;
+  }
+
+  document.getElementById('addPostBtn')?.addEventListener('click', async () => {
+    const title = document.getElementById('postTitleInput').value.trim();
+    if (!title) {
+      showMsg('টাইটেল দিন');
+      return;
+    }
+
+    const btn = document.getElementById('addPostBtn');
+    const span = btn.querySelector('span');
+    span.textContent = 'পোস্ট হচ্ছে...';
+    btn.disabled = true;
+
+    const type = document.getElementById('postTypeInput').value;
+    let imageUrl = null;
+    if (selectedImageFile && type !== 'announcement') {
+      imageUrl = await uploadPostImage(selectedImageFile);
+    }
+
+    const { data: newPost, error } = await supabase
+      .from('club_posts')
+      .insert({
+        club_id: clubId,
+        type,
+        title,
+        description: document.getElementById('postDescInput').value.trim() || null,
+        image: imageUrl,
+        event_date: (type === 'achievement' || type === 'event') ? (document.getElementById('postDateInput').value || null) : null,
+      })
+      .select()
+      .single();
+
+    span.textContent = 'পোস্ট করুন';
+    btn.disabled = false;
+
+    if (error) {
+      showMsg('পোস্ট ব্যর্থ: ' + error.message);
+      return;
+    }
+
+    showMsg('পোস্ট হয়েছে ✓', 'success');
+    document.getElementById('postTitleInput').value = '';
+    document.getElementById('postDescInput').value = '';
+    document.getElementById('postDateInput').value = '';
+    document.getElementById('postImageInput').value = '';
+    selectedImageFile = null;
+
+    loadPosts();
+
+    if (type === 'event') {
+      setTimeout(() => {
+        if (confirm(`"${title}" ইভেন্টটি অন্য ক্লাবদের কাছে ব্রডকাস্ট করতে চান?`)) {
+          window.openBroadcastModal?.(newPost.id, newPost.title, clubId, clubName);
+        }
+      }, 300);
+    }
+  });
+
+  function renderPosts() {
+    const container = document.getElementById('postsList');
+    const emptyEl = document.getElementById('postsEmpty');
+    const filtered = allPosts.filter((p) => p.type === currentFilterType);
+
+    container.innerHTML = '';
+    if (filtered.length === 0) {
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    filtered.forEach((p) => {
+      const card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML = `
+        ${p.image ? `<img class="item-photo" src="${p.image}" alt="${p.title}" />` : `<div class="item-photo-placeholder"><i class="fas fa-file"></i></div>`}
+        <div class="item-body">
+          <p class="item-title">${p.title}</p>
+          <p class="item-sub">${p.event_date ? new Date(p.event_date).toLocaleDateString('bn-BD') : ''}</p>
+        </div>
+        <div class="item-actions">
+          ${p.type === 'event' ? '<button class="icon-btn edit broadcast-btn"><i class="fas fa-tower-broadcast"></i></button>' : ''}
+          <button class="icon-btn delete"><i class="fas fa-trash"></i></button>
+        </div>
+      `;
+      card.querySelector('.delete').addEventListener('click', () => deletePost(p.id));
+      card.querySelector('.broadcast-btn')?.addEventListener('click', () => {
+        window.openBroadcastModal?.(p.id, p.title, clubId, clubName);
+      });
+      container.appendChild(card);
+    });
+  }
+
+  async function deletePost(id) {
+    if (!confirm('এই পোস্টটি মুছে ফেলতে চান?')) return;
+    const { error } = await supabase.from('club_posts').delete().eq('id', id);
+    if (error) {
+      alert('ডিলিট ব্যর্থ: ' + error.message);
+      return;
+    }
+    loadPosts();
+  }
+
+  document.getElementById('postFilterTabs')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.myclub-tab');
+    if (!btn) return;
+    document.querySelectorAll('#postFilterTabs .myclub-tab').forEach((t) => t.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilterType = btn.dataset.type;
+    renderPosts();
+  });
+
+  async function loadPosts() {
+    const { data } = await supabase
+      .from('club_posts')
+      .select('*')
+      .eq('club_id', clubId)
+      .order('created_at', { ascending: false });
+    allPosts = data || [];
+    renderPosts();
+  }
+
+  window.addEventListener('smartfeni:club-ready', (e) => {
+    clubId = e.detail.clubId;
+    clubName = e.detail.club.name;
+    loadPosts();
+  });
+</script>
