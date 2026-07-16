@@ -1,0 +1,230 @@
+---
+---
+
+<div class="broadcast-overlay" id="broadcastOverlay">
+  <div class="broadcast-modal">
+    <button class="broadcast-close" id="broadcastClose"><i class="fas fa-xmark"></i></button>
+
+    <h3><i class="fas fa-tower-broadcast"></i> ব্রডকাস্ট পাঠান</h3>
+    <p class="broadcast-post-title" id="broadcastPostTitle"></p>
+
+    <p class="form-msg" id="broadcastMsg"></p>
+
+    <div class="broadcast-mode-tabs">
+      <button class="myclub-tab active" data-mode="all">সব ক্লাব (উপজেলা ফিল্টার)</button>
+      <button class="myclub-tab" data-mode="specific">নির্দিষ্ট ক্লাব বাছাই</button>
+    </div>
+
+    <div id="allModeFields">
+      <label class="form-label">উপজেলা (ঐচ্ছিক — খালি রাখলে সব উপজেলা)</label>
+      <select class="form-input" id="broadcastUpajilaSelect">
+        <option value="">সব উপজেলা</option>
+        <option value="feni-sadar">ফেনী সদর</option>
+        <option value="chhagalnaiya">ছাগলনাইয়া</option>
+        <option value="daganbhuiyan">দাগনভূঞা</option>
+        <option value="parshuram">পরশুরাম</option>
+        <option value="fulgazi">ফুলগাজী</option>
+        <option value="sonagazi">সোনাগাজী</option>
+      </select>
+    </div>
+
+    <div id="specificModeFields" style="display:none;">
+      <label class="form-label">ক্লাব বাছাই করুন</label>
+      <div id="specificClubList" class="specific-club-list"></div>
+    </div>
+
+    <button class="primary-btn" id="sendBroadcastBtn" type="button">
+      <i class="fas fa-paper-plane"></i> <span>পাঠান</span>
+    </button>
+  </div>
+</div>
+
+<style>
+  .broadcast-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .broadcast-overlay.open {
+    display: flex;
+  }
+
+  .broadcast-overlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+  }
+
+  .broadcast-modal {
+    position: relative;
+    background: #fff;
+    width: 100%;
+    max-width: 520px;
+    max-height: 82vh;
+    overflow-y: auto;
+    border-radius: 24px 24px 0 0;
+    padding: 24px 20px 32px;
+  }
+
+  .broadcast-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: #F4F7FC;
+    border: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: #5A6E85;
+    cursor: pointer;
+  }
+
+  .broadcast-modal h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .broadcast-modal h3 i {
+    color: #FF6B35;
+  }
+
+  .broadcast-post-title {
+    font-size: 0.85rem;
+    color: #8FA0BC;
+    margin-bottom: 16px;
+    margin-top: 4px;
+  }
+
+  .broadcast-mode-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .specific-club-list {
+    max-height: 240px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .club-check-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #FBFCFE;
+    border: 1px solid #EEF3F9;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    color: #1B2A4A;
+    font-weight: 600;
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let currentPostId = null;
+  let currentClubId = null;
+  let currentClubName = '';
+  let broadcastMode = 'all';
+
+  window.openBroadcastModal = async (postId, postTitle, clubId, clubName) => {
+    currentPostId = postId;
+    currentClubId = clubId;
+    currentClubName = clubName;
+    document.getElementById('broadcastPostTitle').textContent = postTitle;
+    document.getElementById('broadcastOverlay').classList.add('open');
+    document.getElementById('broadcastMsg').className = 'form-msg';
+
+    const { data: clubs } = await supabase
+      .from('clubs')
+      .select('id, name, upajila')
+      .eq('is_active', true)
+      .neq('id', clubId);
+
+    const listEl = document.getElementById('specificClubList');
+    listEl.innerHTML = '';
+    (clubs || []).forEach((c) => {
+      const item = document.createElement('label');
+      item.className = 'club-check-item';
+      item.innerHTML = `<input type="checkbox" value="${c.id}" style="width:auto;" /> ${c.name}`;
+      listEl.appendChild(item);
+    });
+  };
+
+  document.getElementById('broadcastClose')?.addEventListener('click', () => {
+    document.getElementById('broadcastOverlay').classList.remove('open');
+  });
+
+  document.querySelectorAll('.broadcast-mode-tabs .myclub-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.broadcast-mode-tabs .myclub-tab').forEach((t) => t.classList.remove('active'));
+      btn.classList.add('active');
+      broadcastMode = btn.dataset.mode;
+      document.getElementById('allModeFields').style.display = broadcastMode === 'all' ? 'block' : 'none';
+      document.getElementById('specificModeFields').style.display = broadcastMode === 'specific' ? 'block' : 'none';
+    });
+  });
+
+  document.getElementById('sendBroadcastBtn')?.addEventListener('click', async () => {
+    const msgEl = document.getElementById('broadcastMsg');
+    const btn = document.getElementById('sendBroadcastBtn');
+    const span = btn.querySelector('span');
+
+    let targetClubIds = [];
+
+    if (broadcastMode === 'all') {
+      const upajila = document.getElementById('broadcastUpajilaSelect').value;
+      let query = supabase.from('clubs').select('id').eq('is_active', true).neq('id', currentClubId);
+      if (upajila) query = query.eq('upajila', upajila);
+      const { data } = await query;
+      targetClubIds = (data || []).map((c) => c.id);
+    } else {
+      targetClubIds = Array.from(document.querySelectorAll('#specificClubList input:checked')).map((i) => i.value);
+    }
+
+    if (targetClubIds.length === 0) {
+      msgEl.textContent = 'কোনো ক্লাব নির্বাচিত হয়নি';
+      msgEl.className = 'form-msg show-error';
+      return;
+    }
+
+    span.textContent = 'পাঠানো হচ্ছে...';
+    btn.disabled = true;
+
+    const rows = targetClubIds.map((receiverId) => ({
+      source_post_id: currentPostId,
+      sender_club_id: currentClubId,
+      receiver_club_id: receiverId,
+    }));
+
+    const { error } = await supabase.from('club_notifications').insert(rows);
+
+    span.textContent = 'পাঠান';
+    btn.disabled = false;
+
+    if (error) {
+      msgEl.textContent = 'ব্যর্থ: ' + error.message;
+      msgEl.className = 'form-msg show-error';
+      return;
+    }
+
+    msgEl.textContent = `${targetClubIds.length} টি ক্লাবকে জানানো হয়েছে ✓`;
+    msgEl.className = 'form-msg show-success';
+    setTimeout(() => {
+      document.getElementById('broadcastOverlay').classList.remove('open');
+    }, 1200);
+  });
+</script>
