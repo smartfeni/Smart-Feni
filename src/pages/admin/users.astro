@@ -4,6 +4,10 @@
 // সব প্রোফাইল, প্রতিটার listing সংখ্যা (ক্লিক করলে expand), ব্লক/আনব্লক
 // আপডেট: "স্থায়ী ডিলিট" বাটন যোগ (শুধু admin, /api/delete-user কল করে)
 //         + লিস্টিং expand প্যানেলে প্রতিটা লিস্টিংয়ের পাশে ডিলিট আইকন
+// আপডেট ২: ক্লাব/শপ ওনার প্রোফাইলে ব্লক/ডিলিট বাটনের বদলে নোট —
+//           এই ইউনিক একাউন্টগুলো শুধু admin/clubs বা admin/shops
+//           থেকে ম্যানেজ হবে, এখান থেকে না (moderator তো ব্লকই
+//           করতে পারবে না)
 // ============================================================
 
 export const prerender = false;
@@ -192,6 +196,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     // moderator target user কে ব্লক/আনব্লক করার অনুমতি রাখে কিনা
     function canManageBlock(targetUser) {
+      if (targetUser.is_club_owner || targetUser.is_shop_owner) return false;
       if (currentUserRole === 'admin') return true;
       if (currentUserRole === 'moderator') return targetUser.role === 'user';
       return false;
@@ -200,6 +205,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     function renderUser(user) {
       const role = roleLabels[user.role] || roleLabels.user;
       const isMe = user.id === currentUserId;
+      const isUniqueAccount = user.is_club_owner || user.is_shop_owner;
 
       const card = document.createElement('div');
       card.style.cssText = `background:#fff;border-radius:18px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);${user.is_blocked ? 'opacity:0.6;' : ''}`;
@@ -215,6 +221,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
               <h3 style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${user.full_name || '(নামহীন)'}</h3>
               <span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:${role.bg};color:${role.color};">${role.text}</span>
               ${isMe ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#F4F7FC;color:#8FA0BC;">আপনি</span>` : ''}
+              ${user.is_club_owner ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#FF6B35;"><i class="fas fa-users"></i> ক্লাব ওনার</span>` : ''}
+              ${user.is_shop_owner ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#FF6B35;"><i class="fas fa-store"></i> শপ ওনার</span>` : ''}
               ${user.is_blocked ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#D14343;">ব্লকড</span>` : ''}
             </div>
             <p style="font-size:0.82rem;color:#8FA0BC;margin-top:3px;">
@@ -249,7 +257,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const actionWrap = card.querySelector('.user-action');
 
       if (!isMe) {
-        if (canManageBlock(user)) {
+        // ===== ক্লাব/শপ ওনার — এখান থেকে কোনো অ্যাকশন না, শুধু নোট =====
+        if (isUniqueAccount) {
+          const label = document.createElement('span');
+          const targetPage = user.is_club_owner ? 'admin/clubs' : 'admin/shops';
+          label.textContent = `${targetPage} থেকে ম্যানেজ করুন`;
+          label.style.cssText = 'font-size:0.72rem;color:#8FA0BC;font-weight:600;padding:8px 4px;white-space:nowrap;text-align:right;';
+          actionWrap.appendChild(label);
+        } else if (canManageBlock(user)) {
           const toggleBtn = document.createElement('button');
           let confirming = false;
 
@@ -289,8 +304,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           actionWrap.appendChild(label);
         }
 
-        // ===== স্থায়ী ডিলিট — শুধু admin, শুধু সাধারণ ইউজারের জন্য =====
-        if (currentUserRole === 'admin' && user.role === 'user') {
+        // ===== স্থায়ী ডিলিট — শুধু admin, শুধু সাধারণ ইউজারের জন্য, ক্লাব/শপ ওনার বাদে =====
+        if (currentUserRole === 'admin' && user.role === 'user' && !isUniqueAccount) {
           const deleteBtn = document.createElement('button');
           let deleteConfirming = false;
 
