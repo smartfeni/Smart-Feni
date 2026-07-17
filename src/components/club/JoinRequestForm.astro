@@ -2,7 +2,7 @@
 const { clubId, clubName } = Astro.props;
 ---
 
-<button class="join-cta-btn" id="showJoinFormBtn" type="button">
+<button class="join-cta-btn" id="showJoinFormBtn" type="button" data-club-name={clubName}>
   <span class="join-cta-text"><i class="fas fa-user-plus"></i> {clubName} এ যোগ দিতে চান? আবেদন করুন</span>
   <i class="fas fa-chevron-down join-cta-chevron" id="joinCtaChevron"></i>
 </button>
@@ -194,4 +194,154 @@ const { clubId, clubName } = Astro.props;
     font-weight: 600;
     color: #1B2A4A;
     margin-bottom: 6px;
-    ma
+    margin-top: 14px;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1.5px solid #E5EAF0;
+    font-size: 0.9rem;
+    font-family: inherit;
+    color: #1B2A4A;
+    background: #FBFCFE;
+    resize: vertical;
+  }
+
+  .form-input:focus {
+    outline: none;
+    border-color: #FF6B35;
+    background: #fff;
+  }
+
+  .join-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #FF6B35;
+    color: #fff;
+    border: none;
+    padding: 14px;
+    border-radius: 14px;
+    font-weight: 700;
+    font-size: 0.92rem;
+    cursor: pointer;
+    margin-top: 18px;
+  }
+
+  .join-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let selectedPhotoFile = null;
+
+  const toggleBtn = document.getElementById('showJoinFormBtn');
+  const formPanel = document.getElementById('joinFormBox');
+  const ctaText = document.querySelector('.join-cta-text');
+
+  function setPanelOpen(isOpen) {
+    if (!formPanel || !toggleBtn || !ctaText) return;
+    formPanel.classList.toggle('open', isOpen);
+    toggleBtn.classList.toggle('open', isOpen);
+    const name = toggleBtn.dataset.clubName || '';
+    ctaText.innerHTML = isOpen
+      ? '<i class="fas fa-xmark"></i> ফর্ম বন্ধ করুন'
+      : `<i class="fas fa-user-plus"></i> ${name} এ যোগ দিতে চান? আবেদন করুন`;
+  }
+
+  if (toggleBtn && formPanel) {
+    toggleBtn.addEventListener('click', () => {
+      const isOpen = formPanel.classList.contains('open');
+      setPanelOpen(!isOpen);
+    });
+  }
+
+  const btn = document.getElementById('joinSubmitBtn');
+  const btnText = document.getElementById('joinBtnText');
+  const msgEl = document.getElementById('joinFormMessage');
+
+  function showMsg(text, type = 'error') {
+    msgEl.textContent = text;
+    msgEl.className = `form-message ${type === 'error' ? 'show-error' : 'show-success'}`;
+  }
+
+  document.getElementById('joinPhotoCircle')?.addEventListener('click', () => {
+    document.getElementById('joinPhotoInput').click();
+  });
+
+  document.getElementById('joinPhotoInput')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    selectedPhotoFile = file;
+    const reader = new FileReader();
+    reader.onload = () => {
+      document.getElementById('joinPhotoPreview').src = reader.result;
+      document.getElementById('joinPhotoCircle').classList.add('has-photo');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  async function uploadPhoto(file, clubId) {
+    const ext = file.name.split('.').pop();
+    const path = `club-join-requests/${clubId}-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
+    if (error) return null;
+    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
+    return data?.publicUrl || null;
+  }
+
+  btn?.addEventListener('click', async () => {
+    const clubId = document.getElementById('joinClubId').value;
+    const applicant_name = document.getElementById('joinApplicantName').value.trim();
+    const phone = document.getElementById('joinApplicantPhone').value.trim();
+    const dob = document.getElementById('joinApplicantDob').value;
+    const message = document.getElementById('joinApplicantMessage').value.trim();
+
+    if (!applicant_name || !phone) {
+      showMsg('নাম ও ফোন নম্বর দিন');
+      return;
+    }
+
+    btn.disabled = true;
+    btnText.textContent = 'পাঠানো হচ্ছে...';
+
+    let photoUrl = null;
+    if (selectedPhotoFile) {
+      photoUrl = await uploadPhoto(selectedPhotoFile, clubId);
+    }
+
+    const { error } = await supabase.from('club_join_requests').insert({
+      club_id: clubId,
+      applicant_name,
+      phone,
+      dob: dob || null,
+      photo: photoUrl,
+      message: message || null,
+    });
+
+    if (error) {
+      showMsg('আবেদন পাঠানো ব্যর্থ: ' + error.message);
+    } else {
+      showMsg('আবেদন সফলভাবে পাঠানো হয়েছে ✓', 'success');
+      document.getElementById('joinApplicantName').value = '';
+      document.getElementById('joinApplicantPhone').value = '';
+      document.getElementById('joinApplicantDob').value = '';
+      document.getElementById('joinApplicantMessage').value = '';
+      document.getElementById('joinPhotoCircle').classList.remove('has-photo');
+      selectedPhotoFile = null;
+
+      setTimeout(() => setPanelOpen(false), 2000);
+    }
+
+    btn.disabled = false;
+    btnText.textContent = 'আবেদন পাঠান';
+  });
+</script>
