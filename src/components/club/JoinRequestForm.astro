@@ -3,10 +3,11 @@ const { clubId, clubName } = Astro.props;
 ---
 
 <button class="join-cta-btn" id="showJoinFormBtn" type="button">
-  <i class="fas fa-user-plus"></i> {clubName} এ যোগ দিতে চান? আবেদন করুন
+  <span class="join-cta-text"><i class="fas fa-user-plus"></i> {clubName} এ যোগ দিতে চান? আবেদন করুন</span>
+  <i class="fas fa-chevron-down join-cta-chevron" id="joinCtaChevron"></i>
 </button>
 
-<div class="section-card" id="joinFormBox" style="display:none;">
+<div class="section-card join-form-panel" id="joinFormBox">
   <h3><i class="fas fa-user-plus"></i> {clubName} এ যোগ দিতে চান?</h3>
   <p class="join-subtitle">নিচের ফর্মটি পূরণ করুন, ক্লাব কর্তৃপক্ষ আপনার সাথে যোগাযোগ করবে</p>
 
@@ -43,18 +44,39 @@ const { clubId, clubName } = Astro.props;
     width: 100%;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     gap: 8px;
     background: #FFF0EA;
     color: #FF6B35;
     border: 1.5px dashed #FFD3BC;
-    padding: 15px;
+    padding: 15px 18px;
     border-radius: 16px;
     font-weight: 700;
     font-size: 0.88rem;
     cursor: pointer;
-    margin-bottom: 20px;
-    text-align: center;
+    margin-bottom: 0;
+    text-align: left;
+  }
+
+  .join-cta-text {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .join-cta-chevron {
+    font-size: 0.78rem;
+    flex-shrink: 0;
+    transition: transform 0.25s ease;
+  }
+
+  .join-cta-btn.open {
+    border-radius: 16px 16px 0 0;
+    margin-bottom: 0;
+  }
+
+  .join-cta-btn.open .join-cta-chevron {
+    transform: rotate(180deg);
   }
 
   .join-cta-btn:hover {
@@ -63,12 +85,23 @@ const { clubId, clubName } = Astro.props;
     border-color: #FF6B35;
   }
 
-  .section-card {
+  /* ===== ফর্ম প্যানেল — dropdown/accordion স্টাইলে খোলে-বন্ধ হয় ===== */
+  .join-form-panel {
     background: #fff;
-    border-radius: 20px;
-    padding: 20px;
+    border-radius: 0 0 20px 20px;
     box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
     margin-bottom: 20px;
+    overflow: hidden;
+    max-height: 0;
+    padding: 0 20px;
+    opacity: 0;
+    transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.35s ease;
+  }
+
+  .join-form-panel.open {
+    max-height: 1400px;
+    padding: 20px;
+    opacity: 1;
   }
 
   .section-card h3 {
@@ -161,136 +194,4 @@ const { clubId, clubName } = Astro.props;
     font-weight: 600;
     color: #1B2A4A;
     margin-bottom: 6px;
-    margin-top: 14px;
-  }
-
-  .form-input {
-    width: 100%;
-    padding: 12px 14px;
-    border-radius: 14px;
-    border: 1.5px solid #E5EAF0;
-    font-size: 0.9rem;
-    font-family: inherit;
-    color: #1B2A4A;
-    background: #FBFCFE;
-    resize: vertical;
-  }
-
-  .form-input:focus {
-    outline: none;
-    border-color: #FF6B35;
-    background: #fff;
-  }
-
-  .join-btn {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    background: #FF6B35;
-    color: #fff;
-    border: none;
-    padding: 14px;
-    border-radius: 14px;
-    font-weight: 700;
-    font-size: 0.92rem;
-    cursor: pointer;
-    margin-top: 18px;
-  }
-
-  .join-btn:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-  }
-</style>
-
-<script>
-  import { supabase } from '../../lib/supabase.js';
-
-  let selectedPhotoFile = null;
-
-  document.getElementById('showJoinFormBtn')?.addEventListener('click', () => {
-    document.getElementById('joinFormBox').style.display = 'block';
-    document.getElementById('showJoinFormBtn').style.display = 'none';
-  });
-
-  const btn = document.getElementById('joinSubmitBtn');
-  const btnText = document.getElementById('joinBtnText');
-  const msgEl = document.getElementById('joinFormMessage');
-
-  function showMsg(text, type = 'error') {
-    msgEl.textContent = text;
-    msgEl.className = `form-message ${type === 'error' ? 'show-error' : 'show-success'}`;
-  }
-
-  document.getElementById('joinPhotoCircle')?.addEventListener('click', () => {
-    document.getElementById('joinPhotoInput').click();
-  });
-
-  document.getElementById('joinPhotoInput')?.addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    selectedPhotoFile = file;
-    const reader = new FileReader();
-    reader.onload = () => {
-      document.getElementById('joinPhotoPreview').src = reader.result;
-      document.getElementById('joinPhotoCircle').classList.add('has-photo');
-    };
-    reader.readAsDataURL(file);
-  });
-
-  async function uploadPhoto(file, clubId) {
-    const ext = file.name.split('.').pop();
-    const path = `club-join-requests/${clubId}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
-    if (error) return null;
-    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
-    return data?.publicUrl || null;
-  }
-
-  btn?.addEventListener('click', async () => {
-    const clubId = document.getElementById('joinClubId').value;
-    const applicant_name = document.getElementById('joinApplicantName').value.trim();
-    const phone = document.getElementById('joinApplicantPhone').value.trim();
-    const dob = document.getElementById('joinApplicantDob').value;
-    const message = document.getElementById('joinApplicantMessage').value.trim();
-
-    if (!applicant_name || !phone) {
-      showMsg('নাম ও ফোন নম্বর দিন');
-      return;
-    }
-
-    btn.disabled = true;
-    btnText.textContent = 'পাঠানো হচ্ছে...';
-
-    let photoUrl = null;
-    if (selectedPhotoFile) {
-      photoUrl = await uploadPhoto(selectedPhotoFile, clubId);
-    }
-
-    const { error } = await supabase.from('club_join_requests').insert({
-      club_id: clubId,
-      applicant_name,
-      phone,
-      dob: dob || null,
-      photo: photoUrl,
-      message: message || null,
-    });
-
-    if (error) {
-      showMsg('আবেদন পাঠানো ব্যর্থ: ' + error.message);
-    } else {
-      showMsg('আবেদন সফলভাবে পাঠানো হয়েছে ✓', 'success');
-      document.getElementById('joinApplicantName').value = '';
-      document.getElementById('joinApplicantPhone').value = '';
-      document.getElementById('joinApplicantDob').value = '';
-      document.getElementById('joinApplicantMessage').value = '';
-      document.getElementById('joinPhotoCircle').classList.remove('has-photo');
-      selectedPhotoFile = null;
-    }
-
-    btn.disabled = false;
-    btnText.textContent = 'আবেদন পাঠান';
-  });
-</script>
+    ma
