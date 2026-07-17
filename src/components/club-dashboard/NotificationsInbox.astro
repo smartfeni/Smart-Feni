@@ -1,4 +1,10 @@
 ---
+// ============================================================
+// কম্পোনেন্ট: /my-club ড্যাশবোর্ড — নোটিফিকেশন ইনবক্স
+// আপডেট: এখন কার্ডে ক্লিক করলে শুধু read-mark হতো, ডিটেইল দেখা
+// যেত না — এখন ক্লিকে একটা bottom-sheet মোডাল খোলে যেখানে পাঠানো
+// ক্লাবের নাম/লোগো, ইভেন্টের পূর্ণ টাইটেল-বিবরণ-তারিখ দেখা যাবে
+// ============================================================
 ---
 
 <div class="dash-card">
@@ -7,10 +13,142 @@
   <p class="empty-note" id="notifEmpty" style="display:none;">এখনো কোনো নোটিফিকেশন নেই</p>
 </div>
 
+<div class="notif-modal" id="notifModal">
+  <div class="notif-modal-backdrop" id="notifModalBackdrop"></div>
+  <div class="notif-modal-body">
+    <button class="notif-modal-close" id="notifModalClose"><i class="fas fa-xmark"></i></button>
+
+    <div class="notif-sender-row">
+      <img id="notifSenderPhoto" src="" alt="" style="display:none;" />
+      <div id="notifSenderPhotoPlaceholder" class="notif-sender-placeholder"><i class="fas fa-users"></i></div>
+      <div>
+        <p class="notif-sender-name" id="notifSenderName"></p>
+        <p class="notif-sender-sub">আপনাকে একটি ইভেন্টে আমন্ত্রণ জানিয়েছে</p>
+      </div>
+    </div>
+
+    <div class="notif-post-box">
+      <p class="notif-post-title" id="notifPostTitle"></p>
+      <p class="notif-post-date" id="notifPostDate"></p>
+      <p class="notif-post-desc" id="notifPostDesc"></p>
+    </div>
+  </div>
+</div>
+
+<style>
+  .notif-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .notif-modal.open {
+    display: flex;
+  }
+
+  .notif-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+  }
+
+  .notif-modal-body {
+    position: relative;
+    background: #fff;
+    width: 100%;
+    max-width: 520px;
+    max-height: 82vh;
+    overflow-y: auto;
+    border-radius: 24px 24px 0 0;
+    padding: 26px 20px 34px;
+  }
+
+  .notif-modal-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: #F4F7FC;
+    border: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: #5A6E85;
+    cursor: pointer;
+    z-index: 2;
+  }
+
+  .notif-sender-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .notif-sender-row img,
+  .notif-sender-placeholder {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    object-fit: contain;
+    background: #F4F7FC;
+    flex-shrink: 0;
+  }
+
+  .notif-sender-placeholder {
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+  }
+
+  .notif-sender-name {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
+  .notif-sender-sub {
+    font-size: 0.78rem;
+    color: #8FA0BC;
+    margin-top: 2px;
+  }
+
+  .notif-post-box {
+    background: #F8FAFC;
+    border-radius: 16px;
+    padding: 16px 18px;
+  }
+
+  .notif-post-title {
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
+  .notif-post-date {
+    font-size: 0.8rem;
+    color: #FF6B35;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+
+  .notif-post-desc {
+    font-size: 0.88rem;
+    color: #3A4A60;
+    line-height: 1.7;
+    margin-top: 10px;
+  }
+</style>
+
 <script>
   import { supabase } from '../../lib/supabase.js';
 
   let clubId = null;
+  let allNotifs = [];
 
   async function loadNotifications() {
     const { data } = await supabase
@@ -19,10 +157,10 @@
       .eq('receiver_club_id', clubId)
       .order('created_at', { ascending: false });
 
-    const notifs = data || [];
+    allNotifs = data || [];
     const container = document.getElementById('notifList');
     const emptyEl = document.getElementById('notifEmpty');
-    const unreadCount = notifs.filter((n) => !n.is_read).length;
+    const unreadCount = allNotifs.filter((n) => !n.is_read).length;
 
     const badge = document.getElementById('notifBadge');
     if (badge) {
@@ -31,33 +169,65 @@
     }
 
     container.innerHTML = '';
-    if (notifs.length === 0) {
+    if (allNotifs.length === 0) {
       emptyEl.style.display = 'block';
       return;
     }
     emptyEl.style.display = 'none';
 
-    notifs.forEach((n) => {
+    allNotifs.forEach((n) => {
       const card = document.createElement('div');
       card.className = 'item-card';
-      card.style.cssText = n.is_read ? '' : 'border-color:#FFD3BC;background:#FFF8F4;';
+      card.style.cssText = `cursor:pointer;${n.is_read ? '' : 'border-color:#FFD3BC;background:#FFF8F4;'}`;
       card.innerHTML = `
-        ${n.sender?.logo_image ? `<img class="item-photo" src="${n.sender.logo_image}" alt="${n.sender.name}" />` : `<div class="item-photo-placeholder"><i class="fas fa-people-group"></i></div>`}
+        ${n.sender?.logo_image ? `<img class="item-photo" src="${n.sender.logo_image}" alt="${n.sender.name}" />` : `<div class="item-photo-placeholder"><i class="fas fa-users"></i></div>`}
         <div class="item-body">
           <p class="item-title">${n.sender?.name || 'অজানা ক্লাব'} ${!n.is_read ? '<span style="color:#FF6B35;">• নতুন</span>' : ''}</p>
           <p class="item-sub">${n.post?.title || ''} ${n.post?.event_date ? '· ' + new Date(n.post.event_date).toLocaleDateString('bn-BD') : ''}</p>
         </div>
+        <i class="fas fa-chevron-right" style="color:#B0BCCB;font-size:0.8rem;"></i>
       `;
-      card.addEventListener('click', () => markRead(n.id, n.is_read));
+      card.addEventListener('click', () => openDetail(n));
       container.appendChild(card);
     });
   }
 
-  async function markRead(id, isRead) {
-    if (isRead) return;
+  function openDetail(n) {
+    document.getElementById('notifSenderName').textContent = n.sender?.name || 'অজানা ক্লাব';
+
+    const photoImg = document.getElementById('notifSenderPhoto');
+    const photoPlaceholder = document.getElementById('notifSenderPhotoPlaceholder');
+    if (n.sender?.logo_image) {
+      photoImg.src = n.sender.logo_image;
+      photoImg.style.display = 'block';
+      photoPlaceholder.style.display = 'none';
+    } else {
+      photoImg.style.display = 'none';
+      photoPlaceholder.style.display = 'flex';
+    }
+
+    document.getElementById('notifPostTitle').textContent = n.post?.title || '';
+    document.getElementById('notifPostDate').textContent = n.post?.event_date
+      ? new Date(n.post.event_date).toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '';
+    document.getElementById('notifPostDesc').textContent = n.post?.description || '';
+
+    document.getElementById('notifModal').classList.add('open');
+
+    if (!n.is_read) markRead(n.id);
+  }
+
+  async function markRead(id) {
     await supabase.from('club_notifications').update({ is_read: true }).eq('id', id);
     loadNotifications();
   }
+
+  document.getElementById('notifModalClose')?.addEventListener('click', () => {
+    document.getElementById('notifModal').classList.remove('open');
+  });
+  document.getElementById('notifModalBackdrop')?.addEventListener('click', () => {
+    document.getElementById('notifModal').classList.remove('open');
+  });
 
   window.addEventListener('smartfeni:club-ready', (e) => {
     clubId = e.detail.clubId;
