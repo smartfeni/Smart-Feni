@@ -1,10 +1,9 @@
 ---
 // ============================================================
 // পেজ: পাবলিক ক্লাব ডিরেক্টরি (/clubs)
-// আপডেট: উপজেলা ফিল্টার চিপ সরিয়ে সার্চ ফিল্টার বসানো হলো — বাংলায়
-// টাইপ করলে club.name (বাংলা নাম) থেকে, ইংরেজিতে টাইপ করলে club.slug
-// (ইউজারনেম, যেমন kolmilota) থেকে ম্যাচ করে। উপজেলা-ভিত্তিক sort বুস্ট
-// ও "আমার ক্লাব" পিনিং আগের মতোই আছে, শুধু ফিল্টার ইনপুট বদলেছে।
+// আপডেট: সার্চ ইনপুটে ফোকাস করলে (মোবাইল কীবোর্ড খোলার সময়) বক্সটা
+// স্মুথলি স্ক্রল করে স্টিকি হেডারের ঠিক নিচে নিয়ে আসে, যাতে রেজাল্ট
+// কীবোর্ডের আড়ালে না থাকে।
 // ============================================================
 
 export const prerender = false;
@@ -21,12 +20,12 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         <p>জেলার বিভিন্ন ক্লাবের কার্যক্রম, অর্জন ও আয়োজন দেখুন</p>
       </div>
 
-      <div class="club-search-box">
+      <div class="club-search-box" id="clubSearchBox">
         <i class="fas fa-search"></i>
         <input
           type="text"
           id="clubSearchInput"
-          placeholder="আপনার ক্লাবের নাম লিখে অনুসন্ধান করুন "
+          placeholder="ক্লাবের নাম লিখুন (বাংলা) অথবা username লিখুন"
           autocomplete="off"
         />
       </div>
@@ -79,6 +78,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     .club-search-box {
       position: relative;
       margin-bottom: 24px;
+      /* ফোকাস হলে scrollIntoView যেন স্টিকি হেডারের নিচে থামে, উপরে না
+         চলে গিয়ে হেডারের আড়ালে হাইড হয়ে যায় — হেডারের উচ্চতা অনুযায়ী
+         এই মান, হেডার সাইজ বদলালে এটাও অ্যাডজাস্ট করতে হতে পারে */
+      scroll-margin-top: 96px;
     }
 
     .club-search-box i {
@@ -290,13 +293,12 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     const loadingState = document.getElementById('loadingState');
     const emptyState = document.getElementById('emptyState');
     const searchInput = document.getElementById('clubSearchInput');
+    const searchBox = document.getElementById('clubSearchBox');
 
     let allClubs = [];
     let searchQuery = '';
     let myClubIds = new Set();
     const savedUpazilaLabel = localStorage.getItem('smartfeni_upazila');
-    // savedUpazilaLabel বাংলা লেবেল আকারে সেভ থাকে (যেমন "ফেনী সদর"),
-    // upajila কলামে ইংরেজি slug থাকে (যেমন "feni-sadar") — ম্যাপ করে মেলাই
     const savedUpazilaSlug = Object.entries(UPAZILA_LABELS).find(([, label]) => label === savedUpazilaLabel)?.[0] || null;
 
     function sortClubs(list) {
@@ -309,14 +311,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         const bLocal = savedUpazilaSlug && b.upajila === savedUpazilaSlug ? 1 : 0;
         if (aLocal !== bLocal) return bLocal - aLocal;
 
-        return 0; // বাকিটা আগের (created_at desc) অর্ডারই থাকবে
+        return 0;
       });
     }
 
-    // বাংলা নাম (club.name) ও ইংরেজি username (club.slug) — দুটোতেই
-    // case-insensitive substring ম্যাচ করে। যেমন "কলমিলতা" লিখলে name
-    // থেকে, "kolmilota" লিখলে slug থেকে ম্যাচ হবে — একই চেক দুটো
-    // স্ক্রিপ্টেই কাজ করে, আলাদা লজিক লাগে না।
     function filterClubs(query) {
       const q = query.trim().toLowerCase();
       if (!q) return allClubs;
@@ -374,7 +372,17 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       });
     }
 
-    // টাইপ করার সাথে সাথে সার্চ (হালকা debounce দিয়ে)
+    // ফোকাস হলে (মোবাইলে কীবোর্ড খোলার সময়) সার্চ বক্সকে স্টিকি হেডারের
+    // ঠিক নিচে স্মুথলি স্ক্রল করে আনা হয়, যাতে নিচের রেজাল্ট কীবোর্ডের
+    // আড়ালে না থাকে। ছোট delay দেওয়া হয়েছে কারণ মোবাইল কীবোর্ড খোলার
+    // অ্যানিমেশন/ভিউপোর্ট resize কিছুটা সময় নেয়, সাথে সাথে স্ক্রল করলে
+    // সঠিক পজিশনে যায় না।
+    searchInput.addEventListener('focus', () => {
+      setTimeout(() => {
+        searchBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 300);
+    });
+
     let debounceTimer;
     searchInput.addEventListener('input', (e) => {
       clearTimeout(debounceTimer);
