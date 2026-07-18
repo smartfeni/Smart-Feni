@@ -1,4 +1,11 @@
 ---
+// ============================================================
+// পেজ: পাবলিক ক্লাব ডিরেক্টরি (/clubs)
+// আপডেট: উপজেলা-ভিত্তিক sort (ইউজারের সেভ করা উপজেলার ক্লাব আগে) +
+// লগইন থাকলে ইউজারের নিজের যোগ দেওয়া ক্লাব(গুলো) সবার উপরে পিন করে
+// "আমার ক্লাব" ব্যাজ দেখায় (club_members.user_id দিয়ে খোঁজা হয়)
+// ============================================================
+
 export const prerender = false;
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
@@ -127,20 +134,15 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     }
   </style>
 
-  <!-- ============================================================
-       is:global জরুরি এখানে — ক্লাব কার্ড JS দিয়ে (innerHTML) রানটাইমে
-       তৈরি হয়, তাই Astro-র বিল্ড-টাইম scoped CSS (data-astro-cid)
-       এগুলোর সাথে ম্যাচ করে না। global করলে সরাসরি ক্লাস-নেম দিয়ে
-       ম্যাচ হবে, কভার+লোগো সাইজ ঠিকমতো কাজ করবে।
-  ============================================================ -->
   <style is:global>
     .clubs-grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: 1fr;
       gap: 16px;
     }
 
     .club-card {
+      position: relative;
       background: #fff;
       border-radius: 20px;
       overflow: hidden;
@@ -158,9 +160,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     .club-cover-wrap {
       position: relative;
       width: 100%;
-      aspect-ratio: 16/9;
+      aspect-ratio: 21/9;
       background: #F4F7FC;
-      overflow: hidden;
     }
 
     .club-cover-img {
@@ -176,44 +177,67 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       background: linear-gradient(135deg, #FFF0EA, #F4F7FC);
     }
 
-    .club-logo-wrap {
+    .my-club-badge {
       position: absolute;
-      left: 12px;
-      bottom: -22px;
+      right: 12px;
+      top: 12px;
+      z-index: 3;
+      background: #1B2A4A;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 40px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .my-club-badge i {
+      color: #FFD166;
+      font-size: 0.7rem;
+    }
+
+    /* ===== লোগো — কভারের নিচে, নেগেটিভ margin দিয়ে ওভারল্যাপ (clipping এড়াতে কভার-wrap এর বাইরে) ===== */
+    .club-logo-row {
+      display: flex;
+      align-items: flex-end;
+      margin-top: -30px;
+      padding: 0 16px;
+      position: relative;
       z-index: 2;
     }
 
-    .club-logo-img {
-      width: 52px;
-      height: 52px;
+    .club-logo-img,
+    .club-logo-placeholder {
+      width: 64px;
+      height: 64px;
       border-radius: 50%;
-      object-fit: cover;
-      background: #fff;
       border: 3px solid #fff;
       box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+      flex-shrink: 0;
+      background: #fff;
+    }
+
+    .club-logo-img {
+      object-fit: cover;
       display: block;
     }
 
     .club-logo-placeholder {
-      width: 52px;
-      height: 52px;
-      border-radius: 50%;
-      background: #FFF0EA;
       color: #FF6B35;
-      border: 3px solid #fff;
-      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.1rem;
+      font-size: 1.4rem;
     }
 
     .club-body {
-      padding: 30px 14px 14px;
+      padding: 10px 16px 18px;
     }
 
     .club-name {
-      font-size: 0.9rem;
+      font-size: 1.05rem;
       font-weight: 700;
       color: #1B2A4A;
       display: flex;
@@ -224,31 +248,26 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     .club-name .verified-badge {
       color: #2563EB;
-      font-size: 0.75rem;
+      font-size: 0.85rem;
       flex-shrink: 0;
     }
 
     .club-upajila {
-      font-size: 0.76rem;
+      font-size: 0.82rem;
       color: #8FA0BC;
-      margin-top: 4px;
+      margin-top: 5px;
       font-weight: 600;
     }
 
     @media (max-width: 480px) {
-      .clubs-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 12px;
-      }
-
       .club-logo-img,
       .club-logo-placeholder {
-        width: 44px;
-        height: 44px;
+        width: 54px;
+        height: 54px;
       }
 
-      .club-body {
-        padding: 26px 12px 12px;
+      .club-logo-row {
+        margin-top: -26px;
       }
     }
   </style>
@@ -272,22 +291,43 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     let allClubs = [];
     let currentFilter = 'all';
+    let myClubIds = new Set();
+    const savedUpazilaLabel = localStorage.getItem('smartfeni_upazila');
+    // savedUpazilaLabel বাংলা লেবেল আকারে সেভ থাকে (যেমন "ফেনী সদর"),
+    // upajila কলামে ইংরেজি slug থাকে (যেমন "feni-sadar") — ম্যাপ করে মেলাই
+    const savedUpazilaSlug = Object.entries(UPAZILA_LABELS).find(([, label]) => label === savedUpazilaLabel)?.[0] || null;
+
+    function sortClubs(list) {
+      return [...list].sort((a, b) => {
+        const aMine = myClubIds.has(a.id) ? 1 : 0;
+        const bMine = myClubIds.has(b.id) ? 1 : 0;
+        if (aMine !== bMine) return bMine - aMine;
+
+        const aLocal = savedUpazilaSlug && a.upajila === savedUpazilaSlug ? 1 : 0;
+        const bLocal = savedUpazilaSlug && b.upajila === savedUpazilaSlug ? 1 : 0;
+        if (aLocal !== bLocal) return bLocal - aLocal;
+
+        return 0; // বাকিটা আগের (created_at desc) অর্ডারই থাকবে
+      });
+    }
 
     function renderClubs() {
       const filtered = currentFilter === 'all'
         ? allClubs
         : allClubs.filter((c) => c.upajila === currentFilter);
 
+      const sorted = sortClubs(filtered);
+
       grid.innerHTML = '';
 
-      if (filtered.length === 0) {
+      if (sorted.length === 0) {
         emptyState.style.display = 'flex';
         return;
       }
 
       emptyState.style.display = 'none';
 
-      filtered.forEach((club) => {
+      sorted.forEach((club) => {
         const card = document.createElement('a');
         card.href = `/${club.slug}`;
         card.className = 'club-card';
@@ -305,8 +345,9 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         card.innerHTML = `
           <div class="club-cover-wrap">
             ${coverHtml}
-            <div class="club-logo-wrap">${logoHtml}</div>
+            ${myClubIds.has(club.id) ? '<span class="my-club-badge"><i class="fas fa-star"></i> আমার ক্লাব</span>' : ''}
           </div>
+          <div class="club-logo-row">${logoHtml}</div>
           <div class="club-body">
             <p class="club-name">
               ${club.name}
@@ -330,7 +371,21 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       renderClubs();
     });
 
+    async function loadMyClubIds() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data } = await supabase
+        .from('club_members')
+        .select('club_id')
+        .eq('user_id', session.user.id);
+
+      (data || []).forEach((row) => myClubIds.add(row.club_id));
+    }
+
     async function loadClubs() {
+      await loadMyClubIds();
+
       const { data, error } = await supabase
         .from('clubs')
         .select('*')
@@ -340,7 +395,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       loadingState.style.display = 'none';
 
       if (error) {
-        grid.innerHTML = `<p style="grid-column:1/-1;text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        grid.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
         return;
       }
 
