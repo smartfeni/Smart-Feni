@@ -1,4 +1,12 @@
 ---
+// ============================================================
+// কম্পোনেন্ট: সদস্য হওয়ার আবেদন ফর্ম
+// আপডেট: এখন লগইন বাধ্যতামূলক — ম্যানুয়াল নাম/ফোন টাইপ করা লাগে না,
+// প্রোফাইল থেকে অটো-ফিল হয়ে দেখায় (শুধু ছবি/জন্মতারিখ/বার্তা ঐচ্ছিক)।
+// user_id সহ insert হয়, একজন ইউজার একাধিক ক্লাবে আবেদন করতে পারবে।
+// dropdown/accordion টগল বাগফিক্স অক্ষত রাখা হয়েছে।
+// ============================================================
+
 const { clubId, clubName } = Astro.props;
 ---
 
@@ -9,34 +17,38 @@ const { clubId, clubName } = Astro.props;
 
 <div class="section-card join-form-panel" id="joinFormBox">
   <h3><i class="fas fa-user-plus"></i> {clubName} এ যোগ দিতে চান?</h3>
-  <p class="join-subtitle">নিচের ফর্মটি পূরণ করুন, ক্লাব কর্তৃপক্ষ আপনার সাথে যোগাযোগ করবে</p>
+  <p class="join-subtitle">আপনার প্রোফাইলের তথ্য থেকে আবেদন যাবে, ক্লাব কর্তৃপক্ষ যোগাযোগ করবে</p>
 
   <p class="form-message" id="joinFormMessage"></p>
 
   <input type="hidden" id="joinClubId" value={clubId} />
 
-  <div class="photo-upload-circle" id="joinPhotoCircle">
-    <img id="joinPhotoPreview" src="" alt="ছবি" />
-    <i class="fas fa-camera"></i>
+  <!-- ===== লগইন করা না থাকলে এটা দেখাবে ===== -->
+  <div id="joinLoginPrompt" style="display:none;">
+    <p class="login-prompt-text">আবেদন করতে হলে আগে লগইন করুন</p>
+    <button class="join-btn" id="joinLoginBtn" type="button">
+      <i class="fas fa-right-to-bracket"></i> লগইন করুন
+    </button>
   </div>
-  <input type="file" id="joinPhotoInput" accept="image/*" style="display:none;" />
-  <p class="photo-hint">ছবি (ঐচ্ছিক) — গৃহীত হলে সদস্য তালিকায় ব্যবহার হবে</p>
 
-  <label class="form-label">আপনার নাম</label>
-  <input type="text" class="form-input" id="joinApplicantName" placeholder="পূর্ণ নাম লিখুন" />
+  <!-- ===== লগইন থাকলে এটা দেখাবে ===== -->
+  <div id="joinAuthedFields" style="display:none;">
+    <div class="applicant-preview">
+      <img id="joinProfilePhoto" src="" alt="" style="display:none;" />
+      <div id="joinProfilePhotoPlaceholder" class="applicant-photo-placeholder"><i class="fas fa-user"></i></div>
+      <div>
+        <p class="applicant-name" id="joinProfileName"></p>
+        <p class="applicant-phone" id="joinProfilePhone"></p>
+      </div>
+    </div>
 
-  <label class="form-label">ফোন নম্বর</label>
-  <input type="text" class="form-input" id="joinApplicantPhone" placeholder="01xxxxxxxxx" />
+    <label class="form-label">বার্তা (ঐচ্ছিক)</label>
+    <textarea class="form-input" id="joinApplicantMessage" rows="3" placeholder="কেন যোগ দিতে চান..."></textarea>
 
-  <label class="form-label">জন্ম তারিখ (ঐচ্ছিক)</label>
-  <input type="date" class="form-input" id="joinApplicantDob" />
-
-  <label class="form-label">বার্তা (ঐচ্ছিক)</label>
-  <textarea class="form-input" id="joinApplicantMessage" rows="3" placeholder="কেন যোগ দিতে চান..."></textarea>
-
-  <button class="join-btn" id="joinSubmitBtn" type="button">
-    <i class="fas fa-paper-plane"></i> <span id="joinBtnText">আবেদন পাঠান</span>
-  </button>
+    <button class="join-btn" id="joinSubmitBtn" type="button">
+      <i class="fas fa-paper-plane"></i> <span id="joinBtnText">আবেদন পাঠান</span>
+    </button>
+  </div>
 </div>
 
 <style>
@@ -54,7 +66,6 @@ const { clubId, clubName } = Astro.props;
     font-weight: 700;
     font-size: 0.88rem;
     cursor: pointer;
-    margin-bottom: 0;
     text-align: left;
   }
 
@@ -72,7 +83,6 @@ const { clubId, clubName } = Astro.props;
 
   .join-cta-btn.open {
     border-radius: 16px 16px 0 0;
-    margin-bottom: 0;
   }
 
   .join-cta-btn.open .join-cta-chevron {
@@ -85,7 +95,6 @@ const { clubId, clubName } = Astro.props;
     border-color: #FF6B35;
   }
 
-  /* ===== ফর্ম প্যানেল — dropdown/accordion স্টাইলে খোলে-বন্ধ হয় ===== */
   .join-form-panel {
     background: #fff;
     border-radius: 0 0 20px 20px;
@@ -99,7 +108,7 @@ const { clubId, clubName } = Astro.props;
   }
 
   .join-form-panel.open {
-    max-height: 1400px;
+    max-height: 700px;
     padding: 20px;
     opacity: 1;
   }
@@ -146,46 +155,51 @@ const { clubId, clubName } = Astro.props;
     color: #1B7A3C;
   }
 
-  .photo-upload-circle {
-    position: relative;
-    width: 76px;
-    height: 76px;
+  .login-prompt-text {
+    text-align: center;
+    font-size: 0.85rem;
+    color: #5A6E85;
+    margin-bottom: 14px;
+  }
+
+  .applicant-preview {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin-bottom: 6px;
+  }
+
+  .applicant-preview img,
+  .applicant-photo-placeholder {
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
     background: #FFF0EA;
-    border: 2px dashed #FFD3BC;
+  }
+
+  .applicant-photo-placeholder {
+    color: #FF6B35;
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
-    overflow: hidden;
-    margin: 0 auto 6px;
+    font-size: 1.1rem;
   }
 
-  .photo-upload-circle img {
-    display: none;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+  .applicant-name {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #1B2A4A;
   }
 
-  .photo-upload-circle.has-photo img {
-    display: block;
-  }
-
-  .photo-upload-circle.has-photo i {
-    display: none;
-  }
-
-  .photo-upload-circle i {
-    color: #FF6B35;
-    font-size: 1.2rem;
-  }
-
-  .photo-hint {
-    text-align: center;
-    font-size: 0.72rem;
-    color: #9AA8BC;
-    margin-bottom: 16px;
+  .applicant-phone {
+    font-size: 0.78rem;
+    color: #8FA0BC;
+    margin-top: 2px;
   }
 
   .form-label {
@@ -229,7 +243,7 @@ const { clubId, clubName } = Astro.props;
     font-weight: 700;
     font-size: 0.92rem;
     cursor: pointer;
-    margin-top: 18px;
+    margin-top: 16px;
   }
 
   .join-btn:disabled {
@@ -241,11 +255,14 @@ const { clubId, clubName } = Astro.props;
 <script>
   import { supabase } from '../../lib/supabase.js';
 
-  let selectedPhotoFile = null;
-
   const toggleBtn = document.getElementById('showJoinFormBtn');
   const formPanel = document.getElementById('joinFormBox');
   const ctaText = document.querySelector('.join-cta-text');
+  const loginPrompt = document.getElementById('joinLoginPrompt');
+  const authedFields = document.getElementById('joinAuthedFields');
+
+  let currentUserId = null;
+  let profileLoaded = false;
 
   function setPanelOpen(isOpen) {
     if (!formPanel || !toggleBtn || !ctaText) return;
@@ -257,12 +274,53 @@ const { clubId, clubName } = Astro.props;
       : `<i class="fas fa-user-plus"></i> ${name} এ যোগ দিতে চান? আবেদন করুন`;
   }
 
-  if (toggleBtn && formPanel) {
-    toggleBtn.addEventListener('click', () => {
-      const isOpen = formPanel.classList.contains('open');
-      setPanelOpen(!isOpen);
-    });
+  async function loadProfileIfNeeded() {
+    if (profileLoaded) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
+      loginPrompt.style.display = 'block';
+      authedFields.style.display = 'none';
+      return;
+    }
+
+    currentUserId = session.user.id;
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name, phone, avatar_url')
+      .eq('id', currentUserId)
+      .single();
+
+    document.getElementById('joinProfileName').textContent = profile?.full_name || 'নামহীন';
+    document.getElementById('joinProfilePhone').textContent = profile?.phone || '';
+
+    const photoImg = document.getElementById('joinProfilePhoto');
+    const photoPlaceholder = document.getElementById('joinProfilePhotoPlaceholder');
+    if (profile?.avatar_url) {
+      photoImg.src = profile.avatar_url;
+      photoImg.style.display = 'block';
+      photoPlaceholder.style.display = 'none';
+    } else {
+      photoImg.style.display = 'none';
+      photoPlaceholder.style.display = 'flex';
+    }
+
+    loginPrompt.style.display = 'none';
+    authedFields.style.display = 'block';
+    profileLoaded = true;
   }
+
+  toggleBtn?.addEventListener('click', async () => {
+    const isOpen = formPanel.classList.contains('open');
+    if (!isOpen) await loadProfileIfNeeded();
+    setPanelOpen(!isOpen);
+  });
+
+  document.getElementById('joinLoginBtn')?.addEventListener('click', () => {
+    window.openAuthModal?.('login');
+  });
 
   const btn = document.getElementById('joinSubmitBtn');
   const btnText = document.getElementById('joinBtnText');
@@ -273,75 +331,36 @@ const { clubId, clubName } = Astro.props;
     msgEl.className = `form-message ${type === 'error' ? 'show-error' : 'show-success'}`;
   }
 
-  document.getElementById('joinPhotoCircle')?.addEventListener('click', () => {
-    document.getElementById('joinPhotoInput').click();
-  });
-
-  document.getElementById('joinPhotoInput')?.addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    selectedPhotoFile = file;
-    const reader = new FileReader();
-    reader.onload = () => {
-      document.getElementById('joinPhotoPreview').src = reader.result;
-      document.getElementById('joinPhotoCircle').classList.add('has-photo');
-    };
-    reader.readAsDataURL(file);
-  });
-
-  async function uploadPhoto(file, clubId) {
-    const ext = file.name.split('.').pop();
-    const path = `club-join-requests/${clubId}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
-    if (error) return null;
-    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
-    return data?.publicUrl || null;
-  }
-
   btn?.addEventListener('click', async () => {
     const clubId = document.getElementById('joinClubId').value;
-    const applicant_name = document.getElementById('joinApplicantName').value.trim();
-    const phone = document.getElementById('joinApplicantPhone').value.trim();
-    const dob = document.getElementById('joinApplicantDob').value;
     const message = document.getElementById('joinApplicantMessage').value.trim();
 
-    if (!applicant_name || !phone) {
-      showMsg('নাম ও ফোন নম্বর দিন');
-      return;
-    }
+    const applicant_name = document.getElementById('joinProfileName').textContent;
+    const phone = document.getElementById('joinProfilePhone').textContent;
+    const photoImg = document.getElementById('joinProfilePhoto');
+    const photo = photoImg.style.display !== 'none' ? photoImg.src : null;
 
     btn.disabled = true;
     btnText.textContent = 'পাঠানো হচ্ছে...';
 
-    let photoUrl = null;
-    if (selectedPhotoFile) {
-      photoUrl = await uploadPhoto(selectedPhotoFile, clubId);
-    }
-
     const { error } = await supabase.from('club_join_requests').insert({
       club_id: clubId,
+      user_id: currentUserId,
       applicant_name,
       phone,
-      dob: dob || null,
-      photo: photoUrl,
+      photo,
       message: message || null,
     });
+
+    btn.disabled = false;
+    btnText.textContent = 'আবেদন পাঠান';
 
     if (error) {
       showMsg('আবেদন পাঠানো ব্যর্থ: ' + error.message);
     } else {
       showMsg('আবেদন সফলভাবে পাঠানো হয়েছে ✓', 'success');
-      document.getElementById('joinApplicantName').value = '';
-      document.getElementById('joinApplicantPhone').value = '';
-      document.getElementById('joinApplicantDob').value = '';
       document.getElementById('joinApplicantMessage').value = '';
-      document.getElementById('joinPhotoCircle').classList.remove('has-photo');
-      selectedPhotoFile = null;
-
       setTimeout(() => setPanelOpen(false), 2000);
     }
-
-    btn.disabled = false;
-    btnText.textContent = 'আবেদন পাঠান';
   });
 </script>
