@@ -1,9 +1,10 @@
 ---
 // ============================================================
 // পেজ: পাবলিক ক্লাব ডিরেক্টরি (/clubs)
-// আপডেট: উপজেলা-ভিত্তিক sort (ইউজারের সেভ করা উপজেলার ক্লাব আগে) +
-// লগইন থাকলে ইউজারের নিজের যোগ দেওয়া ক্লাব(গুলো) সবার উপরে পিন করে
-// "আমার ক্লাব" ব্যাজ দেখায় (club_members.user_id দিয়ে খোঁজা হয়)
+// আপডেট: উপজেলা ফিল্টার চিপ সরিয়ে সার্চ ফিল্টার বসানো হলো — বাংলায়
+// টাইপ করলে club.name (বাংলা নাম) থেকে, ইংরেজিতে টাইপ করলে club.slug
+// (ইউজারনেম, যেমন kolmilota) থেকে ম্যাচ করে। উপজেলা-ভিত্তিক sort বুস্ট
+// ও "আমার ক্লাব" পিনিং আগের মতোই আছে, শুধু ফিল্টার ইনপুট বদলেছে।
 // ============================================================
 
 export const prerender = false;
@@ -20,14 +21,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         <p>জেলার বিভিন্ন ক্লাবের কার্যক্রম, অর্জন ও আয়োজন দেখুন</p>
       </div>
 
-      <div class="filter-row" id="filterRow">
-        <button class="filter-chip active" data-upajila="all">সব</button>
-        <button class="filter-chip" data-upajila="feni-sadar">ফেনী সদর</button>
-        <button class="filter-chip" data-upajila="chhagalnaiya">ছাগলনাইয়া</button>
-        <button class="filter-chip" data-upajila="daganbhuiyan">দাগনভূঞা</button>
-        <button class="filter-chip" data-upajila="parshuram">পরশুরাম</button>
-        <button class="filter-chip" data-upajila="fulgazi">ফুলগাজী</button>
-        <button class="filter-chip" data-upajila="sonagazi">সোনাগাজী</button>
+      <div class="club-search-box">
+        <i class="fas fa-search"></i>
+        <input
+          type="text"
+          id="clubSearchInput"
+          placeholder="ক্লাবের নাম লিখুন (বাংলা) অথবা username লিখুন (English)"
+          autocomplete="off"
+        />
       </div>
 
       <div id="clubsGrid" class="clubs-grid"></div>
@@ -38,8 +39,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       </div>
 
       <div id="emptyState" class="state-msg" style="display:none;">
-        <i class="fas fa-people-group"></i>
-        <p>এই উপজেলায় এখনো কোনো ক্লাব নেই</p>
+        <i class="fas fa-magnifying-glass"></i>
+        <p>এই নামে কোনো ক্লাব পাওয়া যায়নি</p>
       </div>
 
     </div>
@@ -74,36 +75,37 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       margin-top: 6px;
     }
 
-    .filter-row {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding-bottom: 8px;
+    /* ===== সার্চ ফিল্টার বক্স ===== */
+    .club-search-box {
+      position: relative;
       margin-bottom: 24px;
-      scrollbar-width: none;
     }
 
-    .filter-row::-webkit-scrollbar {
-      display: none;
+    .club-search-box i {
+      position: absolute;
+      left: 18px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #B0BCCB;
+      font-size: 0.95rem;
     }
 
-    .filter-chip {
-      flex-shrink: 0;
-      background: #fff;
-      border: 1.5px solid #E5EAF0;
-      color: #5A6E85;
-      padding: 9px 18px;
+    .club-search-box input {
+      width: 100%;
+      padding: 14px 18px 14px 46px;
       border-radius: 40px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
+      border: 1.5px solid #E5EAF0;
+      background: #fff;
+      font-size: 0.92rem;
+      font-family: inherit;
+      color: #1B2A4A;
+      transition: all 0.2s ease;
     }
 
-    .filter-chip.active {
-      background: #FF6B35;
+    .club-search-box input:focus {
+      outline: none;
       border-color: #FF6B35;
-      color: #fff;
+      box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
     }
 
     .state-msg {
@@ -287,10 +289,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     const grid = document.getElementById('clubsGrid');
     const loadingState = document.getElementById('loadingState');
     const emptyState = document.getElementById('emptyState');
-    const filterRow = document.getElementById('filterRow');
+    const searchInput = document.getElementById('clubSearchInput');
 
     let allClubs = [];
-    let currentFilter = 'all';
+    let searchQuery = '';
     let myClubIds = new Set();
     const savedUpazilaLabel = localStorage.getItem('smartfeni_upazila');
     // savedUpazilaLabel বাংলা লেবেল আকারে সেভ থাকে (যেমন "ফেনী সদর"),
@@ -311,11 +313,22 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       });
     }
 
-    function renderClubs() {
-      const filtered = currentFilter === 'all'
-        ? allClubs
-        : allClubs.filter((c) => c.upajila === currentFilter);
+    // বাংলা নাম (club.name) ও ইংরেজি username (club.slug) — দুটোতেই
+    // case-insensitive substring ম্যাচ করে। যেমন "কলমিলতা" লিখলে name
+    // থেকে, "kolmilota" লিখলে slug থেকে ম্যাচ হবে — একই চেক দুটো
+    // স্ক্রিপ্টেই কাজ করে, আলাদা লজিক লাগে না।
+    function filterClubs(query) {
+      const q = query.trim().toLowerCase();
+      if (!q) return allClubs;
+      return allClubs.filter((c) => {
+        const nameMatch = (c.name || '').toLowerCase().includes(q);
+        const slugMatch = (c.slug || '').toLowerCase().includes(q);
+        return nameMatch || slugMatch;
+      });
+    }
 
+    function renderClubs() {
+      const filtered = filterClubs(searchQuery);
       const sorted = sortClubs(filtered);
 
       grid.innerHTML = '';
@@ -361,14 +374,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       });
     }
 
-    filterRow.addEventListener('click', (e) => {
-      const btn = e.target.closest('.filter-chip');
-      if (!btn) return;
-
-      filterRow.querySelectorAll('.filter-chip').forEach((c) => c.classList.remove('active'));
-      btn.classList.add('active');
-      currentFilter = btn.dataset.upajila;
-      renderClubs();
+    // টাইপ করার সাথে সাথে সার্চ (হালকা debounce দিয়ে)
+    let debounceTimer;
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        searchQuery = e.target.value;
+        renderClubs();
+      }, 120);
     });
 
     async function loadMyClubIds() {
