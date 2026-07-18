@@ -1,19 +1,28 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: সদস্য হওয়ার আবেদন ফর্ম
-// আপডেট: এখন লগইন বাধ্যতামূলক — ম্যানুয়াল নাম/ফোন টাইপ করা লাগে না,
-// প্রোফাইল থেকে অটো-ফিল হয়ে দেখায় (শুধু ছবি/জন্মতারিখ/বার্তা ঐচ্ছিক)।
-// user_id সহ insert হয়, একজন ইউজার একাধিক ক্লাবে আবেদন করতে পারবে।
-// dropdown/accordion টগল বাগফিক্স অক্ষত রাখা হয়েছে।
+// লগইন বাধ্যতামূলক — প্রোফাইল থেকে নাম/ফোন/ছবি অটো-ফিল, accordion
+// টগল স্টাইল। পেজ লোডেই চেক করে ইউজার আগে আবেদন করেছে/সদস্য
+// হয়েছে কিনা — সেই অনুযায়ী CTA-এর বদলে status ব্যানার দেখায়।
 // ============================================================
 
 const { clubId, clubName } = Astro.props;
 ---
 
-<button class="join-cta-btn" id="showJoinFormBtn" type="button" data-club-name={clubName}>
-  <span class="join-cta-text"><i class="fas fa-user-plus"></i> {clubName} এ যোগ দিতে চান? আবেদন করুন</span>
-  <i class="fas fa-chevron-down join-cta-chevron" id="joinCtaChevron"></i>
-</button>
+<div id="joinStatusWrap">
+  <button class="join-cta-btn" id="showJoinFormBtn" type="button" data-club-name={clubName}>
+    <span class="join-cta-text"><i class="fas fa-user-plus"></i> {clubName} এ যোগ দিতে চান? আবেদন করুন</span>
+    <i class="fas fa-chevron-down join-cta-chevron" id="joinCtaChevron"></i>
+  </button>
+
+  <div class="status-banner accepted" id="alreadyMemberBanner" style="display:none;">
+    <i class="fas fa-circle-check"></i> আপনি ইতিমধ্যে এই ক্লাবের সদস্য
+  </div>
+
+  <div class="status-banner pending" id="pendingBanner" style="display:none;">
+    <i class="fas fa-hourglass-half"></i> আপনার আবেদনটি পর্যালোচনাধীন
+  </div>
+</div>
 
 <div class="section-card join-form-panel" id="joinFormBox">
   <h3><i class="fas fa-user-plus"></i> {clubName} এ যোগ দিতে চান?</h3>
@@ -67,6 +76,7 @@ const { clubId, clubName } = Astro.props;
     font-size: 0.88rem;
     cursor: pointer;
     text-align: left;
+    margin-bottom: 20px;
   }
 
   .join-cta-text {
@@ -83,6 +93,7 @@ const { clubId, clubName } = Astro.props;
 
   .join-cta-btn.open {
     border-radius: 16px 16px 0 0;
+    margin-bottom: 0;
   }
 
   .join-cta-btn.open .join-cta-chevron {
@@ -93,6 +104,28 @@ const { clubId, clubName } = Astro.props;
     background: #FF6B35;
     color: #fff;
     border-color: #FF6B35;
+  }
+
+  .status-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 15px;
+    border-radius: 16px;
+    font-weight: 700;
+    font-size: 0.88rem;
+    margin-bottom: 20px;
+  }
+
+  .status-banner.accepted {
+    background: #EAFBF0;
+    color: #1B7A3C;
+  }
+
+  .status-banner.pending {
+    background: #FFF3E0;
+    color: #B36B00;
   }
 
   .join-form-panel {
@@ -255,11 +288,14 @@ const { clubId, clubName } = Astro.props;
 <script>
   import { supabase } from '../../lib/supabase.js';
 
+  const wrap = document.getElementById('joinStatusWrap');
   const toggleBtn = document.getElementById('showJoinFormBtn');
   const formPanel = document.getElementById('joinFormBox');
   const ctaText = document.querySelector('.join-cta-text');
   const loginPrompt = document.getElementById('joinLoginPrompt');
   const authedFields = document.getElementById('joinAuthedFields');
+  const acceptedBanner = document.getElementById('alreadyMemberBanner');
+  const pendingBanner = document.getElementById('pendingBanner');
 
   let currentUserId = null;
   let profileLoaded = false;
@@ -272,6 +308,33 @@ const { clubId, clubName } = Astro.props;
     ctaText.innerHTML = isOpen
       ? '<i class="fas fa-xmark"></i> ফর্ম বন্ধ করুন'
       : `<i class="fas fa-user-plus"></i> ${name} এ যোগ দিতে চান? আবেদন করুন`;
+  }
+
+  // ===== পেজ লোড হওয়ার সাথে সাথে — লগইন থাকলে চেক করা হয় এই ইউজার
+  // আগে এই ক্লাবে আবেদন করেছে/সদস্য হয়েছে কিনা =====
+  async function checkExistingStatus(clubId, userId) {
+    const { data } = await supabase
+      .from('club_join_requests')
+      .select('status')
+      .eq('club_id', clubId)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!data) return false; // কখনো আবেদন করেনি — CTA দেখাবে
+
+    if (data.status === 'accepted') {
+      toggleBtn.style.display = 'none';
+      acceptedBanner.style.display = 'flex';
+      return true;
+    }
+    if (data.status === 'pending') {
+      toggleBtn.style.display = 'none';
+      pendingBanner.style.display = 'flex';
+      return true;
+    }
+    return false; // rejected হলে আবার আবেদন করতে পারবে
   }
 
   async function loadProfileIfNeeded() {
@@ -352,15 +415,28 @@ const { clubId, clubName } = Astro.props;
       message: message || null,
     });
 
-    btn.disabled = false;
-    btnText.textContent = 'আবেদন পাঠান';
-
     if (error) {
       showMsg('আবেদন পাঠানো ব্যর্থ: ' + error.message);
+      btn.disabled = false;
+      btnText.textContent = 'আবেদন পাঠান';
     } else {
       showMsg('আবেদন সফলভাবে পাঠানো হয়েছে ✓', 'success');
-      document.getElementById('joinApplicantMessage').value = '';
-      setTimeout(() => setPanelOpen(false), 2000);
+      setTimeout(() => {
+        setPanelOpen(false);
+        toggleBtn.style.display = 'none';
+        pendingBanner.style.display = 'flex';
+      }, 1500);
     }
   });
+
+  // ===== ইনিশিয়াল চেক: লগইন থাকলে আগের আবেদনের status দেখে
+  // সঠিক UI (CTA বনাম status ব্যানার) ঠিক করা হয় =====
+  (async () => {
+    const clubId = document.getElementById('joinClubId').value;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return; // লগইন না থাকলে ডিফল্ট CTA-ই থাকবে
+
+    currentUserId = session.user.id;
+    await checkExistingStatus(clubId, currentUserId);
+  })();
 </script>
