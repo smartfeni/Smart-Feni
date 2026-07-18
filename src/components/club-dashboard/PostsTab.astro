@@ -29,6 +29,22 @@
     <input type="file" class="form-input" id="postImageInput" accept="image/*" />
   </div>
 
+  <!-- ===== শুধু ইভেন্ট টাইপে দেখাবে ===== -->
+  <div id="eventOptionsBox" style="display:none;">
+    <label class="form-label">যোগাযোগ নম্বর (কল বাটনের জন্য)</label>
+    <input type="text" class="form-input" id="postContactPhone" placeholder="01xxxxxxxxx" />
+
+    <label class="event-checkbox-row">
+      <input type="checkbox" id="listInSportsCheckbox" />
+      <span>খেলাধুলা ও ইভেন্টস বিভাগে পাবলিশ করুন (সবাই দেখতে পাবে, এডমিন অনুমোদনের পর)</span>
+    </label>
+
+    <label class="event-checkbox-row">
+      <input type="checkbox" id="broadcastCheckbox" />
+      <span>অন্য ক্লাবে নোটিফিকেশন পাঠান</span>
+    </label>
+  </div>
+
   <button class="primary-btn" id="addPostBtn" type="button">
     <i class="fas fa-plus"></i> <span>পোস্ট করুন</span>
   </button>
@@ -48,11 +64,37 @@
   <p class="empty-note" id="postsEmpty" style="display:none;">কোনো পোস্ট নেই</p>
 </div>
 
+<style>
+  .event-checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 14px;
+    cursor: pointer;
+  }
+
+  .event-checkbox-row input {
+    margin-top: 3px;
+    width: 17px;
+    height: 17px;
+    flex-shrink: 0;
+    accent-color: #FF6B35;
+  }
+
+  .event-checkbox-row span {
+    font-size: 0.84rem;
+    color: #3A4A60;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+</style>
+
 <script>
   import { supabase } from '../../lib/supabase.js';
 
   let clubId = null;
   let clubName = '';
+  let clubUpajila = null;
   let selectedImageFile = null;
   let allPosts = [];
   let currentFilterType = 'achievement';
@@ -68,6 +110,7 @@
     document.getElementById('postDateField').style.display = (type === 'achievement' || type === 'event') ? 'block' : 'none';
     document.getElementById('postImageField').style.display = (type === 'announcement') ? 'none' : 'block';
     document.getElementById('postDescLabel').textContent = type === 'announcement' ? 'বার্তা' : 'বিবরণ';
+    document.getElementById('eventOptionsBox').style.display = type === 'event' ? 'block' : 'none';
   });
 
   document.getElementById('postImageInput')?.addEventListener('change', (e) => {
@@ -90,16 +133,28 @@
       return;
     }
 
+    const type = document.getElementById('postTypeInput').value;
+    const contactPhone = document.getElementById('postContactPhone').value.trim();
+    const listInSports = document.getElementById('listInSportsCheckbox').checked;
+    const shouldBroadcast = document.getElementById('broadcastCheckbox').checked;
+
+    if (type === 'event' && listInSports && !contactPhone) {
+      showMsg('খেলাধুলা বিভাগে পাবলিশ করতে যোগাযোগ নম্বর দিন');
+      return;
+    }
+
     const btn = document.getElementById('addPostBtn');
     const span = btn.querySelector('span');
     span.textContent = 'পোস্ট হচ্ছে...';
     btn.disabled = true;
 
-    const type = document.getElementById('postTypeInput').value;
     let imageUrl = null;
     if (selectedImageFile && type !== 'announcement') {
       imageUrl = await uploadPostImage(selectedImageFile);
     }
+
+    const description = document.getElementById('postDescInput').value.trim() || null;
+    const eventDate = (type === 'achievement' || type === 'event') ? (document.getElementById('postDateInput').value || null) : null;
 
     const { data: newPost, error } = await supabase
       .from('club_posts')
@@ -107,36 +162,55 @@
         club_id: clubId,
         type,
         title,
-        description: document.getElementById('postDescInput').value.trim() || null,
+        description,
         image: imageUrl,
-        event_date: (type === 'achievement' || type === 'event') ? (document.getElementById('postDateInput').value || null) : null,
+        event_date: eventDate,
+        contact_phone: type === 'event' ? (contactPhone || null) : null,
       })
       .select()
       .single();
 
-    span.textContent = 'পোস্ট করুন';
-    btn.disabled = false;
-
     if (error) {
+      span.textContent = 'পোস্ট করুন';
+      btn.disabled = false;
       showMsg('পোস্ট ব্যর্থ: ' + error.message);
       return;
     }
 
+    // ===== চেকবক্স ১: sports ক্যাটাগরিতে পাবলিক লিস্টিং =====
+    if (type === 'event' && listInSports) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await supabase.from('listings').insert({
+          user_id: session.user.id,
+          category: 'sports',
+          type: 'event',
+          title,
+          description,
+          upazila: clubUpajila || null,
+          images: imageUrl ? [imageUrl] : [],
+          contact_phone: contactPhone,
+        });
+      }
+    }
+
+    span.textContent = 'পোস্ট করুন';
+    btn.disabled = false;
     showMsg('পোস্ট হয়েছে ✓', 'success');
     document.getElementById('postTitleInput').value = '';
     document.getElementById('postDescInput').value = '';
     document.getElementById('postDateInput').value = '';
     document.getElementById('postImageInput').value = '';
+    document.getElementById('postContactPhone').value = '';
+    document.getElementById('listInSportsCheckbox').checked = false;
+    document.getElementById('broadcastCheckbox').checked = false;
     selectedImageFile = null;
 
     loadPosts();
 
-    if (type === 'event') {
-      setTimeout(() => {
-        if (confirm(`"${title}" ইভেন্টটি অন্য ক্লাবদের কাছে ব্রডকাস্ট করতে চান?`)) {
-          window.openBroadcastModal?.(newPost.id, newPost.title, clubId, clubName);
-        }
-      }, 300);
+    // ===== চেকবক্স ২: অন্য ক্লাবে নোটিফিকেশন =====
+    if (type === 'event' && shouldBroadcast) {
+      window.openBroadcastModal?.(newPost.id, newPost.title, clubId, clubName);
     }
   });
 
@@ -206,6 +280,7 @@
   window.addEventListener('smartfeni:club-ready', (e) => {
     clubId = e.detail.clubId;
     clubName = e.detail.club.name;
+    clubUpajila = e.detail.club.upajila;
     loadPosts();
   });
 </script>
