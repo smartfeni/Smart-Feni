@@ -1,13 +1,14 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: হিরো (সার্চ বার + wipe-style হিন্ট)
-// ফিক্স ১: সার্চ রেজাল্ট কার্ডের CSS ক্লাস কাজ করছিল না (Astro scoped
-//        style dynamically-added HTML-এ প্রয়োগ হচ্ছিল না) —
-//        এখন inline style দিয়ে সরাসরি বসানো, তাই সবসময় কাজ করবে
-// ফিক্স ২: মোবাইলে ইনপুটে ফোকাস করলে কীবোর্ড খোলার পর সার্চ কার্ড ও
-//        তার নিচের রেজাল্ট কীবোর্ডের আড়ালে চলে যাচ্ছিল — এখন ফোকাসে
-//        স্মুথ scrollIntoView করে স্টিকি হেডারের নিচে নিয়ে আসা হয়
-//        (clubs.astro-র সার্চ বক্সেও একই প্যাটার্ন ব্যবহার করা হয়েছে)
+// ফিক্স ১: সার্চ রেজাল্ট কার্ডের CSS ক্লাস কাজ করছিল না —
+//        inline style দিয়ে সরাসরি বসানো
+// ফিক্স ২ (সংশোধিত): আগে স্ক্রল ট্রিগার করা হতো `focus` ইভেন্টে, কিন্তু
+//        তখন সার্চ বক্স এমনিতেই উপরে থাকে বলে স্ক্রল করার কিছু থাকে না —
+//        কীবোর্ড আসলে সমস্যা করে রেজাল্ট ড্রপডাউন খোলার সময়। তাই এখন
+//        স্ক্রল ট্রিগার করা হচ্ছে যখন প্রথম অক্ষর টাইপ হয়ে রেজাল্ট
+//        দেখা যায় (handleSearch-এর ভেতরে), scrollIntoView-এর বদলে
+//        সরাসরি window.scrollTo দিয়ে অবস্থান হিসেব করে — বেশি নির্ভরযোগ্য
 // ============================================================
 ---
 
@@ -58,6 +59,20 @@
     { name: 'ডাক্তার ও হাসপাতাল ডিরেক্টরি', category: 'ডাক্তার ডিরেক্টরি', slug: 'doctor-directory', keywords: ['doctor', 'hospital', 'doctor directory', 'clinic', 'physician'] },
   ];
 
+  const heroSearchWrap = document.getElementById('heroSearchWrap');
+  let wasResultsVisible = false;
+
+  // sticky header-এর নিচে বক্সটাকে থামানোর জন্য সরাসরি স্ক্রল-পজিশন
+  // হিসেব করে window.scrollTo করা হচ্ছে — scrollIntoView-এর চেয়ে
+  // বেশি প্রেডিক্টেবল, sticky header/scroll-margin এর ওপর নির্ভর করে না
+  function scrollSearchIntoView() {
+    if (!heroSearchWrap) return;
+    const HEADER_OFFSET = 96; // স্টিকি হেডারের উচ্চতা + সামান্য গ্যাপ
+    const rect = heroSearchWrap.getBoundingClientRect();
+    const targetY = window.scrollY + rect.top - HEADER_OFFSET;
+    window.scrollTo({ top: Math.max(targetY, 0), behavior: 'smooth' });
+  }
+
   function handleSearch(query: string) {
     const resultsContainer = document.getElementById('searchResults');
     const hint = document.getElementById('rotatingHint');
@@ -69,6 +84,7 @@
 
     if (!query || query.trim() === '') {
       resultsContainer.style.display = 'none';
+      wasResultsVisible = false;
       return;
     }
 
@@ -100,6 +116,14 @@
     }
 
     resultsContainer.style.display = 'block';
+
+    // রেজাল্ট ড্রপডাউন প্রথমবার দেখা দেওয়ার মুহূর্তেই স্ক্রল করি (প্রতি
+    // কি-স্ট্রোকে না, শুধু hidden → visible ট্রানজিশনে) — এটাই আসল সময়
+    // যখন কীবোর্ড নিচের জায়গা খেয়ে ফেলার সমস্যা হয়
+    if (!wasResultsVisible) {
+      scrollSearchIntoView();
+      wasResultsVisible = true;
+    }
   }
 
   function handleSearchButtonClick() {
@@ -126,7 +150,6 @@
 
   const wipeWordEl = document.getElementById('wipeWord');
   const searchInputEl = document.getElementById('searchInput') as HTMLInputElement;
-  const heroSearchWrap = document.getElementById('heroSearchWrap');
   let wordIndex = 0;
   const HOLD_MS = 1300;
   const WIPE_MS = 400;
@@ -163,12 +186,6 @@
   searchInputEl?.addEventListener('focus', () => {
     const hint = document.getElementById('rotatingHint');
     if (hint) hint.style.display = 'none';
-
-    // মোবাইলে কীবোর্ড খোলার পর সার্চ কার্ড ও রেজাল্ট যেন আড়ালে না
-    // থাকে — কীবোর্ড অ্যানিমেশন/ভিউপোর্ট resize এর জন্য সামান্য delay
-    setTimeout(() => {
-      heroSearchWrap?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 300);
   });
 
   searchInputEl?.addEventListener('blur', () => {
@@ -187,8 +204,6 @@
     max-width: 640px;
     margin: 0 auto;
     position: relative;
-    /* ফোকাসে scrollIntoView এই মার্জিন মেনে স্টিকি হেডারের নিচে থামবে */
-    scroll-margin-top: 96px;
   }
 
   .search-card {
