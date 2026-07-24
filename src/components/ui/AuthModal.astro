@@ -20,6 +20,14 @@
 // আপডেট ৬: সাইনআপে ইমেইল এখন বাধ্যতামূলক (forgot-password ফিচার
 // recovery_email-এর উপর নির্ভরশীল, তাই ইমেইল ছাড়া অ্যাকাউন্ট খুললে
 // ভবিষ্যতে পাসওয়ার্ড রিসেট করা যেত না)
+// আপডেট ৭ (বাগফিক্স): সাইনআপের পর ছবি আপলোড হচ্ছিল না — কারণ
+// storage upload কল হতো signUp() রেসপন্সের সাথে সাথেই, কিন্তু
+// Supabase ক্লায়েন্টের নতুন সেশন internally সেট হতে সামান্য সময়
+// লাগে। ফলে upload কল unauthenticated অবস্থায় চলে যেত আর
+// "new row violates row-level security policy" এরর দিতো (RLS
+// লগে সরাসরি কনফার্ম করা হয়েছে)। এখন signUp()-এর পর সেশনটা
+// supabase.auth.setSession() দিয়ে জোর করে সিঙ্ক করে নেওয়া হচ্ছে,
+// তারপর আপলোড শুরু হয় — এতে রেস কন্ডিশন দূর হয়ে যায়।
 // ============================================================
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -737,6 +745,17 @@ const upazilas = [
         : 'সাইনআপ ব্যর্থ: ' + error.message);
       setLoading(signupSubmit, false);
       return;
+    }
+
+    // নতুন সেশনটা এক্সপ্লিসিটলি সিঙ্ক করে নিচ্ছি — নাহলে পরের storage
+    // upload কল সেশন client-এ পুরোপুরি "সেট" হওয়ার আগেই চলে যেতে পারে
+    // (race condition), ফলে RLS ব্লক করে দেয় ("new row violates
+    // row-level security policy for table objects" — লগে কনফার্ম করা)
+    if (data.session) {
+      await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
     }
 
     let avatarUrl = null;
