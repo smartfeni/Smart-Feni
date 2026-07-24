@@ -14,6 +14,9 @@
 // লগইনের পর auto-redirect সরিয়ে ফেলা হয়েছে — এখন ProfileMenu.astro-তে
 // "অ্যাডমিন প্যানেল" / "আমার শপ" বাটন থাকায় ইউজার নিজে ইচ্ছেমতো
 // যেতে পারে, জোর করে redirect করার দরকার নেই।
+// আপডেট ৫: "পাসওয়ার্ড ভুলে গেছেন?" এখন সত্যিকার ফিচার — ফোন নাম্বার
+// দিয়ে /api/forgot-password কল করে, যেটা recovery_email-এ রিসেট
+// লিংক পাঠায় (আগে href="#" ছিল, কিছুই হতো না)
 // ============================================================
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -63,7 +66,7 @@ const upazilas = [
         <i class="fas fa-eye auth-input-eye"></i>
       </div>
 
-      <a href="#" class="auth-forgot">পাসওয়ার্ড ভুলে গেছেন?</a>
+      <button class="auth-forgot" id="openForgotPane" type="button">পাসওয়ার্ড ভুলে গেছেন?</button>
 
       <button class="auth-submit" id="loginSubmit" type="button">
         <i class="fas fa-right-to-bracket"></i> <span class="auth-submit-text">লগইন করুন</span>
@@ -144,6 +147,26 @@ const upazilas = [
 
       <p class="auth-switch">
         আগে থেকেই অ্যাকাউন্ট আছে? <button class="auth-link" data-tab="login" type="button">লগইন করুন</button>
+      </p>
+    </div>
+
+    <!-- ===== পাসওয়ার্ড ভুলে গেছেন প্যানেল ===== -->
+    <div class="auth-pane" id="forgotPane">
+      <h2 class="auth-title">পাসওয়ার্ড ভুলে গেছেন?</h2>
+      <p class="auth-subtitle">আপনার ফোন নাম্বার দিন, রিকভারি ইমেইলে রিসেট লিংক পাঠানো হবে</p>
+
+      <label class="auth-label">ফোন নম্বর</label>
+      <div class="auth-input-wrap">
+        <i class="fas fa-phone auth-input-icon"></i>
+        <input type="text" class="auth-input" id="forgotPhone" placeholder="01xxxxxxxxx" />
+      </div>
+
+      <button class="auth-submit" id="forgotSubmit" type="button">
+        <i class="fas fa-paper-plane"></i> <span class="auth-submit-text">রিসেট লিংক পাঠান</span>
+      </button>
+
+      <p class="auth-switch">
+        মনে পড়েছে? <button class="auth-link" id="backToLoginFromForgot" type="button">লগইনে ফিরে যান</button>
       </p>
     </div>
   </div>
@@ -373,12 +396,18 @@ const upazilas = [
 
   .auth-forgot {
     display: block;
+    width: 100%;
     text-align: right;
     font-size: 0.82rem;
     color: #FF6B35;
     text-decoration: none;
     font-weight: 600;
     margin-top: 10px;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
   }
 
   .auth-submit {
@@ -541,6 +570,17 @@ const upazilas = [
     panes.forEach((p) => p.classList.toggle('active', p.id === `${tabName}Pane`));
     clearMessage();
   }
+
+  // "পাসওয়ার্ড ভুলে গেছেন" প্যানেল — auth-tab বাটনগুলোর অংশ না,
+  // তাই setTab() এর বাইরে আলাদাভাবে দেখানো/লুকানো হয়
+  function showForgotPane() {
+    tabs.forEach((t) => t.classList.remove('active'));
+    panes.forEach((p) => p.classList.toggle('active', p.id === 'forgotPane'));
+    clearMessage();
+  }
+
+  document.getElementById('openForgotPane')?.addEventListener('click', showForgotPane);
+  document.getElementById('backToLoginFromForgot')?.addEventListener('click', () => setTab('login'));
 
   function showMessage(text, type = 'error') {
     if (!authMessage) return;
@@ -757,6 +797,44 @@ const upazilas = [
     setLoading(loginSubmit, false);
     notifyHeader(profile?.full_name, profile?.avatar_url);
     closeAuthModal();
+  });
+
+  // ===== পাসওয়ার্ড ভুলে গেছেন =====
+  const forgotSubmit = document.getElementById('forgotSubmit');
+  forgotSubmit?.addEventListener('click', async () => {
+    const phone = document.getElementById('forgotPhone')?.value?.trim();
+
+    clearMessage();
+
+    if (!phone) {
+      showMessage('ফোন নাম্বার দিন');
+      return;
+    }
+
+    setLoading(forgotSubmit, true, 'পাঠানো হচ্ছে...');
+
+    try {
+      const res = await fetch('/api/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+
+      const result = await res.json();
+
+      setLoading(forgotSubmit, false);
+
+      if (!res.ok) {
+        showMessage(result.error || 'কিছু একটা সমস্যা হয়েছে, আবার চেষ্টা করুন');
+        return;
+      }
+
+      showMessage(result.message || 'রিসেট লিংক পাঠানো হয়েছে', 'success');
+      document.getElementById('forgotPhone').value = '';
+    } catch (err) {
+      setLoading(forgotSubmit, false);
+      showMessage('নেটওয়ার্ক সমস্যা, আবার চেষ্টা করুন');
+    }
   });
 
   // গ্লোবালি অ্যাক্সেসযোগ্য করা হলো যাতে Header.astro থেকে খোলা যায়
