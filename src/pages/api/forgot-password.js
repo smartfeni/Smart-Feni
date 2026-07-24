@@ -11,6 +11,10 @@
 // ৪. recovery_email থাকলে Resend দিয়ে সেই লিংক পাঠানো
 // ৫. নিরাপত্তার জন্য — নাম্বার ভুল হোক বা রিকভারি ইমেইল না থাকুক,
 //    সবসময় একই জেনেরিক success মেসেজ রিটার্ন হয় (enumeration ঠেকাতে)
+// আপডেট: smartfeni.com ডোমেইন Resend-এ ভেরিফাই হয়ে গেছে, তাই sender
+//        onboarding@resend.dev (টেস্ট-মোড, শুধু নিজের ইমেইলে পাঠাতে
+//        পারতো) থেকে noreply@smartfeni.com-এ বদলানো হলো — এখন যেকোনো
+//        recovery_email-এ পাঠানো যাবে।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -37,7 +41,7 @@ async function sendResetEmail(toEmail, actionLink) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'Smart Feni <onboarding@resend.dev>',
+        from: 'Smart Feni <noreply@smartfeni.com>',
         to: [toEmail],
         subject: 'স্মার্ট ফেনী — পাসওয়ার্ড রিসেট করুন',
         html: `
