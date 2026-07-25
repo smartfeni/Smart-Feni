@@ -5,16 +5,12 @@
 // flow:
 // ১. ফোন নাম্বার থেকে ডামি auth ইমেইল বানানো (change-phone.js এর প্যাটার্ন)
 // ২. supabase.auth.admin.generateLink({ type: 'recovery' }) দিয়ে
-//    সিকিউর রিসেট লিংক জেনারেট করা (এটা ইমেইল পাঠায় না, শুধু লিংক দেয়)
+//    সিকিউর রিসেট টোকেন জেনারেট করা (এটা ইমেইল পাঠায় না, শুধু টোকেন দেয়)
 // ৩. generateLink-এর রেসপন্স থেকে user.id বের করে profiles টেবিলে
 //    recovery_email খোঁজা
-// ৪. recovery_email থাকলে Resend দিয়ে সেই লিংক পাঠানো
+// ৪. recovery_email থাকলে Resend দিয়ে রিসেট লিংক পাঠানো
 // ৫. নিরাপত্তার জন্য — নাম্বার ভুল হোক বা রিকভারি ইমেইল না থাকুক,
 //    সবসময় একই জেনেরিক success মেসেজ রিটার্ন হয় (enumeration ঠেকাতে)
-// আপডেট: smartfeni.com ডোমেইন Resend-এ ভেরিফাই হয়ে গেছে, তাই sender
-//        onboarding@resend.dev (টেস্ট-মোড, শুধু নিজের ইমেইলে পাঠাতে
-//        পারতো) থেকে noreply@smartfeni.com-এ বদলানো হলো — এখন যেকোনো
-//        recovery_email-এ পাঠানো যাবে।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -100,14 +96,25 @@ export async function POST({ request }) {
 
     const dummyEmail = `${digitsOnly}@smartfeni.local`;
 
-    // ===== ধাপ ১: রিকভারি লিংক জেনারেট (এটাই existence check হিসেবেও কাজ করে) =====
+    // ===== ধাপ ১: রিকভারি টোকেন জেনারেট (এটাই existence check হিসেবেও কাজ করে) =====
+    // আগে এখানে linkData.properties.action_link ব্যবহার হতো (Supabase-এর
+    // নিজস্ব /auth/v1/verify এন্ডপয়েন্টের লিংক) — কিন্তু সেটাতে দুইটা সমস্যা
+    // ছিল: (১) Gmail-এর মতো ইমেইল ক্লায়েন্টের লিংক-সেফটি-স্ক্যানার বট
+    // ইউজার ক্লিক করার আগেই একবার visit করে ফেলতো, ফলে এক-বার-ব্যবহারযোগ্য
+    // টোকেন আগেই খরচ হয়ে যেতো ("token not found" — লগে কনফার্ম করা হয়েছে)।
+    // (২) কিছু মোবাইল ওয়েবভিউ/ইমেইল অ্যাপে রিডাইরেক্টের সময় URL hash
+    // fragment (#access_token=...) হারিয়ে যায়। এখন বদলে hashed_token
+    // ব্যবহার করে সরাসরি আমাদের নিজের reset-password পেজে ?token_hash=
+    // query param দিয়ে লিংক পাঠানো হচ্ছে — পেজ লোড হওয়ার সময় শুধু স্ট্যাটিক
+    // HTML দেখায় (তখনো কিছু verify হয় না), ইউজার আসলে ফর্ম দেখে JS চালু
+    // হওয়ার পরই verifyOtp() কল হয় — তাই সাধারণ (non-JS) prefetch বট দিয়ে
+    // টোকেন খরচ হয় না।
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: 'recovery',
       email: dummyEmail,
-      options: { redirectTo: `${SITE_URL}/reset-password` },
     });
 
-    if (linkError || !linkData?.user) {
+    if (linkError || !linkData?.user || !linkData?.properties?.hashed_token) {
       console.error('generateLink ব্যর্থ (সম্ভবত এই নাম্বারে অ্যাকাউন্ট নাই):', linkError?.message);
       // নিরাপত্তার জন্য এখানেও একই জেনেরিক মেসেজ — ফাঁস করা হয় না যে নাম্বারটা ভুল
       return new Response(JSON.stringify({ success: true, message: GENERIC_MESSAGE }), {
@@ -124,10 +131,10 @@ export async function POST({ request }) {
       .single();
 
     const recoveryEmail = profile?.recovery_email;
-    const actionLink = linkData.properties?.action_link;
+    const resetLink = `${SITE_URL}/reset-password?token_hash=${linkData.properties.hashed_token}&type=recovery`;
 
-    if (recoveryEmail && actionLink) {
-      await sendResetEmail(recoveryEmail, actionLink);
+    if (recoveryEmail) {
+      await sendResetEmail(recoveryEmail, resetLink);
     } else {
       console.error('রিকভারি ইমেইল সেট করা নাই এই ইউজারের জন্য:', linkData.user.id);
     }
