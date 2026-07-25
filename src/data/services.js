@@ -4,7 +4,7 @@ export const categories = [
   { id: 'repair', name: 'রিপেয়ার সার্ভিস', icon: 'fa-screwdriver-wrench', desc: 'মেরামত সার্ভিস', slug: 'repair' },
   { id: 'car-rental', name: 'গাড়ি ভাড়া সার্ভিস', icon: 'fa-car', desc: 'গাড়ি ভাড়া নেওয়া/দেওয়া', slug: 'car-rental' },
   { id: 'courier', name: 'ডেলিভারি হিরো', icon: 'fa-truck-fast', desc: 'কুরিয়ার ও ডেলিভারি', slug: 'courier' },
-  { id: 'emergency', name: 'ইমার্জেন্সি কন্টাক্ট', icon: 'fa-phone-volume', desc: 'জরুরি যোগাযোগ নম্বর', slug: 'emergency', hidden: true },
+  { id: 'emergency', name: 'ইমার্জেন্সি কন্টাক্ট', icon: 'fa-phone-volume', desc: 'জরুরি যোগাযোগ নম্বর', slug: 'emergency' },
   { id: 'blood', name: 'ব্লাড ডোনার', icon: 'fa-droplet', desc: 'রক্তদাতা খোঁজা', slug: 'blood' },
   { id: 'home-food', name: 'হোম মেস ফুড', icon: 'fa-utensils', desc: 'বাসার তৈরি খাবার', slug: 'home-food' },
   { id: 'online-shop', name: 'অনলাইন শপ', icon: 'fa-store', desc: 'হোম মেড পণ্যের অনলাইন বাজার', slug: 'online-shop' },
@@ -17,7 +17,7 @@ export const categories = [
   { id: 'legal', name: 'আইনি পরামর্শ', icon: 'fa-scale-balanced', desc: 'আইনি পরামর্শ ও নথি', slug: 'legal' },
   { id: 'event', name: 'ইভেন্ট ম্যানেজমেন্ট', icon: 'fa-calendar-check', desc: 'অনুষ্ঠান আয়োজন', slug: 'event' },
   { id: 'laundry', name: 'লন্ড্রি সার্ভিস', icon: 'fa-shirt', desc: 'কাপড় ধোলাই সার্ভিস', slug: 'laundry' },
-  { id: 'doctor-directory', name: 'ডাক্তার ও হাসপাতাল ডিরেক্টরি', icon: 'fa-hospital', desc: 'ডাক্তার ও হাসপাতাল তালিকা', slug: 'doctor-directory', hidden: true },
+  { id: 'doctor-directory', name: 'ডাক্তার ও হাসপাতাল ডিরেক্টরি', icon: 'fa-hospital', desc: 'ডাক্তার ও হাসপাতাল তালিকা', slug: 'doctor-directory' },
 ];
 
 export const featuredServices = [
