@@ -4,8 +4,8 @@
 // Supabase Auth-এর সাথে কানেক্টেড — ফোন নাম্বারকে ভেতরে ভেতরে
 // ডামি ইমেইলে (phone@smartfeni.local) কনভার্ট করে Supabase Auth
 // ব্যবহার করা হচ্ছে, যাতে ইউজারকে ইমেইল টাইপ করতে না হয়।
-// প্রোফাইল ছবি Supabase Storage-এর 'listing-images' বাকেটে
-// avatars/ ফোল্ডারে আপলোড হয়।
+// প্রোফাইল ছবি এখন সার্ভার-সাইড /api/upload-avatar রুট দিয়ে
+// আপলোড হয় (service role key ব্যবহার করে)।
 // আপডেট: সাইনআপে ঐচ্ছিক রিকভারি ইমেইল, ব্লাড গ্রুপ, উপজেলা যোগ
 // আপডেট ২: ব্লকড ইউজার লগইন করতে পারবে না, সাসপেনশন মেসেজ দেখাবে
 // আপডেট ৩: /rider-profile আলাদা রিডাইরেক্ট সরানো হয়েছে — রাইডার
@@ -20,14 +20,13 @@
 // আপডেট ৬: সাইনআপে ইমেইল এখন বাধ্যতামূলক (forgot-password ফিচার
 // recovery_email-এর উপর নির্ভরশীল, তাই ইমেইল ছাড়া অ্যাকাউন্ট খুললে
 // ভবিষ্যতে পাসওয়ার্ড রিসেট করা যেত না)
-// আপডেট ৭ (বাগফিক্স): সাইনআপের পর ছবি আপলোড হচ্ছিল না — কারণ
-// storage upload কল হতো signUp() রেসপন্সের সাথে সাথেই, কিন্তু
-// Supabase ক্লায়েন্টের নতুন সেশন internally সেট হতে সামান্য সময়
-// লাগে। ফলে upload কল unauthenticated অবস্থায় চলে যেত আর
-// "new row violates row-level security policy" এরর দিতো (RLS
-// লগে সরাসরি কনফার্ম করা হয়েছে)। এখন signUp()-এর পর সেশনটা
-// supabase.auth.setSession() দিয়ে জোর করে সিঙ্ক করে নেওয়া হচ্ছে,
-// তারপর আপলোড শুরু হয় — এতে রেস কন্ডিশন দূর হয়ে যায়।
+// আপডেট ৭ (বাগফিক্স): সাইনআপ ও এডিট পেজ দুই জায়গাতেই ছবি আপলোড
+// ব্যর্থ হচ্ছিল ("new row violates row-level security policy" —
+// Supabase Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
+// হচ্ছিল, সেশন/RLS পলিসি সঠিক থাকা সত্ত্বেও, লগে বারবার কনফার্ম
+// করা হয়েছে)। এখন client-side supabase.storage.upload() এর বদলে
+// সার্ভার-সাইড /api/upload-avatar রুট কল হয় (service role key
+// দিয়ে), যেটা এই ভেরিফিকেশন ধাপটাই বাইপাস করে দেয়।
 // ============================================================
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -680,22 +679,33 @@ const upazilas = [
     }
   }
 
-  // প্রোফাইল ছবি Supabase Storage-এ আপলোড করা
-  async function uploadAvatar(userId, file) {
-    const fileExt = file.name.split('.').pop();
-    const filePath = `avatars/${userId}-${Date.now()}.${fileExt}`;
+  // প্রোফাইল ছবি আপলোড — সার্ভার-সাইড /api/upload-avatar রুট দিয়ে
+  // (service role key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি
+  // supabase.storage.upload() কল হতো, কিন্তু Storage সার্ভিস
+  // ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ হচ্ছিল (RLS ব্লক করে দিতো)।
+  async function uploadAvatar(accessToken, file) {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
 
-    const { error: uploadError } = await supabase.storage
-      .from('listing-images')
-      .upload(filePath, file, { upsert: true });
+      const res = await fetch('/api/upload-avatar', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      });
 
-    if (uploadError) {
-      console.error('ছবি আপলোড এরর:', uploadError.message);
+      const result = await res.json();
+
+      if (!res.ok) {
+        console.error('ছবি আপলোড এরর:', result.error);
+        return null;
+      }
+
+      return result.url || null;
+    } catch (err) {
+      console.error('ছবি আপলোড নেটওয়ার্ক এরর:', err);
       return null;
     }
-
-    const { data } = supabase.storage.from('listing-images').getPublicUrl(filePath);
-    return data?.publicUrl || null;
   }
 
   function notifyHeader(name, avatarUrl) {
@@ -747,20 +757,9 @@ const upazilas = [
       return;
     }
 
-    // নতুন সেশনটা এক্সপ্লিসিটলি সিঙ্ক করে নিচ্ছি — নাহলে পরের storage
-    // upload কল সেশন client-এ পুরোপুরি "সেট" হওয়ার আগেই চলে যেতে পারে
-    // (race condition), ফলে RLS ব্লক করে দেয় ("new row violates
-    // row-level security policy for table objects" — লগে কনফার্ম করা)
-    if (data.session) {
-      await supabase.auth.setSession({
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-      });
-    }
-
     let avatarUrl = null;
-    if (selectedPhotoFile && data.user) {
-      avatarUrl = await uploadAvatar(data.user.id, selectedPhotoFile);
+    if (selectedPhotoFile && data.user && data.session) {
+      avatarUrl = await uploadAvatar(data.session.access_token, selectedPhotoFile);
     }
 
     // ছবি, রিকভারি ইমেইল, ব্লাড গ্রুপ, উপজেলা — একসাথে profiles টেবিলে সেভ
