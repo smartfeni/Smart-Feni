@@ -27,14 +27,6 @@
   <div id="postImageField">
     <label class="form-label">ছবি</label>
     <input type="file" class="form-input" id="postImageInput" accept="image/*" />
-
-    <div id="imagePreviewBox" class="image-preview-box" style="display:none;">
-      <img id="imagePreviewThumb" src="" alt="প্রিভিউ" />
-      <div class="image-preview-info">
-        <p id="imagePreviewName"></p>
-        <button type="button" id="imagePreviewRemove" class="preview-remove-btn"><i class="fas fa-xmark"></i> সরান</button>
-      </div>
-    </div>
   </div>
 
   <!-- ===== শুধু ইভেন্ট টাইপে দেখাবে ===== -->
@@ -95,52 +87,6 @@
     font-weight: 600;
     line-height: 1.4;
   }
-
-  .image-preview-box {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 10px;
-    background: #F8FAFC;
-    border: 1px solid #EEF3F9;
-    border-radius: 14px;
-    padding: 10px 12px;
-  }
-
-  .image-preview-box img {
-    width: 56px;
-    height: 56px;
-    border-radius: 10px;
-    object-fit: contain;
-    background: #fff;
-    flex-shrink: 0;
-    border: 1px solid #EEF3F9;
-  }
-
-  .image-preview-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .image-preview-info p {
-    font-size: 0.8rem;
-    color: #3A4A60;
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    margin-bottom: 4px;
-  }
-
-  .preview-remove-btn {
-    background: none;
-    border: none;
-    color: #E0533D;
-    font-size: 0.76rem;
-    font-weight: 700;
-    padding: 0;
-    cursor: pointer;
-  }
 </style>
 
 <script>
@@ -150,7 +96,6 @@
   let clubName = '';
   let clubUpajila = null;
   let selectedImageFile = null;
-  let previewObjectUrl = null;
   let allPosts = [];
   let currentFilterType = 'achievement';
 
@@ -158,22 +103,6 @@
   function showMsg(text, type = 'error') {
     msgEl.textContent = text;
     msgEl.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
-  }
-
-  function showPreview(file) {
-    if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
-    previewObjectUrl = URL.createObjectURL(file);
-    document.getElementById('imagePreviewThumb').src = previewObjectUrl;
-    document.getElementById('imagePreviewName').textContent = file.name;
-    document.getElementById('imagePreviewBox').style.display = 'flex';
-  }
-
-  function clearPreview() {
-    if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
-    previewObjectUrl = null;
-    selectedImageFile = null;
-    document.getElementById('postImageInput').value = '';
-    document.getElementById('imagePreviewBox').style.display = 'none';
   }
 
   document.getElementById('postTypeInput')?.addEventListener('change', (e) => {
@@ -185,29 +114,37 @@
   });
 
   document.getElementById('postImageInput')?.addEventListener('change', (e) => {
-    const file = e.target.files?.[0] || null;
-    selectedImageFile = file;
-    if (file) {
-      showPreview(file);
-    } else {
-      clearPreview();
-    }
+    selectedImageFile = e.target.files?.[0] || null;
   });
 
-  document.getElementById('imagePreviewRemove')?.addEventListener('click', () => {
-    clearPreview();
-  });
-
+  // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
+  // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
+  // কল হতো, কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
+  // হচ্ছিল ("new row violates row-level security policy" — লগে
+  // কনফার্ম করা হয়েছে)।
   async function uploadPostImage(file) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+
     const ext = file.name.split('.').pop();
     const path = `club-posts/${clubId}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
-    if (error) {
-      console.error('ছবি আপলোড ব্যর্থ:', error.message);
-      return { url: null, error: error.message };
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('path', path);
+
+    const res = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      body: formData,
+    });
+    const result = await res.json();
+
+    if (!res.ok) {
+      console.error('ছবি আপলোড এরর:', result.error);
+      return null;
     }
-    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
-    return { url: data?.publicUrl || null, error: null };
+    return result.url || null;
   }
 
   document.getElementById('addPostBtn')?.addEventListener('click', async () => {
@@ -227,12 +164,6 @@
       return;
     }
 
-    // ছবি ছাড়া ইভেন্ট পাবলিশ করতে চাইলে সতর্ক করা (block না, শুধু নিশ্চিত করা)
-    if (type === 'event' && !selectedImageFile) {
-      const proceed = confirm('আপনি কোনো ছবি select করেননি। ছবি ছাড়াই পোস্ট করতে চান?');
-      if (!proceed) return;
-    }
-
     const btn = document.getElementById('addPostBtn');
     const span = btn.querySelector('span');
     span.textContent = 'পোস্ট হচ্ছে...';
@@ -240,14 +171,7 @@
 
     let imageUrl = null;
     if (selectedImageFile && type !== 'announcement') {
-      const result = await uploadPostImage(selectedImageFile);
-      imageUrl = result.url;
-      if (result.error) {
-        span.textContent = 'পোস্ট করুন';
-        btn.disabled = false;
-        showMsg('ছবি আপলোড ব্যর্থ: ' + result.error);
-        return;
-      }
+      imageUrl = await uploadPostImage(selectedImageFile);
     }
 
     const description = document.getElementById('postDescInput').value.trim() || null;
@@ -275,6 +199,10 @@
     }
 
     // ===== চেকবক্স ১: পাবলিক /services/sports পেজে লিস্টিং =====
+    // sports.astro পেজ এখন 'listings' টেবিলে category='sports' দিয়ে ফিল্টার করে
+    // (আগে ভুলে category='event' ব্যবহার হতো — সেই বাগ ফিক্স হওয়ার পর
+    // এখানেও category='sports' মিলিয়ে দেওয়া হলো), type='sports' দিলে
+    // "খেলা" ব্যাজ/আইকন সহ ঠিকমতো দেখাবে
     if (type === 'event' && listInSports) {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
@@ -297,10 +225,11 @@
     document.getElementById('postTitleInput').value = '';
     document.getElementById('postDescInput').value = '';
     document.getElementById('postDateInput').value = '';
+    document.getElementById('postImageInput').value = '';
     document.getElementById('postContactPhone').value = '';
     document.getElementById('listInSportsCheckbox').checked = false;
     document.getElementById('broadcastCheckbox').checked = false;
-    clearPreview();
+    selectedImageFile = null;
 
     loadPosts();
 
