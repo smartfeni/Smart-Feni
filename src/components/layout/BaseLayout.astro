@@ -30,6 +30,14 @@
 // আপডেট: Font Awesome CDN ভার্সন 6.0.0-beta3 → 6.5.2 (স্টেবল)।
 //         বিটা ভার্সনে অনেক নতুন আইকন (যেমন fa-people-group) ছিল না,
 //         ক্লাব মডিউলের কিছু আইকন তাই দেখা যাচ্ছিল না।
+// বাগফিক্স (নতুন): নতুন club id খোলার পর "Internal server error" আসছিল।
+//         কারণ: destructuring default (= '/logo.png') শুধু তখনই কাজ
+//         করে যখন prop 'undefined' হয় — কিন্তু নতুন club page
+//         ogImage/canonicalPath 'null' হিসেবে পাঠাচ্ছিল (যেমন নতুন
+//         ক্লাবের লোগো এখনো সেট করা হয়নি), ফলে ogImage null-ই থেকে
+//         যাচ্ছিল আর null.startsWith(...) কল করায় সার্ভার ক্র্যাশ
+//         করত। এখন null-safe fallback (ogImage || '/logo.png' এবং
+//         canonicalPath ? ... : ...-এ null-check) যোগ করা হলো।
 // ============================================================
 
 import Header from './Header.astro';
@@ -40,26 +48,30 @@ export interface Props {
   title: string;
   description?: string;
   keywords?: string;
-  ogImage?: string;
-  canonicalPath?: string;
+  ogImage?: string | null;
+  canonicalPath?: string | null;
 }
 
 const {
   title,
   description = 'স্মার্ট ফেনী - ফেনী জেলার প্রথম ডিজিটাল কমিউনিটি সার্ভিস ডিরেক্টরি। বাসা ভাড়া, টিউশন, রক্তদাতা, হোম ফুড, রিপেয়ার সহ ১৮+ ধরনের লোকাল সেবা এক জায়গায়।',
   keywords = 'স্মার্ট ফেনী, Smart Feni, ফেনী সার্ভিস ডিরেক্টরি, ফেনী কমিউনিটি প্ল্যাটফর্ম, ফেনী লোকাল সেবা',
-  ogImage = '/logo.png',
+  ogImage,
   canonicalPath,
 } = Astro.props;
+
+// null-safe: prop 'null' হয়ে এলেও ডিফল্ট বসবে (destructuring default শুধু undefined-এ কাজ করে)
+const safeOgImage = ogImage || '/logo.png';
+const safeCanonicalPath = canonicalPath || null;
 
 const GA_MEASUREMENT_ID = 'G-RWTRLNTCD6';
 
 // সাইট বেস URL (astro.config.mjs এর site থেকে আসে)
 const siteUrl = Astro.site?.toString().replace(/\/$/, '') || 'https://smartfeni.com';
-const canonicalUrl = canonicalPath
-  ? `${siteUrl}${canonicalPath.startsWith('/') ? canonicalPath : `/${canonicalPath}`}`
+const canonicalUrl = safeCanonicalPath
+  ? `${siteUrl}${safeCanonicalPath.startsWith('/') ? safeCanonicalPath : `/${safeCanonicalPath}`}`
   : `${siteUrl}${Astro.url.pathname}`;
-const absoluteOgImage = ogImage.startsWith('http') ? ogImage : `${siteUrl}${ogImage}`;
+const absoluteOgImage = safeOgImage.startsWith('http') ? safeOgImage : `${siteUrl}${safeOgImage}`;
 
 // JSON-LD LocalBusiness schema — ফেনী জেলা কনটেক্সট সহ
 const localBusinessSchema = {
@@ -135,7 +147,7 @@ const localBusinessSchema = {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  
+
   <style is:global>
     /* ===== গ্লোবাল স্টাইল ===== */
     * {
