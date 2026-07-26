@@ -15,7 +15,7 @@ export const categories = [
   { id: 'lost-found', name: 'লস্ট এন্ড ফাউন্ড', icon: 'fa-magnifying-glass', desc: 'হারানো-পাওয়া', slug: 'lost-found' },
   { id: 'health', name: 'স্বাস্থ্য পরামর্শ', icon: 'fa-user-doctor', desc: 'স্বাস্থ্য বিষয়ক পরামর্শ', slug: 'health' },
   { id: 'legal', name: 'আইনি পরামর্শ', icon: 'fa-scale-balanced', desc: 'আইনি পরামর্শ ও নথি', slug: 'legal' },
-  { id: 'event', name: 'ইভেন্ট ম্যানেজমেন্ট', icon: 'fa-calendar-check', desc: 'অনুষ্ঠান আয়োজন', slug: 'event' },
+  { id: 'event', name: 'ইভেন্ট ম্যানেজমেন্ট', icon: 'fa-calendar-check', desc: 'অনুষ্ঠান আয়োজন', slug: 'event', hidden: true },
   { id: 'laundry', name: 'লন্ড্রি সার্ভিস', icon: 'fa-shirt', desc: 'কাপড় ধোলাই সার্ভিস', slug: 'laundry', hidden: true },
   { id: 'doctor-directory', name: 'ডাক্তার ও হাসপাতাল ডিরেক্টরি', icon: 'fa-hospital', desc: 'ডাক্তার ও হাসপাতাল তালিকা', slug: 'doctor-directory', hidden: true },
 ];
