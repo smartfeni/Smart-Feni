@@ -82,13 +82,20 @@
     selectedCoverFile = e.target.files?.[0] || null;
   });
 
+  // বাগফিক্স: আগে upload fail করলে error silently ignore হয়ে যেত
+  // (শুধু null return করত), তাই ইউজার বুঝতে পারতেন না কেন ছবি সেভ
+  // হচ্ছে না। এখন error console-এ log হয় + { url, error } রিটার্ন
+  // করে যাতে কলার (saveProfileBtn হ্যান্ডলার) exact কারণ দেখাতে পারে।
   async function uploadImage(file, prefix) {
     const ext = file.name.split('.').pop();
     const path = `clubs/${prefix}-${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
-    if (error) return null;
+    if (error) {
+      console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, error.message);
+      return { url: null, error: error.message };
+    }
     const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
-    return data?.publicUrl || null;
+    return { url: data?.publicUrl || null, error: null };
   }
 
   document.getElementById('saveProfileBtn')?.addEventListener('click', async () => {
@@ -109,13 +116,17 @@
       longitude: document.getElementById('lngInput').value ? parseFloat(document.getElementById('lngInput').value) : null,
     };
 
+    const uploadErrors = [];
+
     if (selectedLogoFile) {
-      const url = await uploadImage(selectedLogoFile, `${clubId}-logo`);
+      const { url, error } = await uploadImage(selectedLogoFile, `${clubId}-logo`);
       if (url) updates.logo_image = url;
+      if (error) uploadErrors.push(`লোগো: ${error}`);
     }
     if (selectedCoverFile) {
-      const url = await uploadImage(selectedCoverFile, `${clubId}-cover`);
+      const { url, error } = await uploadImage(selectedCoverFile, `${clubId}-cover`);
       if (url) updates.cover_image = url;
+      if (error) uploadErrors.push(`কভার: ${error}`);
     }
 
     const { error } = await supabase.from('clubs').update(updates).eq('id', clubId);
@@ -127,6 +138,12 @@
       showMsg('সেভ ব্যর্থ: ' + error.message);
       return;
     }
+
+    if (uploadErrors.length > 0) {
+      showMsg('বাকি তথ্য সেভ হয়েছে, কিন্তু ছবি আপলোড ব্যর্থ — ' + uploadErrors.join(' | '));
+      return;
+    }
+
     showMsg('প্রোফাইল সেভ হয়েছে ✓', 'success');
   });
 
