@@ -397,14 +397,36 @@ import { categories } from '../../../data/services.js';
       cropConfirmBtn.disabled = true;
       cropConfirmText.textContent = 'আপলোড হচ্ছে...';
 
+      // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
+      // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
+      // কল হতো, কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
+      // হচ্ছিল ("new row violates row-level security policy" — লগে
+      // কনফার্ম করা হয়েছে)।
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        cropMessage.textContent = 'আগে লগইন করুন';
+        cropMessage.className = 'crop-message error';
+        cropConfirmBtn.disabled = false;
+        cropConfirmText.textContent = 'আপলোড করুন';
+        return;
+      }
+
       const path = `${FOLDER}/${pendingSlug}.jpg`;
 
-      const { error: uploadError } = await supabase.storage
-        .from(BUCKET)
-        .upload(path, pendingBlob, { contentType: 'image/jpeg', upsert: true });
+      const uploadFormData = new FormData();
+      uploadFormData.append('file', pendingBlob);
+      uploadFormData.append('path', path);
+      uploadFormData.append('contentType', 'image/jpeg');
 
-      if (uploadError) {
-        cropMessage.textContent = 'আপলোড ব্যর্থ: ' + uploadError.message;
+      const uploadRes = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: uploadFormData,
+      });
+      const uploadResult = await uploadRes.json();
+
+      if (!uploadRes.ok) {
+        cropMessage.textContent = 'আপলোড ব্যর্থ: ' + uploadResult.error;
         cropMessage.className = 'crop-message error';
         cropConfirmBtn.disabled = false;
         cropConfirmText.textContent = 'আপলোড করুন';
