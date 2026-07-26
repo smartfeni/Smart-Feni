@@ -338,15 +338,32 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     });
   });
 
-  async function uploadImages(userId) {
+  // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
+  // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
+  // কল হতো, কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
+  // হচ্ছিল ("new row violates row-level security policy" — লগে
+  // কনফার্ম করা হয়েছে)।
+  async function uploadImages(userId, accessToken) {
     const urls = [];
     for (const file of selectedFiles) {
       const fileExt = file.name.split('.').pop();
       const filePath = `${category}/${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${fileExt}`;
-      const { error } = await supabase.storage.from('listing-images').upload(filePath, file);
-      if (!error) {
-        const { data } = supabase.storage.from('listing-images').getPublicUrl(filePath);
-        if (data?.publicUrl) urls.push(data.publicUrl);
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', filePath);
+
+      const res = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      });
+      const result = await res.json();
+
+      if (res.ok && result.url) {
+        urls.push(result.url);
+      } else {
+        console.error('ছবি আপলোড এরর:', result.error);
       }
     }
     return urls;
@@ -385,7 +402,7 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     textEl.textContent = 'পোস্ট হচ্ছে...';
     submitBtn.disabled = true;
 
-    const imageUrls = selectedFiles.length ? await uploadImages(session.user.id) : [];
+    const imageUrls = selectedFiles.length ? await uploadImages(session.user.id, session.access_token) : [];
 
     const insertPayload = {
       user_id: session.user.id,
