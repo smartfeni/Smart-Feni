@@ -333,12 +333,34 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
       uploadBtn.disabled = true;
       uploadBtnText.textContent = 'আপলোড হচ্ছে...';
 
-      const { error: uploadError } = await supabase.storage
-        .from(BUCKET)
-        .upload(STORAGE_PATH, processedBlob, { upsert: true, contentType: 'image/png' });
+      // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
+      // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
+      // কল হতো, কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
+      // হচ্ছিল ("new row violates row-level security policy" — লগে
+      // কনফার্ম করা হয়েছে)।
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        uploadMessage.textContent = 'আগে লগইন করুন';
+        uploadMessage.className = 'upload-message error';
+        uploadBtn.disabled = false;
+        uploadBtnText.textContent = 'লোগো আপডেট করুন';
+        return;
+      }
 
-      if (uploadError) {
-        uploadMessage.textContent = 'আপলোড ব্যর্থ: ' + uploadError.message;
+      const uploadFormData = new FormData();
+      uploadFormData.append('file', processedBlob);
+      uploadFormData.append('path', STORAGE_PATH);
+      uploadFormData.append('contentType', 'image/png');
+
+      const uploadRes = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: uploadFormData,
+      });
+      const uploadResult = await uploadRes.json();
+
+      if (!uploadRes.ok) {
+        uploadMessage.textContent = 'আপলোড ব্যর্থ: ' + uploadResult.error;
         uploadMessage.className = 'upload-message error';
         uploadBtn.disabled = false;
         uploadBtnText.textContent = 'লোগো আপডেট করুন';
