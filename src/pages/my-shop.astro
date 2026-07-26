@@ -635,21 +635,34 @@ import AddListingModal from '../components/ui/AddListingModal.astro';
       reader.readAsDataURL(file);
     });
 
+    // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
+    // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
+    // কল হতো, কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
+    // হচ্ছিল ("new row violates row-level security policy" — লগে
+    // কনফার্ম করা হয়েছে)।
     async function uploadShopImage(userId, file) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return null;
+
       const fileExt = file.name.split('.').pop();
       const filePath = `shops/${userId}-${Date.now()}.${fileExt}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('listing-images')
-        .upload(filePath, file, { upsert: true });
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', filePath);
 
-      if (uploadError) {
-        console.error('শপ ছবি আপলোড এরর:', uploadError.message);
+      const res = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: formData,
+      });
+      const result = await res.json();
+
+      if (!res.ok) {
+        console.error('শপ ছবি আপলোড এরর:', result.error);
         return null;
       }
-
-      const { data } = supabase.storage.from('listing-images').getPublicUrl(filePath);
-      return data?.publicUrl || null;
+      return result.url || null;
     }
 
     saveProfileBtn?.addEventListener('click', async () => {
