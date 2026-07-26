@@ -82,20 +82,34 @@
     selectedCoverFile = e.target.files?.[0] || null;
   });
 
-  // বাগফিক্স: আগে upload fail করলে error silently ignore হয়ে যেত
-  // (শুধু null return করত), তাই ইউজার বুঝতে পারতেন না কেন ছবি সেভ
-  // হচ্ছে না। এখন error console-এ log হয় + { url, error } রিটার্ন
-  // করে যাতে কলার (saveProfileBtn হ্যান্ডলার) exact কারণ দেখাতে পারে।
+  // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
+  // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
+  // কল হতো, কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
+  // হচ্ছিল ("new row violates row-level security policy" — লগে
+  // কনফার্ম করা হয়েছে)।
   async function uploadImage(file, prefix) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+
     const ext = file.name.split('.').pop();
     const path = `clubs/${prefix}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
-    if (error) {
-      console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, error.message);
-      return { url: null, error: error.message };
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('path', path);
+
+    const res = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      body: formData,
+    });
+    const result = await res.json();
+
+    if (!res.ok) {
+      console.error('ছবি আপলোড এরর:', result.error);
+      return null;
     }
-    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
-    return { url: data?.publicUrl || null, error: null };
+    return result.url || null;
   }
 
   document.getElementById('saveProfileBtn')?.addEventListener('click', async () => {
@@ -104,18 +118,6 @@
     const original = span.textContent;
     span.textContent = 'সেভ হচ্ছে...';
     btn.disabled = true;
-
-    // বাগফিক্স: ছবি আপলোডের ঠিক আগে সেশন সতেজ (refresh) করে নেওয়া হচ্ছে।
-    // ফর্ম পূরণ করতে করতে access token মেয়াদ পার হয়ে গেলে storage
-    // আপলোড 'anon' হিসেবে গিয়ে RLS ভায়োলেশন দিত। getSession() কল করলে
-    // supabase-js নিজে থেকেই expired token refresh করার চেষ্টা করে।
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      span.textContent = original;
-      btn.disabled = false;
-      showMsg('সেশনের মেয়াদ শেষ হয়ে গেছে — পেজ রিলোড করে আবার লগইন করুন।');
-      return;
-    }
 
     const updates = {
       tagline: document.getElementById('taglineInput').value.trim(),
@@ -128,17 +130,13 @@
       longitude: document.getElementById('lngInput').value ? parseFloat(document.getElementById('lngInput').value) : null,
     };
 
-    const uploadErrors = [];
-
     if (selectedLogoFile) {
-      const { url, error } = await uploadImage(selectedLogoFile, `${clubId}-logo`);
+      const url = await uploadImage(selectedLogoFile, `${clubId}-logo`);
       if (url) updates.logo_image = url;
-      if (error) uploadErrors.push(`লোগো: ${error}`);
     }
     if (selectedCoverFile) {
-      const { url, error } = await uploadImage(selectedCoverFile, `${clubId}-cover`);
+      const url = await uploadImage(selectedCoverFile, `${clubId}-cover`);
       if (url) updates.cover_image = url;
-      if (error) uploadErrors.push(`কভার: ${error}`);
     }
 
     const { error } = await supabase.from('clubs').update(updates).eq('id', clubId);
@@ -150,12 +148,6 @@
       showMsg('সেভ ব্যর্থ: ' + error.message);
       return;
     }
-
-    if (uploadErrors.length > 0) {
-      showMsg('বাকি তথ্য সেভ হয়েছে, কিন্তু ছবি আপলোড ব্যর্থ — ' + uploadErrors.join(' | '));
-      return;
-    }
-
     showMsg('প্রোফাইল সেভ হয়েছে ✓', 'success');
   });
 
