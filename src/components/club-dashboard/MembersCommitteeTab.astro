@@ -8,9 +8,14 @@
 //
 // আপডেট ২: deleteMember() এখন club_members থেকে delete করার পাশাপাশি,
 // যদি ওই মেম্বারের user_id থাকে (রেজিস্টার্ড ইউজার থেকে এসেছিল), তাহলে
-// সংশ্লিষ্ট club_join_requests (accepted status) row-ও delete করে দেয় —
-// আগে এটা বাদ থাকায় ইউজার সাইডে "already member" ব্যানার এবং
-// মেম্বারশিপ ইনবক্সে "গৃহীত" স্ট্যাটাস স্টেল থেকে যেত।
+// সংশ্লিষ্ট club_join_requests row-ও status='rejected' এ আপডেট করে দেয়।
+//
+// আপডেট ৩: join_request-এর জন্য .delete() এর বদলে .update() ব্যবহার
+// করা হচ্ছে — কারণ club_join_requests টেবিলে RLS পলিসিতে কোনো DELETE
+// পলিসি নেই (শুধু owner-এর জন্য UPDATE পলিসি আছে), তাই delete() কল
+// কোনো error ছাড়াই silently ০ row affect করছিল, status স্টেল
+// (accepted) থেকে যাচ্ছিল। update() ব্যবহার করলে বিদ্যমান UPDATE
+// পলিসির আওতায় পড়ে, তাই ঠিকভাবে কাজ করবে।
 // ============================================================
 ---
 
@@ -246,19 +251,19 @@
     }
 
     // ধাপ ৩: যদি এই মেম্বার রেজিস্টার্ড ইউজার থেকে আসা হয় (user_id আছে),
-    // তাহলে সংশ্লিষ্ট accepted join_request-ও মুছে দিতে হবে —
-    // নাহলে ইউজার সাইডে "already member" স্টেল থেকে যায়, এবং
-    // মেম্বারশিপ ইনবক্সেও পুরনো accepted status দেখাতে থাকে
+    // তাহলে সংশ্লিষ্ট accepted join_request-টা status='rejected' এ
+    // আপডেট করে দিতে হবে (delete() না, কারণ RLS-এ DELETE পলিসি নেই —
+    // শুধু owner-এর জন্য UPDATE পলিসি আছে)
     if (memberUserId) {
       const { error: joinReqError } = await supabase
         .from('club_join_requests')
-        .delete()
+        .update({ status: 'rejected' })
         .eq('club_id', clubId)
         .eq('user_id', memberUserId)
         .eq('status', 'accepted');
 
       if (joinReqError) {
-        console.error('join_request cleanup ব্যর্থ:', joinReqError.message);
+        console.error('join_request status রিসেট ব্যর্থ:', joinReqError.message);
         // এটা silent fail — মূল delete সফল হয়েছে, তাই ইউজারকে
         // এলার্ট দেখানো হচ্ছে না, শুধু কনসোলে লগ রাখা হলো
       }
