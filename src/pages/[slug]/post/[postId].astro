@@ -1,0 +1,266 @@
+---
+// ============================================================
+// পেজ: ক্লাব পোস্ট শেয়ার/ডিটেইল পেজ (/[slug]/post/[postId])
+// ফাংশন: একটা নির্দিষ্ট ক্লাব পোস্ট (অর্জন/ইভেন্ট/ঘোষণা/গ্যালারি)
+// শেয়ারেবল লিংক আকারে দেখায়, প্রপার OG মেটা ট্যাগ সহ — যাতে
+// Facebook/WhatsApp এ শেয়ার করলে ছবি+টাইটেল সহ প্রিভিউ কার্ড আসে।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../../components/layout/BaseLayout.astro';
+import { supabase } from '../../../lib/supabase.js';
+
+const { slug, postId } = Astro.params;
+
+const { data: club, error: clubError } = await supabase
+  .from('clubs')
+  .select('*')
+  .eq('slug', slug)
+  .eq('is_active', true)
+  .maybeSingle();
+
+if (clubError) {
+  console.error('club fetch error:', clubError.message);
+}
+
+let post = null;
+
+if (club) {
+  const { data: postData, error: postError } = await supabase
+    .from('club_posts')
+    .select('*')
+    .eq('id', postId)
+    .eq('club_id', club.id)
+    .maybeSingle();
+
+  if (postError) {
+    console.error('post fetch error:', postError.message);
+  }
+  post = postData;
+}
+
+const TYPE_LABELS = {
+  achievement: { label: 'অর্জন', icon: 'fa-trophy' },
+  event: { label: 'ইভেন্ট / আয়োজন', icon: 'fa-calendar-days' },
+  announcement: { label: 'ঘোষণা', icon: 'fa-bullhorn' },
+  gallery: { label: 'গ্যালারি', icon: 'fa-images' },
+};
+
+function formatDate(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+const typeInfo = post ? TYPE_LABELS[post.type] || { label: 'পোস্ট', icon: 'fa-newspaper' } : null;
+
+const pageTitle = post && club ? `${post.title} | ${club.name}` : 'পেজ পাওয়া যায়নি | স্মার্ট ফেনী';
+const pageDescription = post
+  ? post.description || `${club.name} এর ${typeInfo.label} — ${post.title}`
+  : undefined;
+const ogImage = post ? post.image || club.cover_image || club.logo_image : undefined;
+const canonicalPath = post && club ? `/${club.slug}/post/${post.id}` : undefined;
+---
+
+<BaseLayout
+  title={pageTitle}
+  description={pageDescription}
+  ogImage={ogImage}
+  canonicalPath={canonicalPath}
+>
+  {post && club ? (
+    <div class="post-detail-page">
+      <div class="container">
+
+        <a href={`/${club.slug}`} class="club-back-link">
+          {club.logo_image ? (
+            <img src={club.logo_image} alt={club.name} class="back-logo" />
+          ) : (
+            <div class="back-logo-placeholder"><i class="fas fa-users"></i></div>
+          )}
+          <span>
+            <i class="fas fa-arrow-left"></i> {club.name} এর প্রোফাইলে যান
+          </span>
+        </a>
+
+        <div class="post-card">
+          <span class="post-type-badge"><i class={`fas ${typeInfo.icon}`}></i> {typeInfo.label}</span>
+
+          {post.image ? (
+            <img src={post.image} alt={post.title} class="post-img" />
+          ) : (
+            <div class="post-img-placeholder"><i class={`fas ${typeInfo.icon}`}></i></div>
+          )}
+
+          <div class="post-body">
+            <h1 class="post-title">{post.title}</h1>
+            {post.event_date && (
+              <p class="post-date"><i class="fas fa-clock"></i> {formatDate(post.event_date)}</p>
+            )}
+            {post.description && <p class="post-desc">{post.description}</p>}
+
+            {post.contact_phone && (
+              <a href={`tel:${post.contact_phone}`} class="post-call-btn">
+                <i class="fas fa-phone"></i> কল করুন
+              </a>
+            )}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  ) : (
+    <section class="not-found">
+      <div class="container">
+        <i class="fas fa-face-frown"></i>
+        <p>এই পোস্টটি খুঁজে পাওয়া যায়নি</p>
+        <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> হোমপেজে ফিরে যান</a>
+      </div>
+    </section>
+  )}
+</BaseLayout>
+
+<style>
+  .post-detail-page {
+    min-height: 70vh;
+    padding: 28px 0 80px;
+    background: #F8FAFC;
+  }
+
+  .club-back-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    color: #5A6E85;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 18px;
+  }
+
+  .back-logo,
+  .back-logo-placeholder {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #fff;
+    border: 1px solid #E5EAF0;
+  }
+
+  .back-logo-placeholder {
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+  }
+
+  .post-card {
+    background: #fff;
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
+    max-width: 620px;
+    margin: 0 auto;
+  }
+
+  .post-type-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 6px 16px;
+    border-radius: 40px;
+    margin: 18px 0 0 18px;
+  }
+
+  .post-img {
+    width: 100%;
+    aspect-ratio: 4/3;
+    object-fit: contain;
+    background: #F4F7FC;
+    display: block;
+    margin-top: 14px;
+  }
+
+  .post-img-placeholder {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: #F4F7FC;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.4rem;
+    margin-top: 14px;
+  }
+
+  .post-body {
+    padding: 20px 22px 26px;
+  }
+
+  .post-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    line-height: 1.4;
+  }
+
+  .post-date {
+    font-size: 0.82rem;
+    color: #FF6B35;
+    font-weight: 600;
+    margin-top: 8px;
+  }
+
+  .post-desc {
+    font-size: 0.92rem;
+    color: #5A6E85;
+    line-height: 1.75;
+    margin-top: 12px;
+    white-space: pre-line;
+  }
+
+  .post-call-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    text-decoration: none;
+    padding: 10px 20px;
+    border-radius: 40px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-top: 18px;
+  }
+
+  .not-found {
+    padding: 120px 0;
+    text-align: center;
+    color: #B0BCCB;
+  }
+  .not-found i {
+    font-size: 3rem;
+    margin-bottom: 16px;
+  }
+  .not-found p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 16px;
+  }
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #FF6B35;
+    text-decoration: none;
+    font-weight: 700;
+  }
+</style>
