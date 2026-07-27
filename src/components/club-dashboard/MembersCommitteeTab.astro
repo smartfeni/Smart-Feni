@@ -5,6 +5,12 @@
 // খোলা থাকত) — বাটনে ক্লিক করলে খুলবে
 // নোট: ইচ্ছাকৃতভাবে এখানে কোনো "এডিট" বাটন নেই — ভুল তথ্য দিলে
 // ডিলিট করে নতুন এন্ট্রি দেওয়াই সহজ, তাই শুধু ডিলিট রাখা হয়েছে
+//
+// আপডেট ২: deleteMember() এখন club_members থেকে delete করার পাশাপাশি,
+// যদি ওই মেম্বারের user_id থাকে (রেজিস্টার্ড ইউজার থেকে এসেছিল), তাহলে
+// সংশ্লিষ্ট club_join_requests (accepted status) row-ও delete করে দেয় —
+// আগে এটা বাদ থাকায় ইউজার সাইডে "already member" ব্যানার এবং
+// মেম্বারশিপ ইনবক্সে "গৃহীত" স্ট্যাটাস স্টেল থেকে যেত।
 // ============================================================
 ---
 
@@ -226,11 +232,38 @@
 
   async function deleteMember(id) {
     if (!confirm('এই সদস্যকে মুছে ফেলতে চান?')) return;
+
+    // ধাপ ১: মেম্বার রেকর্ডটা আগে fetch করে user_id বের করা —
+    // যাতে সংশ্লিষ্ট join_request খুঁজে পাওয়া যায়
+    const memberToDelete = allMembers.find((m) => m.id === id);
+    const memberUserId = memberToDelete?.user_id || null;
+
+    // ধাপ ২: club_members থেকে delete (আগের মতোই)
     const { error } = await supabase.from('club_members').delete().eq('id', id);
     if (error) {
       alert('ডিলিট ব্যর্থ: ' + error.message);
       return;
     }
+
+    // ধাপ ৩: যদি এই মেম্বার রেজিস্টার্ড ইউজার থেকে আসা হয় (user_id আছে),
+    // তাহলে সংশ্লিষ্ট accepted join_request-ও মুছে দিতে হবে —
+    // নাহলে ইউজার সাইডে "already member" স্টেল থেকে যায়, এবং
+    // মেম্বারশিপ ইনবক্সেও পুরনো accepted status দেখাতে থাকে
+    if (memberUserId) {
+      const { error: joinReqError } = await supabase
+        .from('club_join_requests')
+        .delete()
+        .eq('club_id', clubId)
+        .eq('user_id', memberUserId)
+        .eq('status', 'accepted');
+
+      if (joinReqError) {
+        console.error('join_request cleanup ব্যর্থ:', joinReqError.message);
+        // এটা silent fail — মূল delete সফল হয়েছে, তাই ইউজারকে
+        // এলার্ট দেখানো হচ্ছে না, শুধু কনসোলে লগ রাখা হলো
+      }
+    }
+
     loadMembers();
   }
 
