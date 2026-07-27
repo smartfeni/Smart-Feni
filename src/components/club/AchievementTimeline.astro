@@ -1,5 +1,5 @@
 ---
-const { achievements } = Astro.props;
+const { achievements, clubSlug } = Astro.props;
 
 function formatDate(dateStr) {
   if (!dateStr) return null;
@@ -20,7 +20,17 @@ function formatDate(dateStr) {
             <div class="timeline-img-placeholder"><i class="fas fa-trophy"></i></div>
           )}
           <div class="timeline-body">
-            <p class="timeline-title">{a.title}</p>
+            <div class="timeline-title-row">
+              <p class="timeline-title">{a.title}</p>
+              <button
+                class="share-btn"
+                data-share-url={`/${clubSlug}/post/${a.id}`}
+                data-share-title={a.title}
+                aria-label="শেয়ার করুন"
+              >
+                <i class="fas fa-share-nodes"></i>
+              </button>
+            </div>
             {a.event_date && <p class="timeline-date">{formatDate(a.event_date)}</p>}
             {a.description && <p class="timeline-desc">{a.description}</p>}
           </div>
@@ -29,6 +39,8 @@ function formatDate(dateStr) {
     </div>
   </div>
 )}
+
+<div id="shareToast" class="share-toast">লিংক কপি হয়েছে ✓</div>
 
 <style>
   .section-card {
@@ -93,10 +105,42 @@ function formatDate(dateStr) {
     flex-shrink: 0;
   }
 
+  .timeline-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .timeline-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
   .timeline-title {
     font-size: 0.9rem;
     font-weight: 700;
     color: #1B2A4A;
+  }
+
+  .share-btn {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: none;
+    background: #F4F7FC;
+    color: #5A6E85;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+
+  .share-btn:active {
+    background: #FFF0EA;
+    color: #FF6B35;
   }
 
   .timeline-date {
@@ -112,4 +156,63 @@ function formatDate(dateStr) {
     margin-top: 4px;
     line-height: 1.6;
   }
+
+  .share-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    transform: translateX(-50%) translateY(20px);
+    background: #1B2A4A;
+    color: #fff;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 10px 20px;
+    border-radius: 40px;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s ease;
+    z-index: 999;
+  }
+
+  .share-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 </style>
+
+<script>
+  // ============================================================
+  // শেয়ার বাটন — মোবাইলে navigator.share() (native শেয়ার শীট),
+  // সাপোর্ট না থাকলে লিংক ক্লিপবোর্ডে কপি + toast দেখায়
+  // ============================================================
+  function showShareToast() {
+    const toast = document.getElementById('shareToast');
+    if (!toast) return;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
+  }
+
+  document.querySelectorAll('.share-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const path = btn.dataset.shareUrl;
+      const title = btn.dataset.shareTitle;
+      const fullUrl = `${window.location.origin}${path}`;
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ title, url: fullUrl });
+        } catch (err) {
+          // ইউজার শেয়ার শীট ক্যানসেল করলে কিছু করার দরকার নেই
+        }
+      } else {
+        try {
+          await navigator.clipboard.writeText(fullUrl);
+          showShareToast();
+        } catch (err) {
+          console.error('কপি করা যায়নি:', err);
+        }
+      }
+    });
+  });
+</script>
