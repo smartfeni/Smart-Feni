@@ -4,6 +4,8 @@
 // ফাংশন: একটা নির্দিষ্ট ক্লাব পোস্ট (অর্জন/ইভেন্ট/ঘোষণা/গ্যালারি)
 // শেয়ারেবল লিংক আকারে দেখায়, প্রপার OG মেটা ট্যাগ সহ — যাতে
 // Facebook/WhatsApp এ শেয়ার করলে ছবি+টাইটেল সহ প্রিভিউ কার্ড আসে।
+// আপডেট: টাইটেলের পাশে শেয়ার বাটন যোগ করা হলো (পোস্টের ভেতর
+// থেকেও শেয়ার করা যায়, শুধু তালিকা থেকে না)
 // ============================================================
 
 export const prerender = false;
@@ -94,7 +96,17 @@ const canonicalPath = post && club ? `/${club.slug}/post/${post.id}` : undefined
           )}
 
           <div class="post-body">
-            <h1 class="post-title">{post.title}</h1>
+            <div class="post-title-row">
+              <h1 class="post-title">{post.title}</h1>
+              <button
+                class="share-btn"
+                data-share-url={`/${club.slug}/post/${post.id}`}
+                data-share-title={post.title}
+                aria-label="শেয়ার করুন"
+              >
+                <i class="fas fa-share-nodes"></i>
+              </button>
+            </div>
             {post.event_date && (
               <p class="post-date"><i class="fas fa-clock"></i> {formatDate(post.event_date)}</p>
             )}
@@ -119,6 +131,8 @@ const canonicalPath = post && club ? `/${club.slug}/post/${post.id}` : undefined
       </div>
     </section>
   )}
+
+  <div id="postShareToast" class="share-toast">লিংক কপি হয়েছে ✓</div>
 </BaseLayout>
 
 <style>
@@ -205,11 +219,39 @@ const canonicalPath = post && club ? `/${club.slug}/post/${post.id}` : undefined
     padding: 20px 22px 26px;
   }
 
+  .post-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
   .post-title {
     font-size: 1.2rem;
     font-weight: 700;
     color: #1B2A4A;
     line-height: 1.4;
+  }
+
+  .share-btn {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: #F4F7FC;
+    color: #5A6E85;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    cursor: pointer;
+    margin-top: 2px;
+  }
+
+  .share-btn:active {
+    background: #FFF0EA;
+    color: #FF6B35;
   }
 
   .post-date {
@@ -263,4 +305,59 @@ const canonicalPath = post && club ? `/${club.slug}/post/${post.id}` : undefined
     text-decoration: none;
     font-weight: 700;
   }
+
+  .share-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    transform: translateX(-50%) translateY(20px);
+    background: #1B2A4A;
+    color: #fff;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 10px 20px;
+    border-radius: 40px;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s ease;
+    z-index: 999;
+  }
+
+  .share-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 </style>
+
+<script>
+  function showPostShareToast() {
+    const toast = document.getElementById('postShareToast');
+    if (!toast) return;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
+  }
+
+  document.querySelectorAll('.share-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const path = btn.dataset.shareUrl;
+      const title = btn.dataset.shareTitle;
+      const fullUrl = `${window.location.origin}${path}`;
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ title, url: fullUrl });
+        } catch (err) {
+          // ইউজার শেয়ার শীট ক্যানসেল করলে কিছু করার দরকার নেই
+        }
+      } else {
+        try {
+          await navigator.clipboard.writeText(fullUrl);
+          showPostShareToast();
+        } catch (err) {
+          console.error('কপি করা যায়নি:', err);
+        }
+      }
+    });
+  });
+</script>
