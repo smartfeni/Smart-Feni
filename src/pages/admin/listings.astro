@@ -2,6 +2,7 @@
 // ============================================================
 // পেজ: অ্যাডমিন — লিস্টিং ম্যানেজমেন্ট (/admin/listings)
 // সব ক্যাটাগরির লিস্টিং একসাথে দেখা, ফিল্টার, approve/reject/delete
+// + সোর্স ব্যাজ, ভ্যারিফাই টগল, রেটিং প্রদর্শন, প্রোফাইল কানেক্ট
 // ============================================================
 
 export const prerender = false;
@@ -41,6 +42,12 @@ import { categories } from '../../data/services.js';
             <option value="pending">রিভিউ বাকি</option>
             <option value="active">সক্রিয়</option>
             <option value="rejected">বাতিল</option>
+          </select>
+
+          <select id="sourceFilter" class="filter-select">
+            <option value="all">সব সোর্স</option>
+            <option value="manual">ম্যানুয়াল/ইউজার এন্ট্রি</option>
+            <option value="cnglagbe">cnglagbe থেকে</option>
           </select>
         </div>
 
@@ -170,11 +177,17 @@ import { categories } from '../../data/services.js';
     const resultCount = document.getElementById('resultCount');
     const categoryFilter = document.getElementById('categoryFilter');
     const statusFilter = document.getElementById('statusFilter');
+    const sourceFilter = document.getElementById('sourceFilter');
 
     const statusLabels = {
       pending: { text: 'রিভিউ বাকি', bg: '#FFF3E0', color: '#B36B00' },
       active: { text: 'সক্রিয়', color: '#1B7A3C', bg: '#EAFBF0' },
       rejected: { text: 'বাতিল', color: '#D14343', bg: '#FFF0EA' },
+    };
+
+    // সোর্স স্লাগ -> দেখানোর নাম
+    const sourceLabels = {
+      cnglagbe: 'cnglagbe থেকে',
     };
 
     function formatDate(iso) {
@@ -192,6 +205,8 @@ import { categories } from '../../data/services.js';
       const status = statusLabels[listing.status] || statusLabels.pending;
       const categoryName = categoryNameMap[listing.category] || listing.category;
       const thumb = Array.isArray(listing.images) && listing.images.length > 0 ? listing.images[0] : null;
+      const sourceLabel = listing.source ? (sourceLabels[listing.source] || listing.source) : null;
+      const isUnclaimed = !listing.user_id;
 
       const card = document.createElement('div');
       card.style.cssText = 'background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;gap:14px;';
@@ -204,17 +219,23 @@ import { categories } from '../../data/services.js';
         <div style="flex:1;min-width:0;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <h3 style="font-size:0.98rem;font-weight:700;color:#1B2A4A;">${listing.title || '(শিরোনামহীন)'}</h3>
-            <span style="display:flex;gap:6px;flex-shrink:0;">
+            <span style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
               ${!listing.is_reviewed ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#FF6B35;color:#fff;">নতুন</span>` : ''}
               <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${status.bg};color:${status.color};">${status.text}</span>
+              ${listing.is_verified ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#E8F2FF;color:#1D6FE0;"><i class="fas fa-circle-check"></i> ভ্যারিফাইড</span>` : ''}
             </span>
           </div>
-          <p style="font-size:0.82rem;color:#8FA0BC;margin-top:4px;">${categoryName} ${listing.type ? '· ' + listing.type : ''}</p>
+          <p style="font-size:0.82rem;color:#8FA0BC;margin-top:4px;">
+            ${categoryName} ${listing.type ? '· ' + listing.type : ''}
+            ${sourceLabel ? ` · <span style="color:#B36B00;font-weight:700;">${sourceLabel}</span>` : ''}
+            ${isUnclaimed && listing.source ? ` · <span style="color:#8FA0BC;">আনক্লেইমড</span>` : ''}
+          </p>
           ${listing.description ? `<p style="font-size:0.85rem;color:#5A6E85;margin-top:6px;">${listing.description}</p>` : ''}
           <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:0.8rem;color:#5A6E85;">
             ${listing.price ? `<span><i class="fas fa-tag" style="color:#FF6B35;"></i> ${listing.price}</span>` : ''}
             ${listing.upazila ? `<span><i class="fas fa-location-dot" style="color:#FF6B35;"></i> ${listing.upazila}</span>` : ''}
             ${listing.contact_phone ? `<span><i class="fas fa-phone" style="color:#FF6B35;"></i> ${listing.contact_phone}</span>` : ''}
+            ${listing.rating_count > 0 ? `<span><i class="fas fa-star" style="color:#F5A623;"></i> ${Number(listing.rating).toFixed(1)} (${listing.rating_count})</span>` : ''}
             <span><i class="fas fa-clock" style="color:#FF6B35;"></i> ${formatDate(listing.created_at)}</span>
           </div>
           <div class="card-actions" style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"></div>
@@ -247,6 +268,24 @@ import { categories } from '../../data/services.js';
         actionsWrap.appendChild(reviewedBtn);
       }
 
+      // ভ্যারিফাই টগল বাটন
+      const verifyBtn = document.createElement('button');
+      verifyBtn.textContent = listing.is_verified ? 'আনভ্যারিফাই করুন' : 'ভ্যারিফাই করুন';
+      verifyBtn.style.cssText = listing.is_verified
+        ? 'background:#F4F7FC;color:#1B2A4A;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;'
+        : 'background:#E8F2FF;color:#1D6FE0;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+      verifyBtn.addEventListener('click', () => toggleVerified(listing.id, !listing.is_verified));
+      actionsWrap.appendChild(verifyBtn);
+
+      // প্রোফাইল কানেক্ট বাটন — শুধু আনক্লেইমড লিস্টিং এ দেখাবে
+      if (isUnclaimed) {
+        const connectBtn = document.createElement('button');
+        connectBtn.textContent = 'ড্রাইভারের সাথে কানেক্ট করুন';
+        connectBtn.style.cssText = 'background:#1B2A4A;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        connectBtn.addEventListener('click', () => connectToProfile(listing.id, listing.contact_phone));
+        actionsWrap.appendChild(connectBtn);
+      }
+
       const deleteBtn = document.createElement('button');
       deleteBtn.textContent = 'ডিলিট';
       deleteBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
@@ -266,7 +305,6 @@ import { categories } from '../../data/services.js';
     }
 
     async function markReviewed(id) {
-      // শুধু is_reviewed বদলাবে — status/visibility একদম অপরিবর্তিত থাকবে
       const { error } = await supabase.from('listings').update({ is_reviewed: true }).eq('id', id);
       if (error) {
         alert('আপডেট ব্যর্থ: ' + error.message);
@@ -284,12 +322,75 @@ import { categories } from '../../data/services.js';
       loadListings();
     }
 
+    async function toggleVerified(id, nextValue) {
+      const { error } = await supabase.from('listings').update({ is_verified: nextValue }).eq('id', id);
+      if (error) {
+        alert('আপডেট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadListings();
+    }
+
     async function deleteListing(id) {
       const { error } = await supabase.from('listings').delete().eq('id', id);
       if (error) {
         alert('ডিলিট ব্যর্থ: ' + error.message);
         return;
       }
+      loadListings();
+    }
+
+    // ============================================================
+    // লিস্টিং-কে কোনো প্রোফাইল/ইউজার একাউন্টের সাথে কানেক্ট করা
+    // ফোন নম্বর দিয়ে profiles টেবিলে সার্চ করে user_id অ্যাসাইন করে
+    // ============================================================
+    async function connectToProfile(listingId, currentPhone) {
+      const phone = prompt('ড্রাইভারের ফোন নম্বর দিন (যেটা দিয়ে তিনি Smart Feni-তে একাউন্ট খুলেছেন):', currentPhone || '');
+      if (!phone) return;
+
+      const cleanPhone = phone.trim();
+
+      const { data: profiles, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, phone')
+        .eq('phone', cleanPhone);
+
+      if (error) {
+        alert('প্রোফাইল সার্চ ব্যর্থ: ' + error.message);
+        return;
+      }
+
+      if (!profiles || profiles.length === 0) {
+        alert('এই নম্বরে কোনো প্রোফাইল পাওয়া যায়নি। ড্রাইভারকে আগে Smart Feni-তে একাউন্ট খুলতে হবে (এই নম্বর দিয়েই)।');
+        return;
+      }
+
+      let selectedProfile = profiles[0];
+
+      if (profiles.length > 1) {
+        const list = profiles
+          .map((p, i) => `${i + 1}. ${p.full_name || '(নাম নাই)'} — ${p.phone}`)
+          .join('\n');
+        const choice = prompt(`একাধিক প্রোফাইল পাওয়া গেছে, নম্বর লিখে বেছে নিন:\n${list}`, '1');
+        const idx = parseInt(choice, 10) - 1;
+        if (isNaN(idx) || !profiles[idx]) return;
+        selectedProfile = profiles[idx];
+      }
+
+      const confirmMsg = `"${selectedProfile.full_name || selectedProfile.phone}" এর প্রোফাইলের সাথে এই লিস্টিং কানেক্ট করবেন?\n\nএর পর থেকে এই ড্রাইভার নিজে লগইন করে লিস্টিং এডিট করতে পারবেন।`;
+      if (!confirm(confirmMsg)) return;
+
+      const { error: updateError } = await supabase
+        .from('listings')
+        .update({ user_id: selectedProfile.id })
+        .eq('id', listingId);
+
+      if (updateError) {
+        alert('কানেক্ট করা ব্যর্থ: ' + updateError.message);
+        return;
+      }
+
+      alert('কানেক্ট সফল হয়েছে।');
       loadListings();
     }
 
@@ -304,6 +405,7 @@ import { categories } from '../../data/services.js';
 
       const category = categoryFilter.value;
       const status = statusFilter.value;
+      const source = sourceFilter.value;
 
       if (category !== 'all') query = query.eq('category', category);
 
@@ -311,6 +413,12 @@ import { categories } from '../../data/services.js';
         query = query.eq('is_reviewed', false);
       } else if (status !== 'all') {
         query = query.eq('status', status);
+      }
+
+      if (source === 'manual') {
+        query = query.is('source', null);
+      } else if (source !== 'all') {
+        query = query.eq('source', source);
       }
 
       const { data, error } = await query;
@@ -336,6 +444,7 @@ import { categories } from '../../data/services.js';
 
     categoryFilter.addEventListener('change', loadListings);
     statusFilter.addEventListener('change', loadListings);
+    sourceFilter.addEventListener('change', loadListings);
 
     window.addEventListener('smartfeni:admin-ready', () => {
       loadListings();
