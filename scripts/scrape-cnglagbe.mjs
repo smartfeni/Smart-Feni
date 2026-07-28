@@ -76,29 +76,30 @@ function parseDriversFromText(rawText) {
 }
 
 // প্রতিটা স্ক্রলের পর "অপেক্ষা করুন" লোডিং স্টেট শেষ হওয়া পর্যন্ত অপেক্ষা করে,
-// তারপর নতুন কনটেন্ট লোড হয়েছে কিনা চেক করে। ব্যাচ-লোডিং সাইটের জন্য
-// fixed timeout এর চেয়ে এটা অনেক বেশি নির্ভরযোগ্য।
-async function scrollToLoadAll(page, maxRounds = 80) {
+// তারপর নতুন কনটেন্ট লোড হয়েছে কিনা চেক করে। maxRounds অনেক বেশি রাখা হয়েছে
+// যাতে পুরো লিস্ট (২৫০+ এন্ট্রি) সম্পূর্ণ লোড হওয়ার সুযোগ পায় — রানটাইম বেশি
+// লাগলেও সমস্যা নাই।
+async function scrollToLoadAll(page, maxRounds = 300) {
   let lastHeight = 0;
   let stableRounds = 0;
 
   for (let round = 0; round < maxRounds; round++) {
     await page.mouse.wheel(0, 2500);
 
-    // "অপেক্ষা করুন" দেখা দিলে সেটা আবার সরে যাওয়া পর্যন্ত অপেক্ষা করা
-    // (দেখা না দিলে বা খুঁজে না পেলে সাইলেন্টলি এগিয়ে যাবে)
     const loadingIndicator = page.getByText(LOADING_TEXT, { exact: false }).first();
     await loadingIndicator
-      .waitFor({ state: 'visible', timeout: 2000 })
-      .then(() => loadingIndicator.waitFor({ state: 'hidden', timeout: 15000 }))
-      .catch(() => {}); // লোডিং ইন্ডিকেটর না পেলে এগিয়ে যাবে
+      .waitFor({ state: 'visible', timeout: 2500 })
+      .then(() => loadingIndicator.waitFor({ state: 'hidden', timeout: 20000 }))
+      .catch(() => {});
 
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(600);
 
     const height = await page.evaluate(() => document.body.scrollHeight);
     if (height === lastHeight) {
       stableRounds++;
-      if (stableRounds >= 4) break; // পরপর ৪ বার হাইট না বাড়লে থামবে
+      // পরপর ৭ বার হাইট না বাড়লে তবেই ধরে নেওয়া হবে সব লোড হয়ে গেছে
+      // (তাড়াহুড়া করে থামা এড়াতে থ্রেশহোল্ড বাড়ানো হয়েছে)
+      if (stableRounds >= 7) break;
     } else {
       stableRounds = 0;
     }
@@ -153,7 +154,7 @@ async function main() {
     userAgent:
       'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
   });
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(30000);
 
   const allRows = [];
 
