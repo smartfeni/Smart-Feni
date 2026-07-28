@@ -4,6 +4,12 @@
 //
 // রান হয় GitHub Actions cron দিয়ে (দেখুন .github/workflows/scrape-cnglagbe.yml)
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+//
+// উপজেলা ম্যাচ পেলে -> সরাসরি লাইভ (status: active)
+// উপজেলা ম্যাচ না পেলে (ফেনীর বাইরের এলাকা হতে পারে) -> upazila খালি,
+// status: pending রেখে সেভ হয়, ডিলিট হয় না — এডমিন পরে ম্যানুয়ালি
+// রিভিউ করে upazila বসিয়ে approve করতে পারবে (raw এলাকার টেক্সট
+// description এ থাকে, তাই বাদ পড়ার কারণ বোঝা যায়)
 // ============================================================
 
 import { chromium } from 'playwright';
@@ -27,18 +33,15 @@ const VEHICLE_TYPES = [
   { filterText: 'অ্যাম্বুলেন্স', type: 'ambulance' },
 ];
 
-// ============================================================
-// উপজেলা ম্যাচিং — নির্দিষ্ট ৫টা উপজেলার নাম আগে চেক হয়, "ফেনী সদর" সবার
-// শেষে ফলব্যাক হিসেবে (কারণ শুধু "ফেনী" শব্দটা প্রায় সব এন্ট্রিতেই
-// জেলার নাম হিসেবে থাকে, তাই অন্য উপজেলার নাম না থাকলে তবেই এটা ধরা হবে)
-// ============================================================
+// নির্দিষ্ট ৫টা উপজেলার নাম আগে চেক হয়, "ফেনী সদর" সবার শেষে ফলব্যাক
+// (কারণ শুধু "ফেনী" শব্দটা প্রায় সব এন্ট্রিতেই জেলার নাম হিসেবে থাকে)
 const UPAZILA_ALIASES_ORDERED = [
   ['ছাগলনাইয়া', ['ছাগলনাইয়া']],
   ['দাগনভূঞা', ['দাগনভূঞা', 'দাগনভুঞা', 'দাগনভুয়া']],
   ['পরশুরাম', ['পরশুরাম']],
   ['ফুলগাজী', ['ফুলগাজী', 'ফুলগাজি']],
   ['সোনাগাজী', ['সোনাগাজী', 'সোনাগাজি']],
-  ['ফেনী সদর', ['ফেনী সদর', 'সদর', 'ফেনী']], // সবার শেষে ফলব্যাক
+  ['ফেনী সদর', ['ফেনী সদর', 'সদর', 'ফেনী']],
 ];
 
 const PHONE_REGEX = /01[3-9]\d{8}/;
@@ -50,7 +53,7 @@ function matchUpazila(areaText) {
       return upazila;
     }
   }
-  return null; // ফেনী জেলার বাইরের এলাকা — স্কিপ হবে
+  return null; // ফেনী জেলার বাইরের এলাকা হতে পারে
 }
 
 function parseDriversFromText(rawText) {
@@ -124,9 +127,10 @@ async function scrapeVehicleType(page, vehicleType) {
   return rawDrivers;
 }
 
+// upazila ম্যাচ পেলে active/লাইভ, না পেলে pending + upazila null
+// (কিন্তু কখনোই বাদ/ডিলিট হয় না — সব ডিটেইলস description এ থাকে)
 function buildListingRow(driver, vehicleType) {
   const upazila = matchUpazila(driver.area);
-  if (!upazila) return null;
 
   return {
     category: 'car-rental',
@@ -134,10 +138,10 @@ function buildListingRow(driver, vehicleType) {
     title: driver.name,
     description: driver.area,
     price: null,
-    upazila,
+    upazila: upazila, // null হতে পারে
     images: [],
     contact_phone: driver.phone,
-    status: 'active',
+    status: upazila ? 'active' : 'pending',
     is_reviewed: false,
     is_verified: false,
     source: 'cnglagbe',
@@ -154,18 +158,12 @@ async function main() {
   page.setDefaultTimeout(30000);
 
   const allRows = [];
-  let totalSkippedOutOfFeni = 0;
 
   for (const vehicleType of VEHICLE_TYPES) {
     try {
       const drivers = await scrapeVehicleType(page, vehicleType);
       for (const driver of drivers) {
-        const row = buildListingRow(driver, vehicleType);
-        if (row) {
-          allRows.push(row);
-        } else {
-          totalSkippedOutOfFeni++;
-        }
+        allRows.push(buildListingRow(driver, vehicleType));
       }
     } catch (err) {
       console.error(`[${vehicleType.type}] স্ক্র্যাপ ব্যর্থ:`, err.message);
@@ -181,7 +179,8 @@ async function main() {
     return true;
   });
 
-  console.log(`ফেনীর বাইরের এলাকা হিসেবে স্কিপ হয়েছে: ${totalSkippedOutOfFeni} টি`);
+  const outOfFeniCount = uniqueRows.filter((r) => !r.upazila).length;
+  console.log(`ফেনীর বাইরের এলাকা (pending, upazila খালি): ${outOfFeniCount} টি`);
   console.log(`মোট আপসার্ট হবে: ${uniqueRows.length} টি এন্ট্রি`);
 
   if (uniqueRows.length === 0) {
