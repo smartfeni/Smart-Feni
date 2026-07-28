@@ -1,9 +1,15 @@
+<!-- path: src/pages/services/blood.astro -->
 ---
 // ============================================================
 // পেজ: ব্লাড ডোনার লিস্ট
 // ব্র্যান্ড: স্মার্ট ফেনী
-// ফিল্টার: ব্লাড গ্রুপ অনুযায়ী
-// সর্টিং: শেয়ারড locationSort.js ইউটিলিটি ব্যবহার করে
+// ফিল্টার: ব্লাড গ্রুপ + উপজেলা — দুইটা আলাদা ড্রপডাউন, কম্বাইন্ড
+//          ফিল্টারিং, কোনো আলাদা সার্চ বাটন নাই (সিলেক্ট করা মাত্র
+//          instantly ফিল্টার হয়)
+// সর্টিং: শেয়ারড locationSort.js ইউটিলিটি — initLocationReorder()
+//         ব্যবহার করা হচ্ছে (আগে reorderByUserLocation ছিল), যাতে
+//         উপজেলা-ম্যাচ অগ্রাধিকার + প্রতি গ্রুপে shuffle (fairness)
+//         + পেজের ভেতরে উপজেলা বদলালে লাইভ re-sort — তিনটাই পাওয়া যায়
 // SSR পেজ — prerender = false আবশ্যক।
 // ============================================================
 
@@ -13,6 +19,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 import { supabase } from '../../lib/supabase.js';
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 
 const { data: donorData } = await supabase
   .from('profiles')
@@ -21,9 +28,7 @@ const { data: donorData } = await supabase
   .order('created_at', { ascending: false });
 
 const donors = donorData || [];
-const hasDonors = donors.length > 0; // 👈 শুধু এই লাইন যোগ করা হয়েছে
-
-const filters = [{ id: 'all', label: 'সব' }, ...bloodGroups.map((bg) => ({ id: bg, label: bg }))];
+const hasDonors = donors.length > 0;
 ---
 
 <BaseLayout title="ব্লাড ডোনার | স্মার্ট ফেনী">
@@ -32,7 +37,6 @@ const filters = [{ id: 'all', label: 'সব' }, ...bloodGroups.map((bg) => ({ i
       <h1>ফেনীর <span class="accent">রক্তদাতা</span> খুঁজুন</h1>
       <p>জরুরি প্রয়োজনে ফেনীর স্বেচ্ছাসেবী রক্তদাতাদের সাথে সরাসরি যোগাযোগ করুন</p>
 
-      {/* 👇 শুধু এই অংশে শর্ত যোগ করা হয়েছে */}
       {!hasDonors && (
         <a href="/profile/edit" class="btn-register">
           <i class="fas fa-droplet"></i> রক্তদাতা হিসেবে রেজিস্ট্রেশন করুন
@@ -43,12 +47,32 @@ const filters = [{ id: 'all', label: 'সব' }, ...bloodGroups.map((bg) => ({ i
 
   <section class="donor-section">
     <div class="container">
-      <div class="filter-tabs" id="filterTabs">
-        {filters.map((f) => (
-          <button class={`filter-tab ${f.id === 'all' ? 'active' : ''}`} data-filter={f.id}>
-            {f.label}
+      <div class="filter-dropdowns">
+        <div class="dropdown-wrap">
+          <button class="dropdown-btn" id="bloodGroupBtn" type="button">
+            <span id="bloodGroupLabel">ব্লাড গ্রুপ</span>
+            <i class="fas fa-chevron-down"></i>
           </button>
-        ))}
+          <div class="dropdown-panel" id="bloodGroupPanel">
+            <button class="dropdown-option active" data-value="all">সব গ্রুপ</button>
+            {bloodGroups.map((bg) => (
+              <button class="dropdown-option" data-value={bg}>{bg}</button>
+            ))}
+          </div>
+        </div>
+
+        <div class="dropdown-wrap">
+          <button class="dropdown-btn" id="upazilaBtn" type="button">
+            <span id="upazilaLabel">উপজেলা</span>
+            <i class="fas fa-chevron-down"></i>
+          </button>
+          <div class="dropdown-panel" id="upazilaPanel">
+            <button class="dropdown-option active" data-value="all">সব উপজেলা</button>
+            {upazilas.map((u) => (
+              <button class="dropdown-option" data-value={u}>{u}</button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {donors.length === 0 ? (
@@ -61,32 +85,38 @@ const filters = [{ id: 'all', label: 'সব' }, ...bloodGroups.map((bg) => ({ i
           </a>
         </div>
       ) : (
-        <div class="donor-grid" id="donorGrid">
-          {donors.map((donor) => (
-            <div class="donor-card" data-blood-group={donor.blood_group || ''} data-upazila-name={donor.upazila || ''}>
-              <div class="donor-card-top">
-                <span class="donor-avatar">
-                  {donor.avatar_url ? (
-                    <img src={donor.avatar_url} alt={donor.full_name} />
-                  ) : (
-                    <i class="fas fa-circle-user"></i>
-                  )}
-                </span>
-                <span class="blood-badge">{donor.blood_group || '—'}</span>
+        <>
+          <div class="donor-grid" id="donorGrid">
+            {donors.map((donor) => (
+              <div class="donor-card" data-blood-group={donor.blood_group || ''} data-upazila-name={donor.upazila || ''}>
+                <div class="donor-card-top">
+                  <span class="donor-avatar">
+                    {donor.avatar_url ? (
+                      <img src={donor.avatar_url} alt={donor.full_name} />
+                    ) : (
+                      <i class="fas fa-circle-user"></i>
+                    )}
+                  </span>
+                  <span class="blood-badge">{donor.blood_group || '—'}</span>
+                </div>
+
+                <h3 class="donor-name">{donor.full_name}</h3>
+
+                {donor.upazila && (
+                  <p class="donor-location"><i class="fas fa-location-dot"></i> {donor.upazila}</p>
+                )}
+
+                <a href={`tel:${donor.phone}`} class="btn-contact">
+                  <i class="fas fa-phone"></i> যোগাযোগ করুন
+                </a>
               </div>
+            ))}
+          </div>
 
-              <h3 class="donor-name">{donor.full_name}</h3>
-
-              {donor.upazila && (
-                <p class="donor-location"><i class="fas fa-location-dot"></i> {donor.upazila}</p>
-              )}
-
-              <a href={`tel:${donor.phone}`} class="btn-contact">
-                <i class="fas fa-phone"></i> যোগাযোগ করুন
-              </a>
-            </div>
-          ))}
-        </div>
+          <p class="no-match-state" id="noMatchState" style="display:none;">
+            এই ফিল্টারে কোনো রক্তদাতা পাওয়া যায়নি
+          </p>
+        </>
       )}
     </div>
   </section>
@@ -140,19 +170,27 @@ const filters = [{ id: 'all', label: 'সব' }, ...bloodGroups.map((bg) => ({ i
     background: #F8FAFC;
   }
 
-  .filter-tabs {
+  /* ===== ড্রপডাউন ফিল্টার ===== */
+  .filter-dropdowns {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 32px;
-    flex-wrap: wrap;
     justify-content: center;
+    flex-wrap: wrap;
   }
 
-  .filter-tab {
+  .dropdown-wrap {
+    position: relative;
+  }
+
+  .dropdown-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     background: #fff;
     border: 1px solid #EEF3F9;
     color: #1B2A4A;
-    padding: 10px 24px;
+    padding: 12px 20px;
     border-radius: 40px;
     font-weight: 600;
     font-size: 0.9rem;
@@ -160,14 +198,67 @@ const filters = [{ id: 'all', label: 'সব' }, ...bloodGroups.map((bg) => ({ i
     transition: all 0.2s ease;
   }
 
-  .filter-tab:hover {
+  .dropdown-btn:hover {
     border-color: #FF6B35;
   }
 
-  .filter-tab.active {
-    background: #FF6B35;
-    color: #fff;
+  .dropdown-btn.has-value {
+    background: #FFF0EA;
     border-color: #FF6B35;
+    color: #FF6B35;
+  }
+
+  .dropdown-btn i {
+    font-size: 0.75rem;
+    transition: transform 0.2s ease;
+  }
+
+  .dropdown-wrap.open .dropdown-btn i {
+    transform: rotate(180deg);
+  }
+
+  .dropdown-panel {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+    padding: 8px;
+    min-width: 180px;
+    max-height: 280px;
+    overflow-y: auto;
+    z-index: 50;
+  }
+
+  .dropdown-wrap.open .dropdown-panel {
+    display: block;
+  }
+
+  .dropdown-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: #1B2A4A;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .dropdown-option:hover {
+    background: #F4F7FC;
+  }
+
+  .dropdown-option.active {
+    background: #FFF0EA;
+    color: #FF6B35;
+    font-weight: 700;
   }
 
   .empty-state {
@@ -215,6 +306,13 @@ const filters = [{ id: 'all', label: 'সব' }, ...bloodGroups.map((bg) => ({ i
   .btn-register-outline:hover {
     background: #FF6B35;
     color: #fff;
+  }
+
+  .no-match-state {
+    text-align: center;
+    color: #8FA0BC;
+    font-weight: 600;
+    padding: 40px 0;
   }
 
   .donor-grid {
@@ -329,30 +427,98 @@ const filters = [{ id: 'all', label: 'সব' }, ...bloodGroups.map((bg) => ({ i
     .page-header h1 {
       font-size: 1.7rem;
     }
+
+    .dropdown-btn {
+      padding: 10px 16px;
+      font-size: 0.85rem;
+    }
   }
 </style>
 
 <script>
-  import { reorderByUserLocation } from '../../lib/locationSort.js';
+  import { initLocationReorder } from '../../lib/locationSort.js';
 
   const grid = document.getElementById('donorGrid');
-  const tabs = document.querySelectorAll('.filter-tab');
+  const noMatchState = document.getElementById('noMatchState');
   const cards = document.querySelectorAll('.donor-card');
 
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      tabs.forEach((t) => t.classList.remove('active'));
-      tab.classList.add('active');
-      const filter = tab.dataset.filter;
-      cards.forEach((card) => {
-        if (filter === 'all' || card.dataset.bloodGroup === filter) {
-          card.classList.remove('hidden');
-        } else {
-          card.classList.add('hidden');
-        }
-      });
+  // ===== ড্রপডাউন ওপেন/ক্লোজ হ্যান্ডলিং =====
+  const dropdownWraps = document.querySelectorAll('.dropdown-wrap');
+
+  dropdownWraps.forEach((wrap) => {
+    const btn = wrap.querySelector('.dropdown-btn');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = wrap.classList.contains('open');
+      dropdownWraps.forEach((w) => w.classList.remove('open'));
+      if (!isOpen) wrap.classList.add('open');
     });
   });
 
-  reorderByUserLocation(grid, 'upazilaName');
+  document.addEventListener('click', () => {
+    dropdownWraps.forEach((w) => w.classList.remove('open'));
+  });
+
+  // ===== ফিল্টার স্টেট =====
+  let activeBloodGroup = 'all';
+  let activeUpazila = 'all';
+
+  function applyFilters() {
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const matchesBlood = activeBloodGroup === 'all' || card.dataset.bloodGroup === activeBloodGroup;
+      const matchesUpazila = activeUpazila === 'all' || card.dataset.upazilaName === activeUpazila;
+
+      if (matchesBlood && matchesUpazila) {
+        card.classList.remove('hidden');
+        visibleCount++;
+      } else {
+        card.classList.add('hidden');
+      }
+    });
+
+    if (noMatchState) {
+      noMatchState.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
+  }
+
+  function setupDropdown(panelId, btnId, labelId, defaultLabel, onSelect) {
+    const panel = document.getElementById(panelId);
+    const btn = document.getElementById(btnId);
+    const label = document.getElementById(labelId);
+    if (!panel || !btn || !label) return;
+
+    panel.querySelectorAll('.dropdown-option').forEach((opt) => {
+      opt.addEventListener('click', () => {
+        panel.querySelectorAll('.dropdown-option').forEach((o) => o.classList.remove('active'));
+        opt.classList.add('active');
+
+        const value = opt.dataset.value;
+        onSelect(value);
+
+        if (value === 'all') {
+          label.textContent = defaultLabel;
+          btn.classList.remove('has-value');
+        } else {
+          label.textContent = value;
+          btn.classList.add('has-value');
+        }
+
+        btn.closest('.dropdown-wrap').classList.remove('open');
+        applyFilters();
+      });
+    });
+  }
+
+  setupDropdown('bloodGroupPanel', 'bloodGroupBtn', 'bloodGroupLabel', 'ব্লাড গ্রুপ', (v) => {
+    activeBloodGroup = v;
+  });
+
+  setupDropdown('upazilaPanel', 'upazilaBtn', 'upazilaLabel', 'উপজেলা', (v) => {
+    activeUpazila = v;
+  });
+
+  // ===== লোকেশন-ভিত্তিক re-order (fairness shuffle + লাইভ আপডেট) =====
+  initLocationReorder(grid, 'upazilaName');
 </script>
