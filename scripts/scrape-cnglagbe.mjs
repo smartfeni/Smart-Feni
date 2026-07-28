@@ -19,17 +19,14 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-// ড্রাইভার ডিরেক্টরি পেজ — এখানে ফিল্টার চিপ সরাসরি দেখা যায়
 const SOURCE_URL = 'https://www.cnglagbe.com/directory';
 
-// cnglagbe এর ফিল্টার চিপ টেক্সট -> আমাদের সাইটের listing type
 const VEHICLE_TYPES = [
   { filterText: 'সিএনজি', type: 'cng' },
   { filterText: 'টোটো', type: 'auto-rickshaw' },
   { filterText: 'অ্যাম্বুলেন্স', type: 'ambulance' },
 ];
 
-// ফেনীর ৬টা উপজেলা — এলাকার টেক্সটে এইগুলার যেকোনো একটা থাকলেই ম্যাচ ধরা হবে
 const UPAZILAS = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 const UPAZILA_ALIASES = {
   'ফেনী সদর': ['ফেনী সদর', 'সদর'],
@@ -41,6 +38,7 @@ const UPAZILA_ALIASES = {
 };
 
 const PHONE_REGEX = /01[3-9]\d{8}/;
+const LOADING_TEXT = 'অপেক্ষা করুন';
 
 function matchUpazila(areaText) {
   for (const upazila of UPAZILAS) {
@@ -49,11 +47,9 @@ function matchUpazila(areaText) {
       return upazila;
     }
   }
-  return null; // ফেনীর বাইরের এলাকা বা অজানা/অসম্পূর্ণ এলাকা — স্কিপ হবে
+  return null;
 }
 
-// পেজের innerText থেকে নাম/ফোন/এলাকা ট্রিপলেট বের করা
-// প্যাটার্ন: [নাম লাইন] [ফোন নম্বর লাইন] [এলাকা লাইন] — রিপিট হয়
 function parseDriversFromText(rawText) {
   const lines = rawText
     .split('\n')
@@ -79,18 +75,30 @@ function parseDriversFromText(rawText) {
   return drivers;
 }
 
-async function scrollToLoadAll(page, maxRounds = 50) {
+// প্রতিটা স্ক্রলের পর "অপেক্ষা করুন" লোডিং স্টেট শেষ হওয়া পর্যন্ত অপেক্ষা করে,
+// তারপর নতুন কনটেন্ট লোড হয়েছে কিনা চেক করে। ব্যাচ-লোডিং সাইটের জন্য
+// fixed timeout এর চেয়ে এটা অনেক বেশি নির্ভরযোগ্য।
+async function scrollToLoadAll(page, maxRounds = 80) {
   let lastHeight = 0;
   let stableRounds = 0;
 
   for (let round = 0; round < maxRounds; round++) {
     await page.mouse.wheel(0, 2500);
-    await page.waitForTimeout(700);
+
+    // "অপেক্ষা করুন" দেখা দিলে সেটা আবার সরে যাওয়া পর্যন্ত অপেক্ষা করা
+    // (দেখা না দিলে বা খুঁজে না পেলে সাইলেন্টলি এগিয়ে যাবে)
+    const loadingIndicator = page.getByText(LOADING_TEXT, { exact: false }).first();
+    await loadingIndicator
+      .waitFor({ state: 'visible', timeout: 2000 })
+      .then(() => loadingIndicator.waitFor({ state: 'hidden', timeout: 15000 }))
+      .catch(() => {}); // লোডিং ইন্ডিকেটর না পেলে এগিয়ে যাবে
+
+    await page.waitForTimeout(500);
 
     const height = await page.evaluate(() => document.body.scrollHeight);
     if (height === lastHeight) {
       stableRounds++;
-      if (stableRounds >= 3) break;
+      if (stableRounds >= 4) break; // পরপর ৪ বার হাইট না বাড়লে থামবে
     } else {
       stableRounds = 0;
     }
@@ -99,8 +107,6 @@ async function scrollToLoadAll(page, maxRounds = 50) {
 }
 
 async function selectVehicleFilter(page, filterText) {
-  // ফিল্টার চিপে সরাসরি ক্লিক — exact ম্যাচ, যাতে হেডিং টেক্সটের
-  // সাথে ভুলবশত না মিলে যায়
   const chip = page.getByText(filterText, { exact: true }).first();
   await chip.click({ timeout: 10000 });
   await page.waitForTimeout(1000);
@@ -147,6 +153,7 @@ async function main() {
     userAgent:
       'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
   });
+  page.setDefaultTimeout(20000);
 
   const allRows = [];
 
