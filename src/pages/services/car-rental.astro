@@ -2,8 +2,7 @@
 // ============================================================
 // পেজ: গাড়ি ভাড়া সার্ভিস
 // ব্র্যান্ড: স্মার্ট ফেনী
-// আপডেট: কার্ডে ট্যাপ করলে এখন আর মডাল খোলে না — সরাসরি শেয়ারেবল
-// ফুল-পেজে (/listing/[id]) নিয়ে যায়। ListingDetailModal সরানো হলো।
+// আপডেট: প্রতি টাইপের জন্য আলাদা ফলব্যাক ইমেজ + ক্যাটাগরি ফিল্টার
 // ============================================================
 
 export const prerender = false;
@@ -23,16 +22,16 @@ const typeOptions = [
   { id: 'other', label: 'অন্যান্য' },
 ];
 
-// ফলব্যাক আইকন ব্যাজ — ছবি না থাকলে টাইপ অনুযায়ী রঙিন আইকন দেখাবে
-const typeVisuals = {
-  cng: { icon: 'fa-taxi', bg: '#E8F9EE', color: '#16A34A' },
-  car: { icon: 'fa-car', bg: '#EAF1FF', color: '#1D6FE0' },
-  pickup: { icon: 'fa-truck-pickup', bg: '#FFF0EA', color: '#FF6B35' },
-  truck: { icon: 'fa-truck', bg: '#FFF3E0', color: '#B36B00' },
-  microbus: { icon: 'fa-van-shuttle', bg: '#F1EBFF', color: '#7C5CFC' },
-  'auto-rickshaw': { icon: 'fa-motorcycle', bg: '#FFFBEA', color: '#C9A227' },
-  ambulance: { icon: 'fa-truck-medical', bg: '#FFEAEA', color: '#D14343' },
-  other: { icon: 'fa-car', bg: '#F4F7FC', color: '#8FA0BC' },
+// প্রতিটা টাইপের জন্য আলাদা ফলব্যাক ইমেজ — item এ ছবি না থাকলে এটা দেখাবে
+const typeDefaultImages = {
+  cng: '/images/car-types/cng-default.png',
+  car: '/images/car-types/car-default.png',
+  pickup: '/images/car-types/pickup-default.png',
+  truck: '/images/car-types/truck-default.png',
+  microbus: '/images/car-types/microbus-default.png',
+  'auto-rickshaw': '/images/car-types/auto-rickshaw-default.png',
+  ambulance: '/images/car-types/ambulance-default.png',
+  other: '/images/car-types/other-default.png',
 };
 
 const { data: carListings } = await supabase
@@ -64,6 +63,13 @@ const listings = carListings || [];
         <input type="text" id="searchInput" placeholder="আপনার এলাকার নাম লিখে ড্রাইভার খুঁজুন..." />
       </div>
 
+      <div class="filter-row" id="filterRow">
+        <button class="filter-pill active" data-type="all" type="button">সব</button>
+        {typeOptions.map((opt) => (
+          <button class="filter-pill" data-type={opt.id} type="button">{opt.label}</button>
+        ))}
+      </div>
+
       {listings.length === 0 ? (
         <div class="empty-state">
           <i class="fas fa-car-side"></i>
@@ -74,21 +80,22 @@ const listings = carListings || [];
         <>
           <div class="car-grid" id="carGrid">
             {listings.map((item) => {
-              const visual = typeVisuals[item.type] || typeVisuals.other;
+              const hasImage = item.images && item.images.length > 0;
+              const fallbackSrc = typeDefaultImages[item.type] || typeDefaultImages.other;
               return (
                 <a
                   href={`/listing/${item.id}`}
                   class="car-card"
+                  data-type={item.type || 'other'}
                   data-upazila-name={item.upazila || ''}
                   data-search={`${item.title || ''} ${item.description || ''} ${item.upazila || ''}`.toLowerCase()}
                 >
-                  {item.images && item.images.length > 0 ? (
-                    <img src={item.images[0]} alt={item.title} class="car-photo" />
-                  ) : (
-                    <div class="car-icon" style={`background:${visual.bg}; color:${visual.color};`}>
-                      <i class={`fas ${visual.icon}`}></i>
-                    </div>
-                  )}
+                  <img
+                    src={hasImage ? item.images[0] : fallbackSrc}
+                    alt={item.title}
+                    class={hasImage ? 'car-photo' : 'car-photo car-photo-default'}
+                    loading="lazy"
+                  />
 
                   <div class="car-card-body">
                     <h3 class="car-title">{item.title}</h3>
@@ -167,7 +174,7 @@ const listings = carListings || [];
 
   .search-box {
     max-width: 480px;
-    margin: 0 auto 32px;
+    margin: 0 auto 20px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -189,6 +196,38 @@ const listings = carListings || [];
     font-family: inherit;
     background: transparent;
     color: #1B2A4A;
+  }
+
+  .filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 28px;
+  }
+
+  .filter-pill {
+    background: #fff;
+    border: 1.5px solid #EEF3F9;
+    color: #5A6E85;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 7px 16px;
+    border-radius: 30px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+  }
+
+  .filter-pill:hover {
+    border-color: #FFD3BC;
+    color: #FF6B35;
+  }
+
+  .filter-pill.active {
+    background: #FF6B35;
+    border-color: #FF6B35;
+    color: #fff;
   }
 
   .empty-state {
@@ -245,21 +284,18 @@ const listings = carListings || [];
     display: none;
   }
 
-  .car-icon {
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.8rem;
-  }
-
   .car-photo {
     width: 100%;
     aspect-ratio: 4 / 3;
     object-fit: cover;
     object-position: center;
     display: block;
+    background: #F4F7FC;
+  }
+
+  .car-photo-default {
+    object-fit: contain;
+    padding: 16px;
   }
 
   .car-card-body {
@@ -316,13 +352,19 @@ const listings = carListings || [];
   const cards = document.querySelectorAll('.car-card');
   const searchInput = document.getElementById('searchInput');
   const noResults = document.getElementById('noResults');
+  const filterPills = document.querySelectorAll('.filter-pill');
 
-  searchInput?.addEventListener('input', () => {
-    const keyword = searchInput.value.trim().toLowerCase();
+  let activeType = 'all';
+
+  function applyFilters() {
+    const keyword = (searchInput?.value || '').trim().toLowerCase();
     let visibleCount = 0;
 
     cards.forEach((card) => {
-      const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
+      const matchesType = activeType === 'all' || card.dataset.type === activeType;
+      const matchesSearch = keyword === '' || (card.dataset.search || '').includes(keyword);
+      const matches = matchesType && matchesSearch;
+
       if (matches) {
         card.classList.remove('hidden');
         visibleCount++;
@@ -334,6 +376,17 @@ const listings = carListings || [];
     if (noResults) {
       noResults.style.display = visibleCount === 0 ? 'block' : 'none';
     }
+  }
+
+  searchInput?.addEventListener('input', applyFilters);
+
+  filterPills.forEach((pill) => {
+    pill.addEventListener('click', () => {
+      filterPills.forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      activeType = pill.dataset.type;
+      applyFilters();
+    });
   });
 
   reorderByUserLocation(grid, 'upazilaName');
