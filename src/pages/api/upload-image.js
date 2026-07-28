@@ -1,3 +1,4 @@
+// path: src/pages/api/upload-image.js
 // ============================================================
 // API এন্ডপয়েন্ট: জেনেরিক ছবি আপলোড (/api/upload-image)
 // সাইটের যেকোনো জায়গার (club logo/cover, club posts, club members,
@@ -9,6 +10,14 @@
 // ঠিক থাকা সত্ত্বেও, লগে বহুবার কনফার্ম করা হয়েছে, দেখুন
 // /api/upload-avatar.js-এর কমেন্ট)। এই রুট service role key দিয়ে
 // সরাসরি আপলোড করে, তাই ওই ভেরিফিকেশন ধাপটাই বাইপাস হয়ে যায়।
+//
+// আপডেট: আপলোডের সময় cacheControl: '31536000' (১ বছর) সেট করা
+// হচ্ছে। আগে এটা না দেওয়ায় Supabase ডিফল্ট max-age=3600 (১ ঘণ্টা)
+// বসাতো, ফলে প্রতি ঘণ্টায় ব্রাউজার ছবি re-fetch করত। যেহেতু
+// ক্লায়েন্ট সাইডে ইতিমধ্যে ?t=updated_at cache-busting query param
+// ব্যবহার হয় (ছবি বদলালে URL-ই বদলে যায়), তাই লম্বা cache
+// নিরাপদ — নতুন ছবি আপলোড হলে নতুন URL-এর সাথে আবার fresh fetch
+// হবে, পুরনো URL cache-এই থেকে যাবে (ক্ষতি নেই)।
 //
 // ক্লায়েন্ট থেকে পাঠাতে হবে (multipart/form-data):
 //   - file: আপলোড করার ফাইল/ব্লব
@@ -97,7 +106,11 @@ export async function POST({ request }) {
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from('listing-images')
-      .upload(path, arrayBuffer, { upsert: true, contentType });
+      .upload(path, arrayBuffer, {
+        upsert: true,
+        contentType,
+        cacheControl: '31536000',
+      });
 
     if (uploadError) {
       console.error('upload-image error:', uploadError.message);
