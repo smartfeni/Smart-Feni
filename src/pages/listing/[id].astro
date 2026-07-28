@@ -1,0 +1,380 @@
+---
+// ============================================================
+// পেজ: জেনেরিক লিস্টিং শেয়ার/ডিটেইল পেজ (/listing/[id])
+// ফাংশন: 'listings' টেবিলের যেকোনো ক্যাটাগরির (housing/job/tuition,
+// ভবিষ্যতে অন্যান্য) একটা নির্দিষ্ট আইটেম শেয়ারেবল ফুল-পেজ আকারে
+// দেখায়, প্রপার OG মেটা ট্যাগ সহ। ক্যাটাগরি অনুযায়ী টাইপ-লেবেল ও
+// আইকন ম্যাপ করা আছে — নতুন ক্যাটাগরি এই সিস্টেমে যোগ করতে চাইলে
+// শুধু CATEGORY_CONFIG-এ এন্ট্রি বাড়ালেই হবে।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import ImageLightbox from '../../components/ImageLightbox.astro';
+import { supabase } from '../../lib/supabase.js';
+
+const { id } = Astro.params;
+
+const { data: item, error } = await supabase
+  .from('listings')
+  .select('*')
+  .eq('id', id)
+  .eq('status', 'active')
+  .maybeSingle();
+
+if (error) {
+  console.error('listing fetch error:', error.message);
+}
+
+// ক্যাটাগরি অনুযায়ী কনফিগ — নতুন ক্যাটাগরি যোগ করতে চাইলে এখানে বাড়াবে
+const CATEGORY_CONFIG = {
+  housing: {
+    pageLabel: 'বাসা ভাড়া',
+    backLink: '/services/housing',
+    icon: 'fa-house',
+    typeLabels: { flat: 'ফ্ল্যাট', house: 'বাসা', mess: 'মেস', shop: 'দোকান-অফিস' },
+    priceLabel: 'ভাড়া',
+  },
+  job: {
+    pageLabel: 'চাকরির খবর',
+    backLink: '/services/job',
+    icon: 'fa-briefcase',
+    typeLabels: { fulltime: 'ফুল-টাইম', parttime: 'পার্ট-টাইম', internship: 'ইন্টার্নশিপ' },
+    priceLabel: 'বেতন',
+  },
+  tuition: {
+    pageLabel: 'টিউশন',
+    backLink: '/services/tuition',
+    icon: 'fa-book-open',
+    typeLabels: { tutor: 'টিউটর সার্ভিস দিচ্ছি', student: 'টিউটর প্রয়োজন' },
+    priceLabel: 'রেট / বাজেট',
+  },
+};
+
+const config = item ? CATEGORY_CONFIG[item.category] || { pageLabel: 'লিস্টিং', backLink: '/', icon: 'fa-tag', typeLabels: {}, priceLabel: 'মূল্য' } : null;
+const typeLabel = item ? config.typeLabels[item.type] || item.type : null;
+const images = item?.images && item.images.length > 0 ? item.images : [];
+
+const pageTitle = item ? `${item.title} | ${config.pageLabel} | স্মার্ট ফেনী` : 'পেজ পাওয়া যায়নি | স্মার্ট ফেনী';
+const pageDescription = item
+  ? item.description || `${config.pageLabel} — ${item.title}`
+  : undefined;
+const ogImage = item ? images[0] : undefined;
+const canonicalPath = item ? `/listing/${item.id}` : undefined;
+---
+
+<BaseLayout
+  title={pageTitle}
+  description={pageDescription}
+  ogImage={ogImage}
+  canonicalPath={canonicalPath}
+>
+  {item ? (
+    <div class="listing-detail-page">
+      <div class="container">
+
+        <a href={config.backLink} class="back-link">
+          <i class="fas fa-arrow-left"></i> {config.pageLabel} এ ফিরে যান
+        </a>
+
+        <div class="listing-card">
+          <span class="type-badge"><i class={`fas ${config.icon}`}></i> {typeLabel}</span>
+
+          {images.length > 0 ? (
+            <div class="image-strip">
+              {images.map((src) => (
+                <img src={src} alt={item.title} class="listing-img zoomable-listing-img" />
+              ))}
+            </div>
+          ) : (
+            <div class="listing-img-placeholder"><i class={`fas ${config.icon}`}></i></div>
+          )}
+
+          <div class="listing-body">
+            <div class="listing-title-row">
+              <h1 class="listing-title">{item.title}</h1>
+              <button
+                class="share-btn"
+                data-share-url={`/listing/${item.id}`}
+                data-share-title={item.title}
+                aria-label="শেয়ার করুন"
+              >
+                <i class="fas fa-share-nodes"></i>
+              </button>
+            </div>
+
+            {item.price && (
+              <p class="listing-price">
+                <span class="price-label">{config.priceLabel}:</span> {item.price}
+              </p>
+            )}
+
+            {item.upazila && (
+              <p class="listing-location"><i class="fas fa-location-dot"></i> {item.upazila}</p>
+            )}
+
+            {item.description && <p class="listing-desc">{item.description}</p>}
+
+            {item.contact_phone && (
+              <a href={`tel:${item.contact_phone}`} class="listing-call-btn">
+                <i class="fas fa-phone"></i> কল করুন
+              </a>
+            )}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  ) : (
+    <section class="not-found">
+      <div class="container">
+        <i class="fas fa-face-frown"></i>
+        <p>এই লিস্টিংটি খুঁজে পাওয়া যায়নি</p>
+        <a href="/" class="back-link-inline"><i class="fas fa-arrow-left"></i> হোমপেজে ফিরে যান</a>
+      </div>
+    </section>
+  )}
+
+  <div id="listingShareToast" class="share-toast">লিংক কপি হয়েছে ✓</div>
+
+  <ImageLightbox />
+</BaseLayout>
+
+<style>
+  .listing-detail-page {
+    min-height: 70vh;
+    padding: 28px 0 80px;
+    background: #F8FAFC;
+  }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: #5A6E85;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 18px;
+  }
+
+  .listing-card {
+    background: #fff;
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
+    max-width: 620px;
+    margin: 0 auto;
+  }
+
+  .type-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 6px 16px;
+    border-radius: 40px;
+    margin: 18px 0 0 18px;
+  }
+
+  .image-strip {
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    margin-top: 14px;
+    scroll-snap-type: x mandatory;
+  }
+
+  .listing-img {
+    flex: 0 0 100%;
+    scroll-snap-align: start;
+    aspect-ratio: 4/3;
+    object-fit: contain;
+    background: #F4F7FC;
+    cursor: zoom-in;
+  }
+
+  .listing-img-placeholder {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: #F4F7FC;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.4rem;
+    margin-top: 14px;
+  }
+
+  .listing-body {
+    padding: 20px 22px 26px;
+  }
+
+  .listing-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .listing-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    line-height: 1.4;
+  }
+
+  .share-btn {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: #F4F7FC;
+    color: #5A6E85;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    cursor: pointer;
+    margin-top: 2px;
+  }
+
+  .share-btn:active {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .listing-price {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #FF6B35;
+    margin-top: 10px;
+  }
+
+  .price-label {
+    font-weight: 600;
+    color: #8FA0BC;
+    font-size: 0.8rem;
+  }
+
+  .listing-location {
+    font-size: 0.82rem;
+    color: #8FA0BC;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .listing-desc {
+    font-size: 0.92rem;
+    color: #5A6E85;
+    line-height: 1.75;
+    margin-top: 14px;
+    white-space: pre-line;
+  }
+
+  .listing-call-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    text-decoration: none;
+    padding: 10px 20px;
+    border-radius: 40px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-top: 18px;
+  }
+
+  .not-found {
+    padding: 120px 0;
+    text-align: center;
+    color: #B0BCCB;
+  }
+  .not-found i {
+    font-size: 3rem;
+    margin-bottom: 16px;
+  }
+  .not-found p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 16px;
+  }
+  .back-link-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #FF6B35;
+    text-decoration: none;
+    font-weight: 700;
+  }
+
+  .share-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    transform: translateX(-50%) translateY(20px);
+    background: #1B2A4A;
+    color: #fff;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 10px 20px;
+    border-radius: 40px;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s ease;
+    z-index: 999;
+  }
+
+  .share-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+</style>
+
+<script>
+  function showListingShareToast() {
+    const toast = document.getElementById('listingShareToast');
+    if (!toast) return;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
+  }
+
+  document.querySelectorAll('.share-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const path = btn.dataset.shareUrl;
+      const title = btn.dataset.shareTitle;
+      const fullUrl = `${window.location.origin}${path}`;
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ title, url: fullUrl });
+        } catch (err) {
+          // ইউজার শেয়ার শীট ক্যানসেল করলে কিছু করার দরকার নেই
+        }
+      } else {
+        try {
+          await navigator.clipboard.writeText(fullUrl);
+          showListingShareToast();
+        } catch (err) {
+          console.error('কপি করা যায়নি:', err);
+        }
+      }
+    });
+  });
+
+  // ছবিতে ক্লিক করলে গ্লোবাল ImageLightbox খুলবে (জুম + ডাউনলোড)
+  document.querySelectorAll('.zoomable-listing-img').forEach((img) => {
+    img.addEventListener('click', () => {
+      window.openImageLightbox?.(img.src);
+    });
+  });
+</script>
