@@ -27,27 +27,30 @@ const VEHICLE_TYPES = [
   { filterText: 'অ্যাম্বুলেন্স', type: 'ambulance' },
 ];
 
-const UPAZILAS = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
-const UPAZILA_ALIASES = {
-  'ফেনী সদর': ['ফেনী সদর', 'সদর'],
-  ছাগলনাইয়া: ['ছাগলনাইয়া'],
-  দাগনভূঞা: ['দাগনভূঞা', 'দাগনভুঞা', 'দাগনভুয়া'],
-  পরশুরাম: ['পরশুরাম'],
-  ফুলগাজী: ['ফুলগাজী', 'ফুলগাজি'],
-  সোনাগাজী: ['সোনাগাজী', 'সোনাগাজি'],
-};
+// ============================================================
+// উপজেলা ম্যাচিং — নির্দিষ্ট ৫টা উপজেলার নাম আগে চেক হয়, "ফেনী সদর" সবার
+// শেষে ফলব্যাক হিসেবে (কারণ শুধু "ফেনী" শব্দটা প্রায় সব এন্ট্রিতেই
+// জেলার নাম হিসেবে থাকে, তাই অন্য উপজেলার নাম না থাকলে তবেই এটা ধরা হবে)
+// ============================================================
+const UPAZILA_ALIASES_ORDERED = [
+  ['ছাগলনাইয়া', ['ছাগলনাইয়া']],
+  ['দাগনভূঞা', ['দাগনভূঞা', 'দাগনভুঞা', 'দাগনভুয়া']],
+  ['পরশুরাম', ['পরশুরাম']],
+  ['ফুলগাজী', ['ফুলগাজী', 'ফুলগাজি']],
+  ['সোনাগাজী', ['সোনাগাজী', 'সোনাগাজি']],
+  ['ফেনী সদর', ['ফেনী সদর', 'সদর', 'ফেনী']], // সবার শেষে ফলব্যাক
+];
 
 const PHONE_REGEX = /01[3-9]\d{8}/;
 const LOADING_TEXT = 'অপেক্ষা করুন';
 
 function matchUpazila(areaText) {
-  for (const upazila of UPAZILAS) {
-    const aliases = UPAZILA_ALIASES[upazila] || [upazila];
+  for (const [upazila, aliases] of UPAZILA_ALIASES_ORDERED) {
     if (aliases.some((alias) => areaText.includes(alias))) {
       return upazila;
     }
   }
-  return null;
+  return null; // ফেনী জেলার বাইরের এলাকা — স্কিপ হবে
 }
 
 function parseDriversFromText(rawText) {
@@ -75,10 +78,6 @@ function parseDriversFromText(rawText) {
   return drivers;
 }
 
-// প্রতিটা স্ক্রলের পর "অপেক্ষা করুন" লোডিং স্টেট শেষ হওয়া পর্যন্ত অপেক্ষা করে,
-// তারপর নতুন কনটেন্ট লোড হয়েছে কিনা চেক করে। maxRounds অনেক বেশি রাখা হয়েছে
-// যাতে পুরো লিস্ট (২৫০+ এন্ট্রি) সম্পূর্ণ লোড হওয়ার সুযোগ পায় — রানটাইম বেশি
-// লাগলেও সমস্যা নাই।
 async function scrollToLoadAll(page, maxRounds = 300) {
   let lastHeight = 0;
   let stableRounds = 0;
@@ -97,8 +96,6 @@ async function scrollToLoadAll(page, maxRounds = 300) {
     const height = await page.evaluate(() => document.body.scrollHeight);
     if (height === lastHeight) {
       stableRounds++;
-      // পরপর ৭ বার হাইট না বাড়লে তবেই ধরে নেওয়া হবে সব লোড হয়ে গেছে
-      // (তাড়াহুড়া করে থামা এড়াতে থ্রেশহোল্ড বাড়ানো হয়েছে)
       if (stableRounds >= 7) break;
     } else {
       stableRounds = 0;
@@ -157,13 +154,18 @@ async function main() {
   page.setDefaultTimeout(30000);
 
   const allRows = [];
+  let totalSkippedOutOfFeni = 0;
 
   for (const vehicleType of VEHICLE_TYPES) {
     try {
       const drivers = await scrapeVehicleType(page, vehicleType);
       for (const driver of drivers) {
         const row = buildListingRow(driver, vehicleType);
-        if (row) allRows.push(row);
+        if (row) {
+          allRows.push(row);
+        } else {
+          totalSkippedOutOfFeni++;
+        }
       }
     } catch (err) {
       console.error(`[${vehicleType.type}] স্ক্র্যাপ ব্যর্থ:`, err.message);
@@ -179,6 +181,7 @@ async function main() {
     return true;
   });
 
+  console.log(`ফেনীর বাইরের এলাকা হিসেবে স্কিপ হয়েছে: ${totalSkippedOutOfFeni} টি`);
   console.log(`মোট আপসার্ট হবে: ${uniqueRows.length} টি এন্ট্রি`);
 
   if (uniqueRows.length === 0) {
