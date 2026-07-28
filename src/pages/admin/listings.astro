@@ -3,12 +3,15 @@
 // পেজ: অ্যাডমিন — লিস্টিং ম্যানেজমেন্ট (/admin/listings)
 // সব ক্যাটাগরির লিস্টিং একসাথে দেখা, ফিল্টার, approve/reject/delete
 // + সোর্স ব্যাজ, ভ্যারিফাই টগল, রেটিং প্রদর্শন, প্রোফাইল কানেক্ট
+// + আনক্লেইমড লিস্টিং ইনলাইন এডিট (নাম/বিবরণ/দাম/উপজেলা/ফোন)
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import { categories } from '../../data/services.js';
+
+const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 ---
 
 <BaseLayout title="লিস্টিং ম্যানেজমেন্ট | অ্যাডমিন">
@@ -165,7 +168,7 @@ import { categories } from '../../data/services.js';
     }
   </style>
 
-  <script>
+  <script define:vars={{ upazilaOptions }}>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
     import { categories } from '../../data/services.js';
@@ -185,7 +188,6 @@ import { categories } from '../../data/services.js';
       rejected: { text: 'বাতিল', color: '#D14343', bg: '#FFF0EA' },
     };
 
-    // সোর্স স্লাগ -> দেখানোর নাম
     const sourceLabels = {
       cnglagbe: 'cnglagbe থেকে',
     };
@@ -194,6 +196,80 @@ import { categories } from '../../data/services.js';
       if (!iso) return '';
       const d = new Date(iso);
       return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    // ============================================================
+    // এডিট ফর্ম রেন্ডার (শুধু আনক্লেইমড লিস্টিং-এ দেখানো হয়)
+    // ============================================================
+    function renderEditForm(listing) {
+      const form = document.createElement('div');
+      form.style.cssText = 'margin-top:14px;padding:14px;background:#F8FAFC;border-radius:14px;border:1px solid #EEF3F9;display:flex;flex-direction:column;gap:10px;';
+
+      const upazilaOpts = upazilaOptions
+        .map((u) => `<option value="${u}" ${listing.upazila === u ? 'selected' : ''}>${u}</option>`)
+        .join('');
+
+      form.innerHTML = `
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">নাম
+          <input type="text" data-field="title" value="${escapeHtml(listing.title || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
+        </label>
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">বিবরণ / এলাকা
+          <textarea data-field="description" rows="2" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;resize:vertical;">${escapeHtml(listing.description || '')}</textarea>
+        </label>
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">দাম / মূল্য
+          <input type="text" data-field="price" value="${escapeHtml(listing.price || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
+        </label>
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">উপজেলা
+          <select data-field="upazila" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;background:#fff;">
+            <option value="">— নির্বাচন করুন —</option>
+            ${upazilaOpts}
+          </select>
+        </label>
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">ফোন নম্বর
+          <input type="text" data-field="contact_phone" value="${escapeHtml(listing.contact_phone || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
+        </label>
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <button data-action="save" style="flex:1;background:#1B2A4A;color:#fff;border:none;padding:10px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;">সেভ করুন</button>
+          <button data-action="cancel" style="background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:10px 16px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;">বাতিল</button>
+        </div>
+      `;
+
+      form.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        form.remove();
+      });
+
+      form.querySelector('[data-action="save"]').addEventListener('click', async () => {
+        const saveBtn = form.querySelector('[data-action="save"]');
+        saveBtn.textContent = 'সেভ হচ্ছে...';
+        saveBtn.disabled = true;
+
+        const updates = {
+          title: form.querySelector('[data-field="title"]').value.trim(),
+          description: form.querySelector('[data-field="description"]').value.trim(),
+          price: form.querySelector('[data-field="price"]').value.trim() || null,
+          upazila: form.querySelector('[data-field="upazila"]').value || null,
+          contact_phone: form.querySelector('[data-field="contact_phone"]').value.trim(),
+        };
+
+        const { error } = await supabase.from('listings').update(updates).eq('id', listing.id);
+
+        if (error) {
+          alert('সেভ ব্যর্থ: ' + error.message);
+          saveBtn.textContent = 'সেভ করুন';
+          saveBtn.disabled = false;
+          return;
+        }
+
+        loadListings();
+      });
+
+      return form;
     }
 
     // ============================================================
@@ -209,7 +285,7 @@ import { categories } from '../../data/services.js';
       const isUnclaimed = !listing.user_id;
 
       const card = document.createElement('div');
-      card.style.cssText = 'background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;gap:14px;';
+      card.style.cssText = 'background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;gap:14px;flex-wrap:wrap;';
 
       card.innerHTML = `
         ${thumb
@@ -229,6 +305,7 @@ import { categories } from '../../data/services.js';
             ${categoryName} ${listing.type ? '· ' + listing.type : ''}
             ${sourceLabel ? ` · <span style="color:#B36B00;font-weight:700;">${sourceLabel}</span>` : ''}
             ${isUnclaimed && listing.source ? ` · <span style="color:#8FA0BC;">আনক্লেইমড</span>` : ''}
+            ${!listing.upazila ? ` · <span style="color:#D14343;">উপজেলা নাই</span>` : ''}
           </p>
           ${listing.description ? `<p style="font-size:0.85rem;color:#5A6E85;margin-top:6px;">${listing.description}</p>` : ''}
           <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:0.8rem;color:#5A6E85;">
@@ -239,10 +316,12 @@ import { categories } from '../../data/services.js';
             <span><i class="fas fa-clock" style="color:#FF6B35;"></i> ${formatDate(listing.created_at)}</span>
           </div>
           <div class="card-actions" style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"></div>
+          <div class="edit-form-slot"></div>
         </div>
       `;
 
       const actionsWrap = card.querySelector('.card-actions');
+      const editSlot = card.querySelector('.edit-form-slot');
 
       if (listing.status !== 'active') {
         const approveBtn = document.createElement('button');
@@ -268,7 +347,6 @@ import { categories } from '../../data/services.js';
         actionsWrap.appendChild(reviewedBtn);
       }
 
-      // ভ্যারিফাই টগল বাটন
       const verifyBtn = document.createElement('button');
       verifyBtn.textContent = listing.is_verified ? 'আনভ্যারিফাই করুন' : 'ভ্যারিফাই করুন';
       verifyBtn.style.cssText = listing.is_verified
@@ -277,8 +355,17 @@ import { categories } from '../../data/services.js';
       verifyBtn.addEventListener('click', () => toggleVerified(listing.id, !listing.is_verified));
       actionsWrap.appendChild(verifyBtn);
 
-      // প্রোফাইল কানেক্ট বাটন — শুধু আনক্লেইমড লিস্টিং এ দেখাবে
+      // এডিট ও প্রোফাইল-কানেক্ট — শুধু আনক্লেইমড লিস্টিং-এ
       if (isUnclaimed) {
+        const editBtn = document.createElement('button');
+        editBtn.textContent = 'এডিট করুন';
+        editBtn.style.cssText = 'background:#FFF0EA;color:#FF6B35;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        editBtn.addEventListener('click', () => {
+          editSlot.innerHTML = '';
+          editSlot.appendChild(renderEditForm(listing));
+        });
+        actionsWrap.appendChild(editBtn);
+
         const connectBtn = document.createElement('button');
         connectBtn.textContent = 'ড্রাইভারের সাথে কানেক্ট করুন';
         connectBtn.style.cssText = 'background:#1B2A4A;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
@@ -340,10 +427,6 @@ import { categories } from '../../data/services.js';
       loadListings();
     }
 
-    // ============================================================
-    // লিস্টিং-কে কোনো প্রোফাইল/ইউজার একাউন্টের সাথে কানেক্ট করা
-    // ফোন নম্বর দিয়ে profiles টেবিলে সার্চ করে user_id অ্যাসাইন করে
-    // ============================================================
     async function connectToProfile(listingId, currentPhone) {
       const phone = prompt('ড্রাইভারের ফোন নম্বর দিন (যেটা দিয়ে তিনি Smart Feni-তে একাউন্ট খুলেছেন):', currentPhone || '');
       if (!phone) return;
