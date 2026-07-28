@@ -1,3 +1,4 @@
+<!-- path: src/components/layout/Header.astro -->
 ---
 // ============================================================
 // কম্পোনেন্ট: হেডার (ন্যাভবার) — মিনিমাল
@@ -9,6 +10,12 @@
 // লাইভ বদলায়, কিছু না থাকলে আগের প্লেইন সাদা হেডারই থাকবে)
 // আপডেট ৩: লোগো এখন site_images ('logo' key) থেকে ডাইনামিক লোড হয়,
 // না পেলে ফলব্যাক /logo.png (static ফাইল, আগের মতোই)
+// আপডেট ৪: হেডার ব্যাকগ্রাউন্ড ইমেজেও এখন ?v=updated_at cache-busting
+// যোগ করা হলো (লোগোর মতো একই প্যাটার্ন) — কারণ storage bucket এ
+// এখন immutable, max-age=31536000 (১ বছর) cache বসানো আছে, আর
+// header_<slug> filename fixed, তাই আগে cache-busting ছাড়া নতুন
+// ছবি আপলোড করলেও পুরনো ইউজারদের ব্রাউজারে এক বছর পর্যন্ত পুরনো
+// ছবিই cache থেকে দেখানোর ঝুঁকি ছিল
 // ============================================================
 
 import LocationSelector from '../ui/LocationSelector.astro';
@@ -317,9 +324,10 @@ import ProfileMenu from '../ui/ProfileMenu.astro';
   const BUCKET = 'listing-images';
   const STORAGE_KEY = 'smartfeni_upazila';
 
-  function publicUrl(path) {
+  function publicUrl(path, updatedAt) {
     const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-    return data.publicUrl;
+    const bust = updatedAt ? new Date(updatedAt).getTime() : Date.now();
+    return `${data.publicUrl}?v=${bust}`;
   }
 
   async function loadHeaderBg(upazilaSlug) {
@@ -330,7 +338,7 @@ import ProfileMenu from '../ui/ProfileMenu.astro';
     if (upazilaSlug) {
       const { data } = await supabase
         .from('site_images')
-        .select('storage_path')
+        .select('storage_path, updated_at')
         .eq('image_key', `header_${upazilaSlug}`)
         .maybeSingle();
       record = data;
@@ -339,14 +347,14 @@ import ProfileMenu from '../ui/ProfileMenu.astro';
     if (!record) {
       const { data } = await supabase
         .from('site_images')
-        .select('storage_path')
+        .select('storage_path, updated_at')
         .eq('image_key', 'header_default')
         .maybeSingle();
       record = data;
     }
 
     if (record?.storage_path) {
-      navbar.style.backgroundImage = `url('${publicUrl(record.storage_path)}')`;
+      navbar.style.backgroundImage = `url('${publicUrl(record.storage_path, record.updated_at)}')`;
       navbar.classList.add('has-bg-image');
     } else {
       navbar.style.backgroundImage = '';
@@ -377,8 +385,7 @@ import ProfileMenu from '../ui/ProfileMenu.astro';
       .maybeSingle();
 
     if (data?.storage_path && logoImg) {
-      const cacheBust = data.updated_at ? new Date(data.updated_at).getTime() : Date.now();
-      logoImg.src = `${publicUrl(data.storage_path)}?v=${cacheBust}`;
+      logoImg.src = publicUrl(data.storage_path, data.updated_at);
     }
   }
 
