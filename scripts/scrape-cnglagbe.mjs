@@ -19,9 +19,10 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-const SOURCE_URL = 'https://www.cnglagbe.com/';
+// ড্রাইভার ডিরেক্টরি পেজ — এখানে ফিল্টার চিপ সরাসরি দেখা যায়
+const SOURCE_URL = 'https://www.cnglagbe.com/directory';
 
-// cnglagbe এর ফিল্টার টেক্সট -> আমাদের সাইটের listing type
+// cnglagbe এর ফিল্টার চিপ টেক্সট -> আমাদের সাইটের listing type
 const VEHICLE_TYPES = [
   { filterText: 'সিএনজি', type: 'cng' },
   { filterText: 'টোটো', type: 'auto-rickshaw' },
@@ -30,7 +31,6 @@ const VEHICLE_TYPES = [
 
 // ফেনীর ৬টা উপজেলা — এলাকার টেক্সটে এইগুলার যেকোনো একটা থাকলেই ম্যাচ ধরা হবে
 const UPAZILAS = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
-// টেক্সটে শুধু "ফেনী সদর" এর বদলে অনেক সময় শুধু "ফেনী" ও লেখা থাকতে পারে
 const UPAZILA_ALIASES = {
   'ফেনী সদর': ['ফেনী সদর', 'সদর'],
   ছাগলনাইয়া: ['ছাগলনাইয়া'],
@@ -49,7 +49,7 @@ function matchUpazila(areaText) {
       return upazila;
     }
   }
-  return null; // ফেনীর বাইরের এলাকা — স্কিপ হবে
+  return null; // ফেনীর বাইরের এলাকা বা অজানা/অসম্পূর্ণ এলাকা — স্কিপ হবে
 }
 
 // পেজের innerText থেকে নাম/ফোন/এলাকা ট্রিপলেট বের করা
@@ -69,10 +69,9 @@ function parseDriversFromText(rawText) {
     const phone = phoneMatch[0];
     const name = lines[i - 1] || null;
     const nextLine = lines[i + 1] || '';
-    // পরের লাইনও যদি ফোন নম্বর হয়, তাহলে এলাকা লাইন নাই ধরে নিচ্ছি
     const area = PHONE_REGEX.test(nextLine) ? '' : nextLine;
 
-    if (!name || PHONE_REGEX.test(name)) continue; // নাম লাইন হিসেবে ভুল কিছু ধরলে স্কিপ
+    if (!name || PHONE_REGEX.test(name)) continue;
 
     drivers.push({ name, phone, area });
   }
@@ -80,18 +79,18 @@ function parseDriversFromText(rawText) {
   return drivers;
 }
 
-async function scrollToLoadAll(page, maxRounds = 40) {
+async function scrollToLoadAll(page, maxRounds = 50) {
   let lastHeight = 0;
   let stableRounds = 0;
 
   for (let round = 0; round < maxRounds; round++) {
-    await page.mouse.wheel(0, 2000);
-    await page.waitForTimeout(600);
+    await page.mouse.wheel(0, 2500);
+    await page.waitForTimeout(700);
 
     const height = await page.evaluate(() => document.body.scrollHeight);
     if (height === lastHeight) {
       stableRounds++;
-      if (stableRounds >= 3) break; // পরপর ৩ বার হাইট না বাড়লে ধরে নিচ্ছি সব লোড হয়ে গেছে
+      if (stableRounds >= 3) break;
     } else {
       stableRounds = 0;
     }
@@ -100,19 +99,10 @@ async function scrollToLoadAll(page, maxRounds = 40) {
 }
 
 async function selectVehicleFilter(page, filterText) {
-  // ফিল্টার প্যানেল খোলা
-  const filterButton = page.getByText('ফিল্টার', { exact: false }).first();
-  await filterButton.click({ timeout: 10000 }).catch(() => {});
-  await page.waitForTimeout(500);
-
-  // ভেহিকেল টাইপ অপশনে ক্লিক
-  const option = page.getByText(filterText, { exact: false }).first();
-  await option.click({ timeout: 10000 }).catch(() => {});
-  await page.waitForTimeout(500);
-
-  // "প্রয়োগ করুন" / "Apply" জাতীয় বাটন থাকলে ক্লিক (না থাকলে স্কিপ হয়ে যাবে)
-  const applyButton = page.getByText(/প্রয়োগ|Apply|ঠিক আছে|ফলাফল/, { exact: false }).first();
-  await applyButton.click({ timeout: 5000 }).catch(() => {});
+  // ফিল্টার চিপে সরাসরি ক্লিক — exact ম্যাচ, যাতে হেডিং টেক্সটের
+  // সাথে ভুলবশত না মিলে যায়
+  const chip = page.getByText(filterText, { exact: true }).first();
+  await chip.click({ timeout: 10000 });
   await page.waitForTimeout(1000);
 }
 
@@ -132,7 +122,7 @@ async function scrapeVehicleType(page, vehicleType) {
 
 function buildListingRow(driver, vehicleType) {
   const upazila = matchUpazila(driver.area);
-  if (!upazila) return null; // ফেনীর বাইরের এলাকা — স্কিপ
+  if (!upazila) return null;
 
   return {
     category: 'car-rental',
@@ -143,8 +133,8 @@ function buildListingRow(driver, vehicleType) {
     upazila,
     images: [],
     contact_phone: driver.phone,
-    status: 'active',       // অটো-এপ্রুভ, সরাসরি লাইভ দেখাবে
-    is_reviewed: false,     // এডমিন প্যানেলে "নতুন" ব্যাজ দেখাবে, পরে চোখ বুলানোর জন্য
+    status: 'active',
+    is_reviewed: false,
     is_verified: false,
     source: 'cnglagbe',
     user_id: null,
@@ -174,7 +164,6 @@ async function main() {
 
   await browser.close();
 
-  // ফোন নম্বর দিয়ে ডুপ্লিকেট বাদ (একই নম্বর একাধিক টাইপে থাকলে প্রথমটাই রাখা হচ্ছে)
   const seenPhones = new Set();
   const uniqueRows = allRows.filter((row) => {
     if (seenPhones.has(row.contact_phone)) return false;
