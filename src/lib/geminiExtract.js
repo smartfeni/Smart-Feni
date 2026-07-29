@@ -12,6 +12,8 @@ const GEMINI_MODEL = 'gemini-3.1-flash';
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 // প্রতিটা ক্যাটাগরির জন্য আলাদা JSON schema + নির্দেশনা
+// নোট: Gemini responseSchema OpenAPI 3.0-স্টাইল — nullable ফিল্ডের জন্য
+// type: ['string','null'] না লিখে nullable: true লিখতে হয়
 const CATEGORY_CONFIG = {
   housing: {
     instruction:
@@ -23,9 +25,9 @@ const CATEGORY_CONFIG = {
       properties: {
         title: { type: 'string', description: 'সংক্ষিপ্ত শিরোনাম, যেমন: "২ বেডরুম বাসা ভাড়া"' },
         rent_type: { type: 'string', description: 'যেমন: "১ রুম", "২ বেডরুম", "৩ বেডরুম", "বাচেলর", "ফ্ল্যাট" ইত্যাদি' },
-        price: { type: ['string', 'null'], description: 'মাসিক ভাড়া, শুধু সংখ্যা বা "৮০০০ টাকা" ফরম্যাটে' },
-        area: { type: ['string', 'null'], description: 'এলাকার নাম যা পোস্টে লেখা আছে' },
-        phone: { type: ['string', 'null'] },
+        price: { type: 'string', nullable: true, description: 'মাসিক ভাড়া, শুধু সংখ্যা বা "৮০০০ টাকা" ফরম্যাটে' },
+        area: { type: 'string', nullable: true, description: 'এলাকার নাম যা পোস্টে লেখা আছে' },
+        phone: { type: 'string', nullable: true },
         description: { type: 'string', description: 'পোস্টের বাকি গুরুত্বপূর্ণ তথ্য সংক্ষেপে' },
       },
       required: ['title', 'rent_type', 'description'],
@@ -41,8 +43,8 @@ const CATEGORY_CONFIG = {
       properties: {
         name: { type: 'string' },
         blood_group: { type: 'string', description: 'যেমন: "O+", "A-", "AB+", "B+" ইত্যাদি' },
-        phone: { type: ['string', 'null'] },
-        area: { type: ['string', 'null'] },
+        phone: { type: 'string', nullable: true },
+        area: { type: 'string', nullable: true },
       },
       required: ['name', 'blood_group'],
     },
@@ -56,9 +58,9 @@ const CATEGORY_CONFIG = {
       properties: {
         title: { type: 'string', description: 'আইটেমের নাম' },
         condition: { type: 'string', description: 'যেমন: "নতুন মতো", "ব্যবহৃত", "পুরাতন" ইত্যাদি' },
-        price: { type: ['string', 'null'] },
-        area: { type: ['string', 'null'] },
-        phone: { type: ['string', 'null'] },
+        price: { type: 'string', nullable: true },
+        area: { type: 'string', nullable: true },
+        phone: { type: 'string', nullable: true },
         description: { type: 'string' },
       },
       required: ['title', 'condition', 'description'],
@@ -137,7 +139,7 @@ export function buildListingRowFromExtraction(extracted, category, imageUrl) {
   const base = {
     category,
     images: imageUrl ? [imageUrl] : [],
-    status: 'pending', // Telegram-এ Approve চাপার আগ পর্যন্ত pending
+    status: 'pending',
     is_reviewed: false,
     is_verified: false,
     source: 'screenshot-import',
@@ -151,7 +153,7 @@ export function buildListingRowFromExtraction(extracted, category, imageUrl) {
       title: extracted.title,
       description: extracted.description,
       price: extracted.price || null,
-      upazila: null, // ম্যাচ করা যায়নি, admin ম্যানুয়ালি বসাবে
+      upazila: null,
       contact_phone: extracted.phone || null,
     };
   }
