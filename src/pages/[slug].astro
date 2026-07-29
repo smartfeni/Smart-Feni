@@ -1,172 +1,144 @@
+---
 // ============================================================
-// API এন্ডপয়েন্ট: নতুন ক্লাব ওউনার অ্যাকাউন্ট তৈরি (/api/create-club)
-// শুধু এডমিন প্যানেল থেকে কল হবে। Service role key ব্যবহার করে
-// Supabase Auth এ ইউজার তৈরি করে, clubs টেবিলে row বসায়,
-// তারপর profiles এ is_club_owner ও club_id সেট করে দেয়।
-// এই key কখনো ব্রাউজারে পাঠানো হয় না — শুধু এই সার্ভার ফাইলেই থাকে।
+// পেজ: root-level catch-all (/[slug])
+// আগে শুধু clubs টেবিলে slug লুকআপ করত। এখন shops টেবিলেও চেক
+// করে (club না পেলে) — কারণ club আর shop দুটোই এখন top-level
+// slug URL শেয়ার করে (smartfeni.com/slug)।
+// static ফাইল (about, contact, my-shop ইত্যাদি) সবসময় এই
+// dynamic route এর আগে prioritize হয় — তাই conflict হবে না।
 // ============================================================
-
-import { createClient } from '@supabase/supabase-js';
 
 export const prerender = false;
 
-// এই স্লাগগুলো ক্লাবের জন্য ব্যবহার করা যাবে না — সাইটের
-// এক্সিস্টিং রুটের সাথে কনফ্লিক্ট করবে
-const RESERVED_SLUGS = [
-  'housing', 'job', 'repair', 'car-rental', 'courier', 'emergency',
-  'blood', 'home-food', 'recycle', 'tuition', 'sports', 'lost-found',
-  'health', 'legal', 'event', 'laundry', 'doctor-directory', 'online-shop',
-  'clubs', 'admin', 'api', 'my-club', 'my-shop', 'services', 'profile',
-  'shop', 'about', 'contact', 'index',
-];
+import BaseLayout from '../components/layout/BaseLayout.astro';
+import ClubProfile from '../components/club/ClubProfile.astro';
+import ShopProfile from '../components/shop/ShopProfile.astro';
+import { supabase } from '../lib/supabase.js';
 
-function slugify(input) {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
+const { slug } = Astro.params;
+
+const { data: club, error: clubError } = await supabase
+  .from('clubs')
+  .select('*')
+  .eq('slug', slug)
+  .eq('is_active', true)
+  .maybeSingle();
+
+if (clubError) {
+  console.error('club fetch error:', clubError.message);
 }
 
-export async function POST({ request }) {
-  try {
-    const { clubName, slug, phone, password, upajila } = await request.json();
+let members = [];
+let posts = [];
 
-    if (!clubName || !slug || !phone || !password) {
-      return new Response(
-        JSON.stringify({ error: 'ক্লাবের নাম, স্লাগ, ফোন নম্বর ও পাসওয়ার্ড আবশ্যক' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+if (club) {
+  const [{ data: memberData }, { data: postData }] = await Promise.all([
+    supabase
+      .from('club_members')
+      .select('*')
+      .eq('club_id', club.id)
+      .order('position_order', { ascending: true }),
+    supabase
+      .from('club_posts')
+      .select('*')
+      .eq('club_id', club.id)
+      .order('created_at', { ascending: false }),
+  ]);
+  members = memberData || [];
+  posts = postData || [];
+}
 
-    if (password.length < 6) {
-      return new Response(
-        JSON.stringify({ error: 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+// club না পাওয়া গেলে shops টেবিলে চেক
+let shop = null;
+let shopProducts = [];
 
-    const cleanSlug = slugify(slug);
+if (!club) {
+  const { data: shopData, error: shopError } = await supabase
+    .from('shops')
+    .select('*')
+    .eq('slug', slug)
+    .eq('is_active', true)
+    .maybeSingle();
 
-    if (!cleanSlug) {
-      return new Response(
-        JSON.stringify({ error: 'স্লাগ সঠিক ফরম্যাটে দিন (শুধু ইংরেজি অক্ষর/সংখ্যা/হাইফেন)' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+  if (shopError) {
+    console.error('shop fetch error:', shopError.message);
+  }
 
-    if (RESERVED_SLUGS.includes(cleanSlug)) {
-      return new Response(
-        JSON.stringify({ error: `"${cleanSlug}" স্লাগটি সংরক্ষিত, অন্য একটা নাম দিন` }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+  shop = shopData || null;
 
-    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (shop) {
+    const { data: productData } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('category', 'online-shop')
+      .eq('user_id', shop.owner_id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false });
 
-    if (!supabaseUrl || !serviceRoleKey) {
-      return new Response(
-        JSON.stringify({ error: 'সার্ভার কনফিগারেশন ঠিক নেই (service role key পাওয়া যায়নি)' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // এডমিন ক্লায়েন্ট — শুধু এই সার্ভার ফাইলেই থাকবে, কখনো ব্রাউজারে যাবে না
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-
-    // স্লাগ আগে থেকে ব্যবহৃত কিনা চেক — clubs আর shops দুটো টেবিলেই,
-    // কারণ দুটোই একই top-level URL namespace শেয়ার করে (/[slug])
-    const [{ data: existingClub }, { data: existingShop }] = await Promise.all([
-      supabaseAdmin.from('clubs').select('id').eq('slug', cleanSlug).maybeSingle(),
-      supabaseAdmin.from('shops').select('id').eq('slug', cleanSlug).maybeSingle(),
-    ]);
-
-    if (existingClub || existingShop) {
-      return new Response(
-        JSON.stringify({ error: `"${cleanSlug}" স্লাগটি ইতিমধ্যে ব্যবহৃত হচ্ছে` }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const digitsOnly = phone.replace(/\D/g, '');
-    const email = `${digitsOnly}@smartfeni.local`;
-
-    // ধাপ ১: Auth ইউজার তৈরি
-    const { data: userData, error: createError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: clubName, phone },
-    });
-
-    if (createError) {
-      const message = createError.message.includes('already been registered')
-        ? 'এই ফোন নম্বরে আগে থেকেই অ্যাকাউন্ট আছে'
-        : 'অ্যাকাউন্ট তৈরি ব্যর্থ: ' + createError.message;
-      return new Response(JSON.stringify({ error: message }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // ধাপ ২: clubs টেবিলে row তৈরি
-    const { data: clubData, error: clubError } = await supabaseAdmin
-      .from('clubs')
-      .insert({
-        owner_id: userData.user.id,
-        name: clubName,
-        slug: cleanSlug,
-        upajila: upajila || null,
-        is_active: true,
-        is_verified: false,
-      })
-      .select()
-      .single();
-
-    if (clubError) {
-      // clubs row তৈরি ব্যর্থ হলে তৈরি হওয়া auth ইউজার ক্লিনআপ করে দেওয়া ভালো
-      await supabaseAdmin.auth.admin.deleteUser(userData.user.id);
-      return new Response(
-        JSON.stringify({ error: 'ক্লাব তৈরি ব্যর্থ: ' + clubError.message }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // ধাপ ৩: profiles আপডেট
-    const { error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .update({
-        is_club_owner: true,
-        club_id: clubData.id,
-      })
-      .eq('id', userData.user.id);
-
-    if (profileError) {
-      return new Response(
-        JSON.stringify({ error: 'ক্লাব তৈরি হয়েছে কিন্তু প্রোফাইল আপডেট ব্যর্থ: ' + profileError.message }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        userId: userData.user.id,
-        clubId: clubData.id,
-        clubName,
-        slug: cleanSlug,
-        phone,
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    );
-  } catch (err) {
-    return new Response(
-      JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+    shopProducts = productData || [];
   }
 }
+
+const notFound = !club && !shop;
+
+const pageTitle = club
+  ? `${club.name} | স্মার্ট ফেনী`
+  : shop
+  ? `${shop.name} | স্মার্ট ফেনী`
+  : 'পেজ পাওয়া যায়নি | স্মার্ট ফেনী';
+
+const pageDescription = club
+  ? club.tagline || club.description || `${club.name} — ফেনীর একটি ক্লাব`
+  : shop
+  ? shop.tagline || shop.description || `${shop.name} — ফেনীর একটি অনলাইন শপ`
+  : undefined;
+
+const ogImage = club ? club.cover_image || club.logo_image : shop ? shop.cover_image || shop.logo_image : undefined;
+const canonicalPath = club ? `/${club.slug}` : shop ? `/${shop.slug}` : undefined;
+---
+
+<BaseLayout
+  title={pageTitle}
+  description={pageDescription}
+  ogImage={ogImage}
+  canonicalPath={canonicalPath}
+>
+  {club ? (
+    <ClubProfile club={club} members={members} posts={posts} />
+  ) : shop ? (
+    <ShopProfile shop={shop} products={shopProducts} />
+  ) : (
+    <section class="not-found">
+      <div class="container">
+        <i class="fas fa-face-frown"></i>
+        <p>এই পেজটি খুঁজে পাওয়া যায়নি</p>
+        <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> হোমপেজে ফিরে যান</a>
+      </div>
+    </section>
+  )}
+</BaseLayout>
+
+<style>
+  .not-found {
+    padding: 120px 0;
+    text-align: center;
+    color: #B0BCCB;
+  }
+  .not-found i {
+    font-size: 3rem;
+    margin-bottom: 16px;
+  }
+  .not-found p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 16px;
+  }
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #FF6B35;
+    text-decoration: none;
+    font-weight: 700;
+  }
+</style>
