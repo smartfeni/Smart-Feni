@@ -71,6 +71,14 @@ const CATEGORY_CONFIG = {
   },
 };
 
+/**
+ * স্ক্রিনশট থেকে structured ডেটা extract করে।
+ * @param {Object} params
+ * @param {string} params.imageBase64
+ * @param {string} params.mimeType
+ * @param {'housing'|'blood'|'recycle'} params.category
+ * @returns {Promise<Object|Array>} housing/recycle -> object, blood -> array
+ */
 export async function extractListingFromScreenshot({ imageBase64, mimeType, category }) {
   const config = CATEGORY_CONFIG[category];
   if (!config) throw new Error(`অসমর্থিত ক্যাটাগরি: ${category}`);
@@ -112,8 +120,15 @@ export async function extractListingFromScreenshot({ imageBase64, mimeType, cate
   return JSON.parse(rawText);
 }
 
-// housing/recycle: extract হওয়া single object + সংগ্রহ করা আসল ছবি -> listings row
-export function buildListingRowFromExtraction(extracted, category, imageUrls = []) {
+/**
+ * housing/recycle: extract হওয়া single object + উপজিলা + সংগ্রহ করা
+ * আসল ছবি -> `listings` টেবিলের row ফরম্যাটে রূপান্তর করে।
+ * @param {Object} extracted
+ * @param {'housing'|'recycle'} category
+ * @param {string} upazila
+ * @param {string[]} imageUrls - Storage এ আপলোড হওয়া আসল ছবির URL গুলো
+ */
+export function buildListingRowFromExtraction(extracted, category, upazila, imageUrls = []) {
   const base = {
     category,
     images: imageUrls,
@@ -131,7 +146,7 @@ export function buildListingRowFromExtraction(extracted, category, imageUrls = [
       title: extracted.title,
       description: extracted.description,
       price: extracted.price || null,
-      upazila: null,
+      upazila,
       contact_phone: extracted.phone || null,
     };
   }
@@ -143,7 +158,7 @@ export function buildListingRowFromExtraction(extracted, category, imageUrls = [
       title: extracted.title,
       description: extracted.description,
       price: extracted.price || null,
-      upazila: null,
+      upazila,
       contact_phone: extracted.phone || null,
     };
   }
@@ -151,7 +166,12 @@ export function buildListingRowFromExtraction(extracted, category, imageUrls = [
   throw new Error(`buildListingRowFromExtraction: অসমর্থিত ক্যাটাগরি ${category}`);
 }
 
-// blood: extract হওয়া array + কমন উপজিলা/ক্লাব -> manual_blood_donors rows
+/**
+ * blood: extract হওয়া array + কমন উপজিলা/ক্লাব নাম -> `manual_blood_donors` rows
+ * @param {Array} extractedArray
+ * @param {string} upazila
+ * @param {string} clubNameRaw
+ */
 export function buildBloodDonorRows(extractedArray, upazila, clubNameRaw) {
   return extractedArray
     .filter((d) => d.phone) // ফোন নাম্বার ছাড়া এন্ট্রি বাদ (unique constraint আছে)
