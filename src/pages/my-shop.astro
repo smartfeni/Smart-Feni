@@ -1,23 +1,24 @@
 ---
 // ============================================================
-// পেজ: আমার শপ (/my-shop)
-// শুধু is_shop_owner=true ইউজার অ্যাক্সেস করতে পারবে।
-// উপরে শপ প্রোফাইল এডিট (ছবি, ট্যাগলাইন — নাম শুধু এডমিন বদলাতে পারবে)
-// নিচে নিজের প্রোডাক্ট (category='online-shop') Add/Edit/Delete
-// আপডেট: প্রোডাক্ট কার্ড JS দিয়ে dynamically তৈরি হওয়ায় Astro-র
-// scoped CSS ম্যাচ করছিল না (data-astro-cid attribute বসছিল না) —
-// তাই প্রোডাক্ট কার্ড সংক্রান্ত স্টাইল আলাদা <style is:global> ব্লকে
-// সরানো হয়েছে যাতে ফিক্সড-হাইট ছবির ফ্রেম ঠিকমতো কাজ করে
+// পেজ: আমার শপ (/my-shop) — ট্যাব-ভিত্তিক ড্যাশবোর্ড
+// (my-club.astro এর প্যাটার্নে রিফ্যাক্টর করা)
+// আগে এই একটা ফাইলেই প্রোফাইল এডিট + প্রোডাক্ট সব ছিল —
+// এখন দুটো আলাদা ট্যাব কম্পোনেন্টে ভাগ করা হয়েছে:
+//   ProfileEditTab — শপের প্রোফাইল (নাম/লোগো/কভার/ট্যাগলাইন/ঠিকানা ইত্যাদি)
+//   ProductsTab — প্রোডাক্ট Add/Edit/Delete
+// এখন profiles.shop_name ইত্যাদির বদলে shops টেবিল ব্যবহার করে
+// (profiles.shop_id দিয়ে লিংক)
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
-import AddListingModal from '../components/ui/AddListingModal.astro';
+import ProfileEditTab from '../components/shop-dashboard/ProfileEditTab.astro';
+import ProductsTab from '../components/shop-dashboard/ProductsTab.astro';
 ---
 
 <BaseLayout title="আমার শপ | স্মার্ট ফেনী">
-  <div class="shop-page">
+  <div class="myshop-page">
     <div class="container">
 
       <div id="loadingState" class="loading-state">
@@ -25,91 +26,32 @@ import AddListingModal from '../components/ui/AddListingModal.astro';
         <p>লোড হচ্ছে...</p>
       </div>
 
-      <div id="guardedContent" class="shop-content" style="display:none;">
+      <div id="guardedContent" class="myshop-content" style="display:none;">
 
-        <!-- ===== শপ প্রোফাইল কার্ড ===== -->
-        <div class="profile-card">
-          <p class="profile-message" id="profileMessage"></p>
-
-          <div class="profile-photo-upload">
-            <label for="shopImageInput" class="profile-photo-circle" id="shopImagePreviewCircle">
-              <img id="shopImagePreviewImg" src="" alt="শপের ছবি" />
-              <i class="fas fa-store" id="shopImagePlaceholderIcon"></i>
-              <span class="profile-photo-edit"><i class="fas fa-pen"></i></span>
-            </label>
-            <input type="file" id="shopImageInput" accept="image/*" style="display:none;" />
-          </div>
-
-          <label class="profile-label">শপের নাম</label>
-          <input type="text" class="profile-input" id="shopNameDisplay" disabled />
-          <p class="profile-hint">শপের নাম শুধু এডমিন বদলাতে পারবেন</p>
-
-          <label class="profile-label">শপের ট্যাগলাইন / বিবরণ</label>
-          <textarea class="profile-input" id="shopTaglineInput" rows="2" placeholder="যেমন: সেরা মানের কাপড়ের দোকান"></textarea>
-
-          <button class="profile-save-btn" id="saveProfileBtn" type="button">
-            <i class="fas fa-check"></i> <span>শপ প্রোফাইল সেভ করুন</span>
-          </button>
+        <div class="myshop-header">
+          <h1><i class="fas fa-store"></i> <span id="shopHeaderName"></span></h1>
         </div>
 
-        <div class="section-divider">
-          <h2><i class="fas fa-box"></i> প্রোডাক্ট তালিকা</h2>
+        <div class="myshop-tabs" id="myshopTabs">
+          <button class="myshop-tab active" data-tab="profile"><i class="fas fa-id-card"></i> প্রোফাইল</button>
+          <button class="myshop-tab" data-tab="products"><i class="fas fa-box"></i> প্রোডাক্ট</button>
         </div>
 
-        <button class="add-product-btn" id="openAddListing" type="button">
-          <i class="fas fa-plus"></i> নতুন প্রোডাক্ট যোগ করুন
-        </button>
-
-        <div id="productsContainer" class="products-grid"></div>
-
-        <div id="emptyState" class="empty-state" style="display:none;">
-          <i class="fas fa-box-open"></i>
-          <p>এখনো কোনো প্রোডাক্ট যোগ করা হয়নি</p>
-          <span>উপরের বাটনে ক্লিক করে প্রথম প্রোডাক্ট যোগ করুন</span>
+        <div class="myshop-panel" data-panel="profile">
+          <ProfileEditTab />
+        </div>
+        <div class="myshop-panel" data-panel="products" style="display:none;">
+          <ProductsTab />
         </div>
 
       </div>
     </div>
   </div>
 
-  <!-- ===== প্রোডাক্ট এডিট মোডাল ===== -->
-  <div class="edit-overlay" id="editOverlay">
-    <div class="edit-modal">
-      <button class="edit-close" id="editClose" aria-label="বন্ধ করুন">
-        <i class="fas fa-xmark"></i>
-      </button>
-
-      <h2 class="edit-title"><i class="fas fa-pen"></i> প্রোডাক্ট এডিট করুন</h2>
-
-      <p class="edit-message" id="editMessage"></p>
-
-      <label class="edit-label">প্রোডাক্টের নাম</label>
-      <input type="text" class="edit-input" id="editTitle" />
-
-      <label class="edit-label">বিবরণ</label>
-      <textarea class="edit-input" id="editDescription" rows="3"></textarea>
-
-      <label class="edit-label">দাম</label>
-      <input type="text" class="edit-input" id="editPrice" />
-
-      <button class="edit-save-btn" id="editSaveBtn" type="button">
-        <i class="fas fa-check"></i> <span>সেভ করুন</span>
-      </button>
-    </div>
-  </div>
-
-  <AddListingModal
-    category="online-shop"
-    typeOptions={[{ id: 'product', label: 'প্রোডাক্ট' }]}
-    titleLabel="প্রোডাক্টের নাম"
-    priceLabel="দাম"
-    autoActive={true}
-  />
-
   <style>
-    .shop-page {
+    .myshop-page {
       min-height: 70vh;
-      padding: 40px 0 80px;
+      padding: 32px 0 80px;
       background: #F8FAFC;
     }
 
@@ -137,104 +79,106 @@ import AddListingModal from '../components/ui/AddListingModal.astro';
       to { transform: rotate(360deg); }
     }
 
-    .shop-content {
-      max-width: 900px;
+    .myshop-content {
+      max-width: 720px;
       margin: 0 auto;
     }
 
-    /* ===== শপ প্রোফাইল কার্ড ===== */
-    .profile-card {
-      background: #fff;
-      border-radius: 20px;
-      padding: 26px 24px;
-      margin-bottom: 28px;
-      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+    .myshop-header h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
     }
 
-    .profile-message {
+    .myshop-header h1 i {
+      color: #FF6B35;
+    }
+
+    .myshop-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 10px;
+      margin-bottom: 20px;
+      scrollbar-width: none;
+    }
+
+    .myshop-tabs::-webkit-scrollbar {
+      display: none;
+    }
+
+    .myshop-tab {
+      flex-shrink: 0;
+      background: #fff;
+      border: 1.5px solid #E5EAF0;
+      color: #5A6E85;
+      padding: 10px 16px;
+      border-radius: 40px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .myshop-tab.active {
+      background: #FF6B35;
+      border-color: #FF6B35;
+      color: #fff;
+    }
+
+    /* ===== কমন ফর্ম/কার্ড স্টাইল — দুটো ট্যাব কম্পোনেন্টই এগুলো ব্যবহার করে ===== */
+    .dash-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 22px 20px;
+      margin-bottom: 18px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+    }
+
+    .dash-card h3 {
+      font-size: 0.98rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dash-card h3 i {
+      color: #FF6B35;
+    }
+
+    .form-msg {
       display: none;
       font-size: 0.82rem;
       font-weight: 600;
       padding: 10px 14px;
       border-radius: 12px;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
       text-align: center;
     }
 
-    .profile-message.show-error {
+    .form-msg.show-error {
       display: block;
       background: #FFF0EA;
       color: #D14343;
     }
 
-    .profile-message.show-success {
+    .form-msg.show-success {
       display: block;
       background: #EAFBF0;
       color: #1B7A3C;
     }
 
-    .profile-photo-upload {
-      display: flex;
-      justify-content: center;
-      margin-bottom: 18px;
-    }
-
-    .profile-photo-circle {
-      position: relative;
-      width: 92px;
-      height: 92px;
-      border-radius: 50%;
-      background: #FFF0EA;
-      border: 2px dashed #FFD3BC;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      overflow: hidden;
-      transition: border-color 0.2s ease;
-    }
-
-    .profile-photo-circle:hover {
-      border-color: #FF6B35;
-    }
-
-    .profile-photo-circle #shopImagePlaceholderIcon {
-      color: #FF6B35;
-      font-size: 1.5rem;
-    }
-
-    .profile-photo-circle img {
-      display: none;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    .profile-photo-circle.has-photo #shopImagePlaceholderIcon {
-      display: none;
-    }
-
-    .profile-photo-circle.has-photo img {
-      display: block;
-    }
-
-    .profile-photo-edit {
-      position: absolute;
-      bottom: 2px;
-      right: 2px;
-      width: 28px;
-      height: 28px;
-      background: #FF6B35;
-      color: #fff;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.68rem;
-      border: 2px solid #fff;
-    }
-
-    .profile-label {
+    .form-label {
       display: block;
       font-size: 0.82rem;
       font-weight: 600;
@@ -243,7 +187,11 @@ import AddListingModal from '../components/ui/AddListingModal.astro';
       margin-top: 14px;
     }
 
-    .profile-input {
+    .form-label:first-of-type {
+      margin-top: 0;
+    }
+
+    .form-input {
       width: 100%;
       padding: 12px 14px;
       border-radius: 14px;
@@ -252,31 +200,28 @@ import AddListingModal from '../components/ui/AddListingModal.astro';
       font-family: inherit;
       color: #1B2A4A;
       background: #FBFCFE;
+      resize: vertical;
     }
 
-    .profile-input:focus {
+    .form-input:focus {
       outline: none;
       border-color: #FF6B35;
       background: #fff;
     }
 
-    .profile-input:disabled {
+    .form-input:disabled {
       background: #F4F7FC;
       color: #9AA8BC;
       cursor: not-allowed;
     }
 
-    textarea.profile-input {
-      resize: vertical;
-    }
-
-    .profile-hint {
+    .form-hint {
       font-size: 0.74rem;
       color: #9AA8BC;
       margin-top: 4px;
     }
 
-    .profile-save-btn {
+    .primary-btn {
       width: 100%;
       display: flex;
       align-items: center;
@@ -290,305 +235,65 @@ import AddListingModal from '../components/ui/AddListingModal.astro';
       font-weight: 700;
       font-size: 0.9rem;
       cursor: pointer;
-      margin-top: 20px;
+      margin-top: 16px;
     }
 
-    .section-divider {
-      margin-bottom: 18px;
+    .primary-btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
     }
 
-    .section-divider h2 {
-      font-size: 1.1rem;
-      font-weight: 700;
+    .secondary-btn {
+      background: #F4F7FC;
       color: #1B2A4A;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .section-divider h2 i {
-      color: #FF6B35;
-    }
-
-    .add-product-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: #FF6B35;
-      color: #fff;
       border: none;
-      padding: 13px 26px;
-      border-radius: 40px;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 0.78rem;
       font-weight: 700;
-      font-size: 0.92rem;
       cursor: pointer;
-      margin-bottom: 28px;
-      box-shadow: 0 10px 24px rgba(255, 107, 53, 0.24);
     }
 
-    .empty-state {
-      text-align: center;
-      background: #fff;
-      border-radius: 20px;
-      padding: 50px 24px;
-      border: 1px dashed #E5EAF0;
-    }
-
-    .empty-state i {
-      font-size: 2rem;
-      color: #D7E0EC;
-      margin-bottom: 12px;
-    }
-
-    .empty-state p {
-      font-weight: 700;
-      color: #1B2A4A;
-      margin-bottom: 4px;
-    }
-
-    .empty-state span {
-      color: #8FA0BC;
-      font-size: 0.85rem;
-    }
-
-    /* ===== প্রোডাক্ট এডিট মোডাল ===== */
-    .edit-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(15, 23, 42, 0.55);
-      z-index: 2000;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      overflow-y: auto;
-    }
-
-    .edit-overlay.open {
-      display: flex;
-    }
-
-    .edit-modal {
+    .photo-upload-circle {
       position: relative;
-      background: #fff;
-      width: 100%;
-      max-width: 420px;
-      border-radius: 28px;
-      padding: 32px 28px 28px;
-      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
-      margin: auto;
-    }
-
-    .edit-close {
-      position: absolute;
-      top: 16px;
-      right: 16px;
-      background: #F4F7FC;
-      border: none;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      color: #5A6E85;
-      cursor: pointer;
-    }
-
-    .edit-title {
-      font-size: 1.15rem;
-      color: #1B2A4A;
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .edit-title i {
-      color: #FF6B35;
-    }
-
-    .edit-message {
-      display: none;
-      font-size: 0.82rem;
-      font-weight: 600;
-      padding: 10px 14px;
-      border-radius: 12px;
-      margin-bottom: 12px;
-      text-align: center;
-    }
-
-    .edit-message.show-error {
-      display: block;
+      width: 80px;
+      height: 80px;
+      border-radius: 18px;
       background: #FFF0EA;
-      color: #D14343;
-    }
-
-    .edit-message.show-success {
-      display: block;
-      background: #EAFBF0;
-      color: #1B7A3C;
-    }
-
-    .edit-label {
-      display: block;
-      font-size: 0.82rem;
-      font-weight: 600;
-      color: #1B2A4A;
-      margin-bottom: 6px;
-      margin-top: 14px;
-    }
-
-    .edit-input {
-      width: 100%;
-      padding: 12px 14px;
-      border-radius: 14px;
-      border: 1.5px solid #E5EAF0;
-      font-size: 0.9rem;
-      font-family: inherit;
-      color: #1B2A4A;
-      background: #FBFCFE;
-    }
-
-    .edit-input:focus {
-      outline: none;
-      border-color: #FF6B35;
-      background: #fff;
-    }
-
-    textarea.edit-input {
-      resize: vertical;
-    }
-
-    .edit-save-btn {
-      width: 100%;
+      border: 2px dashed #FFD3BC;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      background: #FF6B35;
-      color: #fff;
-      border: none;
-      padding: 14px;
-      border-radius: 14px;
-      font-weight: 700;
-      font-size: 0.92rem;
       cursor: pointer;
-      margin-top: 22px;
-    }
-  </style>
-
-  <!-- ============================================================
-       is:global জরুরি এখানে — প্রোডাক্ট কার্ড JS দিয়ে (innerHTML)
-       রানটাইমে তৈরি হয়, তাই Astro-র বিল্ড-টাইম scoped CSS (data-astro-cid)
-       এগুলোর সাথে ম্যাচ করে না। global করলে সরাসরি ক্লাস-নেম দিয়ে
-       ম্যাচ হবে, ফিক্সড-হাইট ছবির ফ্রেম ঠিকমতো কাজ করবে।
-  ============================================================ -->
-  <style is:global>
-    .products-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 18px;
-    }
-
-    .product-card {
-      background: #fff;
-      border-radius: 18px;
-      border: 1px solid #EEF3F9;
       overflow: hidden;
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      margin: 0 auto 16px;
     }
 
-    .product-card:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
-    }
-
-    /* ===== ছবির ফ্রেম — ফিক্সড হাইট, সব ছবি একই সাইজে/শেপে দেখাবে ===== */
-    .product-photo-frame {
-      width: 100%;
-      height: 170px;
-      overflow: hidden;
-      background: #F4F7FC;
-    }
-
-    .product-photo-frame img {
+    .photo-upload-circle img {
+      display: none;
       width: 100%;
       height: 100%;
       object-fit: cover;
+    }
+
+    .photo-upload-circle.has-photo img {
       display: block;
-      transition: transform 0.35s ease;
     }
 
-    .product-card:hover .product-photo-frame img {
-      transform: scale(1.05);
+    .photo-upload-circle.has-photo i {
+      display: none;
     }
 
-    .product-icon-frame {
-      width: 100%;
-      height: 170px;
-      background: #FFF0EA;
+    .photo-upload-circle i {
       color: #FF6B35;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.8rem;
+      font-size: 1.4rem;
     }
 
-    .product-body {
-      padding: 14px 16px 16px;
-    }
-
-    .product-title {
-      font-size: 0.92rem;
-      font-weight: 700;
-      color: #1B2A4A;
-      margin-bottom: 4px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .product-price {
-      display: inline-block;
-      font-size: 0.85rem;
-      font-weight: 700;
-      color: #FF6B35;
-      background: #FFF0EA;
-      padding: 2px 10px;
-      border-radius: 20px;
-      margin-bottom: 12px;
-    }
-
-    .product-actions {
-      display: flex;
-      gap: 8px;
-    }
-
-    .product-actions button {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 5px;
-      border: none;
-      padding: 9px;
-      border-radius: 10px;
-      font-size: 0.76rem;
-      font-weight: 700;
-      cursor: pointer;
-      transition: opacity 0.15s ease;
-    }
-
-    .product-actions button:hover {
-      opacity: 0.8;
-    }
-
-    .btn-edit {
-      background: #F4F7FC;
-      color: #1B2A4A;
-    }
-
-    .btn-delete {
-      background: #FFF0EA;
-      color: #D14343;
+    .empty-note {
+      font-size: 0.84rem;
+      color: #B0BCCB;
+      text-align: center;
+      padding: 20px 0;
     }
   </style>
 
@@ -597,105 +302,8 @@ import AddListingModal from '../components/ui/AddListingModal.astro';
 
     const loadingState = document.getElementById('loadingState');
     const guardedContent = document.getElementById('guardedContent');
-    const productsContainer = document.getElementById('productsContainer');
-    const emptyState = document.getElementById('emptyState');
+    const tabsBar = document.getElementById('myshopTabs');
 
-    let currentUserId = null;
-    let products = [];
-
-    // ===== শপ প্রোফাইল =====
-    const profileMessage = document.getElementById('profileMessage');
-    const shopNameDisplay = document.getElementById('shopNameDisplay');
-    const shopTaglineInput = document.getElementById('shopTaglineInput');
-    const saveProfileBtn = document.getElementById('saveProfileBtn');
-    const shopImageInput = document.getElementById('shopImageInput');
-    const shopImageCircle = document.getElementById('shopImagePreviewCircle');
-    const shopImageImg = document.getElementById('shopImagePreviewImg');
-    let selectedShopImageFile = null;
-
-    function showProfileMsg(text, type = 'error') {
-      profileMessage.textContent = text;
-      profileMessage.className = `profile-message ${type === 'error' ? 'show-error' : 'show-success'}`;
-    }
-
-    function clearProfileMsg() {
-      profileMessage.textContent = '';
-      profileMessage.className = 'profile-message';
-    }
-
-    shopImageInput?.addEventListener('change', () => {
-      const file = shopImageInput.files?.[0];
-      if (!file) return;
-      selectedShopImageFile = file;
-      const reader = new FileReader();
-      reader.onload = () => {
-        shopImageImg.src = reader.result;
-        shopImageCircle?.classList.add('has-photo');
-      };
-      reader.readAsDataURL(file);
-    });
-
-    // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
-    // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
-    // কল হতো, কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
-    // হচ্ছিল ("new row violates row-level security policy" — লগে
-    // কনফার্ম করা হয়েছে)।
-    async function uploadShopImage(userId, file) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return null;
-
-      const fileExt = file.name.split('.').pop();
-      const filePath = `shops/${userId}-${Date.now()}.${fileExt}`;
-
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('path', filePath);
-
-      const res = await fetch('/api/upload-image', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: formData,
-      });
-      const result = await res.json();
-
-      if (!res.ok) {
-        console.error('শপ ছবি আপলোড এরর:', result.error);
-        return null;
-      }
-      return result.url || null;
-    }
-
-    saveProfileBtn?.addEventListener('click', async () => {
-      clearProfileMsg();
-
-      const originalText = saveProfileBtn.querySelector('span').textContent;
-      saveProfileBtn.querySelector('span').textContent = 'সেভ হচ্ছে...';
-      saveProfileBtn.disabled = true;
-
-      let imageUrl = null;
-      if (selectedShopImageFile) {
-        imageUrl = await uploadShopImage(currentUserId, selectedShopImageFile);
-      }
-
-      const updates = {
-        shop_tagline: shopTaglineInput.value.trim(),
-      };
-      if (imageUrl) updates.shop_image = imageUrl;
-
-      const { error } = await supabase.from('profiles').update(updates).eq('id', currentUserId);
-
-      saveProfileBtn.querySelector('span').textContent = originalText;
-      saveProfileBtn.disabled = false;
-
-      if (error) {
-        showProfileMsg('সেভ ব্যর্থ: ' + error.message);
-        return;
-      }
-
-      showProfileMsg('শপ প্রোফাইল সেভ হয়েছে ✓', 'success');
-    });
-
-    // ===== গার্ড + প্রোফাইল লোড =====
     async function init() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -705,157 +313,45 @@ import AddListingModal from '../components/ui/AddListingModal.astro';
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('is_shop_owner, shop_name, shop_tagline, shop_image')
+        .select('is_shop_owner, shop_id')
         .eq('id', session.user.id)
         .single();
 
-      if (!profile?.is_shop_owner) {
+      if (!profile?.is_shop_owner || !profile?.shop_id) {
         window.location.href = '/';
         return;
       }
 
-      currentUserId = session.user.id;
+      const { data: shop } = await supabase
+        .from('shops')
+        .select('*')
+        .eq('id', profile.shop_id)
+        .single();
 
-      shopNameDisplay.value = profile.shop_name || '';
-      shopTaglineInput.value = profile.shop_tagline || '';
-      if (profile.shop_image) {
-        shopImageImg.src = profile.shop_image;
-        shopImageCircle?.classList.add('has-photo');
+      if (!shop) {
+        window.location.href = '/';
+        return;
       }
+
+      document.getElementById('shopHeaderName').textContent = shop.name;
 
       loadingState.style.display = 'none';
       guardedContent.style.display = 'block';
 
-      loadProducts();
+      window.dispatchEvent(new CustomEvent('smartfeni:shop-ready', { detail: { shopId: shop.id, shop } }));
     }
 
-    async function loadProducts() {
-      const { data, error } = await supabase
-        .from('listings')
-        .select('*')
-        .eq('category', 'online-shop')
-        .eq('user_id', currentUserId)
-        .order('created_at', { ascending: false });
+    tabsBar?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.myshop-tab');
+      if (!btn) return;
 
-      if (error) {
-        console.error('প্রোডাক্ট লোড এরর:', error.message);
-      }
+      document.querySelectorAll('.myshop-tab').forEach((t) => t.classList.remove('active'));
+      btn.classList.add('active');
 
-      products = data || [];
-      renderProducts();
-    }
-
-    function renderProducts() {
-      productsContainer.innerHTML = '';
-
-      if (products.length === 0) {
-        emptyState.style.display = 'block';
-        return;
-      }
-      emptyState.style.display = 'none';
-
-      products.forEach((p) => {
-        const card = document.createElement('div');
-        card.className = 'product-card';
-
-        const imageHtml = p.images && p.images.length > 0
-          ? `<div class="product-photo-frame"><img src="${p.images[0]}" alt="${p.title || ''}" /></div>`
-          : `<div class="product-icon-frame"><i class="fas fa-box"></i></div>`;
-
-        card.innerHTML = `
-          ${imageHtml}
-          <div class="product-body">
-            <p class="product-title">${p.title || ''}</p>
-            ${p.price ? `<span class="product-price">৳${p.price}</span>` : ''}
-            <div class="product-actions">
-              <button class="btn-edit"><i class="fas fa-pen"></i> এডিট</button>
-              <button class="btn-delete"><i class="fas fa-trash"></i> ডিলিট</button>
-            </div>
-          </div>
-        `;
-
-        card.querySelector('.btn-edit').addEventListener('click', () => openEdit(p));
-        card.querySelector('.btn-delete').addEventListener('click', () => deleteProduct(p.id));
-
-        productsContainer.appendChild(card);
+      const target = btn.dataset.tab;
+      document.querySelectorAll('.myshop-panel').forEach((p) => {
+        p.style.display = p.dataset.panel === target ? 'block' : 'none';
       });
-    }
-
-    async function deleteProduct(id) {
-      if (!confirm('এই প্রোডাক্টটি ডিলিট করতে চান?')) return;
-
-      const { error } = await supabase.from('listings').delete().eq('id', id);
-      if (error) {
-        alert('ডিলিট ব্যর্থ: ' + error.message);
-        return;
-      }
-      loadProducts();
-    }
-
-    // ===== প্রোডাক্ট এডিট মোডাল =====
-    const editOverlay = document.getElementById('editOverlay');
-    const editClose = document.getElementById('editClose');
-    const editMessage = document.getElementById('editMessage');
-    const editTitleInput = document.getElementById('editTitle');
-    const editDescInput = document.getElementById('editDescription');
-    const editPriceInput = document.getElementById('editPrice');
-    const editSaveBtn = document.getElementById('editSaveBtn');
-    let editingId = null;
-
-    function openEdit(product) {
-      editingId = product.id;
-      editTitleInput.value = product.title || '';
-      editDescInput.value = product.description || '';
-      editPriceInput.value = product.price || '';
-      editMessage.className = 'edit-message';
-      editMessage.textContent = '';
-      editOverlay.classList.add('open');
-      document.body.style.overflow = 'hidden';
-    }
-
-    function closeEdit() {
-      editOverlay.classList.remove('open');
-      document.body.style.overflow = '';
-    }
-
-    editClose?.addEventListener('click', closeEdit);
-    editOverlay?.addEventListener('click', (e) => {
-      if (e.target === editOverlay) closeEdit();
-    });
-
-    editSaveBtn?.addEventListener('click', async () => {
-      const title = editTitleInput.value.trim();
-      if (!title) {
-        editMessage.textContent = 'প্রোডাক্টের নাম আবশ্যক';
-        editMessage.className = 'edit-message show-error';
-        return;
-      }
-
-      const { error } = await supabase
-        .from('listings')
-        .update({
-          title,
-          description: editDescInput.value.trim(),
-          price: editPriceInput.value.trim(),
-        })
-        .eq('id', editingId);
-
-      if (error) {
-        editMessage.textContent = 'সেভ ব্যর্থ: ' + error.message;
-        editMessage.className = 'edit-message show-error';
-        return;
-      }
-
-      editMessage.textContent = 'সেভ হয়েছে ✓';
-      editMessage.className = 'edit-message show-success';
-      setTimeout(() => {
-        closeEdit();
-        loadProducts();
-      }, 700);
-    });
-
-    document.getElementById('openAddListing')?.addEventListener('click', () => {
-      window.openListingModal?.('product');
     });
 
     init();
