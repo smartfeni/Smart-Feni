@@ -4,6 +4,8 @@
 // ClubProfile.astro এর হিরো স্টাইল (কভার + সেন্টার লোগো) অনুসরণ
 // করে, সাথে প্রোডাক্ট গ্রিড (আগের shop/[id].astro থেকে) যোগ করা।
 // props: shop (shops টেবিলের row), products (listings অ্যারে)
+// আপডেট (Phase F): কার্টে যোগ করুন বাটন + view/cart_add ইভেন্ট
+// ট্র্যাকিং + ফ্লোটিং কার্ট বাটন
 // ============================================================
 
 import ListingDetailModal from '../ui/ListingDetailModal.astro';
@@ -108,11 +110,12 @@ const upazilaLabel = shop.upazila ? UPAZILA_LABELS[shop.upazila] || shop.upazila
         <>
           <div class="product-grid" id="productGrid">
             {products.map((item, i) => (
-              <button
-                type="button"
+              <div
                 class="product-card"
                 data-detail-index={i}
                 data-search={`${item.title || ''} ${item.description || ''}`.toLowerCase()}
+                tabindex="0"
+                role="button"
               >
                 {item.images && item.images.length > 0 ? (
                   <img src={item.images[0]} alt={item.title} class="product-photo" />
@@ -125,8 +128,16 @@ const upazilaLabel = shop.upazila ? UPAZILA_LABELS[shop.upazila] || shop.upazila
                 <div class="product-card-body">
                   <h3 class="product-title">{item.title}</h3>
                   {item.price && <p class="product-price">৳{item.price}</p>}
+                  <button
+                    type="button"
+                    class="add-cart-btn"
+                    data-listing-id={item.id}
+                    data-shop-id={shop.id}
+                  >
+                    <i class="fas fa-cart-plus"></i> কার্টে যোগ করুন
+                  </button>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
 
@@ -135,6 +146,11 @@ const upazilaLabel = shop.upazila ? UPAZILA_LABELS[shop.upazila] || shop.upazila
       )}
     </div>
   </div>
+
+  <a href="/cart" class="floating-cart-btn" id="floatingCartBtn">
+    <i class="fas fa-cart-shopping"></i>
+    <span class="cart-count" id="cartCountBadge" style="display:none;">0</span>
+  </a>
 
   <ListingDetailModal />
 
@@ -471,6 +487,70 @@ const upazilaLabel = shop.upazila ? UPAZILA_LABELS[shop.upazila] || shop.upazila
     color: #FF6B35;
   }
 
+  .add-cart-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    border: none;
+    padding: 9px;
+    border-radius: 10px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 10px;
+  }
+
+  .add-cart-btn:hover {
+    background: #FF6B35;
+    color: #fff;
+  }
+
+  .add-cart-btn.added {
+    background: #EAFBF0;
+    color: #1B7A3C;
+  }
+
+  .floating-cart-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 20px;
+    background: #1B2A4A;
+    color: #fff;
+    border: none;
+    width: 58px;
+    height: 58px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
+    cursor: pointer;
+    z-index: 500;
+    text-decoration: none;
+  }
+
+  .floating-cart-btn .cart-count {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: #FF6B35;
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    min-width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+  }
+
   .no-results {
     text-align: center;
     color: #A0AFC0;
@@ -480,6 +560,7 @@ const upazilaLabel = shop.upazila ? UPAZILA_LABELS[shop.upazila] || shop.upazila
 </style>
 
 <script>
+  import { supabase } from '../../lib/supabase.js';
   import { initListingDetailModal } from '../../lib/listingDetailModal.js';
 
   const dataEl = document.getElementById('shopProductsData');
@@ -488,6 +569,10 @@ const upazilaLabel = shop.upazila ? UPAZILA_LABELS[shop.upazila] || shop.upazila
   const cards = document.querySelectorAll('.product-card');
   const searchInput = document.getElementById('productSearchInput');
   const noResults = document.getElementById('noResults');
+  const cartCountBadge = document.getElementById('cartCountBadge');
+
+  let currentUserId = null;
+  const viewedThisSession = new Set();
 
   searchInput?.addEventListener('input', () => {
     const keyword = searchInput.value.trim().toLowerCase();
@@ -514,4 +599,93 @@ const upazilaLabel = shop.upazila ? UPAZILA_LABELS[shop.upazila] || shop.upazila
     typeIcons: {},
     cardSelector: '.product-card',
   });
+
+  // ===== 'view' ইভেন্ট ট্র্যাকিং — কার্ড ক্লিক করলে (প্রতি প্রোডাক্ট প্রতি সেশনে একবার) =====
+  cards.forEach((card) => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.add-cart-btn')) return; // কার্ট বাটনে ক্লিক হলে ভিউ লগ না
+      const idx = card.dataset.detailIndex;
+      const listing = products[idx];
+      if (!listing || viewedThisSession.has(listing.id)) return;
+      viewedThisSession.add(listing.id);
+      logProductEvent('view', listing.id);
+    });
+  });
+
+  async function logProductEvent(eventType, listingId) {
+    if (!currentUserId) return; // লগইন করা না থাকলে ইভেন্ট লগ হয় না
+    const shopIdEl = document.querySelector(`[data-listing-id="${listingId}"]`);
+    const shopId = shopIdEl?.dataset.shopId || null;
+
+    await supabase.from('product_events').insert({
+      event_type: eventType,
+      shop_id: shopId,
+      listing_id: listingId,
+      user_id: currentUserId,
+    });
+  }
+
+  // ===== কার্টে যোগ করুন =====
+  document.querySelectorAll('.add-cart-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+
+      if (!currentUserId) {
+        window.openAuthModal?.('login');
+        return;
+      }
+
+      const listingId = btn.dataset.listingId;
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> যোগ হচ্ছে...';
+
+      // আগে থেকে কার্টে থাকলে quantity +1, না থাকলে নতুন row
+      const { data: existing } = await supabase
+        .from('cart_items')
+        .select('id, quantity')
+        .eq('user_id', currentUserId)
+        .eq('listing_id', listingId)
+        .maybeSingle();
+
+      if (existing) {
+        await supabase.from('cart_items').update({ quantity: existing.quantity + 1 }).eq('id', existing.id);
+      } else {
+        await supabase.from('cart_items').insert({ user_id: currentUserId, listing_id: listingId, quantity: 1 });
+      }
+
+      await logProductEvent('cart_add', listingId);
+
+      btn.classList.add('added');
+      btn.innerHTML = '<i class="fas fa-check"></i> কার্টে যোগ হয়েছে';
+      btn.disabled = false;
+
+      setTimeout(() => {
+        btn.classList.remove('added');
+        btn.innerHTML = originalHtml;
+      }, 1500);
+
+      refreshCartCount();
+    });
+  });
+
+  async function refreshCartCount() {
+    if (!currentUserId || !cartCountBadge) return;
+
+    const { data } = await supabase.from('cart_items').select('quantity').eq('user_id', currentUserId);
+    const total = (data || []).reduce((sum, row) => sum + row.quantity, 0);
+
+    if (total > 0) {
+      cartCountBadge.textContent = total;
+      cartCountBadge.style.display = 'flex';
+    } else {
+      cartCountBadge.style.display = 'none';
+    }
+  }
+
+  (async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    currentUserId = session?.user?.id || null;
+    refreshCartCount();
+  })();
 </script>
