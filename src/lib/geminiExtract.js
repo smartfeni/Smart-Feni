@@ -8,7 +8,7 @@
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে: GEMINI_API_KEY
 // ============================================================
 
-const GEMINI_MODEL = 'gemini-3.1-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 // প্রতিটা ক্যাটাগরির জন্য আলাদা JSON schema + নির্দেশনা
