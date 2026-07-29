@@ -12,6 +12,9 @@
 // আপডেট: ক্লাব ওনার একাউন্ট থেকে লিস্টিং পোস্ট করা ব্লক করা হয়েছে —
 // ক্লাব ওনার শুধু "আমার ক্লাব" থেকে ক্লাবের পোস্ট দিতে পারবে, সাধারণ
 // লিস্টিং সিস্টেমে না (রিড-অনলি ইউজার হিসেবে থাকবে)
+// আপডেট: ছবি আপলোড প্রিভিউ এখন Instagram/Urban Company স্টাইল ছোট
+// স্কয়ার ড্রপবক্স গ্রিড — প্রথমে শুধু ➕ বক্স, ছবি সিলেক্ট করলে পাশে
+// থাম্বনেইল + রিমুভ বাটন, পাশে সবসময় আরেকটা ➕ বক্স (আরও ছবি যোগ করতে)
 // ============================================================
 
 export interface Props {
@@ -80,8 +83,8 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     <input type="text" class="listing-input" id="listingPhone" placeholder="01xxxxxxxxx" />
 
     <label class="listing-label">ছবি (ঐচ্ছিক, একাধিক দেওয়া যাবে)</label>
-    <input type="file" id="listingImages" accept="image/*" multiple />
-    <div class="listing-image-preview" id="listingImagePreview"></div>
+    <input type="file" id="listingImages" accept="image/*" multiple hidden />
+    <div class="listing-image-grid" id="listingImageGrid"></div>
 
     <button class="listing-submit" id="listingSubmit" type="button">
       <i class="fas fa-check"></i> <span class="listing-submit-text">লিস্টিং পোস্ট করুন</span>
@@ -212,21 +215,6 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     resize: vertical;
   }
 
-  .listing-image-preview {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-top: 10px;
-  }
-
-  .listing-image-preview img {
-    width: 60px;
-    height: 60px;
-    object-fit: cover;
-    border-radius: 10px;
-    border: 1px solid #E5EAF0;
-  }
-
   .listing-submit {
     width: 100%;
     display: flex;
@@ -255,6 +243,74 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
       padding: 28px 22px 22px;
       border-radius: 22px;
     }
+  }
+</style>
+
+<style is:global>
+  /* ছবি আপলোড গ্রিড — JS দিয়ে dynamically তৈরি হওয়ায় এই স্টাইলগুলো
+     গ্লোবাল রাখা হয়েছে (Astro scoped CSS dynamically তৈরি এলিমেন্টে বসে না) */
+  .listing-image-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .listing-image-box {
+    width: 72px;
+    height: 72px;
+    border-radius: 14px;
+    position: relative;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .listing-image-box.add-box {
+    border: 1.5px dashed #D8E0EA;
+    background: #FBFCFE;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8FA0BC;
+    font-size: 1.3rem;
+    cursor: pointer;
+  }
+
+  .listing-image-box.add-box:hover {
+    border-color: #FF6B35;
+    color: #FF6B35;
+    background: #FFF7F3;
+  }
+
+  .listing-image-box.thumb-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    border: 1px solid #E5EAF0;
+    border-radius: 14px;
+  }
+
+  .listing-image-remove-btn {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.65);
+    color: #fff;
+    border: none;
+    font-size: 0.6rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .listing-image-remove-btn:hover {
+    background: #D14343;
   }
 </style>
 
@@ -319,24 +375,54 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     if (e.target === overlay) closeListingModal();
   });
 
-  // নির্বাচিত ছবি প্রিভিউ
+  // ছবি আপলোড — ছোট স্কয়ার ড্রপবক্স গ্রিড (থাম্বনেইল + সবসময় একটা ➕ বক্স)
   const imagesInput = document.getElementById('listingImages');
-  const imagePreview = document.getElementById('listingImagePreview');
+  const imageGrid = document.getElementById('listingImageGrid');
   let selectedFiles = [];
 
-  imagesInput?.addEventListener('change', () => {
-    selectedFiles = Array.from(imagesInput.files || []);
-    imagePreview.innerHTML = '';
-    selectedFiles.forEach((file) => {
+  function renderImageGrid() {
+    imageGrid.innerHTML = '';
+
+    selectedFiles.forEach((file, index) => {
+      const box = document.createElement('div');
+      box.className = 'listing-image-box thumb-box';
+
+      const img = document.createElement('img');
       const reader = new FileReader();
-      reader.onload = () => {
-        const img = document.createElement('img');
-        img.src = reader.result;
-        imagePreview.appendChild(img);
-      };
+      reader.onload = () => { img.src = reader.result; };
       reader.readAsDataURL(file);
+      box.appendChild(img);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'listing-image-remove-btn';
+      removeBtn.innerHTML = '<i class="fas fa-xmark"></i>';
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedFiles.splice(index, 1);
+        renderImageGrid();
+      });
+      box.appendChild(removeBtn);
+
+      imageGrid.appendChild(box);
     });
+
+    // সবসময় শেষে একটা ➕ বক্স — ক্লিক করলে আরও ছবি যোগ করা যাবে
+    const addBox = document.createElement('div');
+    addBox.className = 'listing-image-box add-box';
+    addBox.innerHTML = '<i class="fas fa-plus"></i>';
+    addBox.addEventListener('click', () => imagesInput.click());
+    imageGrid.appendChild(addBox);
+  }
+
+  imagesInput?.addEventListener('change', () => {
+    const newFiles = Array.from(imagesInput.files || []);
+    selectedFiles = selectedFiles.concat(newFiles);
+    imagesInput.value = ''; // রিসেট, যাতে একই ফাইল আবার সিলেক্ট করা যায়
+    renderImageGrid();
   });
+
+  renderImageGrid(); // শুরুতে শুধু ➕ বক্স দেখানোর জন্য
 
   // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
   // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
