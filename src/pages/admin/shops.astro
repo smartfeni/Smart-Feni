@@ -1,10 +1,13 @@
 ---
 // ============================================================
 // পেজ: অ্যাডমিন — শপ ম্যানেজমেন্ট (/admin/shops)
-// নতুন শপ ওউনার অ্যাকাউন্ট তৈরি (/api/create-shop কল করে),
-// শপ active/deactivate, সিরিয়াল up/down
-// আপডেট: তৈরির ফর্ম এখন CTA বক্সে — ডিফল্টে লুকানো, বাটনে ক্লিক
-//         করলে খোলে (আগে সবসময় খোলা থাকত)
+// আপডেট: profiles টেবিলের বদলে এখন আলাদা shops টেবিল ব্যবহার করে
+// (club এর প্যাটার্নে)। নতুন সংযোজন:
+//   ১. ম্যানুয়াল শপ তৈরির ফর্মে slug ইনপুট যোগ হয়েছে
+//   ২. "শপ আবেদন" সেকশন — ইউজারদের request-approve ফ্লো (নতুন
+//      shop_requests টেবিল থেকে pending রিকোয়েস্ট দেখায়)
+//   ৩. প্রতিটা শপে "ওউনার পরিবর্তন" বাটন — কোনো শপের owner_id
+//      অন্য existing ইউজার অ্যাকাউন্টে রিলিংক করার জন্য
 // ============================================================
 
 export const prerender = false;
@@ -30,9 +33,16 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <p class="admin-subtitle" id="resultCount"></p>
         </div>
 
-        <!-- ===== নতুন শপ তৈরির CTA ===== -->
+        <!-- ===== পেন্ডিং শপ আবেদন ===== -->
+        <div class="section-block">
+          <h2 class="section-title"><i class="fas fa-inbox"></i> পেন্ডিং আবেদন <span id="pendingCountBadge" class="count-badge" style="display:none;"></span></h2>
+          <div id="requestsContainer" class="requests-container"></div>
+          <p id="noRequestsMsg" class="no-items-msg" style="display:none;">কোনো পেন্ডিং আবেদন নেই</p>
+        </div>
+
+        <!-- ===== নতুন শপ তৈরির CTA (ম্যানুয়াল) ===== -->
         <button class="cta-toggle-btn" id="showCreateFormBtn" type="button">
-          <i class="fas fa-plus"></i> নতুন শপ যোগ করুন
+          <i class="fas fa-plus"></i> ম্যানুয়ালি নতুন শপ যোগ করুন
         </button>
 
         <!-- ===== নতুন শপ তৈরির ফর্ম (ডিফল্টে লুকানো) ===== -->
@@ -43,6 +53,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
           <label class="form-label">শপের নাম</label>
           <input type="text" class="form-input" id="shopNameInput" placeholder="যেমন: রহিম'স ক্লথিং শপ" />
+
+          <label class="form-label">স্লাগ (URL — যেমন smartfeni.com/<b>rahims-shop</b>)</label>
+          <input type="text" class="form-input" id="shopSlugInput" placeholder="rahims-shop" />
 
           <label class="form-label">ফোন নম্বর (লগইন আইডি হিসেবে ব্যবহার হবে)</label>
           <input type="text" class="form-input" id="shopPhoneInput" placeholder="01xxxxxxxxx" />
@@ -56,14 +69,31 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         </div>
 
         <!-- ===== শপ তালিকা ===== -->
-        <div id="shopsContainer" class="shops-container"></div>
-
-        <div id="emptyState" class="empty-state" style="display:none;">
-          <i class="fas fa-store-slash"></i>
-          <p>এখনো কোনো শপ যোগ করা হয়নি</p>
+        <div class="section-block">
+          <h2 class="section-title"><i class="fas fa-store"></i> সব শপ</h2>
+          <div id="shopsContainer" class="shops-container"></div>
+          <div id="emptyState" class="empty-state" style="display:none;">
+            <i class="fas fa-store-slash"></i>
+            <p>এখনো কোনো শপ যোগ করা হয়নি</p>
+          </div>
         </div>
 
       </div>
+    </div>
+  </div>
+
+  <!-- ===== ওউনার পরিবর্তন মোডাল ===== -->
+  <div class="modal-overlay" id="reassignOverlay">
+    <div class="modal-box">
+      <button class="modal-close" id="reassignClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      <h2 class="modal-title"><i class="fas fa-user-pen"></i> ওউনার পরিবর্তন</h2>
+      <p class="modal-shop-name" id="reassignShopName"></p>
+      <p class="modal-message" id="reassignMessage"></p>
+      <label class="form-label">নতুন ওউনারের ফোন নম্বর (তার অ্যাকাউন্ট আগে থেকে থাকতে হবে)</label>
+      <input type="text" class="form-input" id="reassignPhoneInput" placeholder="01xxxxxxxxx" />
+      <button class="create-btn" id="reassignSubmitBtn" type="button">
+        <i class="fas fa-check"></i> <span id="reassignBtnText">পরিবর্তন করুন</span>
+      </button>
     </div>
   </div>
 
@@ -127,6 +157,101 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       color: #8FA0BC;
       margin-top: 4px;
       font-weight: 600;
+    }
+
+    .section-block {
+      margin-bottom: 28px;
+    }
+
+    .section-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-title i {
+      color: #FF6B35;
+    }
+
+    .count-badge {
+      background: #FF6B35;
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 9px;
+      border-radius: 40px;
+    }
+
+    .no-items-msg {
+      text-align: center;
+      color: #B0BCCB;
+      font-size: 0.85rem;
+      padding: 20px 0;
+    }
+
+    .requests-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .request-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 16px 18px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      border-left: 3px solid #FF6B35;
+    }
+
+    .request-name {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .request-meta {
+      font-size: 0.8rem;
+      color: #8FA0BC;
+      margin-top: 3px;
+    }
+
+    .request-message {
+      font-size: 0.82rem;
+      color: #5A6E85;
+      margin-top: 8px;
+      background: #F8FAFC;
+      padding: 8px 10px;
+      border-radius: 10px;
+    }
+
+    .request-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .btn-approve, .btn-reject {
+      flex: 1;
+      border: none;
+      padding: 9px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .btn-approve {
+      background: #EAFBF0;
+      color: #1B7A3C;
+    }
+
+    .btn-reject {
+      background: #FFF0EA;
+      color: #D14343;
     }
 
     .cta-toggle-btn {
@@ -266,6 +391,86 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .empty-state i {
       font-size: 2.4rem;
     }
+
+    /* ===== ওউনার পরিবর্তন মোডাল ===== */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.5);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal-box {
+      background: #fff;
+      border-radius: 20px;
+      padding: 26px 22px;
+      max-width: 420px;
+      width: 100%;
+      position: relative;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: #F4F7FC;
+      border: none;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      color: #5A6E85;
+      cursor: pointer;
+    }
+
+    .modal-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .modal-title i {
+      color: #FF6B35;
+    }
+
+    .modal-shop-name {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-bottom: 14px;
+    }
+
+    .modal-message {
+      display: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+
+    .modal-message.show-error {
+      display: block;
+      background: #FFF0EA;
+      color: #D14343;
+    }
+
+    .modal-message.show-success {
+      display: block;
+      background: #EAFBF0;
+      color: #1B7A3C;
+    }
   </style>
 
   <script>
@@ -285,25 +490,27 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       document.getElementById('showCreateFormBtn').style.display = 'none';
     });
 
-    function showMsg(text, type = 'error') {
-      createMessage.textContent = text;
-      createMessage.className = `form-message ${type === 'error' ? 'show-error' : 'show-success'}`;
+    function showMsg(el, text, type = 'error') {
+      el.textContent = text;
+      el.className = `form-message ${type === 'error' ? 'show-error' : 'show-success'}`;
     }
 
-    function clearMsg() {
-      createMessage.textContent = '';
-      createMessage.className = 'form-message';
+    function clearMsg(el) {
+      el.textContent = '';
+      el.className = 'form-message';
     }
 
+    // ===== ম্যানুয়াল শপ তৈরি =====
     createBtn?.addEventListener('click', async () => {
-      clearMsg();
+      clearMsg(createMessage);
 
       const shopName = document.getElementById('shopNameInput').value.trim();
+      const slug = document.getElementById('shopSlugInput').value.trim();
       const phone = document.getElementById('shopPhoneInput').value.trim();
       const password = document.getElementById('shopPasswordInput').value;
 
-      if (!shopName || !phone || !password) {
-        showMsg('সব ঘর পূরণ করুন');
+      if (!shopName || !slug || !phone || !password) {
+        showMsg(createMessage, 'সব ঘর পূরণ করুন');
         return;
       }
 
@@ -314,40 +521,207 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const res = await fetch('/api/create-shop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shopName, phone, password }),
+          body: JSON.stringify({ shopName, slug, phone, password }),
         });
         const result = await res.json();
 
         if (!res.ok) {
-          showMsg(result.error || 'শপ তৈরি ব্যর্থ');
+          showMsg(createMessage, result.error || 'শপ তৈরি ব্যর্থ');
         } else {
-          showMsg('শপ সফলভাবে তৈরি হয়েছে ✓', 'success');
+          showMsg(createMessage, 'শপ সফলভাবে তৈরি হয়েছে ✓', 'success');
           document.getElementById('shopNameInput').value = '';
+          document.getElementById('shopSlugInput').value = '';
           document.getElementById('shopPhoneInput').value = '';
           document.getElementById('shopPasswordInput').value = '';
           loadShops();
         }
       } catch (err) {
-        showMsg('নেটওয়ার্ক ত্রুটি: ' + err.message);
+        showMsg(createMessage, 'নেটওয়ার্ক ত্রুটি: ' + err.message);
       }
 
       createBtnText.textContent = 'শপ তৈরি করুন';
       createBtn.disabled = false;
     });
 
-    function renderShop(shop, index, total) {
+    // ===== পেন্ডিং আবেদন =====
+    const requestsContainer = document.getElementById('requestsContainer');
+    const noRequestsMsg = document.getElementById('noRequestsMsg');
+    const pendingCountBadge = document.getElementById('pendingCountBadge');
+
+    async function loadRequests() {
+      const { data, error } = await supabase
+        .from('shop_requests')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('আবেদন লোড এরর:', error.message);
+        return;
+      }
+
+      const requests = data || [];
+      requestsContainer.innerHTML = '';
+
+      if (requests.length === 0) {
+        noRequestsMsg.style.display = 'block';
+        pendingCountBadge.style.display = 'none';
+        return;
+      }
+
+      noRequestsMsg.style.display = 'none';
+      pendingCountBadge.style.display = 'inline-block';
+      pendingCountBadge.textContent = requests.length;
+
+      requests.forEach((req) => {
+        const card = document.createElement('div');
+        card.className = 'request-card';
+        card.innerHTML = `
+          <p class="request-name">${req.shop_name}</p>
+          <p class="request-meta"><i class="fas fa-phone"></i> ${req.phone} · ${new Date(req.created_at).toLocaleDateString('bn-BD')}</p>
+          ${req.message ? `<p class="request-message">${req.message}</p>` : ''}
+          <div class="request-actions">
+            <button class="btn-approve"><i class="fas fa-check"></i> Approve</button>
+            <button class="btn-reject"><i class="fas fa-xmark"></i> Reject</button>
+          </div>
+        `;
+
+        card.querySelector('.btn-approve').addEventListener('click', (e) => approveRequest(req, e.target.closest('button')));
+        card.querySelector('.btn-reject').addEventListener('click', () => rejectRequest(req.id));
+
+        requestsContainer.appendChild(card);
+      });
+    }
+
+    async function approveRequest(req, btn) {
+      const originalHtml = btn.innerHTML;
+      btn.innerHTML = 'অপেক্ষা করুন...';
+      btn.disabled = true;
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/approve-shop-request', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ requestId: req.id }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          alert('Approve ব্যর্থ: ' + (result.error || 'অজানা ত্রুটি'));
+          btn.innerHTML = originalHtml;
+          btn.disabled = false;
+          return;
+        }
+
+        loadRequests();
+        loadShops();
+      } catch (err) {
+        alert('নেটওয়ার্ক ত্রুটি: ' + err.message);
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+      }
+    }
+
+    async function rejectRequest(id) {
+      if (!confirm('এই আবেদনটি বাতিল করতে চান?')) return;
+
+      const { error } = await supabase.from('shop_requests').update({ status: 'rejected' }).eq('id', id);
+      if (error) {
+        alert('বাতিল ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadRequests();
+    }
+
+    // ===== ওউনার পরিবর্তন মোডাল =====
+    const reassignOverlay = document.getElementById('reassignOverlay');
+    const reassignClose = document.getElementById('reassignClose');
+    const reassignShopName = document.getElementById('reassignShopName');
+    const reassignMessage = document.getElementById('reassignMessage');
+    const reassignPhoneInput = document.getElementById('reassignPhoneInput');
+    const reassignSubmitBtn = document.getElementById('reassignSubmitBtn');
+    const reassignBtnText = document.getElementById('reassignBtnText');
+    let reassignTargetShop = null;
+
+    function openReassign(shop) {
+      reassignTargetShop = shop;
+      reassignShopName.textContent = shop.name;
+      reassignPhoneInput.value = '';
+      clearMsg(reassignMessage);
+      reassignOverlay.classList.add('open');
+    }
+
+    function closeReassign() {
+      reassignOverlay.classList.remove('open');
+      reassignTargetShop = null;
+    }
+
+    reassignClose?.addEventListener('click', closeReassign);
+    reassignOverlay?.addEventListener('click', (e) => {
+      if (e.target === reassignOverlay) closeReassign();
+    });
+
+    reassignSubmitBtn?.addEventListener('click', async () => {
+      clearMsg(reassignMessage);
+      const newPhone = reassignPhoneInput.value.trim();
+
+      if (!newPhone) {
+        showMsg(reassignMessage, 'ফোন নম্বর দিন');
+        return;
+      }
+
+      reassignBtnText.textContent = 'পরিবর্তন হচ্ছে...';
+      reassignSubmitBtn.disabled = true;
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/reassign-shop-owner', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ shopId: reassignTargetShop.id, newOwnerPhone: newPhone }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          showMsg(reassignMessage, result.error || 'পরিবর্তন ব্যর্থ');
+        } else {
+          showMsg(reassignMessage, 'ওউনার পরিবর্তন হয়েছে ✓', 'success');
+          setTimeout(() => {
+            closeReassign();
+            loadShops();
+          }, 800);
+        }
+      } catch (err) {
+        showMsg(reassignMessage, 'নেটওয়ার্ক ত্রুটি: ' + err.message);
+      }
+
+      reassignBtnText.textContent = 'পরিবর্তন করুন';
+      reassignSubmitBtn.disabled = false;
+    });
+
+    // ===== শপ তালিকা =====
+    function renderShop(shop, index, total, ownerPhone) {
       const card = document.createElement('div');
-      card.style.cssText = `background:#fff;border-radius:16px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;align-items:center;gap:14px;${shop.shop_active ? '' : 'opacity:0.6;'}`;
+      card.style.cssText = `background:#fff;border-radius:16px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);${shop.is_active ? '' : 'opacity:0.6;'}`;
 
       card.innerHTML = `
-        <div style="width:44px;height:44px;border-radius:12px;background:#FFF0EA;color:#FF6B35;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">
-          <i class="fas fa-store"></i>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:44px;height:44px;border-radius:12px;background:#FFF0EA;color:#FF6B35;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">
+            <i class="fas fa-store"></i>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <p style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${shop.name}</p>
+            <p style="font-size:0.78rem;color:#8FA0BC;">/${shop.slug} · ${ownerPhone || 'ওউনার নেই'} ${shop.is_active ? '' : '· নিষ্ক্রিয়'}</p>
+          </div>
         </div>
-        <div style="flex:1;min-width:0;">
-          <p style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${shop.shop_name || '(নামহীন শপ)'}</p>
-          <p style="font-size:0.8rem;color:#8FA0BC;">${shop.phone || ''} ${shop.shop_active ? '' : '· নিষ্ক্রিয়'}</p>
-        </div>
-        <div class="shop-actions" style="display:flex;gap:6px;flex-shrink:0;"></div>
+        <div class="shop-actions" style="display:flex;gap:6px;flex-shrink:0;margin-top:12px;"></div>
       `;
 
       const actions = card.querySelector('.shop-actions');
@@ -366,12 +740,19 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       downBtn.addEventListener('click', () => moveShop(shop, 'down'));
       actions.appendChild(downBtn);
 
+      const reassignBtn = document.createElement('button');
+      reassignBtn.innerHTML = '<i class="fas fa-user-pen"></i>';
+      reassignBtn.title = 'ওউনার পরিবর্তন';
+      reassignBtn.style.cssText = 'background:#EFF6FF;color:#2563EB;border:none;width:34px;height:34px;border-radius:10px;cursor:pointer;';
+      reassignBtn.addEventListener('click', () => openReassign(shop));
+      actions.appendChild(reassignBtn);
+
       const toggleBtn = document.createElement('button');
-      toggleBtn.textContent = shop.shop_active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন';
-      toggleBtn.style.cssText = shop.shop_active
-        ? 'background:#FFF0EA;color:#D14343;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;'
-        : 'background:#EAFBF0;color:#1B7A3C;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
-      toggleBtn.addEventListener('click', () => toggleActive(shop.id, !shop.shop_active));
+      toggleBtn.textContent = shop.is_active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন';
+      toggleBtn.style.cssText = shop.is_active
+        ? 'background:#FFF0EA;color:#D14343;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;flex:1;'
+        : 'background:#EAFBF0;color:#1B7A3C;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;flex:1;';
+      toggleBtn.addEventListener('click', () => toggleActive(shop.id, !shop.is_active));
       actions.appendChild(toggleBtn);
 
       return card;
@@ -388,15 +769,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const tempOrder = shop.shop_order;
 
       await Promise.all([
-        supabase.from('profiles').update({ shop_order: other.shop_order }).eq('id', shop.id),
-        supabase.from('profiles').update({ shop_order: tempOrder }).eq('id', other.id),
+        supabase.from('shops').update({ shop_order: other.shop_order }).eq('id', shop.id),
+        supabase.from('shops').update({ shop_order: tempOrder }).eq('id', other.id),
       ]);
 
       loadShops();
     }
 
     async function toggleActive(id, newState) {
-      const { error } = await supabase.from('profiles').update({ shop_active: newState }).eq('id', id);
+      const { error } = await supabase.from('shops').update({ is_active: newState }).eq('id', id);
       if (error) {
         alert('আপডেট ব্যর্থ: ' + error.message);
         return;
@@ -408,9 +789,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       container.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
 
       const { data, error } = await supabase
-        .from('profiles')
+        .from('shops')
         .select('*')
-        .eq('is_shop_owner', true)
         .order('shop_order', { ascending: true });
 
       if (error) {
@@ -428,10 +808,19 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       }
 
       emptyState.style.display = 'none';
-      allShops.forEach((shop, i) => container.appendChild(renderShop(shop, i, allShops.length)));
+
+      const ownerIds = allShops.map((s) => s.owner_id).filter(Boolean);
+      let phoneMap = {};
+      if (ownerIds.length > 0) {
+        const { data: owners } = await supabase.from('profiles').select('id, phone').in('id', ownerIds);
+        (owners || []).forEach((o) => { phoneMap[o.id] = o.phone; });
+      }
+
+      allShops.forEach((shop, i) => container.appendChild(renderShop(shop, i, allShops.length, phoneMap[shop.owner_id])));
     }
 
     window.addEventListener('smartfeni:admin-ready', () => {
+      loadRequests();
       loadShops();
     });
 
