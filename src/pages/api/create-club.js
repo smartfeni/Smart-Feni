@@ -78,16 +78,16 @@ export async function POST({ request }) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // স্লাগ আগে থেকে ব্যবহৃত কিনা চেক
-    const { data: existingClub } = await supabaseAdmin
-      .from('clubs')
-      .select('id')
-      .eq('slug', cleanSlug)
-      .maybeSingle();
+    // স্লাগ আগে থেকে ব্যবহৃত কিনা চেক — clubs আর shops দুটো টেবিলেই,
+    // কারণ দুটোই একই top-level URL namespace শেয়ার করে (/[slug])
+    const [{ data: existingClub }, { data: existingShop }] = await Promise.all([
+      supabaseAdmin.from('clubs').select('id').eq('slug', cleanSlug).maybeSingle(),
+      supabaseAdmin.from('shops').select('id').eq('slug', cleanSlug).maybeSingle(),
+    ]);
 
-    if (existingClub) {
+    if (existingClub || existingShop) {
       return new Response(
-        JSON.stringify({ error: `"${cleanSlug}" স্লাগটি ইতিমধ্যে অন্য ক্লাব ব্যবহার করছে` }),
+        JSON.stringify({ error: `"${cleanSlug}" স্লাগটি ইতিমধ্যে ব্যবহৃত হচ্ছে` }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
