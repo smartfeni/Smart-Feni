@@ -11,7 +11,7 @@
 //
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে:
 // TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GEMINI_API_KEY,
-// SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -23,7 +23,10 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = String(process.env.TELEGRAM_CHAT_ID);
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(
+  process.env.PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 const CATEGORY_LABELS = {
   housing: 'বাসা ভাড়া',
@@ -96,7 +99,6 @@ async function handlePhotoMessage(message) {
   const chatId = String(message.chat.id);
   if (chatId !== ADMIN_CHAT_ID) return; // শুধু admin চ্যাট থেকে গ্রহণ করবে
 
-  // সবচেয়ে বড় সাইজের ছবিটা নেওয়া (photo array ছোট->বড় সাজানো থাকে)
   const largestPhoto = message.photo[message.photo.length - 1];
 
   const { data: row, error } = await supabase
@@ -156,10 +158,8 @@ async function handleCategorySelected(callbackQuery, importId, category) {
   try {
     const { base64, mimeType, buffer } = await downloadTelegramPhotoAsBase64(row.file_id);
 
-    // Gemini দিয়ে extraction
     const extracted = await extractListingFromScreenshot({ imageBase64: base64, mimeType, category });
 
-    // Supabase Storage এ আপলোড
     const fileExt = mimeType === 'image/png' ? 'png' : 'jpg';
     const storagePath = `screenshot-imports/${row.id}.${fileExt}`;
     const { error: uploadError } = await supabase.storage
@@ -215,7 +215,7 @@ async function handleApprove(callbackQuery, importId) {
   }
 
   const listingRow = buildListingRowFromExtraction(row.extracted, row.category, row.image_url);
-  listingRow.status = 'active'; // admin approve করেছে, তাই সরাসরি লাইভ
+  listingRow.status = 'active';
 
   const { error } = await supabase.from('listings').insert(listingRow);
 
@@ -260,7 +260,6 @@ export async function POST({ request }) {
       const cq = update.callback_query;
       const chatId = String(cq.message.chat.id);
 
-      // অ্যাডমিন চ্যাট ছাড়া কোনো callback প্রসেস হবে না
       if (chatId === ADMIN_CHAT_ID) {
         const [action, importId, category] = cq.data.split(':');
         await tg('answerCallbackQuery', { callback_query_id: cq.id });
