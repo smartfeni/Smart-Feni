@@ -1,10 +1,9 @@
 // ============================================================
 // Telegram Webhook — স্ক্রিনশট থেকে লিস্টিং ইম্পোর্ট (multi-step)
 //
-// housing/recycle: ছবি -> ক্যাটাগরি -> extraction -> আসল ছবি
-//   (একাধিক) -> ✅ শেষ -> listings এ insert (status: pending)
-// blood: ছবি -> "ব্লাড ডোনার" -> উপজিলা বাটন -> ক্লাব নাম (টেক্সট)
-//   -> extraction (array) -> manual_blood_donors এ bulk insert
+// সব ক্যাটাগরির কমন ফ্লো: ছবি -> ক্যাটাগরি বাটন -> উপজিলা বাটন
+//   housing/recycle: -> extraction -> আসল ছবি (একাধিক) -> ✅ শেষ -> listings insert (status: pending)
+//   blood: -> ক্লাব নাম (টেক্সট রিপ্লাই) -> extraction (array) -> manual_blood_donors bulk insert
 //
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে:
 // TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GEMINI_API_KEY,
@@ -82,8 +81,8 @@ async function handlePhotoMessage(message) {
   const activeSession = await getActiveSession(chatId);
   const largestPhoto = message.photo[message.photo.length - 1];
 
-  // যদি housing/recycle ফ্লো "আসল ছবি" ধাপে থাকে, নতুন সেশন না বানিয়ে
-  // এই ছবিটা extra_image_urls এ যোগ করা হবে
+  // housing/recycle "আসল ছবি" ধাপে থাকলে, নতুন সেশন না বানিয়ে
+  // এই ছবিটা extra_image_urls এ যোগ হবে
   if (activeSession && activeSession.step === 'awaiting_extra_images') {
     const { buffer, mimeType } = await downloadTelegramPhoto(largestPhoto.file_id);
     const path = `screenshot-imports/${activeSession.id}-${Date.now()}.${mimeType === 'image/png' ? 'png' : 'jpg'}`;
@@ -95,7 +94,9 @@ async function handlePhotoMessage(message) {
     await tg('sendMessage', {
       chat_id: chatId,
       text: `📷 ছবি যোগ হলো (মোট ${updatedUrls.length}টা)। আরও ছবি পাঠাতে পারেন, শেষ হলে ✅ চাপুন।`,
-      reply_markup: { inline_keyboard: [[{ text: '✅ শেষ, লিস্টিং তৈরি করো', callback_data: `doneimg:${activeSession.id}` }]] },
+      reply_markup: {
+        inline_keyboard: [[{ text: '✅ শেষ, লিস্টিং তৈরি করো', callback_data: `doneimg:${activeSession.id}` }]],
+      },
     });
     return;
   }
@@ -140,7 +141,7 @@ async function handleTextMessage(message) {
   if (chatId !== ADMIN_CHAT_ID) return;
 
   const session = await getActiveSession(chatId);
-  if (!session || session.step !== 'awaiting_club_name') return; // অন্য কোনো সাধারণ মেসেজ, ইগনোর
+  if (!session || session.step !== 'awaiting_club_name') return; // অন্য সাধারণ মেসেজ, ইগনোর
 
   const clubNameRaw = message.text.trim();
 
@@ -159,9 +160,7 @@ async function handleTextMessage(message) {
       return;
     }
 
-    const { error } = await supabase
-      .from('manual_blood_donors')
-      .upsert(rows, { onConflict: 'phone' });
+    const { error } = await supabase.from('manual_blood_donors').upsert(rows, { onConflict: 'phone' });
 
     if (error) {
       await tg('sendMessage', { chat_id: chatId, text: `❌ সেভ করতে সমস্যা: ${error.message}` });
@@ -183,33 +182,52 @@ async function handleTextMessage(message) {
 }
 
 // ---------- Callback হ্যান্ডলিং ----------
+
+// সব ক্যাটাগরির জন্যই কমন — ক্যাটাগরি সেভ করে উপজিলা বাটন দেখায়
 async function handleCategorySelected(chatId, messageId, importId, category) {
-  if (category === 'blood') {
-    await supabase.from('screenshot_imports').update({ category, step: 'awaiting_upazila' }).eq('id', importId);
+  await supabase.from('screenshot_imports').update({ category, step: 'awaiting_upazila' }).eq('id', importId);
 
-    const buttons = UPAZILA_LIST.map((name, i) => [{ text: name, callback_data: `upa:${importId}:${i}` }]);
-    await tg('editMessageText', {
-      chat_id: chatId,
-      message_id: messageId,
-      text: 'কোন উপজিলার ডোনার লিস্ট এটা?',
-      reply_markup: { inline_keyboard: buttons },
-    });
-    return;
-  }
+  const buttons = UPAZILA_LIST.map((name, i) => [{ text: name, callback_data: `upa:${importId}:${i}` }]);
+  await tg('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text: `${CATEGORY_LABELS[category]} ✅\n\nকোন উপজিলার জন্য এই স্ক্রিনশট?`,
+    reply_markup: { inline_keyboard: buttons },
+  });
+}
 
-  // housing/recycle: এখনই extraction চালানো হবে
-  await tg('editMessageText', { chat_id: chatId, message_id: messageId, text: `⏳ ${CATEGORY_LABELS[category]} হিসেবে প্রসেস হচ্ছে...` });
+// উপজিলা সিলেক্ট হওয়ার পর ক্যাটাগরি অনুযায়ী ভাগ হয়ে যায়
+async function handleUpazilaSelected(chatId, messageId, importId, upazilaIndex) {
+  const upazila = UPAZILA_LIST[Number(upazilaIndex)];
+  await supabase.from('screenshot_imports').update({ upazila }).eq('id', importId);
 
   const { data: row } = await supabase.from('screenshot_imports').select('*').eq('id', importId).single();
   if (!row) return;
 
+  if (row.category === 'blood') {
+    await supabase.from('screenshot_imports').update({ step: 'awaiting_club_name' }).eq('id', importId);
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: `উপজিলা: ${upazila} ✅\n\nকোন ক্লাব থেকে এই লিস্ট, নাম লিখে reply করুন।`,
+    });
+    return;
+  }
+
+  // housing/recycle: এখন extraction চালানো হবে
+  await tg('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text: `উপজিলা: ${upazila} ✅\n\n⏳ ${CATEGORY_LABELS[row.category]} হিসেবে প্রসেস হচ্ছে...`,
+  });
+
   try {
     const { base64, mimeType } = await downloadTelegramPhoto(row.file_id);
-    const extracted = await extractListingFromScreenshot({ imageBase64: base64, mimeType, category });
+    const extracted = await extractListingFromScreenshot({ imageBase64: base64, mimeType, category: row.category });
 
     await supabase
       .from('screenshot_imports')
-      .update({ category, extracted, step: 'awaiting_extra_images' })
+      .update({ extracted, step: 'awaiting_extra_images' })
       .eq('id', importId);
 
     await tg('editMessageText', {
@@ -219,20 +237,12 @@ async function handleCategorySelected(chatId, messageId, importId, category) {
       reply_markup: { inline_keyboard: [[{ text: '✅ শেষ, লিস্টিং তৈরি করো', callback_data: `doneimg:${importId}` }]] },
     });
   } catch (err) {
-    await tg('editMessageText', { chat_id: chatId, message_id: messageId, text: `❌ প্রসেস করতে সমস্যা: ${err.message}` });
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: `❌ প্রসেস করতে সমস্যা: ${err.message}`,
+    });
   }
-}
-
-async function handleUpazilaSelected(chatId, messageId, importId, upazilaIndex) {
-  const upazila = UPAZILA_LIST[Number(upazilaIndex)];
-
-  await supabase.from('screenshot_imports').update({ upazila, step: 'awaiting_club_name' }).eq('id', importId);
-
-  await tg('editMessageText', {
-    chat_id: chatId,
-    message_id: messageId,
-    text: `উপজিলা: ${upazila} ✅\n\nকোন ক্লাব থেকে এই লিস্ট, নাম লিখে reply করুন।`,
-  });
 }
 
 async function handleDoneImages(chatId, messageId, importId) {
@@ -242,11 +252,15 @@ async function handleDoneImages(chatId, messageId, importId) {
     return;
   }
 
-  const listingRow = buildListingRowFromExtraction(row.extracted, row.category, row.extra_image_urls);
+  const listingRow = buildListingRowFromExtraction(row.extracted, row.category, row.upazila, row.extra_image_urls);
   const { error } = await supabase.from('listings').insert(listingRow);
 
   if (error) {
-    await tg('editMessageText', { chat_id: chatId, message_id: messageId, text: `❌ লিস্টিং সেভ করতে সমস্যা: ${error.message}` });
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: `❌ লিস্টিং সেভ করতে সমস্যা: ${error.message}`,
+    });
     return;
   }
 
@@ -255,7 +269,7 @@ async function handleDoneImages(chatId, messageId, importId) {
   await tg('editMessageText', {
     chat_id: chatId,
     message_id: messageId,
-    text: `✅ লিস্টিং pending-এ যোগ হয়েছে! (${CATEGORY_LABELS[row.category]}, ${row.extra_image_urls.length}টা ছবি সহ)`,
+    text: `✅ লিস্টিং pending-এ যোগ হয়েছে! (${CATEGORY_LABELS[row.category]}, ${row.upazila}, ${row.extra_image_urls.length}টা ছবি সহ)`,
   });
 }
 
