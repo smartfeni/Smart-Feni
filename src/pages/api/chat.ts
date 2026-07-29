@@ -6,13 +6,86 @@
 //       হিসেবে বসাতে হবে (PUBLIC_ prefix ছাড়া, শুধু সার্ভার-সাইড ব্যবহারের জন্য)
 // আপডেট: gemini-2.0-flash (বন্ধ) → gemini-2.5-flash (নতুন key-তে 404) →
 //         gemini-3.1-flash-lite এ মাইগ্রেট + conversation history সাপোর্ট
-//         + লগইন পদ্ধতি স্পষ্টীকরণ (ফোন+পাসওয়ার্ড, OTP না — Gemini ভুল অনুমান করছিল)
+//         + লগইন পদ্ধতি স্পষ্টীকরণ (ফোন+পাসওয়ার্ড, OTP না)
+// আপডেট (নতুন): সাইট-কনটেক্সট সিঙ্ক —
+//         ১) ক্যাটাগরি লিস্ট এখন hardcode না করে সরাসরি src/data/services.js
+//            থেকে import হয় — services.js আপডেট হলে চ্যাটবট অটোমেটিক জানবে
+//         ২) src/data/chatFeatures.js থেকে non-category ফিচার (যেমন ক্লাব
+//            সমূহ) এর বর্ণনা import হয় — নতুন ফিচার এলে ওই ছোট ফাইলে
+//            এন্ট্রি যোগ করলেই চলবে, এই ফাইল ছোঁয়া লাগবে না
+//         ৩) প্রতিটা রিকোয়েস্টে Supabase থেকে হালকা লাইভ স্ট্যাটস (মোট
+//            সক্রিয় লিস্টিং সংখ্যা, মোট সক্রিয় ক্লাব সংখ্যা) টেনে
+//            system prompt-এ যোগ করা হয় — real-time তথ্য থাকে
 
 export const prerender = false;
 
 import type { APIRoute } from 'astro';
+import { createClient } from '@supabase/supabase-js';
+import { categories } from '../../data/services.js';
+import { chatFeatures } from '../../data/chatFeatures.js';
 
-const SYSTEM_CONTEXT = `
+interface HistoryTurn {
+  role: 'user' | 'model';
+  text: string;
+}
+
+const MAX_HISTORY_TURNS = 10; // সর্বোচ্চ শেষ ১০টা টার্ন (backend safeguard)
+const MODEL_NAME = 'gemini-3.1-flash-lite';
+
+// ============================================================
+// ১) ক্যাটাগরি লিস্ট — services.js থেকে অটোমেটিক জেনারেট
+// ============================================================
+function buildCategoryListText(): string {
+  return categories
+    .map((c: any) => `- ${c.name} (${c.desc}) — লিংক: /services/${c.slug}`)
+    .join('\n');
+}
+
+// ============================================================
+// ২) non-category ফিচার লিস্ট — chatFeatures.js থেকে
+// ============================================================
+function buildFeaturesListText(): string {
+  if (!chatFeatures || chatFeatures.length === 0) return '';
+  return chatFeatures
+    .map(
+      (f: any) =>
+        `- ${f.name} — ${f.description} ব্রাউজ পেজ: ${f.browseUrl}। ${f.urlPattern}`
+    )
+    .join('\n');
+}
+
+// ============================================================
+// ৩) লাইভ স্ট্যাটস — Supabase থেকে (fail হলেও চ্যাট বন্ধ হবে না)
+// ============================================================
+async function fetchLiveStats(): Promise<string> {
+  try {
+    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) return '';
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+    const [listingsRes, clubsRes] = await Promise.all([
+      supabase.from('listings').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+      supabase.from('clubs').select('id', { count: 'exact', head: true }).eq('is_active', true),
+    ]);
+
+    const listingCount = listingsRes.count ?? null;
+    const clubCount = clubsRes.count ?? null;
+
+    const lines: string[] = [];
+    if (listingCount !== null) lines.push(`- বর্তমানে সাইটে মোট সক্রিয় লিস্টিং: ${listingCount}টি`);
+    if (clubCount !== null) lines.push(`- বর্তমানে সক্রিয় ক্লাব: ${clubCount}টি`);
+
+    return lines.join('\n');
+  } catch (err) {
+    console.error('Chat API: live stats fetch failed', err);
+    return '';
+  }
+}
+
+function buildSystemContext(liveStatsText: string): string {
+  return `
 তুমি "স্মার্ট ফেনী সহায়ক" — স্মার্ট ফেনী (Smart Feni) ওয়েবসাইটের জন্য একটা সহায়ক AI।
 
 স্মার্ট ফেনী কী:
@@ -21,25 +94,14 @@ const SYSTEM_CONTEXT = `
 লোকেশন সিস্টেম — ফেনী জেলার ৬টা উপজেলা:
 ফেনী সদর, ছাগলনাইয়া, দাগনভূঞা, পরশুরাম, ফুলগাজী, সোনাগাজী। ইউজার লোকেশন সিলেক্ট করলে সেই এলাকার লিস্টিং আগে দেখায়।
 
-সার্ভিস ক্যাটাগরি (মোট ১৮টা, প্রতিটার URL হলো https://smart-feni-murex.vercel.app/services/[slug]):
-- বাসা ভাড়া (housing) — বাসা/ফ্ল্যাট ভাড়া খোঁজা ও দেওয়া
-- চাকরির খবর (job) — স্থানীয় চাকরির বিজ্ঞাপন
-- রিপেয়ার সার্ভিস (repair) — মেরামত সার্ভিস (ইলেকট্রিশিয়ান, প্লাম্বার ইত্যাদি)
-- গাড়ি ভাড়া সার্ভিস (car-rental)
-- ডেলিভারি হিরো (courier) — কুরিয়ার ও ডেলিভারি রাইডার
-- ইমার্জেন্সি কন্টাক্ট (emergency) — জরুরি যোগাযোগ নম্বর
-- ব্লাড ডোনার (blood) — রক্তদাতা খোঁজা
-- হোম মেস ফুড (home-food) — বাসার তৈরি খাবার
-- অনলাইন শপ (online-shop) — হোম মেড পণ্যের মাল্টি-ভেন্ডর অনলাইন মার্কেট, প্রতিটা দোকানের নিজস্ব পেজ আছে
-- রিসাইকেল মার্কেট (recycle) — পুরনো পণ্য কেনাবেচা
-- টিউশন খুঁজুন (tuition)
-- খেলাধুলা ও ইভেন্টস (sports)
-- লস্ট এন্ড ফাউন্ড (lost-found)
-- স্বাস্থ্য পরামর্শ (health)
-- আইনি পরামর্শ (legal)
-- ইভেন্ট ম্যানেজমেন্ট (event)
-- লন্ড্রি সার্ভিস (laundry)
-- ডাক্তার ও হাসপাতাল ডিরেক্টরি (doctor-directory)
+সার্ভিস ক্যাটাগরি (প্রতিটা নিচের লিংকে গিয়ে দেখা যায়):
+${buildCategoryListText()}
+
+অন্যান্য গুরুত্বপূর্ণ ফিচার (ক্যাটাগরি লিস্টিং না, আলাদা মডিউল):
+${buildFeaturesListText() || '(এই মুহূর্তে অতিরিক্ত কোনো ফিচার নেই)'}
+
+লাইভ তথ্য (এই মুহূর্তের):
+${liveStatsText || '(লাইভ স্ট্যাটস এই মুহূর্তে পাওয়া যায়নি)'}
 
 কীভাবে ব্যবহার করে:
 - লগইন/সাইনআপ ফোন নম্বর + পাসওয়ার্ড দিয়ে হয় (কোনো OTP/ভেরিফিকেশন কোড সিস্টেম নেই — এটা একদম সাধারণ ফোন নম্বর + পাসওয়ার্ড লগইন, ইমেইলের বদলে ফোন নম্বর ইউজারনেম হিসেবে ব্যবহৃত হয়)
@@ -52,20 +114,13 @@ const SYSTEM_CONTEXT = `
 
 উত্তর দেওয়ার নিয়ম:
 - সবসময় বাংলায় উত্তর দেবে, সংক্ষিপ্ত ও স্পষ্টভাবে (৩-৪ বাক্যের বেশি না)
-- প্রাসঙ্গিক হলে সেই ক্যাটাগরির লিংক উল্লেখ করবে, এই ফরম্যাটে একদম আলাদা লাইনে: [LINK]শিরোনাম|/services/slug
-  (উদাহরণ: [LINK]ব্লাড ডোনার|/services/blood) — একই উত্তরে সর্বোচ্চ একটা লিংক দিবে, প্রাসঙ্গিক হলে
+- প্রাসঙ্গিক হলে সেই ক্যাটাগরি/ফিচারের লিংক উল্লেখ করবে, এই ফরম্যাটে একদম আলাদা লাইনে: [LINK]শিরোনাম|/path
+  (উদাহরণ: [LINK]ব্লাড ডোনার|/services/blood অথবা [LINK]ক্লাব সমূহ|/clubs) — একই উত্তরে সর্বোচ্চ একটা লিংক দিবে, প্রাসঙ্গিক হলে
 - আগের কথোপকথন মনে রেখে প্রসঙ্গ বুঝে উত্তর দিবে (যেমন ইউজার "সেটার নাম্বার কী?" জিজ্ঞেস করলে বুঝবে আগের বার্তায় কোন বিষয় ছিল)
 - যা জানো না বা সাইটে নেই এমন কিছু বানিয়ে বলবে না — অনিশ্চিত হলে সরাসরি বলবে "এই বিষয়ে নিশ্চিত তথ্য নেই, সাইটের যোগাযোগ সেকশনে জিজ্ঞাসা করুন"
 - সাইটের বাইরের প্রশ্ন (যেমন সাধারণ জ্ঞান, রাজনীতি) হলে ভদ্রভাবে বলবে তুমি শুধু স্মার্ট ফেনী সংক্রান্ত প্রশ্নে সাহায্য করতে পারো
 `.trim();
-
-interface HistoryTurn {
-  role: 'user' | 'model';
-  text: string;
 }
-
-const MAX_HISTORY_TURNS = 10; // সর্বোচ্চ শেষ ১০টা টার্ন (backend safeguard)
-const MODEL_NAME = 'gemini-3.1-flash-lite';
 
 export const POST: APIRoute = async ({ request }) => {
   try {
@@ -103,6 +158,9 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
+    const liveStatsText = await fetchLiveStats();
+    const systemContext = buildSystemContext(liveStatsText);
+
     const contents = [
       ...history.map((h) => ({
         role: h.role,
@@ -121,7 +179,7 @@ export const POST: APIRoute = async ({ request }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           system_instruction: {
-            parts: [{ text: SYSTEM_CONTEXT }],
+            parts: [{ text: systemContext }],
           },
           contents,
           generationConfig: {
