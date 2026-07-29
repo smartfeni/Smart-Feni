@@ -1,11 +1,12 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: রিইউজেবল ফুলস্ক্রিন ইমেজ লাইটবক্স
-// যেকোনো জায়গা থেকে window.openImageLightbox(url) কল করলেই খুলবে।
-// ফিচার: ট্যাপ করে জুম ইন/আউট, ডাউনলোড/সেভ বাটন, ব্যাকড্রপ/X/Esc
+// যেকোনো জায়গা থেকে window.openImageLightbox(urlOrArray, startIndex) কল
+// করলেই খুলবে। সিঙ্গেল URL (string) বা মাল্টি-ইমেজ (array) দুটোই সাপোর্ট করে।
+// ফিচার: ট্যাপ করে জুম ইন/আউট, prev/next বাটন, swipe নেভিগেশন, ডট
+// ইন্ডিকেটর, কীবোর্ড ← → নেভিগেশন, ডাউনলোড/সেভ বাটন, ব্যাকড্রপ/X/Esc
 // দিয়ে বন্ধ করা যায়। একটা পেজে একবার <ImageLightbox /> বসালেই হবে।
-// আপডেট: নিচের "ছবিতে ট্যাপ করে জুম করুন" হিন্ট টেক্সট সরানো হলো
-// (অপ্রয়োজনীয় ইন্সট্রাকশন ছিল)
+// আপডেট: মাল্টি-ইমেজ ক্যারোসেল সাপোর্ট (prev/next, swipe, ডট) যোগ হলো
 // ============================================================
 ---
 
@@ -21,9 +22,18 @@
     </button>
   </div>
 
+  <button class="lightbox-nav-btn lightbox-nav-prev" id="lightboxPrevBtn" aria-label="আগের ছবি">
+    <i class="fas fa-chevron-left"></i>
+  </button>
+  <button class="lightbox-nav-btn lightbox-nav-next" id="lightboxNextBtn" aria-label="পরের ছবি">
+    <i class="fas fa-chevron-right"></i>
+  </button>
+
   <div class="lightbox-image-wrap" id="lightboxImageWrap">
     <img id="lightboxImage" src="" alt="ছবি" />
   </div>
+
+  <div class="lightbox-dots" id="lightboxDots"></div>
 </div>
 
 <style is:global>
@@ -50,7 +60,7 @@
     position: absolute;
     top: 18px;
     right: 18px;
-    z-index: 2;
+    z-index: 3;
     display: flex;
     gap: 10px;
   }
@@ -73,6 +83,40 @@
     background: rgba(255, 255, 255, 0.28);
   }
 
+  .lightbox-nav-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 3;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    border: none;
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .lightbox-nav-btn:hover {
+    background: rgba(255, 255, 255, 0.28);
+  }
+
+  .lightbox-overlay.has-multi .lightbox-nav-btn {
+    display: flex;
+  }
+
+  .lightbox-nav-prev {
+    left: 14px;
+  }
+
+  .lightbox-nav-next {
+    right: 14px;
+  }
+
   .lightbox-image-wrap {
     position: relative;
     z-index: 1;
@@ -83,6 +127,7 @@
     justify-content: center;
     overflow: hidden;
     padding: 20px;
+    touch-action: pan-y;
   }
 
   .lightbox-image-wrap img {
@@ -93,11 +138,42 @@
     transition: transform 0.25s ease;
     transform: scale(1);
     touch-action: pinch-zoom;
+    user-select: none;
+    -webkit-user-drag: none;
   }
 
   .lightbox-image-wrap img.zoomed {
     transform: scale(2.2);
     cursor: zoom-out;
+  }
+
+  .lightbox-dots {
+    position: absolute;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3;
+    display: none;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .lightbox-overlay.has-multi .lightbox-dots {
+    display: flex;
+  }
+
+  .lightbox-dots .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.4);
+    transition: all 0.25s ease;
+  }
+
+  .lightbox-dots .dot.active {
+    background: #fff;
+    width: 18px;
+    border-radius: 4px;
   }
 </style>
 
@@ -107,14 +183,49 @@
   const img = document.getElementById('lightboxImage');
   const closeBtn = document.getElementById('lightboxCloseBtn');
   const downloadBtn = document.getElementById('lightboxDownloadBtn');
+  const prevBtn = document.getElementById('lightboxPrevBtn');
+  const nextBtn = document.getElementById('lightboxNextBtn');
+  const dotsWrap = document.getElementById('lightboxDots');
 
-  let currentUrl = null;
+  let images = [];
+  let currentIndex = 0;
 
-  function openLightbox(url) {
-    if (!url) return;
-    currentUrl = url;
-    img.src = url;
+  function renderDots() {
+    dotsWrap.innerHTML = '';
+    images.forEach((_, i) => {
+      const dot = document.createElement('span');
+      dot.className = `dot ${i === currentIndex ? 'active' : ''}`;
+      dotsWrap.appendChild(dot);
+    });
+  }
+
+  function showImage(index) {
+    if (images.length === 0) return;
+    currentIndex = (index + images.length) % images.length;
+    img.src = images[currentIndex];
     img.classList.remove('zoomed');
+    renderDots();
+  }
+
+  function showNext() {
+    showImage(currentIndex + 1);
+  }
+
+  function showPrev() {
+    showImage(currentIndex - 1);
+  }
+
+  // urlOrArray: একটা ছবির URL (string) অথবা ছবির URL এর অ্যারে
+  // startIndex: অ্যারে হলে কোন ইনডেক্স থেকে শুরু হবে
+  function openLightbox(urlOrArray, startIndex = 0) {
+    if (!urlOrArray) return;
+
+    images = Array.isArray(urlOrArray) ? urlOrArray : [urlOrArray];
+    if (images.length === 0) return;
+
+    overlay.classList.toggle('has-multi', images.length > 1);
+    showImage(startIndex);
+
     overlay.classList.add('open');
     document.body.style.overflow = 'hidden';
   }
@@ -131,12 +242,40 @@
 
   closeBtn?.addEventListener('click', closeLightbox);
   backdrop?.addEventListener('click', closeLightbox);
+  prevBtn?.addEventListener('click', (e) => { e.stopPropagation(); showPrev(); });
+  nextBtn?.addEventListener('click', (e) => { e.stopPropagation(); showNext(); });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && overlay.classList.contains('open')) closeLightbox();
+    if (!overlay.classList.contains('open')) return;
+    if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'ArrowRight') showNext();
+    if (e.key === 'ArrowLeft') showPrev();
   });
 
+  // সোয়াইপ (টাচ) দিয়ে পরের/আগের ছবি
+  let touchStartX = 0;
+  let touchEndX = 0;
+
+  const imageWrap = document.getElementById('lightboxImageWrap');
+
+  imageWrap?.addEventListener('touchstart', (e) => {
+    touchStartX = e.changedTouches[0].screenX;
+  }, { passive: true });
+
+  imageWrap?.addEventListener('touchend', (e) => {
+    touchEndX = e.changedTouches[0].screenX;
+    const diff = touchEndX - touchStartX;
+    const SWIPE_THRESHOLD = 40;
+
+    if (Math.abs(diff) < SWIPE_THRESHOLD) return;
+    if (img.classList.contains('zoomed')) return; // জুম করা অবস্থায় সোয়াইপ নেভিগেশন বন্ধ
+
+    if (diff < 0) showNext();
+    else showPrev();
+  }, { passive: true });
+
   downloadBtn?.addEventListener('click', async () => {
+    const currentUrl = images[currentIndex];
     if (!currentUrl) return;
     try {
       const res = await fetch(currentUrl);
