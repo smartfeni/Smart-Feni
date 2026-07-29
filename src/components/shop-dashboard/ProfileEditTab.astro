@@ -1,0 +1,251 @@
+---
+// ============================================================
+// কম্পোনেন্ট: ProfileEditTab (shop-dashboard) — শপ প্রোফাইল এডিট
+// club-dashboard/ProfileEditTab.astro এর প্যাটার্নে। এখন profiles
+// এর বদলে shops টেবিল আপডেট করে। শপের নাম এখনো শুধু এডমিন বদলাতে
+// পারবে (আগের কনভেনশন ধরে রাখা হয়েছে) — বাকি সব ফিল্ড (লোগো, কভার,
+// ট্যাগলাইন, বিবরণ, উপজেলা, ঠিকানা, ফোন, ফেসবুক লিংক) ওউনার এডিট
+// করতে পারবে।
+// প্যারেন্ট পেজ (my-shop.astro) থেকে 'smartfeni:shop-ready' ইভেন্ট
+// দিয়ে shop ডেটা পায়।
+// ============================================================
+---
+
+<div class="dash-card">
+  <h3><i class="fas fa-id-card"></i> শপ প্রোফাইল</h3>
+
+  <p class="form-msg" id="profileMsg"></p>
+
+  <div class="photo-upload-circle" id="logoCircle">
+    <img id="logoPreview" src="" alt="লোগো" />
+    <i class="fas fa-store"></i>
+  </div>
+  <input type="file" id="logoInput" accept="image/*" style="display:none;" />
+  <p class="form-hint" style="text-align:center; margin-top:-10px; margin-bottom:16px;">
+    <button type="button" class="secondary-btn" id="chooseLogoBtn">লোগো পরিবর্তন করুন</button>
+  </p>
+
+  <label class="form-label">কভার ছবি</label>
+  <div class="cover-preview" id="coverPreviewWrap">
+    <img id="coverPreview" src="" alt="কভার" style="display:none;" />
+    <div id="coverPlaceholder" class="cover-placeholder"><i class="fas fa-image"></i> কভার ছবি নেই</div>
+  </div>
+  <input type="file" id="coverInput" accept="image/*" style="display:none;" />
+  <button type="button" class="secondary-btn" id="chooseCoverBtn" style="margin-top:8px;">কভার পরিবর্তন করুন</button>
+
+  <label class="form-label">শপের নাম</label>
+  <input type="text" class="form-input" id="shopNameDisplay" disabled />
+  <p class="form-hint">শপের নাম শুধু এডমিন বদলাতে পারবেন</p>
+
+  <label class="form-label">ট্যাগলাইন</label>
+  <input type="text" class="form-input" id="taglineInput" placeholder="যেমন: সেরা মানের কাপড়ের দোকান" />
+
+  <label class="form-label">বিবরণ</label>
+  <textarea class="form-input" id="descriptionInput" rows="3" placeholder="আপনার শপ সম্পর্কে সংক্ষেপে লিখুন"></textarea>
+
+  <label class="form-label">উপজেলা</label>
+  <select class="form-input" id="upazilaInput">
+    <option value="">নির্বাচন করুন</option>
+    <option value="feni-sadar">ফেনী সদর</option>
+    <option value="chhagalnaiya">ছাগলনাইয়া</option>
+    <option value="daganbhuiyan">দাগনভূঞা</option>
+    <option value="parshuram">পরশুরাম</option>
+    <option value="fulgazi">ফুলগাজী</option>
+    <option value="sonagazi">সোনাগাজী</option>
+  </select>
+
+  <label class="form-label">ঠিকানা</label>
+  <input type="text" class="form-input" id="addressInput" placeholder="দোকানের সম্পূর্ণ ঠিকানা" />
+
+  <label class="form-label">যোগাযোগের ফোন নম্বর</label>
+  <input type="text" class="form-input" id="phoneInput" placeholder="01xxxxxxxxx" />
+
+  <label class="form-label">ফেসবুক পেজ লিংক (ঐচ্ছিক)</label>
+  <input type="text" class="form-input" id="facebookInput" placeholder="https://facebook.com/yourpage" />
+
+  <button class="primary-btn" id="saveProfileBtn" type="button">
+    <i class="fas fa-check"></i> <span id="saveProfileBtnText">সেভ করুন</span>
+  </button>
+</div>
+
+<style>
+  .cover-preview {
+    width: 100%;
+    aspect-ratio: 16/7;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #F4F7FC;
+    border: 1.5px dashed #E5EAF0;
+  }
+
+  .cover-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .cover-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #9AA8BC;
+    font-size: 0.85rem;
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let currentShopId = null;
+  let selectedLogoFile = null;
+  let selectedCoverFile = null;
+
+  const profileMsg = document.getElementById('profileMsg');
+  const shopNameDisplay = document.getElementById('shopNameDisplay');
+  const taglineInput = document.getElementById('taglineInput');
+  const descriptionInput = document.getElementById('descriptionInput');
+  const upazilaInput = document.getElementById('upazilaInput');
+  const addressInput = document.getElementById('addressInput');
+  const phoneInput = document.getElementById('phoneInput');
+  const facebookInput = document.getElementById('facebookInput');
+  const saveBtn = document.getElementById('saveProfileBtn');
+  const saveBtnText = document.getElementById('saveProfileBtnText');
+
+  const logoCircle = document.getElementById('logoCircle');
+  const logoPreview = document.getElementById('logoPreview');
+  const logoInput = document.getElementById('logoInput');
+
+  const coverPreview = document.getElementById('coverPreview');
+  const coverPlaceholder = document.getElementById('coverPlaceholder');
+  const coverInput = document.getElementById('coverInput');
+
+  function showMsg(text, type = 'error') {
+    profileMsg.textContent = text;
+    profileMsg.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
+  }
+
+  function clearMsg() {
+    profileMsg.textContent = '';
+    profileMsg.className = 'form-msg';
+  }
+
+  document.getElementById('chooseLogoBtn')?.addEventListener('click', () => logoInput.click());
+  document.getElementById('chooseCoverBtn')?.addEventListener('click', () => coverInput.click());
+
+  logoInput?.addEventListener('change', () => {
+    const file = logoInput.files?.[0];
+    if (!file) return;
+    selectedLogoFile = file;
+    const reader = new FileReader();
+    reader.onload = () => {
+      logoPreview.src = reader.result;
+      logoCircle.classList.add('has-photo');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  coverInput?.addEventListener('change', () => {
+    const file = coverInput.files?.[0];
+    if (!file) return;
+    selectedCoverFile = file;
+    const reader = new FileReader();
+    reader.onload = () => {
+      coverPreview.src = reader.result;
+      coverPreview.style.display = 'block';
+      coverPlaceholder.style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (my-shop.astro
+  // এর আগের কনভেনশন অনুযায়ী)
+  async function uploadImage(file, prefix) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+
+    const fileExt = file.name.split('.').pop();
+    const filePath = `shops/${prefix}-${currentShopId}-${Date.now()}.${fileExt}`;
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('path', filePath);
+
+    const res = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      body: formData,
+    });
+    const result = await res.json();
+
+    if (!res.ok) {
+      console.error('ছবি আপলোড এরর:', result.error);
+      return null;
+    }
+    return result.url || null;
+  }
+
+  saveBtn?.addEventListener('click', async () => {
+    clearMsg();
+    saveBtnText.textContent = 'সেভ হচ্ছে...';
+    saveBtn.disabled = true;
+
+    let logoUrl = null;
+    let coverUrl = null;
+
+    if (selectedLogoFile) {
+      logoUrl = await uploadImage(selectedLogoFile, 'logo');
+    }
+    if (selectedCoverFile) {
+      coverUrl = await uploadImage(selectedCoverFile, 'cover');
+    }
+
+    const updates = {
+      tagline: taglineInput.value.trim(),
+      description: descriptionInput.value.trim(),
+      upazila: upazilaInput.value || null,
+      address: addressInput.value.trim(),
+      phone: phoneInput.value.trim(),
+      facebook_link: facebookInput.value.trim() || null,
+    };
+    if (logoUrl) updates.logo_image = logoUrl;
+    if (coverUrl) updates.cover_image = coverUrl;
+
+    const { error } = await supabase.from('shops').update(updates).eq('id', currentShopId);
+
+    saveBtnText.textContent = 'সেভ করুন';
+    saveBtn.disabled = false;
+
+    if (error) {
+      showMsg('সেভ ব্যর্থ: ' + error.message);
+      return;
+    }
+
+    showMsg('শপ প্রোফাইল সেভ হয়েছে ✓', 'success');
+  });
+
+  window.addEventListener('smartfeni:shop-ready', (e) => {
+    const shop = e.detail.shop;
+    currentShopId = shop.id;
+
+    shopNameDisplay.value = shop.name || '';
+    taglineInput.value = shop.tagline || '';
+    descriptionInput.value = shop.description || '';
+    upazilaInput.value = shop.upazila || '';
+    addressInput.value = shop.address || '';
+    phoneInput.value = shop.phone || '';
+    facebookInput.value = shop.facebook_link || '';
+
+    if (shop.logo_image) {
+      logoPreview.src = shop.logo_image;
+      logoCircle.classList.add('has-photo');
+    }
+    if (shop.cover_image) {
+      coverPreview.src = shop.cover_image;
+      coverPreview.style.display = 'block';
+      coverPlaceholder.style.display = 'none';
+    }
+  });
+</script>
