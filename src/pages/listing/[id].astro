@@ -5,8 +5,8 @@
 // শেয়ারেবল ফুল-পেজ আকারে দেখায়, প্রপার OG মেটা ট্যাগ সহ। ক্যাটাগরি
 // অনুযায়ী টাইপ-লেবেল ও আইকন ম্যাপ করা আছে — নতুন ক্যাটাগরি এই
 // সিস্টেমে যোগ করতে চাইলে শুধু CATEGORY_CONFIG-এ এন্ট্রি বাড়ালেই হবে।
-// আপডেট: car-rental এর typeVisuals (রঙিন আইকন) সরিয়ে
-// typeDefaultImages (টাইপ-ভিত্তিক ফলব্যাক ইমেজ) বসানো হলো
+// আপডেট: ছবি ক্যারোসেল ডট ইন্ডিকেটর + "কত দিন আগে" পোস্ট হয়েছে
+// (relative time) + ইমেজ বক্স ফিক্সড-হাইট (cover) করা হলো
 // ============================================================
 
 export const prerender = false;
@@ -148,9 +148,40 @@ const CATEGORY_CONFIG = {
   },
 };
 
+// বাংলা ডিজিটে কনভার্ট করার হেল্পার
+function toBnDigits(num) {
+  const bnDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return num.toString().replace(/[0-9]/g, (d) => bnDigits[d]);
+}
+
+// created_at থেকে বাংলায় "কত দিন আগে" বের করার হেল্পার
+function getRelativeTimeBn(dateString) {
+  if (!dateString) return null;
+  const then = new Date(dateString);
+  if (isNaN(then.getTime())) return null;
+
+  const diffMs = Date.now() - then.getTime();
+  if (diffMs < 0) return 'এইমাত্র';
+
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+  const diffMonth = Math.floor(diffDay / 30);
+  const diffYear = Math.floor(diffDay / 365);
+
+  if (diffSec < 60) return 'এইমাত্র';
+  if (diffMin < 60) return `${toBnDigits(diffMin)} মিনিট আগে`;
+  if (diffHour < 24) return `${toBnDigits(diffHour)} ঘণ্টা আগে`;
+  if (diffDay < 30) return `${toBnDigits(diffDay)} দিন আগে`;
+  if (diffMonth < 12) return `${toBnDigits(diffMonth)} মাস আগে`;
+  return `${toBnDigits(diffYear)} বছর আগে`;
+}
+
 const config = item ? CATEGORY_CONFIG[item.category] || { pageLabel: 'লিস্টিং', backLink: '/', icon: 'fa-tag', typeLabels: {}, priceLabel: 'মূল্য' } : null;
 const typeLabel = item ? config.typeLabels[item.type] || item.type : null;
 const images = item?.images && item.images.length > 0 ? item.images : [];
+const postedAgo = item ? getRelativeTimeBn(item.created_at) : null;
 
 // car-rental এর জন্য টাইপ-ভিত্তিক ফলব্যাক ইমেজ (ছবি না থাকলে ব্যবহার হবে)
 const fallbackImage = item && config.typeDefaultImages ? (config.typeDefaultImages[item.type] || config.typeDefaultImages.other) : null;
@@ -181,11 +212,20 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
           <span class="type-badge"><i class={`fas ${config.icon}`}></i> {typeLabel}</span>
 
           {images.length > 0 ? (
-            <div class="image-strip">
-              {images.map((src) => (
-                <img src={src} alt={item.title} class="listing-img zoomable-listing-img" />
-              ))}
-            </div>
+            <>
+              <div class="image-strip" id="imageStrip">
+                {images.map((src) => (
+                  <img src={src} alt={item.title} class="listing-img zoomable-listing-img" />
+                ))}
+              </div>
+              {images.length > 1 && (
+                <div class="image-dots" id="imageDots">
+                  {images.map((_, i) => (
+                    <span class={`dot ${i === 0 ? 'active' : ''}`} data-index={i}></span>
+                  ))}
+                </div>
+              )}
+            </>
           ) : fallbackImage ? (
             <img src={fallbackImage} alt={item.title} class="listing-img-fallback" />
           ) : (
@@ -211,9 +251,14 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
               </p>
             )}
 
-            {item.upazila && (
-              <p class="listing-location"><i class="fas fa-location-dot"></i> {item.upazila}</p>
-            )}
+            <div class="listing-meta-row">
+              {item.upazila && (
+                <span class="listing-location"><i class="fas fa-location-dot"></i> {item.upazila}</span>
+              )}
+              {postedAgo && (
+                <span class="listing-posted"><i class="fas fa-clock"></i> {postedAgo}</span>
+              )}
+            </div>
 
             {item.description && <p class="listing-desc">{item.description}</p>}
 
@@ -293,15 +338,40 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
   .listing-img {
     flex: 0 0 100%;
     scroll-snap-align: start;
-    aspect-ratio: 4/3;
-    object-fit: contain;
+    width: 100%;
+    height: 320px;
+    max-height: 45vh;
+    object-fit: cover;
     background: #F4F7FC;
     cursor: zoom-in;
   }
 
+  .image-dots {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 0 0;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #D8E0EA;
+    transition: all 0.25s ease;
+  }
+
+  .dot.active {
+    background: #FF6B35;
+    width: 18px;
+    border-radius: 4px;
+  }
+
   .listing-img-fallback {
     width: 100%;
-    aspect-ratio: 4/3;
+    height: 280px;
+    max-height: 40vh;
     object-fit: contain;
     background: #F4F7FC;
     padding: 24px;
@@ -311,7 +381,8 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
 
   .listing-img-placeholder {
     width: 100%;
-    aspect-ratio: 4/3;
+    height: 280px;
+    max-height: 40vh;
     background: #F4F7FC;
     color: #FF6B35;
     display: flex;
@@ -373,10 +444,17 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     font-size: 0.8rem;
   }
 
-  .listing-location {
+  .listing-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 6px;
+  }
+
+  .listing-location,
+  .listing-posted {
     font-size: 0.82rem;
     color: #8FA0BC;
-    margin-top: 6px;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -488,4 +566,14 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
       window.openImageLightbox?.(img.src);
     });
   });
+
+  // ছবি স্লাইড করলে (swipe) নিচের ডট ইন্ডিকেটর আপডেট হবে
+  const imageStrip = document.getElementById('imageStrip');
+  const dots = document.querySelectorAll('#imageDots .dot');
+  if (imageStrip && dots.length > 0) {
+    imageStrip.addEventListener('scroll', () => {
+      const index = Math.round(imageStrip.scrollLeft / imageStrip.clientWidth);
+      dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
+    }, { passive: true });
+  }
 </script>
