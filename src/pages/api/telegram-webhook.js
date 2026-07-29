@@ -1,13 +1,10 @@
 // ============================================================
-// Telegram Webhook — স্ক্রিনশট থেকে লিস্টিং ইম্পোর্ট
+// Telegram Webhook — স্ক্রিনশট থেকে লিস্টিং ইম্পোর্ট (multi-step)
 //
-// ফ্লো:
-// ১. Admin ছবি পাঠায় -> বট ৩টা ক্যাটাগরি বাটন দেখায়
-// ২. ক্যাটাগরি সিলেক্ট করলে -> Gemini extraction চলে, ছবি
-//    Supabase Storage-এ আপলোড হয়, ফলাফল বাংলায় দেখানো হয়
-//    Approve/Reject বাটন সহ
-// ৩. Approve চাপলে -> `listings` টেবিলে insert (status: active)
-// ৪. Reject চাপলে -> বাতিল, কিছু insert হয় না
+// housing/recycle: ছবি -> ক্যাটাগরি -> extraction -> আসল ছবি
+//   (একাধিক) -> ✅ শেষ -> listings এ insert (status: pending)
+// blood: ছবি -> "ব্লাড ডোনার" -> উপজিলা বাটন -> ক্লাব নাম (টেক্সট)
+//   -> extraction (array) -> manual_blood_donors এ bulk insert
 //
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে:
 // TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GEMINI_API_KEY,
@@ -15,7 +12,11 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
-import { extractListingFromScreenshot, buildListingRowFromExtraction } from '../../lib/geminiExtract.js';
+import {
+  extractListingFromScreenshot,
+  buildListingRowFromExtraction,
+  buildBloodDonorRows,
+} from '../../lib/geminiExtract.js';
 
 export const prerender = false;
 
@@ -23,16 +24,11 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = String(process.env.TELEGRAM_CHAT_ID);
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-const supabase = createClient(
-  process.env.PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const supabase = createClient(process.env.PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-const CATEGORY_LABELS = {
-  housing: 'বাসা ভাড়া',
-  blood: 'ব্লাড ডোনার',
-  recycle: 'ক্রয়-বিক্রয়',
-};
+const CATEGORY_LABELS = { housing: 'বাসা ভাড়া', blood: 'ব্লাড ডোনার', recycle: 'ক্রয়-বিক্রয়' };
+
+const UPAZILA_LIST = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 
 async function tg(method, body) {
   const res = await fetch(`${TELEGRAM_API}/${method}`, {
@@ -43,64 +39,68 @@ async function tg(method, body) {
   return res.json();
 }
 
-// Telegram file_id দিয়ে ছবি ডাউনলোড করে base64 এ রূপান্তর করে
-async function downloadTelegramPhotoAsBase64(fileId) {
+async function downloadTelegramPhoto(fileId) {
   const fileInfo = await tg('getFile', { file_id: fileId });
   const filePath = fileInfo?.result?.file_path;
   if (!filePath) throw new Error('Telegram file path পাওয়া যায়নি');
 
   const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
   const res = await fetch(fileUrl);
-  const buffer = await res.arrayBuffer();
-  const base64 = Buffer.from(buffer).toString('base64');
+  const buffer = Buffer.from(await res.arrayBuffer());
   const mimeType = filePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
 
-  return { base64, mimeType, buffer: Buffer.from(buffer) };
+  return { buffer, mimeType, base64: buffer.toString('base64') };
 }
 
-// এক্সট্র্যাক্ট হওয়া ডেটা বাংলায় সামারি টেক্সট বানায়
-function formatSummary(category, extracted) {
-  const label = CATEGORY_LABELS[category];
-  if (category === 'housing') {
-    return (
-      `📋 *${label}* — রিভিউ করুন\n\n` +
-      `শিরোনাম: ${extracted.title}\n` +
-      `ধরন: ${extracted.rent_type}\n` +
-      `ভাড়া: ${extracted.price || 'উল্লেখ নাই'}\n` +
-      `এলাকা: ${extracted.area || 'উল্লেখ নাই'}\n` +
-      `ফোন: ${extracted.phone || 'উল্লেখ নাই'}\n` +
-      `বিবরণ: ${extracted.description}`
-    );
-  }
-  if (category === 'blood') {
-    return (
-      `📋 *${label}* — রিভিউ করুন\n\n` +
-      `নাম: ${extracted.name}\n` +
-      `ব্লাড গ্রুপ: ${extracted.blood_group}\n` +
-      `এলাকা: ${extracted.area || 'উল্লেখ নাই'}\n` +
-      `ফোন: ${extracted.phone || 'উল্লেখ নাই'}`
-    );
-  }
-  if (category === 'recycle') {
-    return (
-      `📋 *${label}* — রিভিউ করুন\n\n` +
-      `আইটেম: ${extracted.title}\n` +
-      `কন্ডিশন: ${extracted.condition}\n` +
-      `দাম: ${extracted.price || 'উল্লেখ নাই'}\n` +
-      `এলাকা: ${extracted.area || 'উল্লেখ নাই'}\n` +
-      `ফোন: ${extracted.phone || 'উল্লেখ নাই'}\n` +
-      `বিবরণ: ${extracted.description}`
-    );
-  }
-  return 'অজানা ক্যাটাগরি';
+async function uploadToStorage(buffer, mimeType, path) {
+  const { error } = await supabase.storage
+    .from('listing-images')
+    .upload(path, buffer, { contentType: mimeType, upsert: true });
+  if (error) throw new Error(`Storage আপলোড ব্যর্থ: ${error.message}`);
+  const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
+  return data.publicUrl;
 }
 
+// এই চ্যাটের সবচেয়ে সাম্প্রতিক 'চলমান' সেশন খুঁজে বের করে
+async function getActiveSession(chatId) {
+  const { data } = await supabase
+    .from('screenshot_imports')
+    .select('*')
+    .eq('telegram_chat_id', chatId)
+    .neq('step', 'done')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data;
+}
+
+// ---------- ছবি হ্যান্ডলিং ----------
 async function handlePhotoMessage(message) {
   const chatId = String(message.chat.id);
-  if (chatId !== ADMIN_CHAT_ID) return; // শুধু admin চ্যাট থেকে গ্রহণ করবে
+  if (chatId !== ADMIN_CHAT_ID) return;
 
+  const activeSession = await getActiveSession(chatId);
   const largestPhoto = message.photo[message.photo.length - 1];
 
+  // যদি housing/recycle ফ্লো "আসল ছবি" ধাপে থাকে, নতুন সেশন না বানিয়ে
+  // এই ছবিটা extra_image_urls এ যোগ করা হবে
+  if (activeSession && activeSession.step === 'awaiting_extra_images') {
+    const { buffer, mimeType } = await downloadTelegramPhoto(largestPhoto.file_id);
+    const path = `screenshot-imports/${activeSession.id}-${Date.now()}.${mimeType === 'image/png' ? 'png' : 'jpg'}`;
+    const url = await uploadToStorage(buffer, mimeType, path);
+
+    const updatedUrls = [...activeSession.extra_image_urls, url];
+    await supabase.from('screenshot_imports').update({ extra_image_urls: updatedUrls }).eq('id', activeSession.id);
+
+    await tg('sendMessage', {
+      chat_id: chatId,
+      text: `📷 ছবি যোগ হলো (মোট ${updatedUrls.length}টা)। আরও ছবি পাঠাতে পারেন, শেষ হলে ✅ চাপুন।`,
+      reply_markup: { inline_keyboard: [[{ text: '✅ শেষ, লিস্টিং তৈরি করো', callback_data: `doneimg:${activeSession.id}` }]] },
+    });
+    return;
+  }
+
+  // নতুন সেশন শুরু (FB পোস্টের স্ক্রিনশট)
   const { data: row, error } = await supabase
     .from('screenshot_imports')
     .insert({
@@ -108,7 +108,7 @@ async function handlePhotoMessage(message) {
       telegram_message_id: message.message_id,
       category: 'unset',
       file_id: largestPhoto.file_id,
-      status: 'awaiting_category',
+      step: 'awaiting_category',
     })
     .select()
     .single();
@@ -134,119 +134,128 @@ async function handlePhotoMessage(message) {
   });
 }
 
-async function handleCategorySelected(callbackQuery, importId, category) {
-  const chatId = String(callbackQuery.message.chat.id);
-  const messageId = callbackQuery.message.message_id;
+// ---------- টেক্সট হ্যান্ডলিং (ক্লাবের নাম) ----------
+async function handleTextMessage(message) {
+  const chatId = String(message.chat.id);
+  if (chatId !== ADMIN_CHAT_ID) return;
 
-  await tg('editMessageText', {
-    chat_id: chatId,
-    message_id: messageId,
-    text: `⏳ ${CATEGORY_LABELS[category]} হিসেবে প্রসেস হচ্ছে...`,
-  });
+  const session = await getActiveSession(chatId);
+  if (!session || session.step !== 'awaiting_club_name') return; // অন্য কোনো সাধারণ মেসেজ, ইগনোর
 
-  const { data: row } = await supabase
-    .from('screenshot_imports')
-    .select('*')
-    .eq('id', importId)
-    .single();
+  const clubNameRaw = message.text.trim();
 
-  if (!row) {
-    await tg('editMessageText', { chat_id: chatId, message_id: messageId, text: '❌ এন্ট্রি খুঁজে পাওয়া যায়নি' });
-    return;
-  }
+  await tg('sendMessage', { chat_id: chatId, text: `⏳ "${clubNameRaw}" ক্লাব হিসেবে প্রসেস হচ্ছে...` });
 
   try {
-    const { base64, mimeType, buffer } = await downloadTelegramPhotoAsBase64(row.file_id);
+    const { base64, mimeType } = await downloadTelegramPhoto(session.file_id);
+    const extractedArray = await extractListingFromScreenshot({ imageBase64: base64, mimeType, category: 'blood' });
 
-    const extracted = await extractListingFromScreenshot({ imageBase64: base64, mimeType, category });
+    const rows = buildBloodDonorRows(extractedArray, session.upazila, clubNameRaw);
+    const skipped = extractedArray.length - rows.length;
 
-    const fileExt = mimeType === 'image/png' ? 'png' : 'jpg';
-    const storagePath = `screenshot-imports/${row.id}.${fileExt}`;
-    const { error: uploadError } = await supabase.storage
-      .from('listing-images')
-      .upload(storagePath, buffer, { contentType: mimeType, upsert: true });
+    if (rows.length === 0) {
+      await tg('sendMessage', { chat_id: chatId, text: '❌ কোনো ভ্যালিড ফোন নম্বর সহ ডোনার পাওয়া যায়নি।' });
+      await supabase.from('screenshot_imports').update({ step: 'done' }).eq('id', session.id);
+      return;
+    }
 
-    if (uploadError) throw new Error(`Storage আপলোড ব্যর্থ: ${uploadError.message}`);
+    const { error } = await supabase
+      .from('manual_blood_donors')
+      .upsert(rows, { onConflict: 'phone' });
 
-    const { data: publicUrlData } = supabase.storage.from('listing-images').getPublicUrl(storagePath);
-    const imageUrl = publicUrlData.publicUrl;
+    if (error) {
+      await tg('sendMessage', { chat_id: chatId, text: `❌ সেভ করতে সমস্যা: ${error.message}` });
+      return;
+    }
 
     await supabase
       .from('screenshot_imports')
-      .update({ category, extracted, image_url: imageUrl, status: 'awaiting_approval' })
+      .update({ club_name_raw: clubNameRaw, step: 'done' })
+      .eq('id', session.id);
+
+    let summary = `✅ ${rows.length} জন ডোনার pending-এ যোগ হয়েছে\n(${session.upazila}, ${clubNameRaw})`;
+    if (skipped > 0) summary += `\n⚠️ ${skipped} জনের ফোন নম্বর পাওয়া যায়নি, বাদ পড়েছে।`;
+
+    await tg('sendMessage', { chat_id: chatId, text: summary });
+  } catch (err) {
+    await tg('sendMessage', { chat_id: chatId, text: `❌ প্রসেস করতে সমস্যা: ${err.message}` });
+  }
+}
+
+// ---------- Callback হ্যান্ডলিং ----------
+async function handleCategorySelected(chatId, messageId, importId, category) {
+  if (category === 'blood') {
+    await supabase.from('screenshot_imports').update({ category, step: 'awaiting_upazila' }).eq('id', importId);
+
+    const buttons = UPAZILA_LIST.map((name, i) => [{ text: name, callback_data: `upa:${importId}:${i}` }]);
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: 'কোন উপজিলার ডোনার লিস্ট এটা?',
+      reply_markup: { inline_keyboard: buttons },
+    });
+    return;
+  }
+
+  // housing/recycle: এখনই extraction চালানো হবে
+  await tg('editMessageText', { chat_id: chatId, message_id: messageId, text: `⏳ ${CATEGORY_LABELS[category]} হিসেবে প্রসেস হচ্ছে...` });
+
+  const { data: row } = await supabase.from('screenshot_imports').select('*').eq('id', importId).single();
+  if (!row) return;
+
+  try {
+    const { base64, mimeType } = await downloadTelegramPhoto(row.file_id);
+    const extracted = await extractListingFromScreenshot({ imageBase64: base64, mimeType, category });
+
+    await supabase
+      .from('screenshot_imports')
+      .update({ category, extracted, step: 'awaiting_extra_images' })
       .eq('id', importId);
 
     await tg('editMessageText', {
       chat_id: chatId,
       message_id: messageId,
-      text: formatSummary(category, extracted),
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '✅ Approve', callback_data: `approve:${importId}` },
-            { text: '❌ Reject', callback_data: `reject:${importId}` },
-          ],
-        ],
-      },
+      text: `✅ তথ্য বের করা হয়েছে:\n${extracted.title}\n\nএবার আসল ছবি পাঠান (একাধিক পাঠাতে পারবেন), শেষ হলে ✅ বাটনে চাপুন।`,
+      reply_markup: { inline_keyboard: [[{ text: '✅ শেষ, লিস্টিং তৈরি করো', callback_data: `doneimg:${importId}` }]] },
     });
   } catch (err) {
-    await tg('editMessageText', {
-      chat_id: chatId,
-      message_id: messageId,
-      text: `❌ প্রসেস করতে সমস্যা হয়েছে:\n${err.message}`,
-    });
+    await tg('editMessageText', { chat_id: chatId, message_id: messageId, text: `❌ প্রসেস করতে সমস্যা: ${err.message}` });
   }
 }
 
-async function handleApprove(callbackQuery, importId) {
-  const chatId = String(callbackQuery.message.chat.id);
-  const messageId = callbackQuery.message.message_id;
+async function handleUpazilaSelected(chatId, messageId, importId, upazilaIndex) {
+  const upazila = UPAZILA_LIST[Number(upazilaIndex)];
 
-  const { data: row } = await supabase
-    .from('screenshot_imports')
-    .select('*')
-    .eq('id', importId)
-    .single();
+  await supabase.from('screenshot_imports').update({ upazila, step: 'awaiting_club_name' }).eq('id', importId);
 
+  await tg('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text: `উপজিলা: ${upazila} ✅\n\nকোন ক্লাব থেকে এই লিস্ট, নাম লিখে reply করুন।`,
+  });
+}
+
+async function handleDoneImages(chatId, messageId, importId) {
+  const { data: row } = await supabase.from('screenshot_imports').select('*').eq('id', importId).single();
   if (!row || !row.extracted) {
     await tg('editMessageText', { chat_id: chatId, message_id: messageId, text: '❌ ডেটা পাওয়া যায়নি' });
     return;
   }
 
-  const listingRow = buildListingRowFromExtraction(row.extracted, row.category, row.image_url);
-  listingRow.status = 'active';
-
+  const listingRow = buildListingRowFromExtraction(row.extracted, row.category, row.extra_image_urls);
   const { error } = await supabase.from('listings').insert(listingRow);
 
   if (error) {
-    await tg('editMessageText', {
-      chat_id: chatId,
-      message_id: messageId,
-      text: `❌ লিস্টিং সেভ করতে সমস্যা: ${error.message}`,
-    });
+    await tg('editMessageText', { chat_id: chatId, message_id: messageId, text: `❌ লিস্টিং সেভ করতে সমস্যা: ${error.message}` });
     return;
   }
 
-  await supabase.from('screenshot_imports').update({ status: 'approved' }).eq('id', importId);
+  await supabase.from('screenshot_imports').update({ step: 'done' }).eq('id', importId);
 
   await tg('editMessageText', {
     chat_id: chatId,
     message_id: messageId,
-    text: `✅ লিস্টিং সাইটে যোগ হয়েছে! (${CATEGORY_LABELS[row.category]})`,
-  });
-}
-
-async function handleReject(callbackQuery, importId) {
-  const chatId = String(callbackQuery.message.chat.id);
-  const messageId = callbackQuery.message.message_id;
-
-  await supabase.from('screenshot_imports').update({ status: 'rejected' }).eq('id', importId);
-
-  await tg('editMessageText', {
-    chat_id: chatId,
-    message_id: messageId,
-    text: '🗑️ বাতিল করা হয়েছে, কিছু সেভ হয়নি।',
+    text: `✅ লিস্টিং pending-এ যোগ হয়েছে! (${CATEGORY_LABELS[row.category]}, ${row.extra_image_urls.length}টা ছবি সহ)`,
   });
 }
 
@@ -256,23 +265,21 @@ export async function POST({ request }) {
   try {
     if (update.message?.photo) {
       await handlePhotoMessage(update.message);
+    } else if (update.message?.text) {
+      await handleTextMessage(update.message);
     } else if (update.callback_query) {
       const cq = update.callback_query;
       const chatId = String(cq.message.chat.id);
+      const messageId = cq.message.message_id;
+
+      await tg('answerCallbackQuery', { callback_query_id: cq.id });
 
       if (chatId === ADMIN_CHAT_ID) {
-        const [action, importId, category] = cq.data.split(':');
-        await tg('answerCallbackQuery', { callback_query_id: cq.id });
+        const [action, importId, extra] = cq.data.split(':');
 
-        if (action === 'cat') {
-          await handleCategorySelected(cq, importId, category);
-        } else if (action === 'approve') {
-          await handleApprove(cq, importId);
-        } else if (action === 'reject') {
-          await handleReject(cq, importId);
-        }
-      } else {
-        await tg('answerCallbackQuery', { callback_query_id: cq.id });
+        if (action === 'cat') await handleCategorySelected(chatId, messageId, importId, extra);
+        else if (action === 'upa') await handleUpazilaSelected(chatId, messageId, importId, extra);
+        else if (action === 'doneimg') await handleDoneImages(chatId, messageId, importId);
       }
     }
   } catch (err) {
