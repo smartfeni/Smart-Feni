@@ -1,0 +1,392 @@
+---
+// ============================================================
+// পেজ: /my-orders — কাস্টমারের নিজের অর্ডার হিস্ট্রি ও স্ট্যাটাস
+// ট্র্যাকিং (Pending → Confirmed → Delivered / Cancelled)
+// orders.shop_id → shops.id সরাসরি FK, তাই shop তথ্য embed করা যায়
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="আমার অর্ডার | স্মার্ট ফেনী">
+  <div class="my-orders-page">
+    <div class="container">
+
+      <div id="loadingState" class="loading-state">
+        <div class="spinner"></div>
+        <p>লোড হচ্ছে...</p>
+      </div>
+
+      <div id="loginRequired" class="status-box" style="display:none;">
+        <i class="fas fa-lock"></i>
+        <h2>লগইন করুন</h2>
+        <p>অর্ডার দেখতে আগে লগইন করতে হবে</p>
+        <a href="/" class="primary-link-btn">হোমপেজে যান</a>
+      </div>
+
+      <div id="ordersContent" style="display:none;">
+        <h1 class="page-title"><i class="fas fa-receipt"></i> আমার অর্ডার</h1>
+
+        <div id="emptyOrders" class="status-box" style="display:none;">
+          <i class="fas fa-inbox"></i>
+          <h2>কোনো অর্ডার নেই</h2>
+          <p>এখনো কোনো শপ থেকে অর্ডার করেননি</p>
+          <a href="/shop" class="primary-link-btn">শপ দেখুন</a>
+        </div>
+
+        <div id="ordersContainer" class="orders-list"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <style>
+    .my-orders-page {
+      min-height: 70vh;
+      padding: 32px 0 80px;
+      background: #F8FAFC;
+    }
+
+    .loading-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .status-box {
+      max-width: 420px;
+      margin: 60px auto;
+      text-align: center;
+      background: #fff;
+      border-radius: 24px;
+      padding: 44px 28px;
+      box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
+    }
+
+    .status-box i {
+      font-size: 2.4rem;
+      color: #FF6B35;
+      margin-bottom: 16px;
+    }
+
+    .status-box h2 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 8px;
+    }
+
+    .status-box p {
+      color: #5A6E85;
+      font-size: 0.88rem;
+      margin-bottom: 18px;
+    }
+
+    .primary-link-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #FF6B35;
+      color: #fff;
+      text-decoration: none;
+      padding: 11px 24px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 0.88rem;
+    }
+
+    .page-title {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+      max-width: 640px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .page-title i {
+      color: #FF6B35;
+    }
+
+    .orders-list {
+      max-width: 640px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .order-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+    }
+
+    .order-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 6px;
+    }
+
+    .order-shop-name {
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .order-shop-name i {
+      color: #FF6B35;
+    }
+
+    .order-date {
+      font-size: 0.72rem;
+      color: #9AA8BC;
+      margin-top: 2px;
+    }
+
+    .status-stepper {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 12px 0;
+    }
+
+    .step-dot {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #F0F3F8;
+      color: #B0BCCB;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.65rem;
+      flex-shrink: 0;
+    }
+
+    .step-dot.done {
+      background: #FF6B35;
+      color: #fff;
+    }
+
+    .step-line {
+      flex: 1;
+      height: 2px;
+      background: #F0F3F8;
+    }
+
+    .step-line.done {
+      background: #FF6B35;
+    }
+
+    .step-label-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.65rem;
+      color: #9AA8BC;
+      margin-bottom: 4px;
+    }
+
+    .cancelled-note {
+      text-align: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #D14343;
+      background: #FFF0EA;
+      padding: 8px;
+      border-radius: 10px;
+      margin: 12px 0;
+    }
+
+    .order-items-list {
+      background: #F8FAFC;
+      border-radius: 10px;
+      padding: 8px 12px;
+      margin: 10px 0;
+    }
+
+    .order-item-line {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      color: #3A4A60;
+      padding: 3px 0;
+    }
+
+    .order-contact-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .order-contact-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .order-call-btn {
+      background: #EAF2FF;
+      color: #2563EB;
+    }
+
+    .order-wa-btn {
+      background: #E9F9EF;
+      color: #1EA952;
+    }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+
+    const loadingState = document.getElementById('loadingState');
+    const loginRequired = document.getElementById('loginRequired');
+    const ordersContent = document.getElementById('ordersContent');
+    const emptyOrders = document.getElementById('emptyOrders');
+    const ordersContainer = document.getElementById('ordersContainer');
+
+    const STEPS = ['pending', 'confirmed', 'delivered'];
+    const STEP_LABELS = { pending: 'পেন্ডিং', confirmed: 'কনফার্মড', delivered: 'ডেলিভার্ড' };
+
+    function formatDate(iso) {
+      return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function renderStepper(status) {
+      if (status === 'cancelled') {
+        return `<div class="cancelled-note"><i class="fas fa-xmark"></i> অর্ডারটি বাতিল হয়েছে</div>`;
+      }
+
+      const currentIndex = STEPS.indexOf(status);
+      let dotsHtml = '';
+
+      STEPS.forEach((step, i) => {
+        const isDone = i <= currentIndex;
+        dotsHtml += `<div class="step-dot ${isDone ? 'done' : ''}"><i class="fas fa-check"></i></div>`;
+        if (i < STEPS.length - 1) {
+          dotsHtml += `<div class="step-line ${i < currentIndex ? 'done' : ''}"></div>`;
+        }
+      });
+
+      const labelsHtml = STEPS.map((s) => `<span>${STEP_LABELS[s]}</span>`).join('');
+
+      return `
+        <div class="status-stepper">${dotsHtml}</div>
+        <div class="step-label-row">${labelsHtml}</div>
+      `;
+    }
+
+    function renderOrders(orders) {
+      ordersContainer.innerHTML = '';
+
+      if (orders.length === 0) {
+        emptyOrders.style.display = 'block';
+        return;
+      }
+      emptyOrders.style.display = 'none';
+
+      orders.forEach((order) => {
+        const card = document.createElement('div');
+        card.className = 'order-card';
+
+        const shop = order.shops;
+        const itemsHtml = (order.order_items || [])
+          .map((it) => `<div class="order-item-line"><span>${it.title || ''} × ${it.quantity}</span><span>৳${it.price || 0}</span></div>`)
+          .join('');
+
+        const contactHtml = shop?.phone
+          ? `
+            <div class="order-contact-row">
+              <a href="tel:${shop.phone}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> কল করুন</a>
+              <a href="https://wa.me/${shop.phone.replace(/\D/g, '')}" target="_blank" rel="noopener" class="order-contact-btn order-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
+            </div>
+          `
+          : '';
+
+        card.innerHTML = `
+          <div class="order-top-row">
+            <div>
+              <p class="order-shop-name"><i class="fas fa-store"></i> ${shop?.name || 'শপ'}</p>
+              <p class="order-date">${formatDate(order.created_at)}</p>
+            </div>
+          </div>
+
+          ${renderStepper(order.status)}
+
+          <div class="order-items-list">${itemsHtml}</div>
+
+          ${contactHtml}
+        `;
+
+        ordersContainer.appendChild(card);
+      });
+    }
+
+    async function loadOrders(userId) {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, order_items(*), shops(name, slug, phone)')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      loadingState.style.display = 'none';
+      ordersContent.style.display = 'block';
+
+      if (error) {
+        ordersContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      renderOrders(data || []);
+    }
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        loadingState.style.display = 'none';
+        loginRequired.style.display = 'block';
+        return;
+      }
+
+      await loadOrders(session.user.id);
+    }
+
+    init();
+  </script>
+</BaseLayout>
