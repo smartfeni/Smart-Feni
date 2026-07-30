@@ -3,26 +3,14 @@
 // ============================================================
 // পেজ: নির্দিষ্ট ব্লাড গ্রুপের ডোনার লিস্ট
 // URL: /services/blood/{slug} (যেমন /services/blood/a-positive)
-// /services/blood ল্যান্ডিং পেজ থেকে গ্রুপ সিলেক্ট করে এখানে আসা হয়।
-// শুধু ওই নির্দিষ্ট গ্রুপের ডোনাররাই লোড হয় (হালকা কোয়েরি)।
-// রেজিস্ট্রেশন CTA এই পেজে নেই — সেটা শুধু /services/blood
-// ল্যান্ডিং পেজে থাকে (ইউজার ডিসিশন অনুযায়ী)।
-//
 // দুই সোর্স মার্জ করে দেখানো হয়:
 //   ১. profiles (is_blood_donor=true, donor_disabled=false)
-//   ২. manual_blood_donors (status='active') — স্ক্রিনশট বাল্ক-আপলোড
-//      ও ক্লাব-এন্ট্রি দুটোই এখানে (club_name_raw থাকলে ক্লাব ব্যাজ দেখায়)
-// ফিল্টার: উপজেলা (ড্রপডাউন) + সংগঠনের নাম (সার্চ বক্স) — ব্লাড গ্রুপ
-//          ড্রপডাউন লাগবে না, যেহেতু URL এই আগেই সিলেক্ট করা আছে
+//   ২. manual_blood_donors (status='active') — club_id লিংকড থাকলে
+//      clubs টেবিল থেকে নাম+লোগো এমবেড হয়ে আসে (Supabase FK join),
+//      না থাকলে club_name_raw টেক্সট ফলব্যাক হিসেবে ব্যবহৃত হয়
+// ফিল্টার: উপজেলা (ড্রপডাউন) + সংগঠনের নাম (সার্চ বক্স)
 // সর্টিং: শেয়ারড locationSort.js — initLocationReorder()
-//
-// লাইক + রিপোর্ট (অভিযোগ) সিস্টেম:
-//   - প্রতিটা কার্ডে ❤️ লাইক (কাউন্ট) + 🚩 ফ্ল্যাগ আইকন
-//   - লগইন না থাকলে: লাইক শুধু ভিউ-অনলি কাউন্ট দেখাবে (ক্লিক করা
-//     যাবে না, বাটন স্টাইল থাকবে না), ফ্ল্যাগ আইকন পুরো লুকানো থাকবে
-//   - লগইন করার পর (AuthModal এর smartfeni:auth-changed ইভেন্ট শুনে)
-//     রিফ্রেশ ছাড়াই ইন্টারঅ্যাকটিভ হয়ে যাবে
-//   - ৩+ রিপোর্টে অটো disable (RPC submit_content_report এ হ্যান্ডল হয়)
+// লাইক + রিপোর্ট সিস্টেম অপরিবর্তিত (contentEngagement.js, reportModal.js)
 // SSR পেজ — prerender = false আবশ্যক।
 // ============================================================
 
@@ -62,7 +50,7 @@ const [{ data: profileDonors }, { data: manualDonors }] = await Promise.all([
     .order('created_at', { ascending: false }),
   supabase
     .from('manual_blood_donors')
-    .select('id, name, phone, blood_group, upazila, club_name_raw')
+    .select('id, name, phone, blood_group, upazila, club_name_raw, club_id, clubs(name, logo_image)')
     .eq('status', 'active')
     .eq('blood_group', bloodGroup)
     .order('created_at', { ascending: false }),
@@ -76,7 +64,8 @@ const normalizedProfileDonors = (profileDonors || []).map((d) => ({
   blood_group: d.blood_group,
   upazila: d.upazila,
   avatar_url: d.avatar_url,
-  club_name_raw: null,
+  clubDisplayName: null,
+  clubLogo: null,
   isClubSourced: false,
 }));
 
@@ -88,8 +77,11 @@ const normalizedManualDonors = (manualDonors || []).map((d) => ({
   blood_group: d.blood_group,
   upazila: d.upazila,
   avatar_url: null,
-  club_name_raw: d.club_name_raw,
-  isClubSourced: true,
+  // ক্লাব লিংকড থাকলে clubs.name/logo_image প্রাধান্য পায়,
+  // না থাকলে স্ক্রিনশট থেকে আসা raw টেক্সট ফলব্যাক
+  clubDisplayName: d.clubs?.name || d.club_name_raw || null,
+  clubLogo: d.clubs?.logo_image || null,
+  isClubSourced: Boolean(d.club_name_raw || d.club_id),
 }));
 
 const donors = [...normalizedProfileDonors, ...normalizedManualDonors];
@@ -154,7 +146,7 @@ const hasDonors = donors.length > 0;
               <div
                 class="donor-card"
                 data-upazila-name={donor.upazila || ''}
-                data-club-name={(donor.club_name_raw || '').toLowerCase()}
+                data-club-name={(donor.clubDisplayName || '').toLowerCase()}
                 data-target-type={donor.targetType}
                 data-target-id={donor.id}
               >
@@ -189,8 +181,15 @@ const hasDonors = donors.length > 0;
                   <p class="donor-location"><i class="fas fa-location-dot"></i> {donor.upazila}</p>
                 )}
 
-                {donor.isClubSourced && donor.club_name_raw && (
-                  <p class="club-badge"><i class="fas fa-users"></i> {donor.club_name_raw}</p>
+                {donor.isClubSourced && donor.clubDisplayName && (
+                  <p class="club-badge">
+                    {donor.clubLogo ? (
+                      <img src={donor.clubLogo} alt={donor.clubDisplayName} class="club-badge-logo" />
+                    ) : (
+                      <i class="fas fa-users"></i>
+                    )}
+                    {donor.clubDisplayName}
+                  </p>
                 )}
 
                 <a href={`tel:${donor.phone}`} class="btn-contact">
@@ -597,6 +596,14 @@ const hasDonors = donors.length > 0;
     padding: 6px 10px;
     border-radius: 10px;
     width: fit-content;
+  }
+
+  .club-badge-logo {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
   }
 
   .btn-contact {
