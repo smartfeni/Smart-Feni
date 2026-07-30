@@ -8,12 +8,19 @@
 // আপডেট: ছবি ক্যারোসেল ডট ইন্ডিকেটর + "কত দিন আগে" পোস্ট হয়েছে
 // (relative time) + ইমেজ বক্স ফিক্সড-হাইট (cover) + লাইটবক্সে
 // মাল্টি-ইমেজ নেভিগেশন (পুরো অ্যারে + ইনডেক্স পাঠানো) হলো
+//
+// আপডেট ২: লাইক + রিপোর্ট (অভিযোগ) সিস্টেম — টাইপ ব্যাজের পাশে
+// ❤️ লাইক + 🚩 ফ্ল্যাগ। এই পেজটাই car-rental সহ অনেক ক্যাটাগরির
+// "ভেতরে ঢুকলে" ভিউ, তাই এখানে বসালে সব ক্যাটাগরি একসাথে কাভার হয়।
+// লগইন না থাকলে লাইক ভিউ-অনলি, ফ্ল্যাগ লুকানো। ৩+ রিপোর্টে
+// is_disabled হয়ে গেলে এই পেজে খোলা যাবে না (কোয়েরিতে ফিল্টার যোগ)।
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import ImageLightbox from '../../components/ImageLightbox.astro';
+import ReportModal from '../../components/shared/ReportModal.astro';
 import { supabase } from '../../lib/supabase.js';
 
 const { id } = Astro.params;
@@ -23,6 +30,7 @@ const { data: item, error } = await supabase
   .select('*')
   .eq('id', id)
   .eq('status', 'active')
+  .eq('is_disabled', false)
   .maybeSingle();
 
 if (error) {
@@ -210,7 +218,23 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
         </a>
 
         <div class="listing-card">
-          <span class="type-badge"><i class={`fas ${config.icon}`}></i> {typeLabel}</span>
+          <div class="top-row">
+            <span class="type-badge"><i class={`fas ${config.icon}`}></i> {typeLabel}</span>
+
+            <div class="engagement-row" id="engagementRow">
+              <span class="like-count-view" id="likeCountView">
+                <i class="fas fa-heart"></i>
+                <span id="likeCountViewNum">0</span>
+              </span>
+              <button class="like-btn" type="button" id="likeBtn" aria-label="লাইক করুন" style="display:none;">
+                <i class="fas fa-heart"></i>
+                <span id="likeCountNum">0</span>
+              </button>
+              <button class="flag-btn" type="button" id="flagBtn" aria-label="অভিযোগ করুন" style="display:none;">
+                <i class="fas fa-flag"></i>
+              </button>
+            </div>
+          </div>
 
           {images.length > 0 ? (
             <>
@@ -286,6 +310,11 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
   <div id="listingShareToast" class="share-toast">লিংক কপি হয়েছে ✓</div>
 
   <ImageLightbox />
+  {item && <ReportModal />}
+
+  {item && (
+    <script type="application/json" id="listingIdData" set:html={JSON.stringify(item.id)} />
+  )}
 </BaseLayout>
 
 <style>
@@ -315,6 +344,14 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     margin: 0 auto;
   }
 
+  .top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 18px 18px 0;
+  }
+
   .type-badge {
     display: inline-flex;
     align-items: center;
@@ -325,7 +362,66 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     font-weight: 700;
     padding: 6px 16px;
     border-radius: 40px;
-    margin: 18px 0 0 18px;
+  }
+
+  /* ===== লাইক + ফ্ল্যাগ ===== */
+  .engagement-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .like-count-view {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #8FA0BC;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+
+  .like-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #F4F7FC;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 20px;
+    color: #8FA0BC;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .like-btn.liked {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .like-btn.liked i {
+    color: #FF6B35;
+  }
+
+  .flag-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: #F4F7FC;
+    border: none;
+    border-radius: 50%;
+    color: #B0BCCB;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .flag-btn:hover {
+    background: #FFF0EA;
+    color: #D14343;
   }
 
   .image-strip {
@@ -530,6 +626,9 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
 </style>
 
 <script>
+  import { fetchLikeData, toggleLike, isLoggedIn } from '../../lib/contentEngagement.js';
+  import { initReportModal } from '../../lib/reportModal.js';
+
   function showListingShareToast() {
     const toast = document.getElementById('listingShareToast');
     if (!toast) return;
@@ -578,5 +677,70 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
       const index = Math.round(imageStrip.scrollLeft / imageStrip.clientWidth);
       dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
     }, { passive: true });
+  }
+
+  // ============================================================
+  // লাইক + রিপোর্ট (অভিযোগ) — সব ক্যাটাগরির জন্য জেনেরিক
+  // ============================================================
+  const listingIdEl = document.getElementById('listingIdData');
+  const listingId = listingIdEl ? JSON.parse(listingIdEl.textContent) : null;
+
+  if (listingId) {
+    const report = initReportModal({
+      reasons: [
+        { value: 'unavailable', label: 'আর পাওয়া যাচ্ছে না / বিক্রি-ভাড়া হয়ে গেছে' },
+        { value: 'behavior', label: 'আচরণ খারাপ' },
+        { value: 'wrong_info', label: 'ভুল তথ্য' },
+        { value: 'other', label: 'অন্যান্য' },
+      ],
+    });
+
+    const likeCountView = document.getElementById('likeCountView');
+    const likeCountViewNum = document.getElementById('likeCountViewNum');
+    const likeBtn = document.getElementById('likeBtn');
+    const likeCountNum = document.getElementById('likeCountNum');
+    const flagBtn = document.getElementById('flagBtn');
+
+    async function renderEngagement() {
+      const loggedIn = await isLoggedIn();
+      const { counts, likedByMe } = await fetchLikeData('listing', [listingId]);
+      const count = counts[listingId] || 0;
+      const liked = likedByMe.has(listingId);
+
+      likeCountViewNum.textContent = count;
+      likeCountNum.textContent = count;
+      likeBtn.classList.toggle('liked', liked);
+
+      if (loggedIn) {
+        likeCountView.style.display = 'none';
+        likeBtn.style.display = 'flex';
+        flagBtn.style.display = 'flex';
+      } else {
+        likeCountView.style.display = 'flex';
+        likeBtn.style.display = 'none';
+        flagBtn.style.display = 'none';
+      }
+    }
+
+    likeBtn?.addEventListener('click', async () => {
+      likeBtn.disabled = true;
+      const result = await toggleLike('listing', listingId);
+      likeBtn.disabled = false;
+      if (result.error) return;
+      const currentCount = parseInt(likeCountNum.textContent, 10) || 0;
+      const newCount = result.liked ? currentCount + 1 : Math.max(currentCount - 1, 0);
+      likeCountNum.textContent = newCount;
+      likeCountViewNum.textContent = newCount;
+      likeBtn.classList.toggle('liked', result.liked);
+    });
+
+    flagBtn?.addEventListener('click', () => {
+      report.open('listing', listingId);
+    });
+
+    renderEngagement();
+    window.addEventListener('smartfeni:auth-changed', () => {
+      renderEngagement();
+    });
   }
 </script>
