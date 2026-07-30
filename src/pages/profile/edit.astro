@@ -18,10 +18,14 @@
 // দেখাচ্ছিল না, কারণ id="photoInput"/"photoPreviewCircle"/
 // "photoPreviewImg"/"photoPlaceholderIcon" — এই একই ID গুলো
 // AuthModal.astro-র সাইনআপ প্যানেলেও আছে, আর AuthModal সব পেজেই
-// (Header এর ভেতর দিয়ে) লোড হয়। ফলে document.getElementById()
-// সবসময় AuthModal-এর হিডেন এলিমেন্টে গিয়ে ছবি বসাচ্ছিল, এই পেজের
-// দৃশ্যমান সার্কেলে না। এখন ID গুলো "profileEdit" প্রিফিক্স দিয়ে
-// ইউনিক করা হলো, যাতে আর কনফ্লিক্ট না হয়।
+// (Header এর ভেতর দিয়ে) লোড হয়। ID গুলো "profileEdit" প্রিফিক্স
+// দিয়ে ইউনিক করা হয়েছে, যাতে আর কনফ্লিক্ট না হয়।
+// আপডেট ৪ (রিডিজাইন): প্রোফাইল পেজ এখন দুই মোডে — ডিফল্টে ক্লিন
+// "ভিউ কার্ড" (ছবি, নাম, ফোন, ইমেইল, ব্লাড গ্রুপ/উপজেলা ব্যাজ) +
+// উপরে ডানে "এডিট করুন" বাটন। বাটনে ক্লিক করলে ফর্ম খোলে, সেভ/বাতিল
+// করলে আবার ভিউ কার্ডে ফিরে যায়। পাসওয়ার্ড বদলান ও ফোন নম্বর
+// পরিবর্তন এখন কোলাপ্সিবল accordion (ডিফল্টে বন্ধ) — আগে সবকিছু
+// একসাথে খোলা থাকায় পেজটা অগোছালো লাগছিল।
 // ============================================================
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
@@ -49,100 +53,157 @@ const upazilas = [
       </div>
 
       <div id="editContent">
-        <!-- ===== প্রোফাইল তথ্য কার্ড ===== -->
-        <div class="edit-card">
-          <h1 class="edit-title">প্রোফাইল এডিট</h1>
+        <!-- ===== প্রোফাইল কার্ড (ভিউ মোড + এডিট মোড একই কার্ডে) ===== -->
+        <div class="edit-card profile-card">
 
-          <p class="edit-message" id="profileMessage"></p>
+          <!-- ----- ভিউ মোড (ডিফল্ট) ----- -->
+          <div class="profile-view" id="profileView">
+            <button class="profile-edit-trigger" id="openEditBtn" type="button">
+              <i class="fas fa-pen"></i> এডিট করুন
+            </button>
 
-          <div class="edit-photo-upload">
-            <label for="profileEditPhotoInput" class="edit-photo-circle" id="profileEditPhotoCircle">
-              <img id="profileEditPhotoImg" src="" alt="প্রোফাইল ছবি" />
-              <i class="fas fa-camera" id="profileEditPhotoPlaceholderIcon"></i>
-              <span class="edit-photo-edit"><i class="fas fa-pen"></i></span>
-            </label>
-            <input type="file" id="profileEditPhotoInput" accept="image/*" style="display:none;" />
+            <div class="profile-view-avatar-wrap">
+              <img id="viewAvatarImg" src="" alt="প্রোফাইল ছবি" class="profile-view-avatar" style="display:none;" />
+              <div class="profile-view-avatar-placeholder" id="viewAvatarPlaceholder">
+                <i class="fas fa-user"></i>
+              </div>
+            </div>
+
+            <h1 class="profile-view-name" id="viewName">লোড হচ্ছে...</h1>
+
+            <div class="profile-view-badges">
+              <span class="profile-badge" id="viewBloodBadge" style="display:none;">
+                <i class="fas fa-droplet"></i> <span id="viewBloodBadgeText"></span>
+              </span>
+              <span class="profile-badge" id="viewUpazilaBadge" style="display:none;">
+                <i class="fas fa-location-dot"></i> <span id="viewUpazilaBadgeText"></span>
+              </span>
+              <span class="profile-badge profile-badge-donor" id="viewDonorBadge" style="display:none;">
+                <i class="fas fa-heart"></i> ব্লাড ডোনার
+              </span>
+            </div>
+
+            <div class="profile-view-divider"></div>
+
+            <div class="profile-view-contact">
+              <div class="profile-view-contact-row">
+                <i class="fas fa-phone"></i> <span id="viewPhone">—</span>
+              </div>
+              <div class="profile-view-contact-row">
+                <i class="fas fa-envelope"></i> <span id="viewEmail">যোগ করা হয়নি</span>
+              </div>
+            </div>
           </div>
 
-          <label class="edit-label">পূর্ণ নাম</label>
-          <div class="edit-input-wrap">
-            <i class="fas fa-id-card edit-input-icon"></i>
-            <input type="text" class="edit-input" id="editName" placeholder="আপনার পূর্ণ নাম" />
-          </div>
+          <!-- ----- এডিট মোড (ডিফল্টে হিডেন) ----- -->
+          <div class="profile-edit-form" id="profileEditForm" style="display:none;">
+            <div class="profile-edit-form-header">
+              <h2 class="edit-subtitle-title"><i class="fas fa-pen"></i> প্রোফাইল এডিট</h2>
+              <button class="profile-edit-cancel" id="cancelEditBtn" type="button" aria-label="বাতিল">
+                <i class="fas fa-xmark"></i>
+              </button>
+            </div>
 
-          <label class="edit-label">ফোন নম্বর</label>
-          <div class="edit-input-wrap">
-            <i class="fas fa-phone edit-input-icon"></i>
-            <input type="text" class="edit-input" id="editPhone" disabled />
-          </div>
-          <button type="button" class="phone-change-toggle" id="phoneChangeToggle">
-            <i class="fas fa-pen"></i> নম্বর পরিবর্তন করুন
-          </button>
+            <p class="edit-message" id="profileMessage"></p>
 
-          <div class="phone-change-panel" id="phoneChangePanel" style="display:none;">
-            <p class="edit-message" id="phoneMessage"></p>
+            <div class="edit-photo-upload">
+              <label for="profileEditPhotoInput" class="edit-photo-circle" id="profileEditPhotoCircle">
+                <img id="profileEditPhotoImg" src="" alt="প্রোফাইল ছবি" />
+                <i class="fas fa-camera" id="profileEditPhotoPlaceholderIcon"></i>
+                <span class="edit-photo-edit"><i class="fas fa-pen"></i></span>
+              </label>
+              <input type="file" id="profileEditPhotoInput" accept="image/*" style="display:none;" />
+            </div>
 
-            <label class="edit-label">নতুন ফোন নম্বর</label>
+            <label class="edit-label">পূর্ণ নাম</label>
+            <div class="edit-input-wrap">
+              <i class="fas fa-id-card edit-input-icon"></i>
+              <input type="text" class="edit-input" id="editName" placeholder="আপনার পূর্ণ নাম" />
+            </div>
+
+            <label class="edit-label">ফোন নম্বর</label>
             <div class="edit-input-wrap">
               <i class="fas fa-phone edit-input-icon"></i>
-              <input type="text" class="edit-input" id="newPhoneInput" placeholder="01xxxxxxxxx" />
+              <input type="text" class="edit-input" id="editPhone" disabled />
             </div>
 
-            <label class="edit-label">বর্তমান পাসওয়ার্ড (যাচাইয়ের জন্য)</label>
+            <!-- ফোন নম্বর পরিবর্তন — accordion -->
+            <div class="accordion-item">
+              <button type="button" class="accordion-header" id="phoneChangeToggle">
+                <span><i class="fas fa-pen"></i> নম্বর পরিবর্তন করুন</span>
+                <i class="fas fa-chevron-down accordion-chevron"></i>
+              </button>
+              <div class="accordion-body" id="phoneChangePanel">
+                <div class="accordion-body-inner">
+                  <p class="edit-message" id="phoneMessage"></p>
+
+                  <label class="edit-label">নতুন ফোন নম্বর</label>
+                  <div class="edit-input-wrap">
+                    <i class="fas fa-phone edit-input-icon"></i>
+                    <input type="text" class="edit-input" id="newPhoneInput" placeholder="01xxxxxxxxx" />
+                  </div>
+
+                  <label class="edit-label">বর্তমান পাসওয়ার্ড (যাচাইয়ের জন্য)</label>
+                  <div class="edit-input-wrap">
+                    <i class="fas fa-lock edit-input-icon"></i>
+                    <input type="password" class="edit-input" id="phoneChangePassword" placeholder="••••••••" />
+                  </div>
+
+                  <button class="edit-submit edit-submit-secondary" id="savePhoneBtn" type="button">
+                    <i class="fas fa-check"></i> <span>নম্বর বদলান</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <label class="edit-label">ইমেইল</label>
             <div class="edit-input-wrap">
-              <i class="fas fa-lock edit-input-icon"></i>
-              <input type="password" class="edit-input" id="phoneChangePassword" placeholder="••••••••" />
+              <i class="fas fa-envelope edit-input-icon"></i>
+              <input type="email" class="edit-input" id="editEmail" placeholder="পাসওয়ার্ড রিকভারির জন্য" />
             </div>
 
-            <button class="edit-submit edit-submit-secondary" id="savePhoneBtn" type="button">
-              <i class="fas fa-check"></i> <span>নম্বর বদলান</span>
-            </button>
-          </div>
+            <div class="edit-field-row">
+              <div class="edit-field-col">
+                <label class="edit-label">ব্লাড গ্রুপ</label>
+                <div class="edit-select-wrap">
+                  <i class="fas fa-droplet edit-input-icon"></i>
+                  <select class="edit-input edit-select" id="editBloodGroup">
+                    <option value="">নির্বাচন করুন</option>
+                    {bloodGroups.map((bg) => <option value={bg}>{bg}</option>)}
+                  </select>
+                </div>
+              </div>
 
-          <label class="edit-label">ইমেইল</label>
-          <div class="edit-input-wrap">
-            <i class="fas fa-envelope edit-input-icon"></i>
-            <input type="email" class="edit-input" id="editEmail" placeholder="পাসওয়ার্ড রিকভারির জন্য" />
-          </div>
-
-          <div class="edit-field-row">
-            <div class="edit-field-col">
-              <label class="edit-label">ব্লাড গ্রুপ</label>
-              <div class="edit-select-wrap">
-                <i class="fas fa-droplet edit-input-icon"></i>
-                <select class="edit-input edit-select" id="editBloodGroup">
-                  <option value="">নির্বাচন করুন</option>
-                  {bloodGroups.map((bg) => <option value={bg}>{bg}</option>)}
-                </select>
+              <div class="edit-field-col">
+                <label class="edit-label">উপজেলা</label>
+                <div class="edit-select-wrap">
+                  <i class="fas fa-location-dot edit-input-icon"></i>
+                  <select class="edit-input edit-select" id="editUpazila">
+                    <option value="">নির্বাচন করুন</option>
+                    {upazilas.map((u) => <option value={u}>{u}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
 
-            <div class="edit-field-col">
-              <label class="edit-label">উপজেলা</label>
-              <div class="edit-select-wrap">
-                <i class="fas fa-location-dot edit-input-icon"></i>
-                <select class="edit-input edit-select" id="editUpazila">
-                  <option value="">নির্বাচন করুন</option>
-                  {upazilas.map((u) => <option value={u}>{u}</option>)}
-                </select>
+            <!-- ===== ব্লাড ডোনার টগল ===== -->
+            <div class="donor-toggle-row">
+              <div class="donor-toggle-text">
+                <span class="donor-toggle-label">ব্লাড ডোনার লিস্টে আমাকে দেখাও</span>
+                <span class="donor-toggle-hint" id="donorToggleHint">ব্লাড গ্রুপ সিলেক্ট করলে চালু করা যাবে</span>
               </div>
+              <button type="button" class="donor-toggle-switch" id="donorToggleBtn" role="switch" aria-checked="false">
+                <span class="donor-toggle-knob"></span>
+              </button>
+            </div>
+
+            <div class="profile-edit-actions">
+              <button class="edit-submit-outline" id="cancelEditBtn2" type="button">বাতিল</button>
+              <button class="edit-submit" id="saveProfileBtn" type="button">
+                <i class="fas fa-check"></i> <span>তথ্য সেভ করুন</span>
+              </button>
             </div>
           </div>
-
-          <!-- ===== ব্লাড ডোনার টগল ===== -->
-          <div class="donor-toggle-row">
-            <div class="donor-toggle-text">
-              <span class="donor-toggle-label">ব্লাড ডোনার লিস্টে আমাকে দেখাও</span>
-              <span class="donor-toggle-hint" id="donorToggleHint">ব্লাড গ্রুপ সিলেক্ট করলে চালু করা যাবে</span>
-            </div>
-            <button type="button" class="donor-toggle-switch" id="donorToggleBtn" role="switch" aria-checked="false">
-              <span class="donor-toggle-knob"></span>
-            </button>
-          </div>
-
-          <button class="edit-submit" id="saveProfileBtn" type="button">
-            <i class="fas fa-check"></i> <span>তথ্য সেভ করুন</span>
-          </button>
         </div>
 
         <!-- ===== রাইডার সেটিংস কার্ড (courier) ===== -->
@@ -213,33 +274,41 @@ const upazilas = [
           </button>
         </div>
 
-        <!-- ===== পাসওয়ার্ড বদল কার্ড ===== -->
-        <div class="edit-card">
-          <h2 class="edit-subtitle-title"><i class="fas fa-lock"></i> পাসওয়ার্ড বদলান</h2>
+        <!-- ===== পাসওয়ার্ড বদলান — accordion কার্ড ===== -->
+        <div class="edit-card accordion-card">
+          <div class="accordion-item accordion-item-standalone">
+            <button type="button" class="accordion-header accordion-header-standalone" id="passwordAccordionHeader">
+              <span><i class="fas fa-lock"></i> পাসওয়ার্ড বদলান</span>
+              <i class="fas fa-chevron-down accordion-chevron"></i>
+            </button>
+            <div class="accordion-body" id="passwordAccordionBody">
+              <div class="accordion-body-inner">
+                <p class="edit-message" id="passwordMessage"></p>
 
-          <p class="edit-message" id="passwordMessage"></p>
+                <label class="edit-label">বর্তমান পাসওয়ার্ড</label>
+                <div class="edit-input-wrap">
+                  <i class="fas fa-lock edit-input-icon"></i>
+                  <input type="password" class="edit-input" id="currentPassword" placeholder="••••••••" />
+                </div>
 
-          <label class="edit-label">বর্তমান পাসওয়ার্ড</label>
-          <div class="edit-input-wrap">
-            <i class="fas fa-lock edit-input-icon"></i>
-            <input type="password" class="edit-input" id="currentPassword" placeholder="••••••••" />
+                <label class="edit-label">নতুন পাসওয়ার্ড</label>
+                <div class="edit-input-wrap">
+                  <i class="fas fa-lock edit-input-icon"></i>
+                  <input type="password" class="edit-input" id="newPassword" placeholder="কমপক্ষে ৬ অক্ষর" />
+                </div>
+
+                <label class="edit-label">নতুন পাসওয়ার্ড আবার লিখুন</label>
+                <div class="edit-input-wrap">
+                  <i class="fas fa-lock edit-input-icon"></i>
+                  <input type="password" class="edit-input" id="confirmPassword" placeholder="••••••••" />
+                </div>
+
+                <button class="edit-submit edit-submit-secondary" id="changePasswordBtn" type="button">
+                  <i class="fas fa-key"></i> <span>পাসওয়ার্ড বদলান</span>
+                </button>
+              </div>
+            </div>
           </div>
-
-          <label class="edit-label">নতুন পাসওয়ার্ড</label>
-          <div class="edit-input-wrap">
-            <i class="fas fa-lock edit-input-icon"></i>
-            <input type="password" class="edit-input" id="newPassword" placeholder="কমপক্ষে ৬ অক্ষর" />
-          </div>
-
-          <label class="edit-label">নতুন পাসওয়ার্ড আবার লিখুন</label>
-          <div class="edit-input-wrap">
-            <i class="fas fa-lock edit-input-icon"></i>
-            <input type="password" class="edit-input" id="confirmPassword" placeholder="••••••••" />
-          </div>
-
-          <button class="edit-submit edit-submit-secondary" id="changePasswordBtn" type="button">
-            <i class="fas fa-key"></i> <span>পাসওয়ার্ড বদলান</span>
-          </button>
         </div>
       </div>
     </div>
@@ -342,6 +411,198 @@ const upazilas = [
     display: block;
     background: #EAFBF0;
     color: #1B7A3C;
+  }
+
+  /* ===== প্রোফাইল কার্ড — ভিউ মোড ===== */
+  .profile-card {
+    position: relative;
+  }
+
+  .profile-view {
+    position: relative;
+    text-align: center;
+  }
+
+  .profile-edit-trigger {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 40px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .profile-edit-trigger:hover {
+    background: #FF6B35;
+    color: #fff;
+  }
+
+  .profile-view-avatar-wrap {
+    width: 96px;
+    height: 96px;
+    margin: 4px auto 16px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: #FFF0EA;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 18px rgba(255, 107, 53, 0.18);
+  }
+
+  .profile-view-avatar {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .profile-view-avatar-placeholder {
+    color: #FF6B35;
+    font-size: 2.2rem;
+  }
+
+  .profile-view-name {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 12px;
+  }
+
+  .profile-view-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .profile-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #F4F7FC;
+    color: #4B5A70;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 6px 14px;
+    border-radius: 40px;
+  }
+
+  .profile-badge i {
+    color: #FF6B35;
+    font-size: 0.78rem;
+  }
+
+  .profile-badge-donor {
+    background: #FFF0EA;
+    color: #D14343;
+  }
+
+  .profile-badge-donor i {
+    color: #D14343;
+  }
+
+  .profile-view-divider {
+    height: 1px;
+    background: #EEF3F9;
+    margin: 4px 0 16px;
+  }
+
+  .profile-view-contact {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    text-align: left;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+
+  .profile-view-contact-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.88rem;
+    color: #1B2A4A;
+    font-weight: 600;
+  }
+
+  .profile-view-contact-row i {
+    color: #FF6B35;
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  /* ===== প্রোফাইল কার্ড — এডিট মোড ===== */
+  .profile-edit-form-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+
+  .profile-edit-form-header .edit-subtitle-title {
+    margin-bottom: 0;
+  }
+
+  .profile-edit-cancel {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: #F4F7FC;
+    color: #5A6E85;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .profile-edit-cancel:hover {
+    background: #FFF0EA;
+    color: #D14343;
+  }
+
+  .profile-edit-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 22px;
+  }
+
+  .profile-edit-actions .edit-submit {
+    margin-top: 0;
+  }
+
+  .edit-submit-outline {
+    flex: 1;
+    background: transparent;
+    border: 1.5px solid #E5EAF0;
+    color: #5A6E85;
+    padding: 14px;
+    border-radius: 14px;
+    font-weight: 700;
+    font-size: 0.92rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .edit-submit-outline:hover {
+    border-color: #D14343;
+    color: #D14343;
+  }
+
+  .profile-edit-actions .edit-submit {
+    flex: 2;
   }
 
   .edit-photo-upload {
@@ -478,36 +739,71 @@ const upazilas = [
     background-position: right 14px center;
   }
 
-  /* ===== ফোন নম্বর পরিবর্তন ===== */
-  .phone-change-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: none;
+  /* ===== রিইউজেবল Accordion (ফোন পরিবর্তন + পাসওয়ার্ড) ===== */
+  .accordion-item {
+    margin-top: 14px;
+    border: 1.5px solid #EEF3F9;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .accordion-item-standalone {
+    margin-top: 0;
     border: none;
-    color: #FF6B35;
-    font-size: 0.78rem;
+  }
+
+  .accordion-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #F8FAFC;
+    border: none;
+    padding: 13px 16px;
+    font-size: 0.85rem;
     font-weight: 700;
-    padding: 8px 0 0;
+    color: #1B2A4A;
     cursor: pointer;
   }
 
-  .phone-change-panel {
-    background: #F8FAFC;
+  .accordion-header i:first-child {
+    color: #FF6B35;
+    margin-right: 6px;
+  }
+
+  .accordion-header-standalone {
     border-radius: 14px;
-    padding: 14px 14px 4px;
-    margin-top: 10px;
   }
 
-  .phone-change-panel .edit-label {
-    margin-top: 8px;
+  .accordion-chevron {
+    font-size: 0.75rem;
+    color: #8FA0BC;
+    transition: transform 0.25s ease;
   }
 
-  .phone-change-panel .edit-label:first-of-type {
-    margin-top: 0;
+  .accordion-header.open .accordion-chevron {
+    transform: rotate(180deg);
   }
 
-  .phone-change-panel .edit-submit {
+  .accordion-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+  }
+
+  .accordion-body.open {
+    max-height: 600px;
+  }
+
+  .accordion-body-inner {
+    padding: 4px 16px 18px;
+  }
+
+  .accordion-body-inner .edit-label:first-of-type {
+    margin-top: 12px;
+  }
+
+  .accordion-body-inner .edit-submit {
     margin-top: 16px;
     margin-bottom: 4px;
   }
@@ -723,6 +1019,15 @@ const upazilas = [
       flex-direction: column;
       gap: 0;
     }
+
+    .profile-edit-trigger {
+      position: static;
+      margin-bottom: 14px;
+    }
+
+    .profile-view-avatar-wrap {
+      margin-top: 0;
+    }
   }
 </style>
 
@@ -732,6 +1037,25 @@ const upazilas = [
   const authGate = document.getElementById('authGate');
   const editContent = document.getElementById('editContent');
 
+  // ===== ভিউ মোড এলিমেন্ট =====
+  const profileView = document.getElementById('profileView');
+  const profileEditForm = document.getElementById('profileEditForm');
+  const openEditBtn = document.getElementById('openEditBtn');
+  const cancelEditBtn = document.getElementById('cancelEditBtn');
+  const cancelEditBtn2 = document.getElementById('cancelEditBtn2');
+
+  const viewAvatarImg = document.getElementById('viewAvatarImg');
+  const viewAvatarPlaceholder = document.getElementById('viewAvatarPlaceholder');
+  const viewName = document.getElementById('viewName');
+  const viewPhone = document.getElementById('viewPhone');
+  const viewEmail = document.getElementById('viewEmail');
+  const viewBloodBadge = document.getElementById('viewBloodBadge');
+  const viewBloodBadgeText = document.getElementById('viewBloodBadgeText');
+  const viewUpazilaBadge = document.getElementById('viewUpazilaBadge');
+  const viewUpazilaBadgeText = document.getElementById('viewUpazilaBadgeText');
+  const viewDonorBadge = document.getElementById('viewDonorBadge');
+
+  // ===== এডিট ফর্ম এলিমেন্ট =====
   const nameInput = document.getElementById('editName');
   const phoneInput = document.getElementById('editPhone');
   const emailInput = document.getElementById('editEmail');
@@ -747,18 +1071,23 @@ const upazilas = [
   let currentUserId = null;
   let currentUserEmail = null;
   let currentAccessToken = null;
+  let currentProfile = null;
 
   const donorToggleBtn = document.getElementById('donorToggleBtn');
   const donorToggleHint = document.getElementById('donorToggleHint');
   let isDonorOn = false;
 
-  // ===== ফোন নম্বর পরিবর্তন =====
+  // ===== ফোন নম্বর পরিবর্তন (accordion) =====
   const phoneChangeToggle = document.getElementById('phoneChangeToggle');
   const phoneChangePanel = document.getElementById('phoneChangePanel');
   const newPhoneInput = document.getElementById('newPhoneInput');
   const phoneChangePasswordInput = document.getElementById('phoneChangePassword');
   const phoneMessage = document.getElementById('phoneMessage');
   const savePhoneBtn = document.getElementById('savePhoneBtn');
+
+  // ===== পাসওয়ার্ড বদলান (accordion) =====
+  const passwordAccordionHeader = document.getElementById('passwordAccordionHeader');
+  const passwordAccordionBody = document.getElementById('passwordAccordionBody');
 
   // ===== রাইডার সেকশন (courier) =====
   const riderCard = document.getElementById('riderCard');
@@ -833,6 +1162,90 @@ const upazilas = [
       : '<i class="fas fa-circle"></i> <span>অফলাইন — কাস্টমাররা আপনাকে দেখছেন না</span>';
   }
 
+  // ===== রিইউজেবল accordion টগল =====
+  function setupAccordion(headerEl, bodyEl) {
+    headerEl?.addEventListener('click', () => {
+      const isOpen = bodyEl.classList.contains('open');
+      bodyEl.classList.toggle('open', !isOpen);
+      headerEl.classList.toggle('open', !isOpen);
+    });
+  }
+
+  setupAccordion(phoneChangeToggle, phoneChangePanel);
+  setupAccordion(passwordAccordionHeader, passwordAccordionBody);
+
+  // ===== ভিউ কার্ড রেন্ডার =====
+  function renderProfileView(profile) {
+    if (!profile) return;
+
+    viewName.textContent = profile.full_name || 'ইউজার';
+    viewPhone.textContent = profile.phone || '—';
+    viewEmail.textContent = profile.recovery_email || 'যোগ করা হয়নি';
+
+    if (profile.avatar_url) {
+      viewAvatarImg.src = profile.avatar_url;
+      viewAvatarImg.style.display = 'block';
+      viewAvatarPlaceholder.style.display = 'none';
+    } else {
+      viewAvatarImg.style.display = 'none';
+      viewAvatarPlaceholder.style.display = 'flex';
+    }
+
+    if (profile.blood_group) {
+      viewBloodBadgeText.textContent = profile.blood_group;
+      viewBloodBadge.style.display = 'inline-flex';
+    } else {
+      viewBloodBadge.style.display = 'none';
+    }
+
+    if (profile.upazila) {
+      viewUpazilaBadgeText.textContent = profile.upazila;
+      viewUpazilaBadge.style.display = 'inline-flex';
+    } else {
+      viewUpazilaBadge.style.display = 'none';
+    }
+
+    viewDonorBadge.style.display = profile.is_blood_donor ? 'inline-flex' : 'none';
+  }
+
+  // ===== এডিট ফর্ম পপুলেট =====
+  function populateEditForm(profile) {
+    if (!profile) return;
+
+    if (nameInput) nameInput.value = profile.full_name || '';
+    if (phoneInput) phoneInput.value = profile.phone || '';
+    if (emailInput) emailInput.value = profile.recovery_email || '';
+    if (bloodGroupSelect) bloodGroupSelect.value = profile.blood_group || '';
+    if (upazilaSelect) upazilaSelect.value = profile.upazila || '';
+    setDonorToggle(!!profile.is_blood_donor);
+    updateDonorHint();
+
+    selectedPhotoFile = null;
+    if (profile.avatar_url) {
+      photoImg.src = profile.avatar_url;
+      photoCircle?.classList.add('has-photo');
+    } else {
+      photoImg.src = '';
+      photoCircle?.classList.remove('has-photo');
+    }
+  }
+
+  function openEditMode() {
+    populateEditForm(currentProfile);
+    clearMsg(profileMessage);
+    profileView.style.display = 'none';
+    profileEditForm.style.display = 'block';
+  }
+
+  function closeEditMode() {
+    profileEditForm.style.display = 'none';
+    profileView.style.display = 'block';
+  }
+
+  openEditBtn?.addEventListener('click', openEditMode);
+  cancelEditBtn?.addEventListener('click', closeEditMode);
+  cancelEditBtn2?.addEventListener('click', closeEditMode);
+
   // ===== পেজ লোড হলে সেশন চেক + প্রোফাইল লোড =====
   async function init() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -854,18 +1267,9 @@ const upazilas = [
       .single();
 
     if (profile) {
-      if (nameInput) nameInput.value = profile.full_name || '';
-      if (phoneInput) phoneInput.value = profile.phone || '';
-      if (emailInput) emailInput.value = profile.recovery_email || '';
-      if (bloodGroupSelect) bloodGroupSelect.value = profile.blood_group || '';
-      if (upazilaSelect) upazilaSelect.value = profile.upazila || '';
-      setDonorToggle(!!profile.is_blood_donor);
-      updateDonorHint();
-
-      if (profile.avatar_url) {
-        photoImg.src = profile.avatar_url;
-        photoCircle?.classList.add('has-photo');
-      }
+      currentProfile = profile;
+      renderProfileView(profile);
+      populateEditForm(profile);
     }
 
     // অ্যাপ্রুভড courier (রাইডার) লিস্টিং আছে কিনা চেক
@@ -1008,20 +1412,14 @@ const upazilas = [
       return;
     }
 
+    // লোকাল প্রোফাইল আপডেট + ভিউ কার্ড রিফ্রেশ, তারপর ভিউ মোডে ফিরে যাওয়া
+    currentProfile = { ...currentProfile, ...updates };
+    renderProfileView(currentProfile);
     showMsg(profileMessage, 'তথ্য সেভ হয়েছে ✓', 'success');
+    setTimeout(closeEditMode, 900);
   });
 
   // ===== ফোন নম্বর পরিবর্তন =====
-  phoneChangeToggle?.addEventListener('click', () => {
-    const isOpen = phoneChangePanel.style.display !== 'none';
-    phoneChangePanel.style.display = isOpen ? 'none' : 'block';
-    clearMsg(phoneMessage);
-    if (!isOpen && newPhoneInput) {
-      newPhoneInput.value = '';
-      phoneChangePasswordInput.value = '';
-    }
-  });
-
   savePhoneBtn?.addEventListener('click', async () => {
     clearMsg(phoneMessage);
 
