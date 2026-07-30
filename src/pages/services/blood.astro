@@ -3,13 +3,14 @@
 // ============================================================
 // পেজ: ব্লাড ডোনার লিস্ট
 // ব্র্যান্ড: স্মার্ট ফেনী
-// ফিল্টার: ব্লাড গ্রুপ + উপজেলা — দুইটা আলাদা ড্রপডাউন, কম্বাইন্ড
-//          ফিল্টারিং, কোনো আলাদা সার্চ বাটন নাই (সিলেক্ট করা মাত্র
-//          instantly ফিল্টার হয়)
+// দুই সোর্স মার্জ করে দেখানো হয়:
+//   ১. profiles (is_blood_donor = true) — রেজিস্টার্ড ইউজার
+//   ২. manual_blood_donors (status = 'active') — ক্লাব থেকে বাল্ক
+//      আপলোড হওয়া, অ্যাডমিন-অ্যাপ্রুভড এন্ট্রি (ক্লাবের নাম ব্যাজ সহ)
+// ফিল্টার: ব্লাড গ্রুপ + উপজেলা (ড্রপডাউন) + ক্লাবের নাম (সার্চ বক্স)
+//          তিনটাই কম্বাইন্ড ফিল্টারিং, instant (কোনো সার্চ বাটন নাই)
 // সর্টিং: শেয়ারড locationSort.js ইউটিলিটি — initLocationReorder()
-//         ব্যবহার করা হচ্ছে (আগে reorderByUserLocation ছিল), যাতে
-//         উপজেলা-ম্যাচ অগ্রাধিকার + প্রতি গ্রুপে shuffle (fairness)
-//         + পেজের ভেতরে উপজেলা বদলালে লাইভ re-sort — তিনটাই পাওয়া যায়
+//         ব্যবহার করা হচ্ছে, উপজেলা-ম্যাচ অগ্রাধিকার + fairness shuffle
 // SSR পেজ — prerender = false আবশ্যক।
 // ============================================================
 
@@ -21,13 +22,41 @@ import { supabase } from '../../lib/supabase.js';
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 
-const { data: donorData } = await supabase
-  .from('profiles')
-  .select('full_name, phone, blood_group, upazila, avatar_url')
-  .eq('is_blood_donor', true)
-  .order('created_at', { ascending: false });
+const [{ data: profileDonors }, { data: manualDonors }] = await Promise.all([
+  supabase
+    .from('profiles')
+    .select('full_name, phone, blood_group, upazila, avatar_url')
+    .eq('is_blood_donor', true)
+    .order('created_at', { ascending: false }),
+  supabase
+    .from('manual_blood_donors')
+    .select('name, phone, blood_group, upazila, club_name_raw')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false }),
+]);
 
-const donors = donorData || [];
+// দুই সোর্সকে একটা কমন শেপে রূপান্তর করা হচ্ছে
+const normalizedProfileDonors = (profileDonors || []).map((d) => ({
+  full_name: d.full_name,
+  phone: d.phone,
+  blood_group: d.blood_group,
+  upazila: d.upazila,
+  avatar_url: d.avatar_url,
+  club_name_raw: null,
+  isClubSourced: false,
+}));
+
+const normalizedManualDonors = (manualDonors || []).map((d) => ({
+  full_name: d.name,
+  phone: d.phone,
+  blood_group: d.blood_group,
+  upazila: d.upazila,
+  avatar_url: null,
+  club_name_raw: d.club_name_raw,
+  isClubSourced: true,
+}));
+
+const donors = [...normalizedProfileDonors, ...normalizedManualDonors];
 const hasDonors = donors.length > 0;
 ---
 
@@ -75,6 +104,16 @@ const hasDonors = donors.length > 0;
         </div>
       </div>
 
+      <div class="club-search-wrap">
+        <i class="fas fa-magnifying-glass"></i>
+        <input
+          type="text"
+          id="clubSearchInput"
+          placeholder="ক্লাবের নাম দিয়ে খুঁজুন..."
+          autocomplete="off"
+        />
+      </div>
+
       {donors.length === 0 ? (
         <div class="empty-state">
           <i class="fas fa-droplet"></i>
@@ -88,7 +127,12 @@ const hasDonors = donors.length > 0;
         <>
           <div class="donor-grid" id="donorGrid">
             {donors.map((donor) => (
-              <div class="donor-card" data-blood-group={donor.blood_group || ''} data-upazila-name={donor.upazila || ''}>
+              <div
+                class="donor-card"
+                data-blood-group={donor.blood_group || ''}
+                data-upazila-name={donor.upazila || ''}
+                data-club-name={(donor.club_name_raw || '').toLowerCase()}
+              >
                 <div class="donor-card-top">
                   <span class="donor-avatar">
                     {donor.avatar_url ? (
@@ -104,6 +148,10 @@ const hasDonors = donors.length > 0;
 
                 {donor.upazila && (
                   <p class="donor-location"><i class="fas fa-location-dot"></i> {donor.upazila}</p>
+                )}
+
+                {donor.isClubSourced && donor.club_name_raw && (
+                  <p class="club-badge"><i class="fas fa-users"></i> {donor.club_name_raw}</p>
                 )}
 
                 <a href={`tel:${donor.phone}`} class="btn-contact">
@@ -174,7 +222,7 @@ const hasDonors = donors.length > 0;
   .filter-dropdowns {
     display: flex;
     gap: 12px;
-    margin-bottom: 32px;
+    margin-bottom: 16px;
     justify-content: center;
     flex-wrap: wrap;
   }
@@ -259,6 +307,42 @@ const hasDonors = donors.length > 0;
     background: #FFF0EA;
     color: #FF6B35;
     font-weight: 700;
+  }
+
+  /* ===== ক্লাব সার্চ বক্স ===== */
+  .club-search-wrap {
+    max-width: 420px;
+    margin: 0 auto 28px;
+    position: relative;
+  }
+
+  .club-search-wrap i {
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #B0BCCB;
+    font-size: 0.85rem;
+  }
+
+  .club-search-wrap input {
+    width: 100%;
+    padding: 12px 16px 12px 42px;
+    border-radius: 40px;
+    border: 1px solid #EEF3F9;
+    background: #fff;
+    font-size: 0.9rem;
+    font-family: inherit;
+    color: #1B2A4A;
+  }
+
+  .club-search-wrap input:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+
+  .club-search-wrap input::placeholder {
+    color: #B0BCCB;
   }
 
   .empty-state {
@@ -388,7 +472,7 @@ const hasDonors = donors.length > 0;
   .donor-location {
     color: #5A6E85;
     font-size: 0.85rem;
-    margin-bottom: 16px;
+    margin-bottom: 8px;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -397,6 +481,21 @@ const hasDonors = donors.length > 0;
   .donor-location i {
     color: #FF6B35;
     font-size: 0.75rem;
+  }
+
+  .club-badge {
+    color: #1D6FE0;
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    margin-top: -4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #E8F2FF;
+    padding: 6px 10px;
+    border-radius: 10px;
+    width: fit-content;
   }
 
   .btn-contact {
@@ -462,6 +561,7 @@ const hasDonors = donors.length > 0;
   // ===== ফিল্টার স্টেট =====
   let activeBloodGroup = 'all';
   let activeUpazila = 'all';
+  let clubSearchTerm = '';
 
   function applyFilters() {
     let visibleCount = 0;
@@ -469,8 +569,9 @@ const hasDonors = donors.length > 0;
     cards.forEach((card) => {
       const matchesBlood = activeBloodGroup === 'all' || card.dataset.bloodGroup === activeBloodGroup;
       const matchesUpazila = activeUpazila === 'all' || card.dataset.upazilaName === activeUpazila;
+      const matchesClub = clubSearchTerm === '' || (card.dataset.clubName || '').includes(clubSearchTerm);
 
-      if (matchesBlood && matchesUpazila) {
+      if (matchesBlood && matchesUpazila && matchesClub) {
         card.classList.remove('hidden');
         visibleCount++;
       } else {
@@ -518,6 +619,15 @@ const hasDonors = donors.length > 0;
   setupDropdown('upazilaPanel', 'upazilaBtn', 'upazilaLabel', 'উপজেলা', (v) => {
     activeUpazila = v;
   });
+
+  // ===== ক্লাব নাম সার্চ (instant, টাইপ করা মাত্র ফিল্টার) =====
+  const clubSearchInput = document.getElementById('clubSearchInput');
+  if (clubSearchInput) {
+    clubSearchInput.addEventListener('input', (e) => {
+      clubSearchTerm = e.target.value.trim().toLowerCase();
+      applyFilters();
+    });
+  }
 
   // ===== লোকেশন-ভিত্তিক re-order (fairness shuffle + লাইভ আপডেট) =====
   initLocationReorder(grid, 'upazilaName');
