@@ -151,8 +151,17 @@ async function handleTextMessage(message) {
     const { base64, mimeType } = await downloadTelegramPhoto(session.file_id);
     const extractedArray = await extractListingFromScreenshot({ imageBase64: base64, mimeType, category: 'blood' });
 
-    const rows = buildBloodDonorRows(extractedArray, session.upazila, clubNameRaw);
-    const skipped = extractedArray.length - rows.length;
+    const rawRows = buildBloodDonorRows(extractedArray, session.upazila, clubNameRaw);
+
+    // একই ব্যাচে ফোন নম্বর ডুপ্লিকেট থাকলে upsert ব্যর্থ হয়
+    // (Postgres: "ON CONFLICT DO UPDATE command cannot affect row a second time")
+    // তাই এখানেই ডিডুপ করে ফেলা হচ্ছে, শেষেরটা রাখা হবে
+    const dedupedMap = new Map();
+    rawRows.forEach((row) => dedupedMap.set(row.phone, row));
+    const rows = Array.from(dedupedMap.values());
+
+    const duplicateCount = rawRows.length - rows.length;
+    const skipped = extractedArray.length - rawRows.length; // ফোন নম্বরই নাই
 
     if (rows.length === 0) {
       await tg('sendMessage', { chat_id: chatId, text: '❌ কোনো ভ্যালিড ফোন নম্বর সহ ডোনার পাওয়া যায়নি।' });
@@ -174,6 +183,7 @@ async function handleTextMessage(message) {
 
     let summary = `✅ ${rows.length} জন ডোনার pending-এ যোগ হয়েছে\n(${session.upazila}, ${clubNameRaw})`;
     if (skipped > 0) summary += `\n⚠️ ${skipped} জনের ফোন নম্বর পাওয়া যায়নি, বাদ পড়েছে।`;
+    if (duplicateCount > 0) summary += `\n⚠️ ${duplicateCount} জনের ফোন নম্বর ডুপ্লিকেট ছিল, একটাই রাখা হয়েছে।`;
 
     await tg('sendMessage', { chat_id: chatId, text: summary });
   } catch (err) {
