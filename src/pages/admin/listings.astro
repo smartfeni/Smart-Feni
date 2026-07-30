@@ -1047,4 +1047,161 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         const deleteBtn = document.createElement('button');
         deleteBtn.textContent = group.target_type === 'blood_profile' ? 'তালিকা থেকে বাদ দিন' : 'ডিলিট করুন';
         deleteBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
-        let confirming
+        let confirming = false;
+        deleteBtn.addEventListener('click', () => {
+          if (!confirming) {
+            confirming = true;
+            deleteBtn.textContent = 'নিশ্চিত করুন?';
+            deleteBtn.style.cssText = 'background:#D14343;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+            return;
+          }
+          deleteTarget(group);
+        });
+        actionsWrap.appendChild(deleteBtn);
+
+        if (targetInfo.ownerUserId) {
+          const blockBtn = document.createElement('button');
+          blockBtn.textContent = 'ইউজার ব্লক করুন';
+          blockBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+          blockBtn.addEventListener('click', () => blockOwner(targetInfo.ownerUserId));
+          actionsWrap.appendChild(blockBtn);
+        }
+      }
+
+      const dismissBtn = document.createElement('button');
+      dismissBtn.textContent = 'রিপোর্ট বাতিল করুন (সমস্যা নাই)';
+      dismissBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+      dismissBtn.addEventListener('click', () => dismissReports(group));
+      actionsWrap.appendChild(dismissBtn);
+
+      return card;
+    }
+
+    async function activateTarget(group) {
+      let error = null;
+      if (group.target_type === 'listing') {
+        ({ error } = await supabase.from('listings').update({ is_disabled: false, disabled_at: null }).eq('id', group.target_id));
+      } else if (group.target_type === 'blood_profile') {
+        ({ error } = await supabase.from('profiles').update({ donor_disabled: false, donor_disabled_at: null }).eq('id', group.target_id));
+      } else if (group.target_type === 'blood_manual') {
+        ({ error } = await supabase.from('manual_blood_donors').update({ status: 'active' }).eq('id', group.target_id));
+      }
+
+      if (error) { alert('সক্রিয় করা ব্যর্থ: ' + error.message); return; }
+      await dismissReports(group, false);
+      loadReports();
+    }
+
+    async function deleteTarget(group) {
+      let error = null;
+      if (group.target_type === 'listing') {
+        ({ error } = await supabase.from('listings').delete().eq('id', group.target_id));
+      } else if (group.target_type === 'blood_manual') {
+        ({ error } = await supabase.from('manual_blood_donors').delete().eq('id', group.target_id));
+      } else if (group.target_type === 'blood_profile') {
+        // ইউজার প্রোফাইল ডিলিট করা যায় না — শুধু ডোনার লিস্ট থেকে বাদ
+        ({ error } = await supabase.from('profiles').update({ is_blood_donor: false, donor_disabled: true }).eq('id', group.target_id));
+      }
+
+      if (error) { alert('ব্যর্থ: ' + error.message); return; }
+
+      const ids = group.reports.map((r) => r.id);
+      await supabase.from('content_reports').update({ status: 'resolved' }).in('id', ids);
+
+      loadReports();
+      refreshReportsBadge();
+    }
+
+    async function dismissReports(group, reload = true) {
+      const ids = group.reports.map((r) => r.id);
+      const { error } = await supabase.from('content_reports').update({ status: 'dismissed' }).in('id', ids);
+      if (error) { alert('ব্যর্থ: ' + error.message); return; }
+      if (reload) {
+        loadReports();
+        refreshReportsBadge();
+      }
+    }
+
+    async function blockOwner(userId) {
+      if (!confirm('এই ইউজারকে ব্লক করবেন? ব্লক হলে তিনি আর লগইন করতে পারবেন না।')) return;
+      const { error } = await supabase.from('profiles').update({ is_blocked: true }).eq('id', userId);
+      if (error) { alert('ব্লক করা ব্যর্থ: ' + error.message); return; }
+      alert('ইউজার ব্লক করা হয়েছে।');
+    }
+
+    async function loadReports() {
+      reportsContainer.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
+
+      let query = supabase.from('content_reports').select('*').order('created_at', { ascending: false });
+
+      const status = reportStatusFilter.value;
+      const targetType = reportTargetTypeFilter.value;
+
+      if (status !== 'all') query = query.eq('status', status);
+      if (targetType !== 'all') query = query.eq('target_type', targetType);
+
+      const { data: reports, error } = await query;
+
+      if (error) {
+        reportsContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      if (!reports || reports.length === 0) {
+        reportsContainer.innerHTML = '';
+        reportsEmptyState.style.display = 'flex';
+        return;
+      }
+
+      reportsEmptyState.style.display = 'none';
+
+      // target_type + target_id অনুযায়ী গ্রুপ করা
+      const groups = {};
+      reports.forEach((r) => {
+        const key = `${r.target_type}:${r.target_id}`;
+        if (!groups[key]) groups[key] = { target_type: r.target_type, target_id: r.target_id, reports: [] };
+        groups[key].reports.push(r);
+      });
+      const groupList = Object.values(groups);
+
+      // রিপোর্টকারীদের প্রোফাইল ফেচ
+      const reporterIds = [...new Set(reports.map((r) => r.user_id))];
+      const { data: reporterProfiles } = reporterIds.length
+        ? await supabase.from('profiles').select('id, full_name, phone').in('id', reporterIds)
+        : { data: [] };
+      const reporterMap = Object.fromEntries((reporterProfiles || []).map((p) => [p.id, p]));
+
+      // টার্গেট ইনফো ফেচ (৩ সোর্স)
+      const listingIds = groupList.filter((g) => g.target_type === 'listing').map((g) => g.target_id);
+      const profileIds = groupList.filter((g) => g.target_type === 'blood_profile').map((g) => g.target_id);
+      const manualIds = groupList.filter((g) => g.target_type === 'blood_manual').map((g) => g.target_id);
+
+      const [listingsRes, profilesRes, manualRes] = await Promise.all([
+        listingIds.length ? supabase.from('listings').select('id, title, category, user_id, is_disabled').in('id', listingIds) : Promise.resolve({ data: [] }),
+        profileIds.length ? supabase.from('profiles').select('id, full_name, phone, donor_disabled').in('id', profileIds) : Promise.resolve({ data: [] }),
+        manualIds.length ? supabase.from('manual_blood_donors').select('id, name, phone, status').in('id', manualIds) : Promise.resolve({ data: [] }),
+      ]);
+
+      const listingMap = Object.fromEntries((listingsRes.data || []).map((l) => [l.id, l]));
+      const profileMap = Object.fromEntries((profilesRes.data || []).map((p) => [p.id, p]));
+      const manualMap = Object.fromEntries((manualRes.data || []).map((m) => [m.id, m]));
+
+      reportsContainer.innerHTML = '';
+      groupList.forEach((group) => {
+        const targetInfo = resolveTargetInfo(group.target_type, group.target_id, listingMap, profileMap, manualMap);
+        reportsContainer.appendChild(renderReportGroupCard(group, targetInfo, reporterMap));
+      });
+    }
+
+    reportStatusFilter.addEventListener('change', loadReports);
+    reportTargetTypeFilter.addEventListener('change', loadReports);
+
+    // ============================================================
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadListings();
+      refreshReportsBadge();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
