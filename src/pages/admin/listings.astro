@@ -3,6 +3,9 @@
 // পেজ: অ্যাডমিন — লিস্টিং ম্যানেজমেন্ট (/admin/listings)
 // ট্যাব ১: সব ক্যাটাগরির লিস্টিং (listings টেবিল)
 // ট্যাব ২: ম্যানুয়াল ব্লাড ডোনার রিভিউ (manual_blood_donors টেবিল)
+// ট্যাব ৩ (নতুন): অভিযোগ/রিপোর্ট (content_reports টেবিল) — লাইক/
+//        রিপোর্ট সিস্টেম থেকে আসা অভিযোগ, target_type অনুযায়ী
+//        listings/profiles/manual_blood_donors তিনটা সোর্সকেই কাভার করে
 // ============================================================
 
 export const prerender = false;
@@ -35,6 +38,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         <div class="tab-switcher">
           <button class="tab-btn active" data-tab="listings">লিস্টিং</button>
           <button class="tab-btn" data-tab="blood">ব্লাড ডোনার (ম্যানুয়াল)</button>
+          <button class="tab-btn" data-tab="reports">রিপোর্ট <span id="reportsBadge" class="tab-badge" style="display:none;"></span></button>
         </div>
 
         <!-- ===== ট্যাব ১: লিস্টিং ===== -->
@@ -98,6 +102,32 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
           <div id="bloodEmptyState" class="empty-state" style="display:none;">
             <i class="fas fa-droplet"></i>
             <p>কোনো ডোনার পাওয়া যায়নি</p>
+          </div>
+        </div>
+
+        <!-- ===== ট্যাব ৩ (নতুন): রিপোর্ট/অভিযোগ ===== -->
+        <div id="reportsTab" class="tab-panel" style="display:none;">
+          <div class="filter-bar">
+            <select id="reportStatusFilter" class="filter-select">
+              <option value="pending">পেন্ডিং (একশন বাকি)</option>
+              <option value="dismissed">সক্রিয় করা হয়েছে</option>
+              <option value="resolved">সমাধান হয়েছে (ডিলিট)</option>
+              <option value="all">সব স্ট্যাটাস</option>
+            </select>
+
+            <select id="reportTargetTypeFilter" class="filter-select">
+              <option value="all">সব ধরনের কন্টেন্ট</option>
+              <option value="listing">লিস্টিং</option>
+              <option value="blood_profile">ব্লাড ডোনার (রেজিস্টার্ড)</option>
+              <option value="blood_manual">ব্লাড ডোনার (ম্যানুয়াল)</option>
+            </select>
+          </div>
+
+          <div id="reportsContainer" class="listings-container"></div>
+
+          <div id="reportsEmptyState" class="empty-state" style="display:none;">
+            <i class="fas fa-flag"></i>
+            <p>কোনো রিপোর্ট পাওয়া যায়নি</p>
           </div>
         </div>
 
@@ -175,6 +205,9 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     }
 
     .tab-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       background: none;
       border: none;
       padding: 10px 18px;
@@ -189,6 +222,15 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     .tab-btn.active {
       color: #FF6B35;
       border-bottom-color: #FF6B35;
+    }
+
+    .tab-badge {
+      background: #D14343;
+      color: #fff;
+      font-size: 0.68rem;
+      font-weight: 800;
+      padding: 1px 7px;
+      border-radius: 20px;
     }
 
     .filter-bar {
@@ -299,20 +341,26 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     const tabButtons = document.querySelectorAll('.tab-btn');
     const listingsTab = document.getElementById('listingsTab');
     const bloodTab = document.getElementById('bloodTab');
+    const reportsTab = document.getElementById('reportsTab');
 
     tabButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         tabButtons.forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
 
+        listingsTab.style.display = 'none';
+        bloodTab.style.display = 'none';
+        reportsTab.style.display = 'none';
+
         if (btn.dataset.tab === 'listings') {
           listingsTab.style.display = 'block';
-          bloodTab.style.display = 'none';
           loadListings();
-        } else {
-          listingsTab.style.display = 'none';
+        } else if (btn.dataset.tab === 'blood') {
           bloodTab.style.display = 'block';
           loadBloodDonors();
+        } else {
+          reportsTab.style.display = 'block';
+          loadReports();
         }
       });
     });
@@ -425,6 +473,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
               ${!listing.is_reviewed ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#FF6B35;color:#fff;">নতুন</span>` : ''}
               <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${status.bg};color:${status.color};">${status.text}</span>
               ${listing.is_verified ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#E8F2FF;color:#1D6FE0;"><i class="fas fa-circle-check"></i> ভ্যারিফাইড</span>` : ''}
+              ${listing.is_disabled ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#FFF0EA;color:#D14343;"><i class="fas fa-flag"></i> রিপোর্টেড</span>` : ''}
             </span>
           </div>
           <p style="font-size:0.82rem;color:#8FA0BC;margin-top:4px;">
@@ -649,6 +698,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       pending: { text: 'রিভিউ বাকি', bg: '#FFF3E0', color: '#B36B00' },
       active: { text: 'সক্রিয়', bg: '#EAFBF0', color: '#1B7A3C' },
       rejected: { text: 'বাতিল', bg: '#FFF0EA', color: '#D14343' },
+      disabled: { text: 'রিপোর্টেড (ডিসেবল)', bg: '#FFF0EA', color: '#D14343' },
     };
 
     let selectedDonorIds = new Set();
@@ -870,10 +920,131 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     bloodUpazilaFilter.addEventListener('change', loadBloodDonors);
 
     // ============================================================
-    window.addEventListener('smartfeni:admin-ready', () => {
-      loadListings();
-    });
+    // ট্যাব ৩ (নতুন): রিপোর্ট/অভিযোগ (content_reports)
+    // ============================================================
+    const reportsContainer = document.getElementById('reportsContainer');
+    const reportsEmptyState = document.getElementById('reportsEmptyState');
+    const reportStatusFilter = document.getElementById('reportStatusFilter');
+    const reportTargetTypeFilter = document.getElementById('reportTargetTypeFilter');
+    const reportsBadge = document.getElementById('reportsBadge');
 
-    initAdminGuard();
-  </script>
-</BaseLayout>
+    const reasonLabelMap = {
+      unavailable: 'এভেইলেবল না / প্রবাসে',
+      behavior: 'আচরণ খারাপ',
+      wrong_info: 'ভুল তথ্য',
+      sold: 'বিক্রি হয়ে গেছে',
+      rented: 'ভাড়া হয়ে গেছে',
+      other: 'অন্যান্য',
+    };
+
+    const targetTypeLabels = {
+      listing: 'লিস্টিং',
+      blood_profile: 'ব্লাড ডোনার (রেজিস্টার্ড)',
+      blood_manual: 'ব্লাড ডোনার (ম্যানুয়াল)',
+    };
+
+    // পেন্ডিং রিপোর্ট সংখ্যা ট্যাবে ব্যাজ হিসেবে দেখানোর জন্য (শুধু একবার, পেজ লোডে)
+    async function refreshReportsBadge() {
+      const { count } = await supabase
+        .from('content_reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      if (count && count > 0) {
+        reportsBadge.textContent = count;
+        reportsBadge.style.display = 'inline-block';
+      } else {
+        reportsBadge.style.display = 'none';
+      }
+    }
+
+    function resolveTargetInfo(targetType, targetId, listingMap, profileMap, manualMap) {
+      if (targetType === 'listing') {
+        const l = listingMap[targetId];
+        if (!l) return { title: '(লিস্টিং পাওয়া যায়নি — ডিলিট হয়ে থাকতে পারে)', subtitle: '', ownerUserId: null, isActive: false, notFound: true };
+        return {
+          title: l.title || '(শিরোনামহীন)',
+          subtitle: categoryNameMap[l.category] || l.category,
+          ownerUserId: l.user_id || null,
+          isDisabled: !!l.is_disabled,
+          notFound: false,
+        };
+      }
+      if (targetType === 'blood_profile') {
+        const p = profileMap[targetId];
+        if (!p) return { title: '(প্রোফাইল পাওয়া যায়নি)', subtitle: '', ownerUserId: null, isDisabled: false, notFound: true };
+        return {
+          title: p.full_name || '(নাম নাই)',
+          subtitle: `রক্তদাতা · ${p.phone || ''}`,
+          ownerUserId: p.id,
+          isDisabled: !!p.donor_disabled,
+          notFound: false,
+        };
+      }
+      if (targetType === 'blood_manual') {
+        const m = manualMap[targetId];
+        if (!m) return { title: '(ডোনার পাওয়া যায়নি — ডিলিট হয়ে থাকতে পারে)', subtitle: '', ownerUserId: null, isDisabled: false, notFound: true };
+        return {
+          title: m.name || '(নাম নাই)',
+          subtitle: `রক্তদাতা (ম্যানুয়াল) · ${m.phone || ''}`,
+          ownerUserId: null,
+          isDisabled: m.status === 'disabled',
+          notFound: false,
+        };
+      }
+      return { title: targetId, subtitle: '', ownerUserId: null, isDisabled: false, notFound: true };
+    }
+
+    function renderReportGroupCard(group, targetInfo, reporterMap) {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;flex-direction:column;gap:12px;';
+
+      const reportRows = group.reports
+        .map((r) => {
+          const reporter = reporterMap[r.user_id];
+          const reasonText = reasonLabelMap[r.reason_category] || r.reason_category;
+          return `
+            <div style="padding:10px 12px;background:#F8FAFC;border-radius:12px;font-size:0.82rem;color:#1B2A4A;">
+              <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                <span style="font-weight:700;">${escapeHtml(reporter?.full_name || 'অজানা ইউজার')} ${reporter?.phone ? `· ${escapeHtml(reporter.phone)}` : ''}</span>
+                <span style="color:#8FA0BC;font-size:0.75rem;">${formatDate(r.created_at)}</span>
+              </div>
+              <div style="margin-top:4px;color:#D14343;font-weight:700;">${escapeHtml(reasonText)}</div>
+              ${r.reason_details ? `<div style="margin-top:2px;color:#5A6E85;">${escapeHtml(r.reason_details)}</div>` : ''}
+            </div>
+          `;
+        })
+        .join('');
+
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          <div>
+            <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:#F4F7FC;color:#5A6E85;">${targetTypeLabels[group.target_type] || group.target_type}</span>
+            <h3 style="font-size:1rem;font-weight:700;color:#1B2A4A;margin-top:6px;">${escapeHtml(targetInfo.title)}</h3>
+            ${targetInfo.subtitle ? `<p style="font-size:0.82rem;color:#8FA0BC;">${escapeHtml(targetInfo.subtitle)}</p>` : ''}
+          </div>
+          <span style="font-size:0.75rem;font-weight:800;padding:4px 12px;border-radius:20px;background:#FFF0EA;color:#D14343;white-space:nowrap;">
+            ${group.reports.length} টা অভিযোগ
+          </span>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">${reportRows}</div>
+
+        <div class="report-actions" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+      `;
+
+      const actionsWrap = card.querySelector('.report-actions');
+
+      if (!targetInfo.notFound) {
+        if (targetInfo.isDisabled) {
+          const activateBtn = document.createElement('button');
+          activateBtn.textContent = 'সক্রিয় করুন';
+          activateBtn.style.cssText = 'background:#1B7A3C;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+          activateBtn.addEventListener('click', () => activateTarget(group));
+          actionsWrap.appendChild(activateBtn);
+        }
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = group.target_type === 'blood_profile' ? 'তালিকা থেকে বাদ দিন' : 'ডিলিট করুন';
+        deleteBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        let confirming
