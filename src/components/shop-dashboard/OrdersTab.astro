@@ -1,0 +1,283 @@
+---
+// ============================================================
+// কম্পোনেন্ট: OrdersTab (shop-dashboard) — অর্ডার হিস্ট্রি ও
+// স্ট্যাটাস ট্র্যাকিং (৩০ দিনের হিস্ট্রি)
+// Pending → Confirmed → Delivered (+ যেকোনো ধাপ থেকে Cancel)
+// প্যারেন্ট পেজ থেকে 'smartfeni:shop-ready' ইভেন্ট দিয়ে shopId পায়।
+// ============================================================
+---
+
+<div class="dash-card">
+  <h3><i class="fas fa-receipt"></i> অর্ডার (গত ৩০ দিন)</h3>
+
+  <div id="ordersContainer" class="orders-list"></div>
+
+  <div id="emptyOrders" class="empty-note" style="display:none;">
+    <i class="fas fa-inbox" style="font-size:1.6rem; color:#D7E0EC; display:block; margin-bottom:8px;"></i>
+    গত ৩০ দিনে কোনো অর্ডার আসেনি
+  </div>
+</div>
+
+<style is:global>
+  .orders-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .order-card {
+    background: #FBFCFE;
+    border: 1px solid #EEF3F9;
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .order-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+
+  .order-customer-name {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
+  .order-date {
+    font-size: 0.72rem;
+    color: #9AA8BC;
+    margin-top: 2px;
+  }
+
+  .status-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  .status-pending {
+    background: #FFF4E0;
+    color: #B8860B;
+  }
+
+  .status-confirmed {
+    background: #EAF2FF;
+    color: #2563EB;
+  }
+
+  .status-delivered {
+    background: #EAFBF0;
+    color: #1B7A3C;
+  }
+
+  .status-cancelled {
+    background: #FFF0EA;
+    color: #D14343;
+  }
+
+  .order-contact-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .order-contact-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px;
+    border-radius: 9px;
+    text-decoration: none;
+    font-size: 0.76rem;
+    font-weight: 700;
+  }
+
+  .order-call-btn {
+    background: #EAF2FF;
+    color: #2563EB;
+  }
+
+  .order-wa-btn {
+    background: #E9F9EF;
+    color: #1EA952;
+  }
+
+  .order-address {
+    font-size: 0.78rem;
+    color: #5A6E85;
+    margin-bottom: 10px;
+  }
+
+  .order-address i {
+    color: #FF6B35;
+    margin-right: 4px;
+  }
+
+  .order-items-list {
+    background: #fff;
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+  }
+
+  .order-item-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    color: #3A4A60;
+    padding: 3px 0;
+  }
+
+  .order-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .order-actions button {
+    flex: 1;
+    border: none;
+    padding: 9px;
+    border-radius: 10px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .btn-confirm-order {
+    background: #EAF2FF;
+    color: #2563EB;
+  }
+
+  .btn-deliver-order {
+    background: #EAFBF0;
+    color: #1B7A3C;
+  }
+
+  .btn-cancel-order {
+    background: #FFF0EA;
+    color: #D14343;
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const ordersContainer = document.getElementById('ordersContainer');
+  const emptyOrders = document.getElementById('emptyOrders');
+
+  let currentShopId = null;
+
+  const STATUS_LABELS = {
+    pending: 'পেন্ডিং',
+    confirmed: 'কনফার্মড',
+    delivered: 'ডেলিভার্ড',
+    cancelled: 'বাতিল',
+  };
+
+  function formatDate(iso) {
+    return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function loadOrders() {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, order_items(*)')
+      .eq('shop_id', currentShopId)
+      .gte('created_at', thirtyDaysAgo)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('অর্ডার লোড এরর:', error.message);
+      return;
+    }
+
+    renderOrders(data || []);
+  }
+
+  function renderOrders(orders) {
+    ordersContainer.innerHTML = '';
+
+    if (orders.length === 0) {
+      emptyOrders.style.display = 'block';
+      return;
+    }
+    emptyOrders.style.display = 'none';
+
+    orders.forEach((order) => {
+      const card = document.createElement('div');
+      card.className = 'order-card';
+
+      const itemsHtml = (order.order_items || [])
+        .map((it) => `<div class="order-item-line"><span>${it.title || ''} × ${it.quantity}</span><span>৳${it.price || 0}</span></div>`)
+        .join('');
+
+      let actionsHtml = '';
+      if (order.status === 'pending') {
+        actionsHtml = `
+          <div class="order-actions">
+            <button class="btn-confirm-order"><i class="fas fa-check"></i> কনফার্ম করুন</button>
+            <button class="btn-cancel-order"><i class="fas fa-xmark"></i> বাতিল</button>
+          </div>
+        `;
+      } else if (order.status === 'confirmed') {
+        actionsHtml = `
+          <div class="order-actions">
+            <button class="btn-deliver-order"><i class="fas fa-truck"></i> ডেলিভার্ড করুন</button>
+            <button class="btn-cancel-order"><i class="fas fa-xmark"></i> বাতিল</button>
+          </div>
+        `;
+      }
+
+      card.innerHTML = `
+        <div class="order-top-row">
+          <div>
+            <p class="order-customer-name">${order.customer_name || ''}</p>
+            <p class="order-date">${formatDate(order.created_at)}</p>
+          </div>
+          <span class="status-badge status-${order.status}">${STATUS_LABELS[order.status] || order.status}</span>
+        </div>
+
+        <div class="order-contact-row">
+          <a href="tel:${order.customer_phone}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> কল করুন</a>
+          <a href="https://wa.me/${(order.customer_phone || '').replace(/\D/g, '')}" target="_blank" rel="noopener" class="order-contact-btn order-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
+        </div>
+
+        ${order.customer_address ? `<p class="order-address"><i class="fas fa-map-pin"></i> ${order.customer_address}</p>` : ''}
+
+        <div class="order-items-list">${itemsHtml}</div>
+
+        ${actionsHtml}
+      `;
+
+      card.querySelector('.btn-confirm-order')?.addEventListener('click', () => updateStatus(order.id, 'confirmed'));
+      card.querySelector('.btn-deliver-order')?.addEventListener('click', () => updateStatus(order.id, 'delivered'));
+      card.querySelector('.btn-cancel-order')?.addEventListener('click', () => {
+        if (confirm('এই অর্ডারটি বাতিল করতে চান?')) updateStatus(order.id, 'cancelled');
+      });
+
+      ordersContainer.appendChild(card);
+    });
+  }
+
+  async function updateStatus(orderId, newStatus) {
+    const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
+    if (error) {
+      alert('আপডেট ব্যর্থ: ' + error.message);
+      return;
+    }
+    loadOrders();
+  }
+
+  window.addEventListener('smartfeni:shop-ready', (e) => {
+    currentShopId = e.detail.shopId;
+    loadOrders();
+  });
+</script>
