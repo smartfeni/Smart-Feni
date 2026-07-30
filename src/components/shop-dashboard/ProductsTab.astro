@@ -1,10 +1,9 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: ProductsTab (shop-dashboard) — প্রোডাক্ট Add/Edit/Delete
-// পুরনো my-shop.astro থেকে প্রোডাক্ট CRUD লজিক হুবহু নিয়ে এসে
-// dash-card র‍্যাপারে বসানো হয়েছে। listings টেবিল এখনো user_id দিয়ে
-// কাজ করে (shops টেবিলের সাথে সরাসরি সম্পর্ক নেই, এক ওউনার = এক শপ
-// বলে user_id ই যথেষ্ট)।
+// আপডেট: প্রতি প্রোডাক্টে "বেস্ট সেলার" টগল (একজন ওউনারের একটাই
+// বেস্ট সেলার থাকতে পারবে — টগল করলে বাকিগুলো অটো unset হয়) +
+// "শেয়ার" বাটন (Web Share API, ফলব্যাক হিসেবে লিংক কপি)
 // ============================================================
 
 import AddListingModal from '../ui/AddListingModal.astro';
@@ -194,6 +193,40 @@ import AddListingModal from '../ui/AddListingModal.astro';
     margin-bottom: 12px;
   }
 
+  .product-photo-wrap {
+    position: relative;
+  }
+
+  .best-seller-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: #FFD700;
+    color: #7A5C00;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .btn-star {
+    background: #FFF7DB;
+    color: #B8860B;
+  }
+
+  .btn-star.active {
+    background: #FFD700;
+    color: #7A5C00;
+  }
+
+  .btn-share {
+    background: #EAF2FF;
+    color: #2563EB;
+  }
+
   .product-actions {
     display: flex;
     gap: 8px;
@@ -236,6 +269,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
   const emptyState = document.getElementById('emptyState');
 
   let currentUserId = null;
+  let currentShopSlug = null;
   let products = [];
 
   async function loadProducts() {
@@ -271,8 +305,15 @@ import AddListingModal from '../ui/AddListingModal.astro';
         ? `<div class="product-photo-frame"><img src="${p.images[0]}" alt="${p.title || ''}" /></div>`
         : `<div class="product-icon-frame"><i class="fas fa-box"></i></div>`;
 
+      const bestSellerBadge = p.is_best_seller
+        ? `<span class="best-seller-badge"><i class="fas fa-star"></i> বেস্ট সেলার</span>`
+        : '';
+
       card.innerHTML = `
-        ${imageHtml}
+        <div class="product-photo-wrap">
+          ${imageHtml}
+          ${bestSellerBadge}
+        </div>
         <div class="product-body">
           <p class="product-title">${p.title || ''}</p>
           ${p.price ? `<span class="product-price">৳${p.price}</span>` : ''}
@@ -280,14 +321,54 @@ import AddListingModal from '../ui/AddListingModal.astro';
             <button class="btn-edit"><i class="fas fa-pen"></i> এডিট</button>
             <button class="btn-delete"><i class="fas fa-trash"></i> ডিলিট</button>
           </div>
+          <div class="product-actions">
+            <button class="btn-star ${p.is_best_seller ? 'active' : ''}"><i class="fas fa-star"></i> ${p.is_best_seller ? 'বেস্ট সেলার' : 'বেস্ট সেলার করুন'}</button>
+            <button class="btn-share"><i class="fas fa-share-nodes"></i> শেয়ার</button>
+          </div>
         </div>
       `;
 
       card.querySelector('.btn-edit').addEventListener('click', () => openEdit(p));
       card.querySelector('.btn-delete').addEventListener('click', () => deleteProduct(p.id));
+      card.querySelector('.btn-star').addEventListener('click', () => toggleBestSeller(p));
+      card.querySelector('.btn-share').addEventListener('click', () => shareProduct(p));
 
       productsContainer.appendChild(card);
     });
+  }
+
+  async function toggleBestSeller(product) {
+    const newValue = !product.is_best_seller;
+
+    // একজন ওউনারের একটাই বেস্ট সেলার থাকতে পারবে — আগে সব unset করে
+    // তারপর টার্গেটটা set করা হয় (newValue true হলে)
+    await supabase.from('listings').update({ is_best_seller: false }).eq('user_id', currentUserId);
+
+    if (newValue) {
+      await supabase.from('listings').update({ is_best_seller: true }).eq('id', product.id);
+    }
+
+    loadProducts();
+  }
+
+  async function shareProduct(product) {
+    const url = `https://smartfeni.com/${currentShopSlug}?product=${product.id}`;
+    const shareData = {
+      title: product.title || 'প্রোডাক্ট',
+      text: `${product.title || 'প্রোডাক্ট'} — স্মার্ট ফেনী তে দেখুন`,
+      url,
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch (err) {
+        // ইউজার শেয়ার বাতিল করলে কিছু করার নেই
+      }
+    } else {
+      await navigator.clipboard.writeText(url);
+      alert('লিংক কপি হয়েছে ✓');
+    }
   }
 
   async function deleteProduct(id) {
@@ -369,6 +450,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
 
   window.addEventListener('smartfeni:shop-ready', (e) => {
     currentUserId = e.detail.shop.owner_id;
+    currentShopSlug = e.detail.shop.slug;
     loadProducts();
   });
 </script>
