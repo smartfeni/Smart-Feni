@@ -1,0 +1,170 @@
+<!-- path: src/components/club-dashboard/DonorTab.astro -->
+---
+---
+
+<div class="dash-card">
+  <h3><i class="fas fa-droplet"></i> নতুন ডোনার যোগ করুন</h3>
+  <p class="form-msg" id="donorMsg"></p>
+
+  <label class="form-label">ডোনারের নাম</label>
+  <input type="text" class="form-input" id="donorNameInput" />
+
+  <label class="form-label">ফোন নম্বর</label>
+  <input type="text" class="form-input" id="donorPhoneInput" placeholder="01xxxxxxxxx" />
+
+  <label class="form-label">ব্লাড গ্রুপ</label>
+  <select class="form-input" id="donorGroupInput">
+    <option value="A+">A+</option>
+    <option value="A-">A-</option>
+    <option value="B+">B+</option>
+    <option value="B-">B-</option>
+    <option value="AB+">AB+</option>
+    <option value="AB-">AB-</option>
+    <option value="O+">O+</option>
+    <option value="O-">O-</option>
+  </select>
+
+  <label class="form-label">উপজেলা</label>
+  <select class="form-input" id="donorUpazilaInput">
+    <option value="">— ক্লাবের উপজেলা ব্যবহার হবে —</option>
+    <option value="ফেনী সদর">ফেনী সদর</option>
+    <option value="ছাগলনাইয়া">ছাগলনাইয়া</option>
+    <option value="দাগনভূঞা">দাগনভূঞা</option>
+    <option value="পরশুরাম">পরশুরাম</option>
+    <option value="ফুলগাজী">ফুলগাজী</option>
+    <option value="সোনাগাজী">সোনাগাজী</option>
+  </select>
+
+  <button class="primary-btn" id="addDonorBtn" type="button">
+    <i class="fas fa-plus"></i> <span>যোগ করুন</span>
+  </button>
+</div>
+
+<div class="dash-card">
+  <h3><i class="fas fa-list"></i> আমার ডোনার লিস্ট</h3>
+  <div id="donorsList"></div>
+  <p class="empty-note" id="donorsEmpty" style="display:none;">কোনো ডোনার যোগ করা হয়নি</p>
+</div>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let clubId = null;
+  let clubUpazilaLabel = null;
+  let allDonors = [];
+
+  const UPAZILA_LABELS = {
+    'feni-sadar': 'ফেনী সদর',
+    'chhagalnaiya': 'ছাগলনাইয়া',
+    'daganbhuiyan': 'দাগনভূঞা',
+    'parshuram': 'পরশুরাম',
+    'fulgazi': 'ফুলগাজী',
+    'sonagazi': 'সোনাগাজী',
+  };
+
+  const msgEl = document.getElementById('donorMsg');
+  function showMsg(text, type = 'error') {
+    msgEl.textContent = text;
+    msgEl.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
+  }
+
+  document.getElementById('addDonorBtn')?.addEventListener('click', async () => {
+    const name = document.getElementById('donorNameInput').value.trim();
+    const phone = document.getElementById('donorPhoneInput').value.trim();
+    const bloodGroup = document.getElementById('donorGroupInput').value;
+    const selectedUpazila = document.getElementById('donorUpazilaInput').value;
+
+    if (!name || !phone) {
+      showMsg('নাম ও ফোন নম্বর দিন');
+      return;
+    }
+
+    const btn = document.getElementById('addDonorBtn');
+    const span = btn.querySelector('span');
+    span.textContent = 'যোগ হচ্ছে...';
+    btn.disabled = true;
+
+    const { error } = await supabase.from('manual_blood_donors').upsert(
+      {
+        name,
+        phone,
+        blood_group: bloodGroup,
+        upazila: selectedUpazila || clubUpazilaLabel,
+        club_id: clubId,
+        status: 'active',
+        source: 'club-owner',
+      },
+      { onConflict: 'phone' }
+    );
+
+    span.textContent = 'যোগ করুন';
+    btn.disabled = false;
+
+    if (error) {
+      showMsg('যোগ করতে ব্যর্থ: ' + error.message);
+      return;
+    }
+
+    showMsg('ডোনার যোগ হয়েছে ✓', 'success');
+    document.getElementById('donorNameInput').value = '';
+    document.getElementById('donorPhoneInput').value = '';
+    document.getElementById('donorUpazilaInput').value = '';
+
+    loadDonors();
+  });
+
+  function renderDonors() {
+    const container = document.getElementById('donorsList');
+    const emptyEl = document.getElementById('donorsEmpty');
+
+    container.innerHTML = '';
+    if (allDonors.length === 0) {
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    allDonors.forEach((d) => {
+      const card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML = `
+        <div class="item-photo-placeholder"><i class="fas fa-droplet"></i></div>
+        <div class="item-body">
+          <p class="item-title">${d.name} — ${d.blood_group}</p>
+          <p class="item-sub">${d.phone} ${d.upazila ? '· ' + d.upazila : ''}</p>
+        </div>
+        <div class="item-actions">
+          <button class="icon-btn delete"><i class="fas fa-trash"></i></button>
+        </div>
+      `;
+      card.querySelector('.delete').addEventListener('click', () => deleteDonor(d.id));
+      container.appendChild(card);
+    });
+  }
+
+  async function deleteDonor(id) {
+    if (!confirm('এই ডোনার এন্ট্রিটি মুছে ফেলতে চান?')) return;
+    const { error } = await supabase.from('manual_blood_donors').delete().eq('id', id);
+    if (error) {
+      alert('ডিলিট ব্যর্থ: ' + error.message);
+      return;
+    }
+    loadDonors();
+  }
+
+  async function loadDonors() {
+    const { data } = await supabase
+      .from('manual_blood_donors')
+      .select('*')
+      .eq('club_id', clubId)
+      .order('created_at', { ascending: false });
+    allDonors = data || [];
+    renderDonors();
+  }
+
+  window.addEventListener('smartfeni:club-ready', (e) => {
+    clubId = e.detail.clubId;
+    clubUpazilaLabel = UPAZILA_LABELS[e.detail.club.upajila] || null;
+    loadDonors();
+  });
+</script>
