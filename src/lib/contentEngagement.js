@@ -2,21 +2,34 @@
 // শেয়ারড লজিক: লাইক টগল + অভিযোগ (রিপোর্ট) সাবমিট + কাউন্ট ফেচ
 // যেকোনো কন্টেন্ট টাইপে কাজ করে (target_type: 'listing' | 'blood_profile' | 'blood_manual')
 // ব্যবহার (পেজের <script>-এ):
-//   import { fetchLikeData, toggleLike, submitReport, requireAuth } from '../../lib/contentEngagement.js';
+//   import { fetchLikeData, toggleLike, submitReport, isLoggedIn } from '../../lib/contentEngagement.js';
+//
+// আপডেট: requireAuth() এখন সরাসরি window.openAuthModal() কল করে
+// (AuthModal.astro-তে এটাই গ্লোবাল ওপেন ফাংশন হিসেবে এক্সপোজ করা আছে) —
+// আলাদা কাস্টম ইভেন্ট লাগবে না।
 // ============================================================
 
 import { supabase } from './supabase.js';
 
 /**
- * লগইন চেক করে। লগইন না থাকলে গ্লোবাল ইভেন্ট ছোড়ে যাতে হেডারের
- * AuthModal ওপেন করা যায় — পেজে ইতিমধ্যে যেভাবে অথ-মডাল ট্রিগার করা
- * হয় সেটার সাথে এই ইভেন্ট নাম মিলিয়ে নিতে হবে (নিচে নোট দেখুন)।
- * @returns {Promise<object|null>} logged-in user অথবা null
+ * বর্তমানে কেউ লগইন করা আছে কিনা চেক করে।
+ * @returns {Promise<boolean>}
+ */
+export async function isLoggedIn() {
+  const { data: { user } } = await supabase.auth.getUser();
+  return !!user;
+}
+
+/**
+ * লগইন চেক করে। লগইন না থাকলে AuthModal খুলে দেয়।
+ * @returns {Promise<object|null>} লগইন করা user অথবা null
  */
 export async function requireAuth() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    window.dispatchEvent(new CustomEvent('smartfeni:auth-required'));
+    if (typeof window.openAuthModal === 'function') {
+      window.openAuthModal('login');
+    }
     return null;
   }
   return user;
@@ -24,7 +37,8 @@ export async function requireAuth() {
 
 /**
  * একগুচ্ছ target_id এর জন্য একবারে লাইক কাউন্ট + বর্তমান ইউজার
- * কোনগুলো লাইক করেছে তা ফেচ করে।
+ * কোনগুলো লাইক করেছে তা ফেচ করে। লগইন না থাকলে likedByMe খালি থাকবে,
+ * কিন্তু counts ঠিকই পাওয়া যাবে (ভিউ-অনলি প্রিভিউ এর জন্য)।
  * @param {string} targetType
  * @param {string[]} targetIds
  * @returns {Promise<{counts: Record<string, number>, likedByMe: Set<string>}>}
@@ -56,6 +70,7 @@ export async function fetchLikeData(targetType, targetIds) {
 
 /**
  * লাইক টগল করে (আগে থেকে লাইক থাকলে তুলে নেয়, না থাকলে যোগ করে)।
+ * লগইন না থাকলে AuthModal খুলে যাবে এবং { error: 'auth_required' } রিটার্ন করবে।
  * @param {string} targetType
  * @param {string} targetId
  * @returns {Promise<{liked: boolean}|{error: string}>}
@@ -88,6 +103,7 @@ export async function toggleLike(targetType, targetId) {
 /**
  * অভিযোগ (রিপোর্ট) সাবমিট করে — DB-এর RPC ফাংশন কল করে, যেটা
  * নিজেই কাউন্ট চেক করে ৩+ হলে অটো-ডিজেবল আর নোটিফিকেশন পাঠায়।
+ * লগইন না থাকলে AuthModal খুলে যাবে।
  * @param {string} targetType
  * @param {string} targetId
  * @param {string} reasonCategory
