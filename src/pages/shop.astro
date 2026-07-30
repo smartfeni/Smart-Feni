@@ -1,293 +1,449 @@
 ---
 // ============================================================
-// পেজ: /shop — সব শপের লিস্টিং (আগে ছিল services/online-shop.astro)
-// এখন shops টেবিল থেকে ডেটা আসে, প্রতিটা কার্ড /{slug} তে যায়
-// (top-level slug রুট, club এর মতো)
+// পেজ: /shop — সব শপের লিস্টিং (Club ডিরেক্টরির কার্ড-প্যাটার্নে,
+// কিন্তু শপ-স্পেসিফিক ইনফো: প্রোডাক্ট কাউন্ট, বাজার/এলাকার নাম)
+// আগে ছিল services/online-shop.astro তে, এখন এখানে সরে এসেছে।
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
-import { supabase } from '../lib/supabase.js';
-
-const { data: shopsData, error: shopsError } = await supabase
-  .from('shops')
-  .select('id, name, slug, tagline, logo_image, owner_id')
-  .eq('is_active', true)
-  .order('shop_order', { ascending: true });
-
-if (shopsError) {
-  console.error('shop fetch error:', shopsError.message);
-}
-
-const shops = shopsData || [];
-
-// প্রতিটা শপের প্রোডাক্ট সংখ্যা গণনা
-let productCounts = {};
-if (shops.length > 0) {
-  const { data: allProducts } = await supabase
-    .from('listings')
-    .select('user_id')
-    .eq('category', 'online-shop')
-    .eq('status', 'active');
-
-  (allProducts || []).forEach((p) => {
-    productCounts[p.user_id] = (productCounts[p.user_id] || 0) + 1;
-  });
-}
 ---
 
 <BaseLayout title="অনলাইন শপ | স্মার্ট ফেনী">
-  <section class="page-header">
+  <div class="shops-page">
     <div class="container">
-      <span class="section-tag"><i class="fas fa-store"></i> অনলাইন শপ</span>
-      <h1>ফেনীর <span class="accent">অনলাইন বাজার</span></h1>
-      <p>নিবন্ধিত শপ থেকে পণ্য দেখুন, পছন্দ হলে সরাসরি কল করে অর্ডার করুন</p>
-    </div>
-  </section>
 
-  <section class="shop-section">
-    <div class="container">
-      <div class="search-box">
-        <i class="fas fa-magnifying-glass"></i>
-        <input type="text" id="searchInput" placeholder="শপের নাম খুঁজুন..." />
+      <div class="page-header">
+        <h1><i class="fas fa-store"></i> ফেনীর অনলাইন শপ</h1>
+        <p>নিবন্ধিত শপ থেকে পণ্য দেখুন, কার্টে যোগ করুন বা সরাসরি কল করে অর্ডার করুন</p>
       </div>
 
-      {shops.length === 0 ? (
-        <div class="empty-state">
-          <i class="fas fa-store-slash"></i>
-          <p>এখনো কোনো শপ নিবন্ধিত হয়নি</p>
-          <span>শীঘ্রই নতুন শপ যুক্ত হবে</span>
-        </div>
-      ) : (
-        <>
-          <div class="shop-grid" id="shopGrid">
-            {shops.map((shop) => (
-              <a
-                href={`/${shop.slug}`}
-                class="shop-card"
-                data-search={(shop.name || '').toLowerCase()}
-              >
-                {shop.logo_image ? (
-                  <img src={shop.logo_image} alt={shop.name} class="shop-photo" />
-                ) : (
-                  <div class="shop-icon">
-                    <i class="fas fa-store"></i>
-                  </div>
-                )}
+      <div class="shop-search-box" id="shopSearchBox">
+        <i class="fas fa-search"></i>
+        <input
+          type="text"
+          id="shopSearchInput"
+          placeholder="যে শপটি খুঁজছেন, তার নাম লিখুন..."
+          autocomplete="off"
+        />
+      </div>
 
-                <div class="shop-card-body">
-                  <h3 class="shop-title">{shop.name}</h3>
-                  {shop.tagline && <p class="shop-tagline">{shop.tagline}</p>}
-                  <p class="product-count">
-                    <i class="fas fa-box"></i> {productCounts[shop.owner_id] || 0} টি প্রোডাক্ট
-                  </p>
-                </div>
-              </a>
-            ))}
-          </div>
+      <div id="shopsGrid" class="shops-grid"></div>
 
-          <p class="no-results" id="noResults" style="display:none;">কোনো ফলাফল পাওয়া যায়নি</p>
-        </>
-      )}
+      <div id="loadingState" class="state-msg">
+        <div class="spinner"></div>
+        <p>লোড হচ্ছে...</p>
+      </div>
+
+      <div id="emptyState" class="state-msg" style="display:none;">
+        <i class="fas fa-store-slash"></i>
+        <p>এই নামে কোনো শপ পাওয়া যায়নি</p>
+      </div>
+
     </div>
-  </section>
-</BaseLayout>
+  </div>
 
-<style>
-  .page-header {
-    padding: 60px 0 30px;
-    background: #fff;
-    text-align: center;
-  }
-
-  .page-header h1 {
-    font-size: 2.2rem;
-    font-weight: 700;
-    margin: 12px 0 8px;
-  }
-
-  .page-header .accent {
-    color: #FF6B35;
-  }
-
-  .page-header p {
-    color: #5A6E85;
-    font-size: 1.05rem;
-    margin-bottom: 20px;
-  }
-
-  .shop-section {
-    padding: 30px 0 70px;
-    background: #F8FAFC;
-  }
-
-  .search-box {
-    max-width: 480px;
-    margin: 0 auto 32px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #fff;
-    border: 1px solid #EEF3F9;
-    border-radius: 40px;
-    padding: 12px 20px;
-  }
-
-  .search-box i {
-    color: #A0AFC0;
-  }
-
-  .search-box input {
-    border: none;
-    outline: none;
-    flex: 1;
-    font-size: 0.9rem;
-    font-family: inherit;
-    background: transparent;
-    color: #1B2A4A;
-  }
-
-  .empty-state {
-    text-align: center;
-    background: #fff;
-    border-radius: 20px;
-    padding: 50px 24px;
-    border: 1px dashed #E5EAF0;
-  }
-
-  .empty-state i {
-    font-size: 2rem;
-    color: #D7E0EC;
-    margin-bottom: 12px;
-  }
-
-  .empty-state p {
-    font-weight: 700;
-    color: #1B2A4A;
-    margin-bottom: 4px;
-  }
-
-  .empty-state span {
-    color: #8FA0BC;
-    font-size: 0.85rem;
-  }
-
-  .shop-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 18px;
-  }
-
-  .shop-card {
-    background: #fff;
-    border-radius: 18px;
-    border: 1px solid #EEF3F9;
-    overflow: hidden;
-    text-decoration: none;
-    display: block;
-    transition: all 0.2s ease;
-  }
-
-  .shop-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
-  }
-
-  .shop-card.hidden {
-    display: none;
-  }
-
-  .shop-icon {
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    background: #FFF0EA;
-    color: #FF6B35;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 2rem;
-  }
-
-  .shop-photo {
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    object-fit: contain;
-    object-position: center;
-    display: block;
-    background: #F4F7FC;
-  }
-
-  .shop-card-body {
-    padding: 16px;
-  }
-
-  .shop-title {
-    font-size: 1rem;
-    font-weight: 700;
-    color: #1B2A4A;
-    margin-bottom: 4px;
-  }
-
-  .shop-tagline {
-    font-size: 0.8rem;
-    color: #5A6E85;
-    margin-bottom: 10px;
-    line-height: 1.4;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-  }
-
-  .product-count {
-    font-size: 0.75rem;
-    color: #8FA0BC;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .product-count i {
-    color: #FF6B35;
-  }
-
-  .no-results {
-    text-align: center;
-    color: #A0AFC0;
-    font-size: 0.95rem;
-    padding: 40px 0;
-  }
-
-  @media (max-width: 768px) {
-    .page-header h1 {
-      font-size: 1.7rem;
+  <style>
+    .shops-page {
+      min-height: 70vh;
+      padding: 40px 0 80px;
     }
-  }
-</style>
 
-<script>
-  const cards = document.querySelectorAll('.shop-card');
-  const searchInput = document.getElementById('searchInput');
-  const noResults = document.getElementById('noResults');
+    .page-header {
+      margin-bottom: 24px;
+    }
 
-  searchInput?.addEventListener('input', () => {
-    const keyword = searchInput.value.trim().toLowerCase();
-    let visibleCount = 0;
+    .page-header h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
 
-    cards.forEach((card) => {
-      const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
-      if (matches) {
-        card.classList.remove('hidden');
-        visibleCount++;
-      } else {
-        card.classList.add('hidden');
+    .page-header h1 i {
+      color: #FF6B35;
+    }
+
+    .page-header p {
+      font-size: 0.95rem;
+      color: #5A6E85;
+      margin-top: 6px;
+    }
+
+    .shop-search-box {
+      position: relative;
+      margin-bottom: 24px;
+      scroll-margin-top: 96px;
+    }
+
+    .shop-search-box i {
+      position: absolute;
+      left: 18px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #B0BCCB;
+      font-size: 0.95rem;
+    }
+
+    .shop-search-box input {
+      width: 100%;
+      padding: 14px 18px 14px 46px;
+      border-radius: 40px;
+      border: 1.5px solid #E5EAF0;
+      background: #fff;
+      font-size: 0.92rem;
+      font-family: inherit;
+      color: #1B2A4A;
+      transition: all 0.2s ease;
+    }
+
+    .shop-search-box input:focus {
+      outline: none;
+      border-color: #FF6B35;
+      box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
+    }
+
+    .state-msg {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 60px 0;
+      color: #B0BCCB;
+      text-align: center;
+    }
+
+    .state-msg i {
+      font-size: 2.4rem;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+
+  <style is:global>
+    .shops-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .shop-card {
+      position: relative;
+      background: #fff;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      text-decoration: none;
+      display: block;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .shop-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+    }
+
+    .shop-cover-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 21/9;
+      background: #F4F7FC;
+    }
+
+    .shop-cover-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .shop-cover-placeholder {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #FFF0EA, #F4F7FC);
+    }
+
+    .my-shop-badge {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      z-index: 3;
+      background: #1B2A4A;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 40px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .my-shop-badge i {
+      color: #FFD166;
+      font-size: 0.7rem;
+    }
+
+    .shop-logo-row {
+      display: flex;
+      align-items: flex-end;
+      margin-top: -30px;
+      padding: 0 16px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .shop-logo-img,
+    .shop-logo-placeholder {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      border: 3px solid #fff;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+      flex-shrink: 0;
+      background: #fff;
+    }
+
+    .shop-logo-img {
+      object-fit: cover;
+      display: block;
+    }
+
+    .shop-logo-placeholder {
+      color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+    }
+
+    .shop-body {
+      padding: 10px 16px 18px;
+    }
+
+    .shop-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      line-height: 1.3;
+    }
+
+    .shop-name .verified-badge {
+      color: #2563EB;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+
+    .shop-tagline-text {
+      font-size: 0.82rem;
+      color: #5A6E85;
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
+      -webkit-box-orient: vertical;
+    }
+
+    .shop-meta-chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .shop-chip {
+      font-size: 0.76rem;
+      color: #8FA0BC;
+      font-weight: 600;
+      background: #F8FAFC;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    .shop-chip i {
+      color: #FF6B35;
+      margin-right: 3px;
+    }
+
+    @media (max-width: 480px) {
+      .shop-logo-img,
+      .shop-logo-placeholder {
+        width: 54px;
+        height: 54px;
       }
+
+      .shop-logo-row {
+        margin-top: -26px;
+      }
+    }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+
+    const grid = document.getElementById('shopsGrid');
+    const loadingState = document.getElementById('loadingState');
+    const emptyState = document.getElementById('emptyState');
+    const searchInput = document.getElementById('shopSearchInput');
+    const searchBox = document.getElementById('shopSearchBox');
+
+    let allShops = [];
+    let searchQuery = '';
+    let myShopId = null;
+    let productCounts = {};
+
+    function filterShops(query) {
+      const q = query.trim().toLowerCase();
+      if (!q) return allShops;
+      return allShops.filter((s) => {
+        const nameMatch = (s.name || '').toLowerCase().includes(q);
+        const slugMatch = (s.slug || '').toLowerCase().includes(q);
+        return nameMatch || slugMatch;
+      });
+    }
+
+    function sortShops(list) {
+      return [...list].sort((a, b) => {
+        const aMine = a.id === myShopId ? 1 : 0;
+        const bMine = b.id === myShopId ? 1 : 0;
+        return bMine - aMine;
+      });
+    }
+
+    function renderShops() {
+      const filtered = filterShops(searchQuery);
+      const sorted = sortShops(filtered);
+
+      grid.innerHTML = '';
+
+      if (sorted.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+
+      emptyState.style.display = 'none';
+
+      sorted.forEach((shop) => {
+        const card = document.createElement('a');
+        card.href = `/${shop.slug}`;
+        card.className = 'shop-card';
+
+        const coverHtml = shop.cover_image
+          ? `<img class="shop-cover-img" src="${shop.cover_image}" alt="${shop.name}" loading="lazy" />`
+          : `<div class="shop-cover-placeholder"></div>`;
+
+        const logoHtml = shop.logo_image
+          ? `<img class="shop-logo-img" src="${shop.logo_image}" alt="${shop.name}" loading="lazy" />`
+          : `<div class="shop-logo-placeholder"><i class="fas fa-store"></i></div>`;
+
+        const count = productCounts[shop.owner_id] || 0;
+
+        card.innerHTML = `
+          <div class="shop-cover-wrap">
+            ${coverHtml}
+            ${shop.id === myShopId ? '<span class="my-shop-badge"><i class="fas fa-star"></i> আমার শপ</span>' : ''}
+          </div>
+          <div class="shop-logo-row">${logoHtml}</div>
+          <div class="shop-body">
+            <p class="shop-name">
+              ${shop.name}
+              ${shop.is_verified ? '<i class="fas fa-circle-check verified-badge"></i>' : ''}
+            </p>
+            ${shop.tagline ? `<p class="shop-tagline-text">${shop.tagline}</p>` : ''}
+            <div class="shop-meta-chips">
+              ${shop.location_name ? `<span class="shop-chip"><i class="fas fa-location-dot"></i> ${shop.location_name}</span>` : ''}
+              <span class="shop-chip"><i class="fas fa-box"></i> ${count} প্রোডাক্ট</span>
+            </div>
+          </div>
+        `;
+
+        grid.appendChild(card);
+      });
+    }
+
+    searchInput.addEventListener('focus', () => {
+      setTimeout(() => {
+        searchBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 300);
     });
 
-    if (noResults) {
-      noResults.style.display = visibleCount === 0 ? 'block' : 'none';
+    let debounceTimer;
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        searchQuery = e.target.value;
+        renderShops();
+      }, 120);
+    });
+
+    async function loadMyShopId() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data } = await supabase
+        .from('profiles')
+        .select('shop_id')
+        .eq('id', session.user.id)
+        .single();
+
+      myShopId = data?.shop_id || null;
     }
-  });
-</script>
+
+    async function loadProductCounts(shops) {
+      const ownerIds = shops.map((s) => s.owner_id).filter(Boolean);
+      if (ownerIds.length === 0) return;
+
+      const { data } = await supabase
+        .from('listings')
+        .select('user_id')
+        .eq('category', 'online-shop')
+        .eq('status', 'active')
+        .in('user_id', ownerIds);
+
+      (data || []).forEach((row) => {
+        productCounts[row.user_id] = (productCounts[row.user_id] || 0) + 1;
+      });
+    }
+
+    async function loadShops() {
+      await loadMyShopId();
+
+      const { data, error } = await supabase
+        .from('shops')
+        .select('*')
+        .eq('is_active', true)
+        .order('shop_order', { ascending: true });
+
+      loadingState.style.display = 'none';
+
+      if (error) {
+        grid.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      allShops = data || [];
+      await loadProductCounts(allShops);
+      renderShops();
+    }
+
+    loadShops();
+  </script>
+</BaseLayout>
