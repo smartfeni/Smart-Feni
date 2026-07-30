@@ -2,10 +2,8 @@
 // ============================================================
 // পেজ: অ্যাডমিন — লিস্টিং ম্যানেজমেন্ট (/admin/listings)
 // ট্যাব ১: সব ক্যাটাগরির লিস্টিং (listings টেবিল)
-// ট্যাব ২: ম্যানুয়াল ব্লাড ডোনার রিভিউ (manual_blood_donors টেবিল)
-// ট্যাব ৩ (নতুন): অভিযোগ/রিপোর্ট (content_reports টেবিল) — লাইক/
-//        রিপোর্ট সিস্টেম থেকে আসা অভিযোগ, target_type অনুযায়ী
-//        listings/profiles/manual_blood_donors তিনটা সোর্সকেই কাভার করে
+// ট্যাব ২: ম্যানুয়াল ব্লাড ডোনার রিভিউ + বাল্ক ক্লাব-লিংক (manual_blood_donors টেবিল)
+// ট্যাব ৩: অভিযোগ/রিপোর্ট (content_reports টেবিল)
 // ============================================================
 
 export const prerender = false;
@@ -75,6 +73,14 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
 
         <!-- ===== ট্যাব ২: ব্লাড ডোনার ===== -->
         <div id="bloodTab" class="tab-panel" style="display:none;">
+
+          <!-- ===== বাল্ক ক্লাব-লিংক সেকশন ===== -->
+          <div class="link-section" id="clubLinkSection" style="display:none;">
+            <h3><i class="fas fa-link"></i> ক্লাব-নাম লিংক করুন</h3>
+            <p class="link-hint">স্ক্রিনশট থেকে আসা এই ক্লাবের নামগুলা এখনো কোনো existing ক্লাবের সাথে লিংকড না। মিলে গেলে সিলেক্ট করে লিংক করুন — একবারে সব এন্ট্রি আপডেট হবে।</p>
+            <div id="clubLinkList"></div>
+          </div>
+
           <div class="filter-bar">
             <select id="bloodStatusFilter" class="filter-select">
               <option value="pending">রিভিউ বাকি</option>
@@ -105,7 +111,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
           </div>
         </div>
 
-        <!-- ===== ট্যাব ৩ (নতুন): রিপোর্ট/অভিযোগ ===== -->
+        <!-- ===== ট্যাব ৩: রিপোর্ট/অভিযোগ ===== -->
         <div id="reportsTab" class="tab-panel" style="display:none;">
           <div class="filter-bar">
             <select id="reportStatusFilter" class="filter-select">
@@ -306,6 +312,81 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       color: #8FA0BC;
       border: 1.5px solid #E5EAF0;
     }
+
+    .link-section {
+      background: #E8F2FF;
+      border-radius: 16px;
+      padding: 18px;
+      margin-bottom: 24px;
+    }
+
+    .link-section h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .link-hint {
+      font-size: 0.8rem;
+      color: #5A6E85;
+      margin-bottom: 14px;
+    }
+
+    .link-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #fff;
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+
+    .link-row-name {
+      flex: 1;
+      min-width: 140px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      color: #1B2A4A;
+    }
+
+    .link-row-count {
+      font-size: 0.75rem;
+      color: #8FA0BC;
+      font-weight: 600;
+    }
+
+    .link-select {
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.82rem;
+      font-family: inherit;
+      background: #fff;
+      min-width: 160px;
+    }
+
+    .link-btn {
+      background: #1D6FE0;
+      color: #fff;
+      border: none;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .link-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   </style>
 
   <script type="application/json" id="upazilaOptionsData" set:html={JSON.stringify(upazilaOptions)} />
@@ -357,6 +438,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
           loadListings();
         } else if (btn.dataset.tab === 'blood') {
           bloodTab.style.display = 'block';
+          loadClubLinkSuggestions();
           loadBloodDonors();
         } else {
           reportsTab.style.display = 'block';
@@ -683,6 +765,92 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     sourceFilter.addEventListener('change', loadListings);
 
     // ============================================================
+    // বাল্ক ক্লাব-লিংক (club_name_raw -> clubs.id)
+    // ============================================================
+    let clubsList = [];
+
+    async function loadClubsList() {
+      const { data } = await supabase.from('clubs').select('id, name').order('name', { ascending: true });
+      clubsList = data || [];
+    }
+
+    async function loadClubLinkSuggestions() {
+      const section = document.getElementById('clubLinkSection');
+      const listEl = document.getElementById('clubLinkList');
+
+      const { data, error } = await supabase
+        .from('manual_blood_donors')
+        .select('club_name_raw')
+        .is('club_id', null)
+        .not('club_name_raw', 'is', null);
+
+      if (error || !data || data.length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+
+      const nameCounts = {};
+      data.forEach((row) => {
+        if (!row.club_name_raw) return;
+        nameCounts[row.club_name_raw] = (nameCounts[row.club_name_raw] || 0) + 1;
+      });
+
+      const names = Object.keys(nameCounts);
+      if (names.length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+
+      section.style.display = 'block';
+      listEl.innerHTML = '';
+
+      const clubOptions = clubsList.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+
+      names.forEach((rawName) => {
+        const row = document.createElement('div');
+        row.className = 'link-row';
+        row.innerHTML = `
+          <span class="link-row-name">${escapeHtml(rawName)} <span class="link-row-count">(${nameCounts[rawName]} জন)</span></span>
+          <select class="link-select">
+            <option value="">— ক্লাব বেছে নিন —</option>
+            ${clubOptions}
+          </select>
+          <button class="link-btn" disabled>লিংক করুন</button>
+        `;
+
+        const select = row.querySelector('.link-select');
+        const linkBtn = row.querySelector('.link-btn');
+
+        select.addEventListener('change', () => {
+          linkBtn.disabled = !select.value;
+        });
+
+        linkBtn.addEventListener('click', () => linkClubName(rawName, select.value, nameCounts[rawName]));
+
+        listEl.appendChild(row);
+      });
+    }
+
+    async function linkClubName(rawName, clubId, count) {
+      if (!clubId) return;
+      if (!confirm(`"${rawName}" এর ${count} জন ডোনারকে এই ক্লাবের সাথে লিংক করবেন?`)) return;
+
+      const { error } = await supabase
+        .from('manual_blood_donors')
+        .update({ club_id: clubId })
+        .eq('club_name_raw', rawName)
+        .is('club_id', null);
+
+      if (error) {
+        alert('লিংক করতে ব্যর্থ: ' + error.message);
+        return;
+      }
+
+      loadClubLinkSuggestions();
+      loadBloodDonors();
+    }
+
+    // ============================================================
     // ট্যাব ২: ব্লাড ডোনার (manual_blood_donors)
     // ============================================================
     const bloodContainer = document.getElementById('bloodContainer');
@@ -735,7 +903,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
             ${upazilaOpts}
           </select>
         </label>
-        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">ক্লাবের নাম
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">ক্লাবের নাম (টেক্সট)
           <input type="text" data-field="club_name_raw" value="${escapeHtml(donor.club_name_raw || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
         </label>
         <div style="display:flex;gap:8px;margin-top:4px;">
@@ -791,7 +959,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
             <span><i class="fas fa-droplet" style="color:#D14343;"></i> ${escapeHtml(donor.blood_group)}</span>
             <span><i class="fas fa-phone" style="color:#FF6B35;"></i> ${escapeHtml(donor.phone)}</span>
             <span><i class="fas fa-location-dot" style="color:#FF6B35;"></i> ${escapeHtml(donor.upazila || 'নাই')}</span>
-            ${donor.club_name_raw ? `<span><i class="fas fa-users" style="color:#FF6B35;"></i> ${escapeHtml(donor.club_name_raw)}</span>` : ''}
+            ${donor.club_id ? `<span style="color:#1D6FE0;font-weight:700;"><i class="fas fa-circle-check"></i> ক্লাব লিংকড</span>` : (donor.club_name_raw ? `<span><i class="fas fa-users" style="color:#FF6B35;"></i> ${escapeHtml(donor.club_name_raw)}</span>` : '')}
             <span><i class="fas fa-clock" style="color:#FF6B35;"></i> ${formatDate(donor.created_at)}</span>
           </div>
           <div class="card-actions" style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"></div>
@@ -920,7 +1088,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     bloodUpazilaFilter.addEventListener('change', loadBloodDonors);
 
     // ============================================================
-    // ট্যাব ৩ (নতুন): রিপোর্ট/অভিযোগ (content_reports)
+    // ট্যাব ৩: রিপোর্ট/অভিযোগ (content_reports)
     // ============================================================
     const reportsContainer = document.getElementById('reportsContainer');
     const reportsEmptyState = document.getElementById('reportsEmptyState');
@@ -943,7 +1111,6 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       blood_manual: 'ব্লাড ডোনার (ম্যানুয়াল)',
     };
 
-    // পেন্ডিং রিপোর্ট সংখ্যা ট্যাবে ব্যাজ হিসেবে দেখানোর জন্য (শুধু একবার, পেজ লোডে)
     async function refreshReportsBadge() {
       const { count } = await supabase
         .from('content_reports')
@@ -1099,7 +1266,6 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       } else if (group.target_type === 'blood_manual') {
         ({ error } = await supabase.from('manual_blood_donors').delete().eq('id', group.target_id));
       } else if (group.target_type === 'blood_profile') {
-        // ইউজার প্রোফাইল ডিলিট করা যায় না — শুধু ডোনার লিস্ট থেকে বাদ
         ({ error } = await supabase.from('profiles').update({ is_blood_donor: false, donor_disabled: true }).eq('id', group.target_id));
       }
 
@@ -1155,7 +1321,6 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
 
       reportsEmptyState.style.display = 'none';
 
-      // target_type + target_id অনুযায়ী গ্রুপ করা
       const groups = {};
       reports.forEach((r) => {
         const key = `${r.target_type}:${r.target_id}`;
@@ -1164,14 +1329,12 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       });
       const groupList = Object.values(groups);
 
-      // রিপোর্টকারীদের প্রোফাইল ফেচ
       const reporterIds = [...new Set(reports.map((r) => r.user_id))];
       const { data: reporterProfiles } = reporterIds.length
         ? await supabase.from('profiles').select('id, full_name, phone').in('id', reporterIds)
         : { data: [] };
       const reporterMap = Object.fromEntries((reporterProfiles || []).map((p) => [p.id, p]));
 
-      // টার্গেট ইনফো ফেচ (৩ সোর্স)
       const listingIds = groupList.filter((g) => g.target_type === 'listing').map((g) => g.target_id);
       const profileIds = groupList.filter((g) => g.target_type === 'blood_profile').map((g) => g.target_id);
       const manualIds = groupList.filter((g) => g.target_type === 'blood_manual').map((g) => g.target_id);
@@ -1199,6 +1362,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     // ============================================================
     window.addEventListener('smartfeni:admin-ready', () => {
       loadListings();
+      loadClubsList();
       refreshReportsBadge();
     });
 
