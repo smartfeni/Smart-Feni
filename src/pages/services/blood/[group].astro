@@ -1,0 +1,853 @@
+src/pages/services/blood/[group].astro
+---
+// ============================================================
+// পেজ: নির্দিষ্ট ব্লাড গ্রুপের ডোনার লিস্ট
+// URL: /services/blood/{slug} (যেমন /services/blood/a-positive)
+// /services/blood ল্যান্ডিং পেজ থেকে গ্রুপ সিলেক্ট করে এখানে আসা হয়।
+// শুধু ওই নির্দিষ্ট গ্রুপের ডোনাররাই লোড হয় (হালকা কোয়েরি)।
+//
+// দুই সোর্স মার্জ করে দেখানো হয়:
+//   ১. profiles (is_blood_donor=true, donor_disabled=false)
+//   ২. manual_blood_donors (status='active') — স্ক্রিনশট বাল্ক-আপলোড
+//      ও ক্লাব-এন্ট্রি দুটোই এখানে (club_name_raw থাকলে ক্লাব ব্যাজ দেখায়)
+// ফিল্টার: উপজেলা (ড্রপডাউন) + সংগঠনের নাম (সার্চ বক্স) — ব্লাড গ্রুপ
+//          ড্রপডাউন লাগবে না, যেহেতু URL এই আগেই সিলেক্ট করা আছে
+// সর্টিং: শেয়ারড locationSort.js — initLocationReorder()
+//
+// লাইক + রিপোর্ট (অভিযোগ) সিস্টেম:
+//   - প্রতিটা কার্ডে ❤️ লাইক (কাউন্ট) + 🚩 ফ্ল্যাগ আইকন
+//   - লগইন না থাকলে: লাইক শুধু ভিউ-অনলি কাউন্ট দেখাবে (ক্লিক করা
+//     যাবে না, বাটন স্টাইল থাকবে না), ফ্ল্যাগ আইকন পুরো লুকানো থাকবে
+//   - লগইন করার পর (AuthModal এর smartfeni:auth-changed ইভেন্ট শুনে)
+//     রিফ্রেশ ছাড়াই ইন্টারঅ্যাকটিভ হয়ে যাবে
+//   - ৩+ রিপোর্টে অটো disable (RPC submit_content_report এ হ্যান্ডল হয়)
+// SSR পেজ — prerender = false আবশ্যক।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../../components/layout/BaseLayout.astro';
+import ReportModal from '../../../components/shared/ReportModal.astro';
+import { supabase } from '../../../lib/supabase.js';
+
+const slugToGroup = {
+  'a-positive': 'A+',
+  'a-negative': 'A-',
+  'b-positive': 'B+',
+  'b-negative': 'B-',
+  'ab-positive': 'AB+',
+  'ab-negative': 'AB-',
+  'o-positive': 'O+',
+  'o-negative': 'O-',
+};
+
+const { group: groupSlug } = Astro.params;
+const bloodGroup = slugToGroup[groupSlug];
+
+if (!bloodGroup) {
+  return Astro.redirect('/services/blood');
+}
+
+const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
+
+const [{ data: profileDonors }, { data: manualDonors }] = await Promise.all([
+  supabase
+    .from('profiles')
+    .select('id, full_name, phone, blood_group, upazila, avatar_url')
+    .eq('is_blood_donor', true)
+    .eq('donor_disabled', false)
+    .eq('blood_group', bloodGroup)
+    .order('created_at', { ascending: false }),
+  supabase
+    .from('manual_blood_donors')
+    .select('id, name, phone, blood_group, upazila, club_name_raw')
+    .eq('status', 'active')
+    .eq('blood_group', bloodGroup)
+    .order('created_at', { ascending: false }),
+]);
+
+const normalizedProfileDonors = (profileDonors || []).map((d) => ({
+  id: d.id,
+  targetType: 'blood_profile',
+  full_name: d.full_name,
+  phone: d.phone,
+  blood_group: d.blood_group,
+  upazila: d.upazila,
+  avatar_url: d.avatar_url,
+  club_name_raw: null,
+  isClubSourced: false,
+}));
+
+const normalizedManualDonors = (manualDonors || []).map((d) => ({
+  id: d.id,
+  targetType: 'blood_manual',
+  full_name: d.name,
+  phone: d.phone,
+  blood_group: d.blood_group,
+  upazila: d.upazila,
+  avatar_url: null,
+  club_name_raw: d.club_name_raw,
+  isClubSourced: true,
+}));
+
+const donors = [...normalizedProfileDonors, ...normalizedManualDonors];
+const hasDonors = donors.length > 0;
+---
+
+<BaseLayout title={`${bloodGroup} রক্তদাতা | স্মার্ট ফেনী`}>
+  <section class="page-header">
+    <div class="container">
+      <a href="/services/blood" class="back-link">
+        <i class="fas fa-arrow-left"></i> সব গ্রুপ
+      </a>
+      <h1><span class="accent">{bloodGroup}</span> রক্তদাতা</h1>
+      <p>ফেনীর {bloodGroup} গ্রুপের স্বেচ্ছাসেবী রক্তদাতাদের সাথে সরাসরি যোগাযোগ করুন</p>
+
+      {!hasDonors && (
+        <a href="/profile/edit" class="btn-register">
+          <i class="fas fa-droplet"></i> রক্তদাতা হিসেবে রেজিস্ট্রেশন করুন
+        </a>
+      )}
+    </div>
+  </section>
+
+  <section class="donor-section">
+    <div class="container">
+      {hasDonors && (
+        <>
+          <div class="filter-dropdowns">
+            <div class="dropdown-wrap">
+              <button class="dropdown-btn" id="upazilaBtn" type="button">
+                <span id="upazilaLabel">উপজেলা</span>
+                <i class="fas fa-chevron-down"></i>
+              </button>
+              <div class="dropdown-panel" id="upazilaPanel">
+                <button class="dropdown-option active" data-value="all">সব উপজেলা</button>
+                {upazilas.map((u) => (
+                  <button class="dropdown-option" data-value={u}>{u}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div class="club-search-wrap">
+            <i class="fas fa-magnifying-glass"></i>
+            <input
+              type="text"
+              id="clubSearchInput"
+              placeholder="সংগঠনের নাম দিয়ে খুঁজুন..."
+              autocomplete="off"
+            />
+          </div>
+        </>
+      )}
+
+      {donors.length === 0 ? (
+        <div class="empty-state">
+          <i class="fas fa-droplet"></i>
+          <p>{bloodGroup} গ্রুপে এখনো কোনো রক্তদাতা তালিকাভুক্ত হননি</p>
+          <span>প্রোফাইল থেকে "ব্লাড ডোনার লিস্টে দেখাও" অন করে প্রথম রক্তদাতা হোন</span>
+          <a href="/profile/edit" class="btn-register-outline">
+            <i class="fas fa-plus"></i> এখনই নিবন্ধন করুন
+          </a>
+        </div>
+      ) : (
+        <>
+          <div class="donor-grid" id="donorGrid">
+            {donors.map((donor) => (
+              <div
+                class="donor-card"
+                data-upazila-name={donor.upazila || ''}
+                data-club-name={(donor.club_name_raw || '').toLowerCase()}
+                data-target-type={donor.targetType}
+                data-target-id={donor.id}
+              >
+                <div class="donor-card-top">
+                  <span class="donor-avatar">
+                    {donor.avatar_url ? (
+                      <img src={donor.avatar_url} alt={donor.full_name} />
+                    ) : (
+                      <i class="fas fa-droplet"></i>
+                    )}
+                  </span>
+                  <span class="blood-badge">{donor.blood_group || '—'}</span>
+                </div>
+
+                <div class="engagement-row" data-engagement-row>
+                  <span class="like-count-view" data-like-count-view>
+                    <i class="fas fa-heart"></i>
+                    <span data-like-count>0</span>
+                  </span>
+                  <button class="like-btn" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
+                    <i class="fas fa-heart"></i>
+                    <span class="like-count" data-like-count>0</span>
+                  </button>
+                  <button class="flag-btn" type="button" data-flag-btn aria-label="অভিযোগ করুন" style="display:none;">
+                    <i class="fas fa-flag"></i>
+                  </button>
+                </div>
+
+                <h3 class="donor-name">{donor.full_name}</h3>
+
+                {donor.upazila && (
+                  <p class="donor-location"><i class="fas fa-location-dot"></i> {donor.upazila}</p>
+                )}
+
+                {donor.isClubSourced && donor.club_name_raw && (
+                  <p class="club-badge"><i class="fas fa-users"></i> {donor.club_name_raw}</p>
+                )}
+
+                <a href={`tel:${donor.phone}`} class="btn-contact">
+                  <i class="fas fa-phone"></i> যোগাযোগ করুন
+                </a>
+              </div>
+            ))}
+          </div>
+
+          <p class="no-match-state" id="noMatchState" style="display:none;">
+            এই ফিল্টারে কোনো রক্তদাতা পাওয়া যায়নি
+          </p>
+        </>
+      )}
+    </div>
+  </section>
+
+  <ReportModal />
+</BaseLayout>
+
+<style>
+  .page-header {
+    padding: 40px 0 30px;
+    background: #fff;
+    text-align: center;
+  }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #8FA0BC;
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+
+  .back-link:hover {
+    color: #FF6B35;
+  }
+
+  .page-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 8px;
+  }
+
+  .page-header .accent {
+    color: #D14343;
+  }
+
+  .page-header p {
+    color: #5A6E85;
+    font-size: 1.05rem;
+    max-width: 560px;
+    margin: 0 auto 24px;
+  }
+
+  .btn-register {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #FF6B35;
+    color: #fff;
+    text-decoration: none;
+    padding: 14px 28px;
+    border-radius: 40px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+  }
+
+  .btn-register:hover {
+    background: #e85a28;
+    transform: translateY(-2px);
+  }
+
+  .donor-section {
+    padding: 30px 0 70px;
+    background: #F8FAFC;
+  }
+
+  .filter-dropdowns {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .dropdown-wrap {
+    position: relative;
+  }
+
+  .dropdown-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid #EEF3F9;
+    color: #1B2A4A;
+    padding: 12px 20px;
+    border-radius: 40px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .dropdown-btn:hover {
+    border-color: #FF6B35;
+  }
+
+  .dropdown-btn.has-value {
+    background: #FFF0EA;
+    border-color: #FF6B35;
+    color: #FF6B35;
+  }
+
+  .dropdown-btn i {
+    font-size: 0.75rem;
+    transition: transform 0.2s ease;
+  }
+
+  .dropdown-wrap.open .dropdown-btn i {
+    transform: rotate(180deg);
+  }
+
+  .dropdown-panel {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+    padding: 8px;
+    min-width: 180px;
+    max-height: 280px;
+    overflow-y: auto;
+    z-index: 50;
+  }
+
+  .dropdown-wrap.open .dropdown-panel {
+    display: block;
+  }
+
+  .dropdown-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: #1B2A4A;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .dropdown-option:hover {
+    background: #F4F7FC;
+  }
+
+  .dropdown-option.active {
+    background: #FFF0EA;
+    color: #FF6B35;
+    font-weight: 700;
+  }
+
+  .club-search-wrap {
+    max-width: 420px;
+    margin: 0 auto 28px;
+    position: relative;
+  }
+
+  .club-search-wrap i {
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #B0BCCB;
+    font-size: 0.85rem;
+  }
+
+  .club-search-wrap input {
+    width: 100%;
+    padding: 12px 16px 12px 42px;
+    border-radius: 40px;
+    border: 1px solid #EEF3F9;
+    background: #fff;
+    font-size: 0.9rem;
+    font-family: inherit;
+    color: #1B2A4A;
+  }
+
+  .club-search-wrap input:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+
+  .club-search-wrap input::placeholder {
+    color: #B0BCCB;
+  }
+
+  .empty-state {
+    text-align: center;
+    background: #fff;
+    border-radius: 20px;
+    padding: 50px 24px;
+    border: 1px dashed #E5EAF0;
+  }
+
+  .empty-state i {
+    font-size: 2rem;
+    color: #D7E0EC;
+    margin-bottom: 12px;
+  }
+
+  .empty-state p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+  }
+
+  .empty-state span {
+    color: #8FA0BC;
+    font-size: 0.85rem;
+    display: block;
+    margin-bottom: 20px;
+  }
+
+  .btn-register-outline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    color: #FF6B35;
+    border: 1.5px solid #FF6B35;
+    text-decoration: none;
+    padding: 10px 22px;
+    border-radius: 40px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+  }
+
+  .btn-register-outline:hover {
+    background: #FF6B35;
+    color: #fff;
+  }
+
+  .no-match-state {
+    text-align: center;
+    color: #8FA0BC;
+    font-weight: 600;
+    padding: 40px 0;
+  }
+
+  .donor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 20px;
+    align-items: stretch;
+  }
+
+  .donor-card {
+    background: #fff;
+    border-radius: 20px;
+    padding: 20px;
+    border: 1px solid #EEF3F9;
+    transition: all 0.25s ease;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .donor-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+  }
+
+  .donor-card.hidden {
+    display: none;
+  }
+
+  .donor-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+
+  .donor-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: #FFF0EA;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .donor-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .donor-avatar i {
+    color: #D14343;
+    font-size: 1.5rem;
+  }
+
+  .blood-badge {
+    background: #FFF0EA;
+    color: #D14343;
+    font-weight: 800;
+    font-size: 0.95rem;
+    padding: 6px 14px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+
+  /* ===== লাইক + ফ্ল্যাগ রো ===== */
+  .engagement-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .like-count-view {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #8FA0BC;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 6px 12px;
+  }
+
+  .like-count-view i {
+    font-size: 0.8rem;
+  }
+
+  .like-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #F4F7FC;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 20px;
+    color: #8FA0BC;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .like-btn i {
+    font-size: 0.8rem;
+  }
+
+  .like-btn.liked {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .like-btn.liked i {
+    color: #FF6B35;
+  }
+
+  .flag-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: #F4F7FC;
+    border: none;
+    border-radius: 50%;
+    color: #B0BCCB;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .flag-btn:hover {
+    background: #FFF0EA;
+    color: #D14343;
+  }
+
+  .donor-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 6px;
+  }
+
+  .donor-location {
+    color: #5A6E85;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .donor-location i {
+    color: #FF6B35;
+    font-size: 0.75rem;
+  }
+
+  .club-badge {
+    color: #1D6FE0;
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    margin-top: -4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #E8F2FF;
+    padding: 6px 10px;
+    border-radius: 10px;
+    width: fit-content;
+  }
+
+  .btn-contact {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    background: #1B2A4A;
+    color: #fff;
+    text-decoration: none;
+    padding: 12px;
+    border-radius: 40px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: background 0.2s ease;
+    margin-top: auto;
+  }
+
+  .btn-contact:hover {
+    background: #FF6B35;
+  }
+
+  @media (max-width: 768px) {
+    .donor-grid {
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    }
+
+    .page-header h1 {
+      font-size: 1.6rem;
+    }
+
+    .dropdown-btn {
+      padding: 10px 16px;
+      font-size: 0.85rem;
+    }
+  }
+</style>
+
+<script>
+  import { initLocationReorder } from '../../../lib/locationSort.js';
+  import { fetchLikeData, toggleLike, isLoggedIn } from '../../../lib/contentEngagement.js';
+  import { initReportModal } from '../../../lib/reportModal.js';
+
+  const grid = document.getElementById('donorGrid');
+  const noMatchState = document.getElementById('noMatchState');
+  const cards = document.querySelectorAll('.donor-card');
+
+  // ===== ড্রপডাউন ওপেন/ক্লোজ হ্যান্ডলিং =====
+  const dropdownWraps = document.querySelectorAll('.dropdown-wrap');
+
+  dropdownWraps.forEach((wrap) => {
+    const btn = wrap.querySelector('.dropdown-btn');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = wrap.classList.contains('open');
+      dropdownWraps.forEach((w) => w.classList.remove('open'));
+      if (!isOpen) wrap.classList.add('open');
+    });
+  });
+
+  document.addEventListener('click', () => {
+    dropdownWraps.forEach((w) => w.classList.remove('open'));
+  });
+
+  // ===== ফিল্টার স্টেট (শুধু উপজেলা + ক্লাব সার্চ, ব্লাড গ্রুপ URL এ ফিক্সড) =====
+  let activeUpazila = 'all';
+  let clubSearchTerm = '';
+
+  function applyFilters() {
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const matchesUpazila = activeUpazila === 'all' || card.dataset.upazilaName === activeUpazila;
+      const matchesClub = clubSearchTerm === '' || (card.dataset.clubName || '').includes(clubSearchTerm);
+
+      if (matchesUpazila && matchesClub) {
+        card.classList.remove('hidden');
+        visibleCount++;
+      } else {
+        card.classList.add('hidden');
+      }
+    });
+
+    if (noMatchState) {
+      noMatchState.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
+  }
+
+  function setupDropdown(panelId, btnId, labelId, defaultLabel, onSelect) {
+    const panel = document.getElementById(panelId);
+    const btn = document.getElementById(btnId);
+    const label = document.getElementById(labelId);
+    if (!panel || !btn || !label) return;
+
+    panel.querySelectorAll('.dropdown-option').forEach((opt) => {
+      opt.addEventListener('click', () => {
+        panel.querySelectorAll('.dropdown-option').forEach((o) => o.classList.remove('active'));
+        opt.classList.add('active');
+
+        const value = opt.dataset.value;
+        onSelect(value);
+
+        if (value === 'all') {
+          label.textContent = defaultLabel;
+          btn.classList.remove('has-value');
+        } else {
+          label.textContent = value;
+          btn.classList.add('has-value');
+        }
+
+        btn.closest('.dropdown-wrap').classList.remove('open');
+        applyFilters();
+      });
+    });
+  }
+
+  setupDropdown('upazilaPanel', 'upazilaBtn', 'upazilaLabel', 'উপজেলা', (v) => {
+    activeUpazila = v;
+  });
+
+  const clubSearchInput = document.getElementById('clubSearchInput');
+  if (clubSearchInput) {
+    clubSearchInput.addEventListener('input', (e) => {
+      clubSearchTerm = e.target.value.trim().toLowerCase();
+      applyFilters();
+    });
+  }
+
+  // ===== লোকেশন-ভিত্তিক re-order =====
+  if (grid) initLocationReorder(grid, 'upazilaName');
+
+  // ============================================================
+  // লাইক + রিপোর্ট (অভিযোগ) সিস্টেম — লগইন-গেটেড
+  // ============================================================
+  const report = initReportModal({
+    reasons: [
+      { value: 'unavailable', label: 'এভেইলেবল না / প্রবাসে' },
+      { value: 'behavior', label: 'আচরণ খারাপ' },
+      { value: 'wrong_info', label: 'ভুল তথ্য (গ্রুপ/নাম্বার ভুল)' },
+      { value: 'other', label: 'অন্যান্য' },
+    ],
+  });
+
+  function updateLikeDisplay(card, liked, count) {
+    card.querySelectorAll('[data-like-count]').forEach((el) => {
+      el.textContent = count;
+    });
+    const likeBtn = card.querySelector('[data-like-btn]');
+    if (likeBtn) likeBtn.classList.toggle('liked', liked);
+  }
+
+  let boundCards = new WeakSet();
+
+  async function renderEngagement() {
+    const loggedIn = await isLoggedIn();
+
+    const profileIds = [];
+    const manualIds = [];
+    cards.forEach((card) => {
+      const type = card.dataset.targetType;
+      const id = card.dataset.targetId;
+      if (type === 'blood_profile') profileIds.push(id);
+      else if (type === 'blood_manual') manualIds.push(id);
+    });
+
+    const [profileLikes, manualLikes] = await Promise.all([
+      fetchLikeData('blood_profile', profileIds),
+      fetchLikeData('blood_manual', manualIds),
+    ]);
+
+    cards.forEach((card) => {
+      const type = card.dataset.targetType;
+      const id = card.dataset.targetId;
+      const likeData = type === 'blood_profile' ? profileLikes : manualLikes;
+      const count = likeData.counts[id] || 0;
+      const liked = likeData.likedByMe.has(id);
+
+      const viewOnly = card.querySelector('[data-like-count-view]');
+      const likeBtn = card.querySelector('[data-like-btn]');
+      const flagBtn = card.querySelector('[data-flag-btn]');
+
+      updateLikeDisplay(card, liked, count);
+
+      if (loggedIn) {
+        // ইন্টারঅ্যাকটিভ মোড: বাটন দেখাও, ভিউ-অনলি স্প্যান লুকাও
+        viewOnly.style.display = 'none';
+        likeBtn.style.display = 'flex';
+        flagBtn.style.display = 'flex';
+
+        if (!boundCards.has(card)) {
+          boundCards.add(card);
+
+          likeBtn.addEventListener('click', async () => {
+            likeBtn.disabled = true;
+            const result = await toggleLike(type, id);
+            likeBtn.disabled = false;
+            if (result.error) return;
+            const currentCount = parseInt(likeBtn.querySelector('[data-like-count]').textContent, 10) || 0;
+            const newCount = result.liked ? currentCount + 1 : Math.max(currentCount - 1, 0);
+            updateLikeDisplay(card, result.liked, newCount);
+          });
+
+          flagBtn.addEventListener('click', () => {
+            report.open(type, id);
+          });
+        }
+      } else {
+        // ভিউ-অনলি মোড: শুধু কাউন্ট দেখাও, বাটন/ফ্ল্যাগ লুকাও
+        viewOnly.style.display = 'flex';
+        likeBtn.style.display = 'none';
+        flagBtn.style.display = 'none';
+      }
+    });
+  }
+
+  renderEngagement();
+
+  // AuthModal থেকে লগইন হলে এই ইভেন্ট আসে — রিফ্রেশ ছাড়াই বাটন আনলক
+  window.addEventListener('smartfeni:auth-changed', () => {
+    renderEngagement();
+  });
+</script>
