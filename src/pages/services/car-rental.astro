@@ -3,6 +3,12 @@
 // পেজ: গাড়ি ভাড়া সার্ভিস
 // ব্র্যান্ড: স্মার্ট ফেনী
 // আপডেট: typeOptions ক্রম বদলানো হলো — সিএনজি, অটো রিক্সা, এম্বুলেন্স আগে
+//
+// আপডেট ২: লাইক সিস্টেম যোগ হলো — প্রিভিউ কার্ডে ❤️ লাইক (কাউন্ট)।
+// এই পেজের কার্ড ক্লিক করলে /listing/{id} ফুল পেজে যায় (ListingDetailModal
+// ব্যবহার হয় না এখানে), তাই 🚩 ফ্ল্যাগ/রিপোর্ট বাটন এখানে না, ওই ডিটেইল
+// পেজেই বসবে (আলাদা ফাইল, পরের ধাপে)।
+// লগইন না থাকলে লাইক ভিউ-অনলি কাউন্ট দেখাবে।
 // ============================================================
 
 export const prerender = false;
@@ -111,9 +117,19 @@ const totalCount = listings.length;
                   href={`/listing/${item.id}`}
                   class="car-card"
                   data-type={item.type || 'other'}
+                  data-target-id={item.id}
                   data-upazila-name={item.upazila || ''}
                   data-search={`${item.title || ''} ${item.description || ''} ${item.upazila || ''}`.toLowerCase()}
                 >
+                  <button class="like-btn-preview" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
+                    <i class="fas fa-heart"></i>
+                    <span data-like-count>0</span>
+                  </button>
+                  <span class="like-count-preview-view" data-like-count-view>
+                    <i class="fas fa-heart"></i>
+                    <span data-like-count>0</span>
+                  </span>
+
                   <img
                     src={hasImage ? item.images[0] : fallbackSrc}
                     alt={item.title}
@@ -313,6 +329,7 @@ const totalCount = listings.length;
     font-family: inherit;
     text-decoration: none;
     display: block;
+    position: relative;
   }
 
   .car-card:hover {
@@ -322,6 +339,38 @@ const totalCount = listings.length;
 
   .car-card.hidden {
     display: none;
+  }
+
+  /* ===== প্রিভিউ কার্ডে লাইক (টপ-রাইট) ===== */
+  .like-btn-preview,
+  .like-count-preview-view {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 4px 9px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.92);
+    color: #8FA0BC;
+  }
+
+  .like-btn-preview {
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .like-btn-preview.liked {
+    color: #FF6B35;
+  }
+
+  .like-btn-preview.liked i {
+    color: #FF6B35;
   }
 
   .car-photo {
@@ -397,6 +446,7 @@ const totalCount = listings.length;
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { reorderByUserLocation } from '../../lib/locationSort.js';
+  import { fetchLikeData, toggleLike, isLoggedIn } from '../../lib/contentEngagement.js';
 
   const grid = document.getElementById('carGrid');
   const cards = document.querySelectorAll('.car-card');
@@ -440,6 +490,63 @@ const totalCount = listings.length;
   });
 
   reorderByUserLocation(grid, 'upazilaName');
+
+  // ============================================================
+  // প্রিভিউ কার্ডে লাইক (লগইন-গেটেড, ভিউ-অনলি/ইন্টারঅ্যাকটিভ)
+  // ============================================================
+  let boundLikeButtons = new WeakSet();
+
+  async function renderPreviewLikes() {
+    const loggedIn = await isLoggedIn();
+    const ids = Array.from(cards).map((c) => c.dataset.targetId).filter(Boolean);
+    const { counts, likedByMe } = await fetchLikeData('listing', ids);
+
+    cards.forEach((card) => {
+      const id = card.dataset.targetId;
+      if (!id) return;
+
+      const count = counts[id] || 0;
+      const liked = likedByMe.has(id);
+
+      const viewEl = card.querySelector('[data-like-count-view]');
+      const btnEl = card.querySelector('[data-like-btn]');
+
+      viewEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = count));
+      btnEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = count));
+      btnEl.classList.toggle('liked', liked);
+
+      if (loggedIn) {
+        viewEl.style.display = 'none';
+        btnEl.style.display = 'flex';
+
+        if (!boundLikeButtons.has(btnEl)) {
+          boundLikeButtons.add(btnEl);
+
+          btnEl.addEventListener('click', async (e) => {
+            e.preventDefault(); // কার্ড <a> ট্যাগ — লাইক ক্লিকে যেন লিংক ফলো না করে
+            e.stopPropagation();
+            btnEl.disabled = true;
+            const result = await toggleLike('listing', id);
+            btnEl.disabled = false;
+            if (result.error) return;
+            const currentCount = parseInt(btnEl.querySelector('[data-like-count]').textContent, 10) || 0;
+            const newCount = result.liked ? currentCount + 1 : Math.max(currentCount - 1, 0);
+            btnEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = newCount));
+            viewEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = newCount));
+            btnEl.classList.toggle('liked', result.liked);
+          });
+        }
+      } else {
+        viewEl.style.display = 'flex';
+        btnEl.style.display = 'none';
+      }
+    });
+  }
+
+  renderPreviewLikes();
+  window.addEventListener('smartfeni:auth-changed', () => {
+    renderPreviewLikes();
+  });
 
   // CTA: লগইন থাকলে লিস্টিং মোডাল, না থাকলে আগে লগইন মোডাল
   document.getElementById('openCarCta')?.addEventListener('click', async () => {
