@@ -4,7 +4,7 @@
 // পেজ: ব্লাড ডোনার লিস্ট
 // ব্র্যান্ড: স্মার্ট ফেনী
 // দুই সোর্স মার্জ করে দেখানো হয়:
-//   ১. profiles (is_blood_donor = true) — রেজিস্টার্ড ইউজার
+//   ১. profiles (is_blood_donor = true, donor_disabled = false) — রেজিস্টার্ড ইউজার
 //   ২. manual_blood_donors (status = 'active') — ক্লাব থেকে বাল্ক
 //      আপলোড হওয়া, অ্যাডমিন-অ্যাপ্রুভড এন্ট্রি (ক্লাবের নাম ব্যাজ সহ)
 // ফিল্টার: ব্লাড গ্রুপ + উপজেলা (ড্রপডাউন) + সংগঠনের নাম (সার্চ বক্স)
@@ -14,12 +14,21 @@
 // ছবিহীন ডোনারদের জন্য কমন ব্লাড-ড্রপ আইকন (fa-droplet)
 // কার্ড flex-column + বাটন margin-top:auto — কনটেন্ট যত ছোট/বড়ই
 // হোক, "যোগাযোগ করুন" বাটন সবসময় কার্ডের একদম নিচে সমান লাইনে থাকে
+//
+// লাইক + রিপোর্ট (অভিযোগ) সিস্টেম:
+//   - প্রতিটা কার্ডে ❤️ লাইক (কাউন্ট সহ, টগলযোগ্য) + 🚩 ফ্ল্যাগ আইকন
+//   - ফ্ল্যাগে ক্লিক করলে ReportModal খোলে, কারণ বেছে সাবমিট করলে
+//     content_reports এ যায় (RPC submit_content_report), ৩+ রিপোর্টে
+//     অটো disable হয়ে যাবে (আর তখন এই কোয়েরিতে আর দেখাবে না)
+//   - target_type: profiles সোর্সের জন্য 'blood_profile', manual
+//     সোর্সের জন্য 'blood_manual'
 // SSR পেজ — prerender = false আবশ্যক।
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
+import ReportModal from '../../components/shared/ReportModal.astro';
 import { supabase } from '../../lib/supabase.js';
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -28,18 +37,21 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
 const [{ data: profileDonors }, { data: manualDonors }] = await Promise.all([
   supabase
     .from('profiles')
-    .select('full_name, phone, blood_group, upazila, avatar_url')
+    .select('id, full_name, phone, blood_group, upazila, avatar_url')
     .eq('is_blood_donor', true)
+    .eq('donor_disabled', false)
     .order('created_at', { ascending: false }),
   supabase
     .from('manual_blood_donors')
-    .select('name, phone, blood_group, upazila, club_name_raw')
+    .select('id, name, phone, blood_group, upazila, club_name_raw')
     .eq('status', 'active')
     .order('created_at', { ascending: false }),
 ]);
 
 // দুই সোর্সকে একটা কমন শেপে রূপান্তর করা হচ্ছে
 const normalizedProfileDonors = (profileDonors || []).map((d) => ({
+  id: d.id,
+  targetType: 'blood_profile',
   full_name: d.full_name,
   phone: d.phone,
   blood_group: d.blood_group,
@@ -50,6 +62,8 @@ const normalizedProfileDonors = (profileDonors || []).map((d) => ({
 }));
 
 const normalizedManualDonors = (manualDonors || []).map((d) => ({
+  id: d.id,
+  targetType: 'blood_manual',
   full_name: d.name,
   phone: d.phone,
   blood_group: d.blood_group,
@@ -135,6 +149,8 @@ const hasDonors = donors.length > 0;
                 data-blood-group={donor.blood_group || ''}
                 data-upazila-name={donor.upazila || ''}
                 data-club-name={(donor.club_name_raw || '').toLowerCase()}
+                data-target-type={donor.targetType}
+                data-target-id={donor.id}
               >
                 <div class="donor-card-top">
                   <span class="donor-avatar">
@@ -145,6 +161,16 @@ const hasDonors = donors.length > 0;
                     )}
                   </span>
                   <span class="blood-badge">{donor.blood_group || '—'}</span>
+                </div>
+
+                <div class="engagement-row">
+                  <button class="like-btn" type="button" data-like-btn aria-label="লাইক করুন">
+                    <i class="fas fa-heart"></i>
+                    <span class="like-count" data-like-count>0</span>
+                  </button>
+                  <button class="flag-btn" type="button" data-flag-btn aria-label="অভিযোগ করুন">
+                    <i class="fas fa-flag"></i>
+                  </button>
                 </div>
 
                 <h3 class="donor-name">{donor.full_name}</h3>
@@ -171,6 +197,8 @@ const hasDonors = donors.length > 0;
       )}
     </div>
   </section>
+
+  <ReportModal />
 </BaseLayout>
 
 <style>
@@ -433,7 +461,7 @@ const hasDonors = donors.length > 0;
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
 
   .donor-avatar {
@@ -467,6 +495,62 @@ const hasDonors = donors.length > 0;
     padding: 6px 14px;
     border-radius: 12px;
     white-space: nowrap;
+  }
+
+  /* ===== লাইক + ফ্ল্যাগ রো ===== */
+  .engagement-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .like-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #F4F7FC;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 20px;
+    color: #8FA0BC;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .like-btn i {
+    font-size: 0.8rem;
+  }
+
+  .like-btn.liked {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .like-btn.liked i {
+    color: #FF6B35;
+  }
+
+  .flag-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: #F4F7FC;
+    border: none;
+    border-radius: 50%;
+    color: #B0BCCB;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .flag-btn:hover {
+    background: #FFF0EA;
+    color: #D14343;
   }
 
   .donor-name {
@@ -544,6 +628,8 @@ const hasDonors = donors.length > 0;
 
 <script>
   import { initLocationReorder } from '../../lib/locationSort.js';
+  import { fetchLikeData, toggleLike } from '../../lib/contentEngagement.js';
+  import { initReportModal } from '../../lib/reportModal.js';
 
   const grid = document.getElementById('donorGrid');
   const noMatchState = document.getElementById('noMatchState');
@@ -639,4 +725,69 @@ const hasDonors = donors.length > 0;
 
   // ===== লোকেশন-ভিত্তিক re-order (fairness shuffle + লাইভ আপডেট) =====
   initLocationReorder(grid, 'upazilaName');
+
+  // ============================================================
+  // লাইক + রিপোর্ট (অভিযোগ) সিস্টেম
+  // ============================================================
+  const report = initReportModal({
+    reasons: [
+      { value: 'unavailable', label: 'এভেইলেবল না / প্রবাসে' },
+      { value: 'behavior', label: 'আচরণ খারাপ' },
+      { value: 'wrong_info', label: 'ভুল তথ্য (গ্রুপ/নাম্বার ভুল)' },
+      { value: 'other', label: 'অন্যান্য' },
+    ],
+  });
+
+  function updateLikeBtn(btn, liked, count) {
+    btn.classList.toggle('liked', liked);
+    btn.querySelector('[data-like-count]').textContent = count;
+  }
+
+  async function setupEngagement() {
+    const profileIds = [];
+    const manualIds = [];
+
+    cards.forEach((card) => {
+      const type = card.dataset.targetType;
+      const id = card.dataset.targetId;
+      if (type === 'blood_profile') profileIds.push(id);
+      else if (type === 'blood_manual') manualIds.push(id);
+    });
+
+    const [profileLikes, manualLikes] = await Promise.all([
+      fetchLikeData('blood_profile', profileIds),
+      fetchLikeData('blood_manual', manualIds),
+    ]);
+
+    cards.forEach((card) => {
+      const type = card.dataset.targetType;
+      const id = card.dataset.targetId;
+      const likeData = type === 'blood_profile' ? profileLikes : manualLikes;
+      const count = likeData.counts[id] || 0;
+      const liked = likeData.likedByMe.has(id);
+
+      const likeBtn = card.querySelector('[data-like-btn]');
+      const flagBtn = card.querySelector('[data-flag-btn]');
+
+      updateLikeBtn(likeBtn, liked, count);
+
+      likeBtn.addEventListener('click', async () => {
+        likeBtn.disabled = true;
+        const result = await toggleLike(type, id);
+        likeBtn.disabled = false;
+
+        if (result.error) return; // auth-required হলে requireAuth() ইভেন্ট ছুড়ে দিয়েছে
+
+        const currentCount = parseInt(likeBtn.querySelector('[data-like-count]').textContent, 10) || 0;
+        const newCount = result.liked ? currentCount + 1 : Math.max(currentCount - 1, 0);
+        updateLikeBtn(likeBtn, result.liked, newCount);
+      });
+
+      flagBtn.addEventListener('click', () => {
+        report.open(type, id);
+      });
+    });
+  }
+
+  setupEngagement();
 </script>
