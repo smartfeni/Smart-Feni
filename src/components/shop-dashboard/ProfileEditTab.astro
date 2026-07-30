@@ -1,13 +1,9 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: ProfileEditTab (shop-dashboard) — শপ প্রোফাইল এডিট
-// club-dashboard/ProfileEditTab.astro এর প্যাটার্নে। এখন profiles
-// এর বদলে shops টেবিল আপডেট করে। শপের নাম এখনো শুধু এডমিন বদলাতে
-// পারবে (আগের কনভেনশন ধরে রাখা হয়েছে) — বাকি সব ফিল্ড (লোগো, কভার,
-// ট্যাগলাইন, বিবরণ, উপজেলা, ঠিকানা, ফোন, ফেসবুক লিংক) ওউনার এডিট
-// করতে পারবে।
-// প্যারেন্ট পেজ (my-shop.astro) থেকে 'smartfeni:shop-ready' ইভেন্ট
-// দিয়ে shop ডেটা পায়।
+// আপডেট: শপের নাম এখন ওউনার নিজে বদলাতে পারবে (আগে শুধু এডমিন
+// পারত)। নতুন "বাজার/এলাকার নাম" ফিল্ড যোগ (পাবলিকলি দেখানো হবে) —
+// উপজেলা ফিল্ড থাকবে কিন্তু পাবলিক পেজে আর দেখানো হবে না।
 // ============================================================
 ---
 
@@ -34,8 +30,7 @@
   <button type="button" class="secondary-btn" id="chooseCoverBtn" style="margin-top:8px;">কভার পরিবর্তন করুন</button>
 
   <label class="form-label">শপের নাম</label>
-  <input type="text" class="form-input" id="shopNameDisplay" disabled />
-  <p class="form-hint">শপের নাম শুধু এডমিন বদলাতে পারবেন</p>
+  <input type="text" class="form-input" id="shopNameInput" placeholder="আপনার শপের নাম" />
 
   <label class="form-label">ট্যাগলাইন</label>
   <input type="text" class="form-input" id="taglineInput" placeholder="যেমন: সেরা মানের কাপড়ের দোকান" />
@@ -43,7 +38,11 @@
   <label class="form-label">বিবরণ</label>
   <textarea class="form-input" id="descriptionInput" rows="3" placeholder="আপনার শপ সম্পর্কে সংক্ষেপে লিখুন"></textarea>
 
-  <label class="form-label">উপজেলা</label>
+  <label class="form-label">বাজার/এলাকার নাম</label>
+  <input type="text" class="form-input" id="locationNameInput" placeholder="যেমন: সদর হাট, মিজান রোড ইত্যাদি" />
+  <p class="form-hint">এটা শপ পেজে দেখানো হবে (উপজেলা পাবলিকলি দেখানো হয় না)</p>
+
+  <label class="form-label">উপজেলা (শুধু অ্যাডমিন/অভ্যন্তরীণ ব্যবহারের জন্য)</label>
   <select class="form-input" id="upazilaInput">
     <option value="">নির্বাচন করুন</option>
     <option value="feni-sadar">ফেনী সদর</option>
@@ -104,7 +103,8 @@
   let selectedCoverFile = null;
 
   const profileMsg = document.getElementById('profileMsg');
-  const shopNameDisplay = document.getElementById('shopNameDisplay');
+  const shopNameInput = document.getElementById('shopNameInput');
+  const locationNameInput = document.getElementById('locationNameInput');
   const taglineInput = document.getElementById('taglineInput');
   const descriptionInput = document.getElementById('descriptionInput');
   const upazilaInput = document.getElementById('upazilaInput');
@@ -160,8 +160,6 @@
     reader.readAsDataURL(file);
   });
 
-  // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (my-shop.astro
-  // এর আগের কনভেনশন অনুযায়ী)
   async function uploadImage(file, prefix) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return null;
@@ -202,9 +200,19 @@
       coverUrl = await uploadImage(selectedCoverFile, 'cover');
     }
 
+    const shopName = shopNameInput.value.trim();
+    if (!shopName) {
+      showMsg('শপের নাম খালি রাখা যাবে না');
+      saveBtnText.textContent = 'সেভ করুন';
+      saveBtn.disabled = false;
+      return;
+    }
+
     const updates = {
+      name: shopName,
       tagline: taglineInput.value.trim(),
       description: descriptionInput.value.trim(),
+      location_name: locationNameInput.value.trim() || null,
       upazila: upazilaInput.value || null,
       address: addressInput.value.trim(),
       phone: phoneInput.value.trim(),
@@ -230,9 +238,10 @@
     const shop = e.detail.shop;
     currentShopId = shop.id;
 
-    shopNameDisplay.value = shop.name || '';
+    shopNameInput.value = shop.name || '';
     taglineInput.value = shop.tagline || '';
     descriptionInput.value = shop.description || '';
+    locationNameInput.value = shop.location_name || '';
     upazilaInput.value = shop.upazila || '';
     addressInput.value = shop.address || '';
     phoneInput.value = shop.phone || '';
