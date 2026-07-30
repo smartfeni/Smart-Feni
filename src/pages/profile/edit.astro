@@ -7,25 +7,21 @@
 // ধরন/মডেল ও বিবরণ (সার্ভিস এরিয়া) এডিট করা যাবে।
 // আপডেট: ফোন নম্বর এখন বদলানো যায় — "নম্বর পরিবর্তন করুন" টগল করলে
 // নতুন নম্বর + বর্তমান পাসওয়ার্ড নিয়ে /api/change-phone কল করে।
-// সফল হলে সেশন invalid হতে পারে বলে সাইন-আউট করে হোমে পাঠিয়ে দেয়।
-// আপডেট ২ (বাগফিক্স): প্রোফাইল ছবি আপলোড ব্যর্থ হচ্ছিল ("new row
-// violates row-level security policy" — Storage সার্ভিস ইউজার-সেশন
-// JWT ভেরিফাই করতে ব্যর্থ হচ্ছিল, সেশন/RLS ঠিক থাকা সত্ত্বেও, লগে
-// কনফার্ম করা হয়েছে)। এখন client-side supabase.storage.upload()
-// এর বদলে সার্ভার-সাইড /api/upload-avatar রুট কল হয় (service role
-// key দিয়ে), যেটা এই ভেরিফিকেশন ধাপটাই বাইপাস করে দেয়।
-// আপডেট ৩ (বাগফিক্স — root cause): প্রোফাইল ছবি প্রিভিউ/লোড কখনোই
-// দেখাচ্ছিল না, কারণ id="photoInput"/"photoPreviewCircle"/
-// "photoPreviewImg"/"photoPlaceholderIcon" — এই একই ID গুলো
-// AuthModal.astro-র সাইনআপ প্যানেলেও আছে, আর AuthModal সব পেজেই
-// (Header এর ভেতর দিয়ে) লোড হয়। ID গুলো "profileEdit" প্রিফিক্স
-// দিয়ে ইউনিক করা হয়েছে, যাতে আর কনফ্লিক্ট না হয়।
-// আপডেট ৪ (রিডিজাইন): প্রোফাইল পেজ এখন দুই মোডে — ডিফল্টে ক্লিন
-// "ভিউ কার্ড" (ছবি, নাম, ফোন, ইমেইল, ব্লাড গ্রুপ/উপজেলা ব্যাজ) +
-// উপরে ডানে "এডিট করুন" বাটন। বাটনে ক্লিক করলে ফর্ম খোলে, সেভ/বাতিল
-// করলে আবার ভিউ কার্ডে ফিরে যায়। পাসওয়ার্ড বদলান ও ফোন নম্বর
-// পরিবর্তন এখন কোলাপ্সিবল accordion (ডিফল্টে বন্ধ) — আগে সবকিছু
-// একসাথে খোলা থাকায় পেজটা অগোছালো লাগছিল।
+// আপডেট (বাগফিক্স — root cause): id="photoInput" ইত্যাদি AuthModal
+// এর সাথে কনফ্লিক্ট করছিল, এখন "profileEdit" প্রিফিক্স দিয়ে ইউনিক।
+// আপডেট (রিডিজাইন): প্রোফাইল পেজ এখন ভিউ কার্ড + এডিট মোড — এডিট
+// বাটনে ফর্ম খোলে, পাসওয়ার্ড/ফোন পরিবর্তন accordion-এ।
+// আপডেট (নতুন — এই সেশন): Header থেকে ProfileMenu ড্রপডাউন সরিয়ে
+// ফেলা হয়েছে, তাই এখন এই পেজেই থাকবে —
+//   ১. রোল-ভিত্তিক শর্টকাট (অ্যাডমিন প্যানেল/আমার শপ/আমার ক্লাব) —
+//      ProfileMenu.astro থেকে লজিক কপি করা হলো
+//   ২. ব্লাড ডোনার টগল এখন ভিউ কার্ডেই (এডিট মোডে ঢোকা লাগবে না),
+//      ক্লিক করলেই সরাসরি Supabase-এ সেভ হয় (রাইডার/কার টগলের
+//      মতো ইনস্ট্যান্ট সেভ, "তথ্য সেভ করুন" বাটন লাগে না)। এডিট
+//      ফর্ম থেকে ব্লাড ডোনার টগল সরানো হয়েছে (ব্লাড গ্রুপ সিলেক্ট
+//      এখনো এডিট ফর্মেই আছে, শুধু অন/অফ টগলটা ভিউ কার্ডে চলে গেছে)।
+//   ৩. "লগ আউট" বাটন — ড্রপডাউন মেনু সরে যাওয়ায় লগ আউট করার আর
+//      কোনো জায়গা ছিল না, তাই ভিউ কার্ডের নিচে যোগ করা হলো।
 // ============================================================
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
@@ -78,9 +74,6 @@ const upazilas = [
               <span class="profile-badge" id="viewUpazilaBadge" style="display:none;">
                 <i class="fas fa-location-dot"></i> <span id="viewUpazilaBadgeText"></span>
               </span>
-              <span class="profile-badge profile-badge-donor" id="viewDonorBadge" style="display:none;">
-                <i class="fas fa-heart"></i> ব্লাড ডোনার
-              </span>
             </div>
 
             <div class="profile-view-divider"></div>
@@ -93,6 +86,35 @@ const upazilas = [
                 <i class="fas fa-envelope"></i> <span id="viewEmail">যোগ করা হয়নি</span>
               </div>
             </div>
+
+            <!-- ===== ব্লাড ডোনার টগল — ভিউ কার্ডেই, ইনস্ট্যান্ট সেভ ===== -->
+            <div class="donor-toggle-row">
+              <div class="donor-toggle-text">
+                <span class="donor-toggle-label">ব্লাড ডোনার লিস্টে আমাকে দেখাও</span>
+                <span class="donor-toggle-hint" id="donorToggleHint">ব্লাড গ্রুপ যোগ করলে চালু করা যাবে</span>
+              </div>
+              <button type="button" class="donor-toggle-switch" id="donorToggleBtn" role="switch" aria-checked="false">
+                <span class="donor-toggle-knob"></span>
+              </button>
+            </div>
+
+            <!-- ===== রোল-ভিত্তিক শর্টকাট (ডিফল্টে হিডেন, JS দিয়ে দেখানো হয়) ===== -->
+            <div class="profile-shortcuts" id="profileShortcuts" style="display:none;">
+              <a href="/admin" class="profile-shortcut" id="shortcutAdmin" style="display:none;">
+                <i class="fas fa-user-shield"></i> অ্যাডমিন প্যানেল
+              </a>
+              <a href="/my-shop" class="profile-shortcut" id="shortcutShop" style="display:none;">
+                <i class="fas fa-store"></i> আমার শপ
+              </a>
+              <a href="/my-club" class="profile-shortcut" id="shortcutClub" style="display:none;">
+                <i class="fas fa-people-group"></i> আমার ক্লাব
+              </a>
+            </div>
+
+            <button class="profile-logout-btn" id="profileLogoutBtn" type="button">
+              <i class="fas fa-arrow-right-from-bracket"></i>
+              <span id="profileLogoutText">লগ আউট</span>
+            </button>
           </div>
 
           <!-- ----- এডিট মোড (ডিফল্টে হিডেন) ----- -->
@@ -184,17 +206,6 @@ const upazilas = [
                   </select>
                 </div>
               </div>
-            </div>
-
-            <!-- ===== ব্লাড ডোনার টগল ===== -->
-            <div class="donor-toggle-row">
-              <div class="donor-toggle-text">
-                <span class="donor-toggle-label">ব্লাড ডোনার লিস্টে আমাকে দেখাও</span>
-                <span class="donor-toggle-hint" id="donorToggleHint">ব্লাড গ্রুপ সিলেক্ট করলে চালু করা যাবে</span>
-              </div>
-              <button type="button" class="donor-toggle-switch" id="donorToggleBtn" role="switch" aria-checked="false">
-                <span class="donor-toggle-knob"></span>
-              </button>
             </div>
 
             <div class="profile-edit-actions">
@@ -368,14 +379,6 @@ const upazilas = [
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
   }
 
-  .edit-title {
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: #1B2A4A;
-    margin-bottom: 20px;
-    text-align: center;
-  }
-
   .edit-subtitle-title {
     font-size: 1.05rem;
     font-weight: 700;
@@ -502,15 +505,6 @@ const upazilas = [
     font-size: 0.78rem;
   }
 
-  .profile-badge-donor {
-    background: #FFF0EA;
-    color: #D14343;
-  }
-
-  .profile-badge-donor i {
-    color: #D14343;
-  }
-
   .profile-view-divider {
     height: 1px;
     background: #EEF3F9;
@@ -525,6 +519,7 @@ const upazilas = [
     background: #F8FAFC;
     border-radius: 14px;
     padding: 14px 16px;
+    margin-bottom: 16px;
   }
 
   .profile-view-contact-row {
@@ -541,6 +536,68 @@ const upazilas = [
     width: 16px;
     text-align: center;
     flex-shrink: 0;
+  }
+
+  /* ===== রোল-ভিত্তিক শর্টকাট ===== */
+  .profile-shortcuts {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .profile-shortcut {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    text-decoration: none;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-align: left;
+    transition: all 0.2s ease;
+  }
+
+  .profile-shortcut:hover {
+    background: #FF6B35;
+    color: #fff;
+  }
+
+  .profile-shortcut i {
+    font-size: 0.85rem;
+    width: 14px;
+    text-align: center;
+  }
+
+  /* ===== লগ আউট বাটন ===== */
+  .profile-logout-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: transparent;
+    color: #5A6E85;
+    border: none;
+    border-top: 1px solid #EEF3F9;
+    padding: 16px 10px 0;
+    margin-top: 20px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .profile-logout-btn:hover {
+    color: #D14343;
+  }
+
+  .profile-logout-btn.confirming {
+    color: #D14343;
+    font-weight: 700;
   }
 
   /* ===== প্রোফাইল কার্ড — এডিট মোড ===== */
@@ -579,10 +636,6 @@ const upazilas = [
     margin-top: 22px;
   }
 
-  .profile-edit-actions .edit-submit {
-    margin-top: 0;
-  }
-
   .edit-submit-outline {
     flex: 1;
     background: transparent;
@@ -603,6 +656,7 @@ const upazilas = [
 
   .profile-edit-actions .edit-submit {
     flex: 2;
+    margin-top: 0;
   }
 
   .edit-photo-upload {
@@ -808,6 +862,7 @@ const upazilas = [
     margin-bottom: 4px;
   }
 
+  /* ===== ব্লাড ডোনার টগল ===== */
   .donor-toggle-row {
     display: flex;
     align-items: center;
@@ -816,7 +871,7 @@ const upazilas = [
     background: #F8FAFC;
     border-radius: 14px;
     padding: 14px 16px;
-    margin-top: 18px;
+    text-align: left;
   }
 
   .donor-toggle-text {
@@ -1053,7 +1108,17 @@ const upazilas = [
   const viewBloodBadgeText = document.getElementById('viewBloodBadgeText');
   const viewUpazilaBadge = document.getElementById('viewUpazilaBadge');
   const viewUpazilaBadgeText = document.getElementById('viewUpazilaBadgeText');
-  const viewDonorBadge = document.getElementById('viewDonorBadge');
+
+  // ===== রোল-ভিত্তিক শর্টকাট =====
+  const profileShortcuts = document.getElementById('profileShortcuts');
+  const shortcutAdmin = document.getElementById('shortcutAdmin');
+  const shortcutShop = document.getElementById('shortcutShop');
+  const shortcutClub = document.getElementById('shortcutClub');
+
+  // ===== লগ আউট =====
+  const profileLogoutBtn = document.getElementById('profileLogoutBtn');
+  const profileLogoutText = document.getElementById('profileLogoutText');
+  let logoutConfirming = false;
 
   // ===== এডিট ফর্ম এলিমেন্ট =====
   const nameInput = document.getElementById('editName');
@@ -1073,6 +1138,7 @@ const upazilas = [
   let currentAccessToken = null;
   let currentProfile = null;
 
+  // ===== ব্লাড ডোনার টগল (ভিউ কার্ডে, ইনস্ট্যান্ট সেভ) =====
   const donorToggleBtn = document.getElementById('donorToggleBtn');
   const donorToggleHint = document.getElementById('donorToggleHint');
   let isDonorOn = false;
@@ -1139,22 +1205,6 @@ const upazilas = [
     }
   }
 
-  function setDonorToggle(on) {
-    isDonorOn = on;
-    donorToggleBtn?.classList.toggle('on', on);
-    donorToggleBtn?.setAttribute('aria-checked', String(on));
-  }
-
-  function updateDonorHint() {
-    const hasBloodGroup = !!bloodGroupSelect?.value;
-    if (donorToggleHint) {
-      donorToggleHint.textContent = hasBloodGroup
-        ? 'জরুরি প্রয়োজনে অন্যরা আপনার তথ্য দেখতে পাবে'
-        : 'ব্লাড গ্রুপ সিলেক্ট করলে চালু করা যাবে';
-      donorToggleHint.classList.remove('hint-error');
-    }
-  }
-
   function renderStatus(el, isOnline) {
     el.className = `rider-status-text ${isOnline ? 'online' : 'offline'}`;
     el.innerHTML = isOnline
@@ -1205,8 +1255,81 @@ const upazilas = [
       viewUpazilaBadge.style.display = 'none';
     }
 
-    viewDonorBadge.style.display = profile.is_blood_donor ? 'inline-flex' : 'none';
+    setDonorToggle(!!profile.is_blood_donor);
+    updateDonorHint();
   }
+
+  // ===== ব্লাড ডোনার টগল লজিক (ইনস্ট্যান্ট সেভ, রাইডার টগলের ধাঁচে) =====
+  function setDonorToggle(on) {
+    isDonorOn = on;
+    donorToggleBtn?.classList.toggle('on', on);
+    donorToggleBtn?.setAttribute('aria-checked', String(on));
+  }
+
+  function updateDonorHint() {
+    const hasBloodGroup = !!currentProfile?.blood_group;
+    if (donorToggleHint) {
+      donorToggleHint.textContent = hasBloodGroup
+        ? 'জরুরি প্রয়োজনে অন্যরা আপনার তথ্য দেখতে পাবে'
+        : 'ব্লাড গ্রুপ যোগ করলে চালু করা যাবে (এডিট করুন থেকে)';
+      donorToggleHint.classList.remove('hint-error');
+    }
+  }
+
+  donorToggleBtn?.addEventListener('click', async () => {
+    if (!currentProfile?.blood_group) {
+      if (donorToggleHint) {
+        donorToggleHint.textContent = 'আগে "এডিট করুন" থেকে ব্লাড গ্রুপ সিলেক্ট করুন';
+        donorToggleHint.classList.add('hint-error');
+      }
+      return;
+    }
+
+    const newValue = !isDonorOn;
+    setDonorToggle(newValue); // অপটিমিস্টিক আপডেট
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_blood_donor: newValue })
+      .eq('id', currentUserId);
+
+    if (error) {
+      setDonorToggle(!newValue); // ব্যর্থ হলে ফিরিয়ে নেওয়া
+      if (donorToggleHint) {
+        donorToggleHint.textContent = 'আপডেট ব্যর্থ, আবার চেষ্টা করুন';
+        donorToggleHint.classList.add('hint-error');
+      }
+      return;
+    }
+
+    currentProfile.is_blood_donor = newValue;
+    updateDonorHint();
+  });
+
+  // ===== রোল-ভিত্তিক শর্টকাট দেখানো/লুকানো =====
+  function renderShortcuts(profile) {
+    const isAdminOrMod = profile.role === 'admin' || profile.role === 'moderator';
+    const isShopOwner = !!profile.is_shop_owner;
+    const isClubOwner = !!profile.is_club_owner;
+
+    shortcutAdmin.style.display = isAdminOrMod ? 'flex' : 'none';
+    shortcutShop.style.display = isShopOwner ? 'flex' : 'none';
+    shortcutClub.style.display = isClubOwner ? 'flex' : 'none';
+    profileShortcuts.style.display = (isAdminOrMod || isShopOwner || isClubOwner) ? 'flex' : 'none';
+  }
+
+  // ===== লগ আউট (একবার ক্লিকে কনফার্ম চাইবে) =====
+  profileLogoutBtn?.addEventListener('click', async () => {
+    if (!logoutConfirming) {
+      logoutConfirming = true;
+      profileLogoutBtn.classList.add('confirming');
+      if (profileLogoutText) profileLogoutText.textContent = 'নিশ্চিত করুন?';
+      return;
+    }
+    await supabase.auth.signOut();
+    window.dispatchEvent(new CustomEvent('smartfeni:logged-out'));
+    window.location.href = '/';
+  });
 
   // ===== এডিট ফর্ম পপুলেট =====
   function populateEditForm(profile) {
@@ -1217,8 +1340,6 @@ const upazilas = [
     if (emailInput) emailInput.value = profile.recovery_email || '';
     if (bloodGroupSelect) bloodGroupSelect.value = profile.blood_group || '';
     if (upazilaSelect) upazilaSelect.value = profile.upazila || '';
-    setDonorToggle(!!profile.is_blood_donor);
-    updateDonorHint();
 
     selectedPhotoFile = null;
     if (profile.avatar_url) {
@@ -1262,13 +1383,14 @@ const upazilas = [
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('full_name, phone, recovery_email, blood_group, upazila, avatar_url, is_blood_donor')
+      .select('full_name, phone, recovery_email, blood_group, upazila, avatar_url, is_blood_donor, role, is_shop_owner, is_club_owner')
       .eq('id', currentUserId)
       .single();
 
     if (profile) {
       currentProfile = profile;
       renderProfileView(profile);
+      renderShortcuts(profile);
       populateEditForm(profile);
     }
 
@@ -1311,25 +1433,6 @@ const upazilas = [
 
   init();
 
-  bloodGroupSelect?.addEventListener('change', () => {
-    updateDonorHint();
-    if (!bloodGroupSelect.value && isDonorOn) {
-      setDonorToggle(false);
-    }
-  });
-
-  donorToggleBtn?.addEventListener('click', () => {
-    if (!bloodGroupSelect?.value) {
-      if (donorToggleHint) {
-        donorToggleHint.textContent = 'আগে ব্লাড গ্রুপ সিলেক্ট করুন';
-        donorToggleHint.classList.add('hint-error');
-      }
-      return;
-    }
-    setDonorToggle(!isDonorOn);
-    updateDonorHint();
-  });
-
   photoInput?.addEventListener('change', () => {
     const file = photoInput.files?.[0];
     if (!file) return;
@@ -1343,10 +1446,6 @@ const upazilas = [
   });
 
   // প্রোফাইল ছবি আপলোড — সার্ভার-সাইড /api/upload-avatar রুট দিয়ে
-  // (service role key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি
-  // supabase.storage.upload() কল হতো, কিন্তু Storage সার্ভিস
-  // ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ হচ্ছিল (RLS ব্লক করে দিতো,
-  // এই পেজেও — সেশন স্টেবল থাকা সত্ত্বেও, লগে কনফার্ম করা হয়েছে)।
   async function uploadAvatar(accessToken, file) {
     try {
       const formData = new FormData();
@@ -1381,12 +1480,6 @@ const upazilas = [
       return;
     }
 
-    if (isDonorOn && !bloodGroupSelect?.value) {
-      showMsg(profileMessage, 'ব্লাড ডোনার লিস্টে দেখাতে হলে ব্লাড গ্রুপ সিলেক্ট করুন');
-      setDonorToggle(false);
-      return;
-    }
-
     setLoading(saveProfileBtn, true, 'সেভ হচ্ছে...');
 
     let avatarUrl = null;
@@ -1399,9 +1492,14 @@ const upazilas = [
       recovery_email: emailInput?.value?.trim() || null,
       blood_group: bloodGroupSelect?.value || null,
       upazila: upazilaSelect?.value || null,
-      is_blood_donor: isDonorOn,
     };
     if (avatarUrl) updates.avatar_url = avatarUrl;
+
+    // ব্লাড গ্রুপ সরিয়ে ফেললে ডোনার টগলও বন্ধ করে দেওয়া, নাহলে
+    // ব্লাড গ্রুপ ছাড়াই ডোনার লিস্টে থেকে যাওয়ার অসামঞ্জস্য হবে
+    if (!updates.blood_group && isDonorOn) {
+      updates.is_blood_donor = false;
+    }
 
     const { error } = await supabase.from('profiles').update(updates).eq('id', currentUserId);
 
