@@ -5,20 +5,21 @@
 // (moderator-দের নিজস্ব চ্যাট + category-ভিত্তিক ডেডিকেটেড চ্যাট,
 // কোড ডিপ্লয় ছাড়াই নতুন চ্যাট যোগ করা যায়)
 //
+// অনুমোদিত না এমন চ্যাট থেকে মেসেজ এলে অটো-ডিটেক্ট করে pending
+// row হিসেবে সেভ হয় (is_active: false) — Admin panel এ
+// /admin/bot-chats পেজে দেখা যাবে, সেখান থেকে Activate করলেই কাজ শুরু
+//
 // সব ক্যাটাগরির কমন ফ্লো: ছবি -> ক্যাটাগরি বাটন (allowed_categories
 //   অনুযায়ী ফিল্টার হতে পারে) -> উপজিলা বাটন
 //   housing/recycle: -> extraction -> আসল ছবি (একাধিক) -> ✅ শেষ -> listings insert (status: pending)
 //   blood: -> ক্লাব নাম (টেক্সট রিপ্লাই) -> extraction (array) -> manual_blood_donors bulk insert
-//   (আগে থেকে থাকা ফোন নম্বরের status প্রিজার্ভ হয়, re-upload করলে
-//    already-active ডোনার আবার pending হয়ে যায় না)
+//   (আগে থেকে থাকা ফোন নম্বরের status প্রিজার্ভ হয়)
 //
-// প্রতিটা এন্ট্রিতে submitted_via_label সেভ হয় (accountability —
-// কোন চ্যাট/moderator থেকে এসেছে)
+// প্রতিটা এন্ট্রিতে submitted_via_label সেভ হয় (accountability)
 //
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে:
 // TELEGRAM_BOT_TOKEN, GEMINI_API_KEY,
 // PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-// (TELEGRAM_CHAT_ID আর লাগে না — telegram_bot_chats টেবিল থেকে আসে)
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -49,15 +50,38 @@ async function tg(method, body) {
   return res.json();
 }
 
-// চ্যাট আইডি টেবিলে অনুমোদিত+active আছে কিনা চেক করে, থাকলে config রিটার্ন করে
-async function getChatConfig(chatId) {
+// চ্যাট আইডি টেবিলে অনুমোদিত+active আছে কিনা চেক করে, থাকলে config রিটার্ন করে।
+// না থাকলে একটা pending row অটো-তৈরি করে (Admin panel এ দেখা যাবে) এবং
+// প্রেরককে একটা তথ্যমূলক মেসেজ পাঠায় — কিন্তু একই চ্যাট থেকে বারবার
+// মেসেজ এলে বারবার pending row তৈরি না হয়ে যায় সেটা নিশ্চিত করা হয়
+async function getChatConfig(chatId, senderName) {
   const { data } = await supabase
     .from('telegram_bot_chats')
     .select('*')
     .eq('chat_id', chatId)
-    .eq('is_active', true)
     .maybeSingle();
-  return data || null;
+
+  if (data) {
+    return data.is_active ? data : null;
+  }
+
+  // এই চ্যাট আগে কখনো দেখা যায়নি — pending row তৈরি করা হচ্ছে
+  const { error } = await supabase.from('telegram_bot_chats').insert({
+    chat_id: chatId,
+    label: senderName ? `${senderName} (অনুমোদন অপেক্ষমান)` : 'অজানা — অনুমোদন অপেক্ষমান',
+    purpose: 'listing_import',
+    allowed_categories: null,
+    is_active: false,
+  });
+
+  if (!error) {
+    await tg('sendMessage', {
+      chat_id: chatId,
+      text: '👋 আপনার অ্যাক্সেস রিকোয়েস্ট পাঠানো হয়েছে। অ্যাডমিন অনুমোদন করলে বট ব্যবহার করতে পারবেন।',
+    });
+  }
+
+  return null;
 }
 
 function getAllowedCategories(chatConfig) {
@@ -102,10 +126,17 @@ async function getActiveSession(chatId) {
   return data;
 }
 
+function senderDisplayName(from) {
+  if (!from) return null;
+  const parts = [from.first_name, from.last_name].filter(Boolean);
+  const name = parts.join(' ');
+  return from.username ? `${name} (@${from.username})` : name || null;
+}
+
 // ---------- ছবি হ্যান্ডলিং ----------
 async function handlePhotoMessage(message) {
   const chatId = String(message.chat.id);
-  const chatConfig = await getChatConfig(chatId);
+  const chatConfig = await getChatConfig(chatId, senderDisplayName(message.from));
   if (!chatConfig) return; // অনুমোদিত না বা inactive — চুপচাপ ইগনোর
 
   const activeSession = await getActiveSession(chatId);
@@ -172,7 +203,7 @@ async function handlePhotoMessage(message) {
 // ---------- টেক্সট হ্যান্ডলিং (ক্লাবের নাম) ----------
 async function handleTextMessage(message) {
   const chatId = String(message.chat.id);
-  const chatConfig = await getChatConfig(chatId);
+  const chatConfig = await getChatConfig(chatId, senderDisplayName(message.from));
   if (!chatConfig) return;
 
   const session = await getActiveSession(chatId);
@@ -205,12 +236,7 @@ async function handleTextMessage(message) {
       return;
     }
 
-    // ============================================================
-    // আগে থেকেই এই ফোন নম্বরগুলা টেবিলে থাকলে তাদের status প্রিজার্ভ
-    // করা হচ্ছে — নাহলে re-upload করলে already active ডোনার আবার
-    // pending হয়ে ব্লাড পেজ থেকে হারিয়ে যেত (upsert পুরো row
-    // ওভাররাইট করে ফেলত)
-    // ============================================================
+    // আগে থেকে থাকা ফোন নম্বরগুলার status প্রিজার্ভ করা হচ্ছে
     const phones = rows.map((r) => r.phone);
     const { data: existingRows } = await supabase
       .from('manual_blood_donors')
@@ -226,10 +252,10 @@ async function handleTextMessage(message) {
       const existingStatus = existingStatusMap[row.phone];
       if (existingStatus) {
         updatedCount++;
-        return { ...row, status: existingStatus }; // পুরনো status প্রিজার্ভ
+        return { ...row, status: existingStatus };
       }
       newCount++;
-      return row; // নতুন এন্ট্রি, status: 'pending' থাকবে (buildBloodDonorRows থেকে আসা)
+      return row;
     });
 
     const { error } = await supabase.from('manual_blood_donors').upsert(rows, { onConflict: 'phone' });
@@ -258,7 +284,6 @@ async function handleTextMessage(message) {
 
 // ---------- Callback হ্যান্ডলিং ----------
 
-// সব ক্যাটাগরির জন্যই কমন — ক্যাটাগরি সেভ করে উপজিলা বাটন দেখায়
 async function handleCategorySelected(chatId, messageId, importId, category) {
   await supabase.from('screenshot_imports').update({ category, step: 'awaiting_upazila' }).eq('id', importId);
 
@@ -271,7 +296,6 @@ async function handleCategorySelected(chatId, messageId, importId, category) {
   });
 }
 
-// উপজিলা সিলেক্ট হওয়ার পর ক্যাটাগরি অনুযায়ী ভাগ হয়ে যায়
 async function handleUpazilaSelected(chatId, messageId, importId, upazilaIndex) {
   const upazila = UPAZILA_LIST[Number(upazilaIndex)];
   await supabase.from('screenshot_imports').update({ upazila }).eq('id', importId);
@@ -289,7 +313,6 @@ async function handleUpazilaSelected(chatId, messageId, importId, upazilaIndex) 
     return;
   }
 
-  // housing/recycle: এখন extraction চালানো হবে
   await tg('editMessageText', {
     chat_id: chatId,
     message_id: messageId,
@@ -365,7 +388,7 @@ export async function POST({ request }) {
 
       await tg('answerCallbackQuery', { callback_query_id: cq.id });
 
-      const chatConfig = await getChatConfig(chatId);
+      const chatConfig = await getChatConfig(chatId, senderDisplayName(cq.from));
       if (chatConfig) {
         const [action, importId, extra] = cq.data.split(':');
 
