@@ -1,0 +1,437 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — Telegram Bot Chats ম্যানেজমেন্ট (/admin/bot-chats)
+// telegram_bot_chats টেবিল ম্যানেজ করার UI — moderator/ক্যাটাগরি-
+// ভিত্তিক চ্যাট অ্যাক্টিভেট, এডিট, ডিলিট + ম্যানুয়াল যোগ
+// pending সেকশন: telegram-webhook.js অটো-ডিটেক্ট করে যেসব নতুন
+// চ্যাট থেকে মেসেজ এসেছে (is_active: false) সেগুলা এখানে দেখায়
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+
+const CATEGORY_OPTIONS = [
+  { id: 'housing', label: 'বাসা ভাড়া' },
+  { id: 'blood', label: 'ব্লাড ডোনার' },
+  { id: 'recycle', label: 'ক্রয়-বিক্রয়' },
+];
+---
+
+<BaseLayout title="Bot Chats | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>Telegram Bot Chats</h1>
+          <p class="admin-subtitle">Moderator ও ক্যাটাগরি-ভিত্তিক চ্যাট ম্যানেজ করুন</p>
+        </div>
+
+        <!-- ===== Pending সেকশন ===== -->
+        <div class="section" id="pendingSection" style="display:none;">
+          <h3><i class="fas fa-clock"></i> অনুমোদন অপেক্ষমান</h3>
+          <p class="section-hint">এই চ্যাটগুলা থেকে বটে মেসেজ এসেছিল, কিন্তু এখনো অনুমোদিত না।</p>
+          <div id="pendingList"></div>
+        </div>
+
+        <!-- ===== ম্যানুয়াল যোগ ===== -->
+        <div class="dash-card">
+          <h3><i class="fas fa-plus"></i> নতুন চ্যাট যোগ করুন</h3>
+          <p class="form-msg" id="addMsg"></p>
+
+          <label class="form-label">Chat ID</label>
+          <input type="text" class="form-input" id="newChatId" placeholder="যেমন: 123456789" />
+
+          <label class="form-label">লেবেল (নাম)</label>
+          <input type="text" class="form-input" id="newLabel" placeholder="যেমন: রহিম — moderator" />
+
+          <label class="form-label">অনুমোদিত ক্যাটাগরি (কিছু না বাছলে সব ক্যাটাগরি)</label>
+          <div class="category-checks" id="newCategoryChecks">
+            {CATEGORY_OPTIONS.map((c) => (
+              <label class="cat-check">
+                <input type="checkbox" value={c.id} />
+                <span>{c.label}</span>
+              </label>
+            ))}
+          </div>
+
+          <button class="primary-btn" id="addChatBtn" type="button">
+            <i class="fas fa-check"></i> <span>যোগ করুন</span>
+          </button>
+        </div>
+
+        <!-- ===== Active চ্যাট লিস্ট ===== -->
+        <div class="section">
+          <h3><i class="fas fa-list"></i> সক্রিয় চ্যাট</h3>
+          <div id="activeList"></div>
+          <p class="empty-note" id="activeEmpty" style="display:none;">কোনো সক্রিয় চ্যাট নাই</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page { min-height: 60vh; padding: 32px 0 80px; }
+
+    .admin-loading {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35;
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .back-link {
+      display: inline-flex; align-items: center; gap: 8px; color: #5A6E85;
+      text-decoration: none; font-weight: 600; font-size: 0.88rem; margin-bottom: 20px;
+    }
+    .back-link:hover { color: #FF6B35; }
+
+    .admin-header { margin-bottom: 24px; }
+    .admin-header h1 { font-size: 1.6rem; font-weight: 700; color: #1B2A4A; }
+    .admin-subtitle { font-size: 0.85rem; color: #8FA0BC; margin-top: 4px; font-weight: 600; }
+
+    .section { margin-bottom: 28px; }
+    .section h3 {
+      font-size: 1rem; font-weight: 700; color: #1B2A4A; margin-bottom: 4px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-hint { font-size: 0.82rem; color: #8FA0BC; margin-bottom: 14px; }
+
+    .dash-card {
+      background: #fff; border-radius: 18px; padding: 20px;
+      box-shadow: 0 4px 16px rgba(15,23,42,0.06); margin-bottom: 28px;
+    }
+    .dash-card h3 {
+      font-size: 1rem; font-weight: 700; color: #1B2A4A; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    .form-label { display: block; font-size: 0.82rem; font-weight: 700; color: #5A6E85; margin: 12px 0 6px; }
+    .form-input {
+      width: 100%; padding: 11px 14px; border-radius: 12px; border: 1.5px solid #E5EAF0;
+      font-size: 0.9rem; font-family: inherit; background: #fff;
+    }
+
+    .form-msg { font-size: 0.82rem; font-weight: 700; margin-bottom: 4px; }
+    .form-msg.show-error { color: #D14343; }
+    .form-msg.show-success { color: #1B7A3C; }
+
+    .category-checks { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
+    .cat-check {
+      display: flex; align-items: center; gap: 6px; font-size: 0.85rem;
+      font-weight: 600; color: #3A4A60; cursor: pointer;
+    }
+    .cat-check input { width: 16px; height: 16px; accent-color: #FF6B35; }
+
+    .primary-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; background: #1B2A4A; color: #fff; border: none; padding: 12px;
+      border-radius: 12px; font-size: 0.9rem; font-weight: 700; cursor: pointer; margin-top: 16px;
+    }
+
+    .chat-card {
+      background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 4px 16px rgba(15,23,42,0.06);
+      margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .chat-card.pending { border: 1.5px dashed #F5A623; background: #FFF9EF; }
+
+    .chat-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+    .chat-label { font-weight: 700; color: #1B2A4A; font-size: 0.95rem; }
+    .chat-id { font-size: 0.78rem; color: #8FA0BC; font-family: monospace; }
+
+    .chat-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chat-cat-badge {
+      font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 20px;
+      background: #E8F2FF; color: #1D6FE0;
+    }
+    .chat-cat-badge.all { background: #F4F7FC; color: #5A6E85; }
+
+    .chat-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chat-btn {
+      border: none; padding: 7px 14px; border-radius: 10px; font-size: 0.78rem;
+      font-weight: 700; cursor: pointer;
+    }
+    .chat-btn.approve { background: #1B7A3C; color: #fff; }
+    .chat-btn.edit { background: #FFF0EA; color: #FF6B35; }
+    .chat-btn.deactivate { background: #F4F7FC; color: #1B2A4A; }
+    .chat-btn.delete { background: transparent; color: #8FA0BC; border: 1.5px solid #E5EAF0; }
+
+    .empty-note { color: #B0BCCB; font-size: 0.85rem; text-align: center; padding: 20px 0; }
+  </style>
+
+  <script type="application/json" id="categoryOptionsData" set:html={JSON.stringify(CATEGORY_OPTIONS)} />
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const categoryOptionsEl = document.getElementById('categoryOptionsData');
+    const CATEGORY_OPTIONS = categoryOptionsEl ? JSON.parse(categoryOptionsEl.textContent) : [];
+    const categoryLabelMap = Object.fromEntries(CATEGORY_OPTIONS.map((c) => [c.id, c.label]));
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    function categoryBadgesHtml(allowedCategories) {
+      if (!allowedCategories || allowedCategories.length === 0) {
+        return `<span class="chat-cat-badge all">সব ক্যাটাগরি</span>`;
+      }
+      return allowedCategories
+        .map((c) => `<span class="chat-cat-badge">${escapeHtml(categoryLabelMap[c] || c)}</span>`)
+        .join('');
+    }
+
+    // ============================================================
+    // ম্যানুয়াল যোগ
+    // ============================================================
+    const addMsgEl = document.getElementById('addMsg');
+    function showAddMsg(text, type = 'error') {
+      addMsgEl.textContent = text;
+      addMsgEl.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
+    }
+
+    document.getElementById('addChatBtn')?.addEventListener('click', async () => {
+      const chatId = document.getElementById('newChatId').value.trim();
+      const label = document.getElementById('newLabel').value.trim();
+      const checked = Array.from(document.querySelectorAll('#newCategoryChecks input:checked')).map((i) => i.value);
+
+      if (!chatId || !label) {
+        showAddMsg('Chat ID এবং লেবেল দিন');
+        return;
+      }
+
+      const btn = document.getElementById('addChatBtn');
+      const span = btn.querySelector('span');
+      span.textContent = 'যোগ হচ্ছে...';
+      btn.disabled = true;
+
+      const { error } = await supabase.from('telegram_bot_chats').insert({
+        chat_id: chatId,
+        label,
+        purpose: 'listing_import',
+        allowed_categories: checked.length > 0 ? checked : null,
+        is_active: true,
+      });
+
+      span.textContent = 'যোগ করুন';
+      btn.disabled = false;
+
+      if (error) {
+        showAddMsg('যোগ করতে ব্যর্থ: ' + error.message);
+        return;
+      }
+
+      showAddMsg('চ্যাট যোগ হয়েছে ✓', 'success');
+      document.getElementById('newChatId').value = '';
+      document.getElementById('newLabel').value = '';
+      document.querySelectorAll('#newCategoryChecks input:checked').forEach((i) => (i.checked = false));
+
+      loadChats();
+    });
+
+    // ============================================================
+    // Pending / Active লিস্ট
+    // ============================================================
+    function renderChatCard(chat, isPending) {
+      const card = document.createElement('div');
+      card.className = `chat-card ${isPending ? 'pending' : ''}`;
+
+      card.innerHTML = `
+        <div class="chat-top">
+          <div>
+            <div class="chat-label">${escapeHtml(chat.label)}</div>
+            <div class="chat-id">chat_id: ${escapeHtml(chat.chat_id)}</div>
+          </div>
+        </div>
+        <div class="chat-cats">${categoryBadgesHtml(chat.allowed_categories)}</div>
+        <div class="chat-actions"></div>
+        <div class="edit-form-slot"></div>
+      `;
+
+      const actionsWrap = card.querySelector('.chat-actions');
+      const editSlot = card.querySelector('.edit-form-slot');
+
+      if (isPending) {
+        const approveBtn = document.createElement('button');
+        approveBtn.className = 'chat-btn approve';
+        approveBtn.textContent = 'Approve করুন';
+        approveBtn.addEventListener('click', () => {
+          editSlot.innerHTML = '';
+          editSlot.appendChild(renderEditForm(chat, true));
+        });
+        actionsWrap.appendChild(approveBtn);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'chat-btn delete';
+        deleteBtn.textContent = 'বাতিল করুন';
+        deleteBtn.addEventListener('click', () => deleteChat(chat.id));
+        actionsWrap.appendChild(deleteBtn);
+      } else {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'chat-btn edit';
+        editBtn.textContent = 'এডিট করুন';
+        editBtn.addEventListener('click', () => {
+          editSlot.innerHTML = '';
+          editSlot.appendChild(renderEditForm(chat, false));
+        });
+        actionsWrap.appendChild(editBtn);
+
+        const deactivateBtn = document.createElement('button');
+        deactivateBtn.className = 'chat-btn deactivate';
+        deactivateBtn.textContent = 'নিষ্ক্রিয় করুন';
+        deactivateBtn.addEventListener('click', () => toggleActive(chat.id, false));
+        actionsWrap.appendChild(deactivateBtn);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'chat-btn delete';
+        deleteBtn.textContent = 'ডিলিট';
+        let confirming = false;
+        deleteBtn.addEventListener('click', () => {
+          if (!confirming) {
+            confirming = true;
+            deleteBtn.textContent = 'নিশ্চিত করুন?';
+            return;
+          }
+          deleteChat(chat.id);
+        });
+        actionsWrap.appendChild(deleteBtn);
+      }
+
+      return card;
+    }
+
+    function renderEditForm(chat, isApproving) {
+      const form = document.createElement('div');
+      form.style.cssText = 'margin-top:10px;padding:14px;background:#F8FAFC;border-radius:14px;border:1px solid #EEF3F9;display:flex;flex-direction:column;gap:10px;';
+
+      const catChecks = CATEGORY_OPTIONS.map(
+        (c) => `
+          <label class="cat-check">
+            <input type="checkbox" value="${c.id}" ${chat.allowed_categories?.includes(c.id) ? 'checked' : ''} />
+            <span>${escapeHtml(c.label)}</span>
+          </label>
+        `
+      ).join('');
+
+      form.innerHTML = `
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">লেবেল
+          <input type="text" data-field="label" value="${escapeHtml(chat.label)}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
+        </label>
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">অনুমোদিত ক্যাটাগরি (কিছু না বাছলে সব)</label>
+        <div class="category-checks">${catChecks}</div>
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <button data-action="save" style="flex:1;background:#1B2A4A;color:#fff;border:none;padding:10px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;">
+            ${isApproving ? 'Approve করে সেভ করুন' : 'সেভ করুন'}
+          </button>
+          <button data-action="cancel" style="background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:10px 16px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;">বাতিল</button>
+        </div>
+      `;
+
+      form.querySelector('[data-action="cancel"]').addEventListener('click', () => form.remove());
+
+      form.querySelector('[data-action="save"]').addEventListener('click', async () => {
+        const saveBtn = form.querySelector('[data-action="save"]');
+        saveBtn.textContent = 'সেভ হচ্ছে...';
+        saveBtn.disabled = true;
+
+        const label = form.querySelector('[data-field="label"]').value.trim();
+        const checked = Array.from(form.querySelectorAll('.category-checks input:checked')).map((i) => i.value);
+
+        const updates = {
+          label,
+          allowed_categories: checked.length > 0 ? checked : null,
+        };
+        if (isApproving) updates.is_active = true;
+
+        const { error } = await supabase.from('telegram_bot_chats').update(updates).eq('id', chat.id);
+
+        if (error) {
+          alert('সেভ ব্যর্থ: ' + error.message);
+          saveBtn.disabled = false;
+          return;
+        }
+
+        loadChats();
+      });
+
+      return form;
+    }
+
+    async function toggleActive(id, isActive) {
+      const { error } = await supabase.from('telegram_bot_chats').update({ is_active: isActive }).eq('id', id);
+      if (error) {
+        alert('আপডেট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadChats();
+    }
+
+    async function deleteChat(id) {
+      const { error } = await supabase.from('telegram_bot_chats').delete().eq('id', id);
+      if (error) {
+        alert('ডিলিট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadChats();
+    }
+
+    async function loadChats() {
+      const { data, error } = await supabase
+        .from('telegram_bot_chats')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) return;
+
+      const chats = data || [];
+      const pending = chats.filter((c) => !c.is_active);
+      const active = chats.filter((c) => c.is_active);
+
+      const pendingSection = document.getElementById('pendingSection');
+      const pendingList = document.getElementById('pendingList');
+      pendingList.innerHTML = '';
+
+      if (pending.length > 0) {
+        pendingSection.style.display = 'block';
+        pending.forEach((chat) => pendingList.appendChild(renderChatCard(chat, true)));
+      } else {
+        pendingSection.style.display = 'none';
+      }
+
+      const activeList = document.getElementById('activeList');
+      const activeEmpty = document.getElementById('activeEmpty');
+      activeList.innerHTML = '';
+
+      if (active.length === 0) {
+        activeEmpty.style.display = 'block';
+      } else {
+        activeEmpty.style.display = 'none';
+        active.forEach((chat) => activeList.appendChild(renderChatCard(chat, false)));
+      }
+    }
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadChats();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
