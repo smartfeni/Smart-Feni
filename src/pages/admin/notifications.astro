@@ -1,0 +1,606 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — কাস্টম নোটিফিকেশন পাঠানো (/admin/notifications)
+// user_notifications টেবিলে ইনসার্ট করে — নির্দিষ্ট ইউজার (ফোন
+// নাম্বার সার্চ করে) অথবা সবাইকে ব্রডকাস্ট। প্রতিটা পাঠানোর একটা
+// লগ admin_notification_log এ থাকে (কতজনকে, কী মেসেজ, কবে)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="নোটিফিকেশন পাঠান | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>নোটিফিকেশন পাঠান</h1>
+          <p class="admin-subtitle">নির্দিষ্ট ইউজারকে অথবা সবাইকে কাস্টম মেসেজ পাঠান</p>
+        </div>
+
+        <div class="compose-card">
+          <div class="target-tabs">
+            <button class="target-tab active" data-target="single" type="button">নির্দিষ্ট ইউজার</button>
+            <button class="target-tab" data-target="broadcast" type="button">সবাইকে (ব্রডকাস্ট)</button>
+          </div>
+
+          <!-- নির্দিষ্ট ইউজার সার্চ -->
+          <div id="singleTargetPanel" class="target-panel">
+            <label class="field-label">ফোন নাম্বার দিয়ে ইউজার খুঁজুন</label>
+            <div class="search-row">
+              <input type="text" id="userSearchInput" placeholder="01xxxxxxxxx" />
+              <button id="userSearchBtn" type="button">খুঁজুন</button>
+            </div>
+            <div id="userSearchResult" class="user-search-result"></div>
+          </div>
+
+          <!-- ব্রডকাস্ট কনফার্মেশন -->
+          <div id="broadcastTargetPanel" class="target-panel" style="display:none;">
+            <p class="broadcast-note">
+              <i class="fas fa-triangle-exclamation"></i>
+              এই মেসেজ <strong>সব রেজিস্টার্ড ইউজারের</strong> কাছে যাবে। সতর্কতার সাথে ব্যবহার করুন।
+            </p>
+          </div>
+
+          <label class="field-label">মেসেজ</label>
+          <textarea id="messageInput" rows="4" placeholder="মেসেজ লিখুন..."></textarea>
+
+          <p class="send-feedback" id="sendFeedback"></p>
+
+          <button id="sendBtn" class="send-btn" type="button" disabled>
+            <i class="fas fa-paper-plane"></i> পাঠান
+          </button>
+        </div>
+
+        <div class="log-section">
+          <h2>সাম্প্রতিক পাঠানো</h2>
+          <div id="logContainer" class="log-container"></div>
+          <div id="logEmptyState" class="empty-state" style="display:none;">
+            <i class="fas fa-inbox"></i>
+            <p>এখনো কোনো নোটিফিকেশন পাঠানো হয়নি</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 20px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .compose-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      margin-bottom: 32px;
+    }
+
+    .target-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      background: #F4F7FC;
+      border-radius: 40px;
+      padding: 4px;
+    }
+
+    .target-tab {
+      flex: 1;
+      border: none;
+      background: transparent;
+      padding: 10px 12px;
+      border-radius: 40px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      color: #5A6E85;
+      cursor: pointer;
+    }
+
+    .target-tab.active {
+      background: #1B2A4A;
+      color: #fff;
+    }
+
+    .target-panel {
+      margin-bottom: 16px;
+    }
+
+    .field-label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #5A6E85;
+      margin-bottom: 6px;
+    }
+
+    .search-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .search-row input {
+      flex: 1;
+      padding: 11px 14px;
+      border-radius: 12px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.88rem;
+      font-family: inherit;
+    }
+
+    .search-row button {
+      background: #1B2A4A;
+      color: #fff;
+      border: none;
+      padding: 0 18px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .user-search-result {
+      margin-top: 10px;
+    }
+
+    .user-result-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 14px;
+      background: #F8FAFC;
+      border-radius: 12px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+
+    .user-result-item.selected {
+      border-color: #FF6B35;
+      background: #FFF0EA;
+    }
+
+    .user-result-name {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .user-result-phone {
+      font-size: 0.78rem;
+      color: #8FA0BC;
+    }
+
+    .no-user-found {
+      font-size: 0.82rem;
+      color: #D14343;
+      padding: 8px 4px;
+    }
+
+    .broadcast-note {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      background: #FFF3E0;
+      color: #B36B00;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 12px 14px;
+      border-radius: 12px;
+      line-height: 1.5;
+    }
+
+    #messageInput {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.88rem;
+      font-family: inherit;
+      resize: vertical;
+      margin-bottom: 6px;
+    }
+
+    .send-feedback {
+      font-size: 0.82rem;
+      font-weight: 700;
+      margin: 6px 0;
+      display: none;
+    }
+
+    .send-feedback.error {
+      display: block;
+      color: #D14343;
+    }
+
+    .send-feedback.success {
+      display: block;
+      color: #1B7A3C;
+    }
+
+    .send-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      background: #FF6B35;
+      color: #fff;
+      border: none;
+      padding: 13px;
+      border-radius: 40px;
+      font-weight: 700;
+      font-size: 0.92rem;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+
+    .send-btn:disabled {
+      background: #D7E0EC;
+      cursor: not-allowed;
+    }
+
+    .log-section h2 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 14px;
+    }
+
+    .log-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .log-item {
+      background: #fff;
+      border-radius: 14px;
+      padding: 14px 16px;
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+    }
+
+    .log-item-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .log-item-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+
+    .log-item-badge.single {
+      background: #E8F2FF;
+      color: #1D6FE0;
+    }
+
+    .log-item-badge.broadcast {
+      background: #FFF0EA;
+      color: #FF6B35;
+    }
+
+    .log-item-msg {
+      font-size: 0.85rem;
+      color: #1B2A4A;
+      line-height: 1.5;
+      white-space: pre-line;
+    }
+
+    .log-item-meta {
+      font-size: 0.75rem;
+      color: #8FA0BC;
+      margin-top: 8px;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 60px 0;
+      color: #B0BCCB;
+    }
+
+    .empty-state i {
+      font-size: 2rem;
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    function formatDate(iso) {
+      const d = new Date(iso);
+      return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    // ============================================================
+    // টার্গেট ট্যাব সুইচিং
+    // ============================================================
+    const targetTabs = document.querySelectorAll('.target-tab');
+    const singlePanel = document.getElementById('singleTargetPanel');
+    const broadcastPanel = document.getElementById('broadcastTargetPanel');
+
+    let currentTarget = 'single';
+    let selectedUser = null; // { id, full_name, phone }
+
+    targetTabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        targetTabs.forEach((t) => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentTarget = tab.dataset.target;
+        singlePanel.style.display = currentTarget === 'single' ? 'block' : 'none';
+        broadcastPanel.style.display = currentTarget === 'broadcast' ? 'block' : 'none';
+        updateSendBtnState();
+      });
+    });
+
+    // ============================================================
+    // ইউজার সার্চ (ফোন নাম্বার দিয়ে)
+    // ============================================================
+    const userSearchInput = document.getElementById('userSearchInput');
+    const userSearchBtn = document.getElementById('userSearchBtn');
+    const userSearchResult = document.getElementById('userSearchResult');
+
+    async function searchUser() {
+      const phone = userSearchInput.value.trim();
+      if (!phone) return;
+
+      userSearchResult.innerHTML = '<p style="font-size:0.82rem;color:#8FA0BC;">খোঁজা হচ্ছে...</p>';
+      selectedUser = null;
+      updateSendBtnState();
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, phone')
+        .ilike('phone', `%${phone}%`)
+        .limit(5);
+
+      if (error || !data || data.length === 0) {
+        userSearchResult.innerHTML = '<p class="no-user-found">কোনো ইউজার পাওয়া যায়নি</p>';
+        return;
+      }
+
+      userSearchResult.innerHTML = '';
+      data.forEach((u) => {
+        const item = document.createElement('div');
+        item.className = 'user-result-item';
+        item.innerHTML = `
+          <div>
+            <div class="user-result-name">${escapeHtml(u.full_name || '(নাম নাই)')}</div>
+            <div class="user-result-phone">${escapeHtml(u.phone || '')}</div>
+          </div>
+          <i class="fas fa-circle-check" style="color:#D7E0EC;"></i>
+        `;
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.user-result-item').forEach((el) => el.classList.remove('selected'));
+          item.classList.add('selected');
+          selectedUser = u;
+          updateSendBtnState();
+        });
+        userSearchResult.appendChild(item);
+      });
+    }
+
+    userSearchBtn.addEventListener('click', searchUser);
+    userSearchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') searchUser();
+    });
+
+    // ============================================================
+    // মেসেজ ইনপুট + সেন্ড বাটন স্টেট
+    // ============================================================
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const sendFeedback = document.getElementById('sendFeedback');
+
+    function updateSendBtnState() {
+      const hasMessage = messageInput.value.trim().length > 0;
+      const targetReady = currentTarget === 'broadcast' || (currentTarget === 'single' && selectedUser);
+      sendBtn.disabled = !(hasMessage && targetReady);
+    }
+
+    messageInput.addEventListener('input', updateSendBtnState);
+
+    function showFeedback(text, type) {
+      sendFeedback.textContent = text;
+      sendFeedback.className = `send-feedback ${type}`;
+    }
+
+    // ============================================================
+    // পাঠানো
+    // ============================================================
+    sendBtn.addEventListener('click', async () => {
+      const message = messageInput.value.trim();
+      if (!message) return;
+
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'পাঠানো হচ্ছে...';
+      showFeedback('', '');
+
+      const { data: { user: adminUser } } = await supabase.auth.getUser();
+
+      try {
+        if (currentTarget === 'single') {
+          if (!selectedUser) throw new Error('একজন ইউজার সিলেক্ট করুন');
+
+          const { error } = await supabase.from('user_notifications').insert({
+            user_id: selectedUser.id,
+            message,
+          });
+          if (error) throw error;
+
+          await supabase.from('admin_notification_log').insert({
+            message,
+            target_type: 'single',
+            target_label: `${selectedUser.full_name || ''} (${selectedUser.phone || ''})`,
+            recipient_count: 1,
+            sent_by: adminUser?.id,
+          });
+        } else {
+          const { data: allProfiles, error: profileError } = await supabase
+            .from('profiles')
+            .select('id');
+          if (profileError) throw profileError;
+
+          const rows = (allProfiles || []).map((p) => ({ user_id: p.id, message }));
+          if (rows.length === 0) throw new Error('কোনো ইউজার পাওয়া যায়নি');
+
+          const { error: insertError } = await supabase.from('user_notifications').insert(rows);
+          if (insertError) throw insertError;
+
+          await supabase.from('admin_notification_log').insert({
+            message,
+            target_type: 'broadcast',
+            target_label: 'সবাইকে',
+            recipient_count: rows.length,
+            sent_by: adminUser?.id,
+          });
+        }
+
+        showFeedback('সফলভাবে পাঠানো হয়েছে ✓', 'success');
+        messageInput.value = '';
+        selectedUser = null;
+        userSearchResult.innerHTML = '';
+        userSearchInput.value = '';
+        loadLog();
+      } catch (err) {
+        showFeedback('পাঠানো ব্যর্থ: ' + err.message, 'error');
+      }
+
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'পাঠান';
+      updateSendBtnState();
+    });
+
+    // ============================================================
+    // হিস্ট্রি লগ
+    // ============================================================
+    const logContainer = document.getElementById('logContainer');
+    const logEmptyState = document.getElementById('logEmptyState');
+
+    async function loadLog() {
+      const { data, error } = await supabase
+        .from('admin_notification_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      if (error || !data || data.length === 0) {
+        logContainer.innerHTML = '';
+        logEmptyState.style.display = 'flex';
+        return;
+      }
+
+      logEmptyState.style.display = 'none';
+      logContainer.innerHTML = '';
+
+      data.forEach((log) => {
+        const item = document.createElement('div');
+        item.className = 'log-item';
+        item.innerHTML = `
+          <div class="log-item-top">
+            <span class="log-item-badge ${log.target_type}">
+              ${log.target_type === 'broadcast' ? 'সবাইকে' : escapeHtml(log.target_label || 'নির্দিষ্ট ইউজার')}
+            </span>
+            <span style="font-size:0.72rem;color:#8FA0BC;">${log.recipient_count} জনকে</span>
+          </div>
+          <div class="log-item-msg">${escapeHtml(log.message)}</div>
+          <div class="log-item-meta">${formatDate(log.created_at)}</div>
+        `;
+        logContainer.appendChild(item);
+      });
+    }
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadLog();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
