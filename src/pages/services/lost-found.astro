@@ -4,6 +4,12 @@
 // ব্র্যান্ড: স্মার্ট ফেনী
 // ২টা ট্যাব (হারানো/পাওয়া), Supabase লাইভ ডেটা, ডিটেইলস মডাল,
 // লোকেশন সর্ট। সার্চ বক্স নাই।
+//
+// আপডেট: লাইক + রিপোর্ট (অভিযোগ) সিস্টেম — প্রিভিউ কার্ডে ❤️ লাইক,
+// ডিটেইল মডালের ভেতরে 🚩 ফ্ল্যাগ। দুই গ্রিড (lost/found) একই
+// শেয়ার্ড ListingDetailModal ব্যবহার করে, তাই ReportModal ও একবারই
+// বসানো হলো, দুই initListingDetailModal কলেই একই report ইনস্ট্যান্স
+// পাস করা হয়েছে। লগইন না থাকলে লাইক ভিউ-অনলি, ফ্ল্যাগ লুকানো।
 // ============================================================
 
 export const prerender = false;
@@ -11,6 +17,7 @@ export const prerender = false;
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import AddListingModal from '../../components/ui/AddListingModal.astro';
 import ListingDetailModal from '../../components/ui/ListingDetailModal.astro';
+import ReportModal from '../../components/shared/ReportModal.astro';
 import { supabase } from '../../lib/supabase.js';
 
 const typeOptions = [
@@ -67,8 +74,18 @@ const foundItems = listings.filter((i) => i.type === 'found');
                 type="button"
                 class="item-card lost-card"
                 data-detail-index={i}
+                data-target-id={item.id}
                 data-upazila-name={item.upazila || ''}
               >
+                <button class="like-btn-preview" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
+                  <i class="fas fa-heart"></i>
+                  <span data-like-count>0</span>
+                </button>
+                <span class="like-count-preview-view" data-like-count-view>
+                  <i class="fas fa-heart"></i>
+                  <span data-like-count>0</span>
+                </span>
+
                 <span class="status-badge lost-badge">হারানো</span>
                 <h3>{item.title}</h3>
                 {item.description && <p class="item-desc">{item.description}</p>}
@@ -99,8 +116,18 @@ const foundItems = listings.filter((i) => i.type === 'found');
                 type="button"
                 class="item-card found-card"
                 data-detail-index={i}
+                data-target-id={item.id}
                 data-upazila-name={item.upazila || ''}
               >
+                <button class="like-btn-preview" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
+                  <i class="fas fa-heart"></i>
+                  <span data-like-count>0</span>
+                </button>
+                <span class="like-count-preview-view" data-like-count-view>
+                  <i class="fas fa-heart"></i>
+                  <span data-like-count>0</span>
+                </span>
+
                 <span class="status-badge found-badge">পাওয়া গিয়েছে</span>
                 <h3>{item.title}</h3>
                 {item.description && <p class="item-desc">{item.description}</p>}
@@ -116,6 +143,7 @@ const foundItems = listings.filter((i) => i.type === 'found');
   </section>
 
   <ListingDetailModal />
+  <ReportModal />
   <AddListingModal category="lost-found" typeOptions={typeOptions} titleLabel="আইটেমের নাম" priceLabel="" />
 
   <script type="application/json" id="lostData" set:html={JSON.stringify(lostItems)} />
@@ -256,6 +284,39 @@ const foundItems = listings.filter((i) => i.type === 'found');
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
   }
 
+  /* ===== প্রিভিউ কার্ডে লাইক (টপ-রাইট) ===== */
+  .like-btn-preview,
+  .like-count-preview-view {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: #F4F7FC;
+    color: #8FA0BC;
+  }
+
+  .like-btn-preview {
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .like-btn-preview.liked {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .like-btn-preview.liked i {
+    color: #FF6B35;
+  }
+
   .status-badge {
     display: inline-block;
     font-size: 0.7rem;
@@ -280,6 +341,7 @@ const foundItems = listings.filter((i) => i.type === 'found');
     font-weight: 700;
     color: #1B2A4A;
     margin-bottom: 8px;
+    padding-right: 70px;
   }
 
   .item-desc {
@@ -329,6 +391,8 @@ const foundItems = listings.filter((i) => i.type === 'found');
   import { supabase } from '../../lib/supabase.js';
   import { initListingDetailModal } from '../../lib/listingDetailModal.js';
   import { reorderByUserLocation } from '../../lib/locationSort.js';
+  import { fetchLikeData, toggleLike, isLoggedIn } from '../../lib/contentEngagement.js';
+  import { initReportModal } from '../../lib/reportModal.js';
 
   // ট্যাব সুইচ
   const tabs = document.querySelectorAll('.tab');
@@ -349,6 +413,18 @@ const foundItems = listings.filter((i) => i.type === 'found');
   reorderByUserLocation(document.getElementById('lostGrid'), 'upazilaName');
   reorderByUserLocation(document.getElementById('foundGrid'), 'upazilaName');
 
+  // ============================================================
+  // রিপোর্ট মডাল (একটাই ইনস্ট্যান্স, দুই ডিটেইল-মডাল কলেই শেয়ার হবে)
+  // ============================================================
+  const report = initReportModal({
+    reasons: [
+      { value: 'resolved', label: 'ইতিমধ্যে সমাধান হয়ে গেছে' },
+      { value: 'wrong_info', label: 'ভুল তথ্য' },
+      { value: 'behavior', label: 'আচরণ খারাপ' },
+      { value: 'other', label: 'অন্যান্য' },
+    ],
+  });
+
   // ডিটেইলস মডাল — lost ও found দুইটা আলাদা ডেটাসেট, তাই আলাদাভাবে init
   const typeNameMap = { lost: 'হারানো', found: 'পাওয়া গিয়েছে' };
   const typeIcons = { lost: 'fa-magnifying-glass', found: 'fa-hand-holding-heart' };
@@ -356,8 +432,8 @@ const foundItems = listings.filter((i) => i.type === 'found');
   const lostData = JSON.parse(document.getElementById('lostData')?.textContent || '[]');
   const foundData = JSON.parse(document.getElementById('foundData')?.textContent || '[]');
 
-  initListingDetailModal({ listings: lostData, typeNameMap, typeIcons, cardSelector: '#lostGrid .item-card' });
-  initListingDetailModal({ listings: foundData, typeNameMap, typeIcons, cardSelector: '#foundGrid .item-card' });
+  initListingDetailModal({ listings: lostData, typeNameMap, typeIcons, cardSelector: '#lostGrid .item-card', report });
+  initListingDetailModal({ listings: foundData, typeNameMap, typeIcons, cardSelector: '#foundGrid .item-card', report });
 
   // পোস্ট বাটন: লগইন চেক + প্রিসেট টাইপ
   async function openWithPreset(presetType) {
@@ -371,4 +447,61 @@ const foundItems = listings.filter((i) => i.type === 'found');
 
   document.getElementById('openLostCta')?.addEventListener('click', () => openWithPreset('lost'));
   document.getElementById('openFoundCta')?.addEventListener('click', () => openWithPreset('found'));
+
+  // ============================================================
+  // প্রিভিউ কার্ডে লাইক (দুই গ্রিড একসাথে, লগইন-গেটেড)
+  // ============================================================
+  const allCards = document.querySelectorAll('.item-card');
+  let boundLikeButtons = new WeakSet();
+
+  async function renderPreviewLikes() {
+    const loggedIn = await isLoggedIn();
+    const ids = Array.from(allCards).map((c) => c.dataset.targetId).filter(Boolean);
+    const { counts, likedByMe } = await fetchLikeData('listing', ids);
+
+    allCards.forEach((card) => {
+      const id = card.dataset.targetId;
+      if (!id) return;
+
+      const count = counts[id] || 0;
+      const liked = likedByMe.has(id);
+
+      const viewEl = card.querySelector('[data-like-count-view]');
+      const btnEl = card.querySelector('[data-like-btn]');
+
+      viewEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = count));
+      btnEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = count));
+      btnEl.classList.toggle('liked', liked);
+
+      if (loggedIn) {
+        viewEl.style.display = 'none';
+        btnEl.style.display = 'flex';
+
+        if (!boundLikeButtons.has(btnEl)) {
+          boundLikeButtons.add(btnEl);
+
+          btnEl.addEventListener('click', async (e) => {
+            e.stopPropagation(); // কার্ডের ক্লিক (ডিটেইল মডাল খোলা) যেন ট্রিগার না হয়
+            btnEl.disabled = true;
+            const result = await toggleLike('listing', id);
+            btnEl.disabled = false;
+            if (result.error) return;
+            const currentCount = parseInt(btnEl.querySelector('[data-like-count]').textContent, 10) || 0;
+            const newCount = result.liked ? currentCount + 1 : Math.max(currentCount - 1, 0);
+            btnEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = newCount));
+            viewEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = newCount));
+            btnEl.classList.toggle('liked', result.liked);
+          });
+        }
+      } else {
+        viewEl.style.display = 'flex';
+        btnEl.style.display = 'none';
+      }
+    });
+  }
+
+  renderPreviewLikes();
+  window.addEventListener('smartfeni:auth-changed', () => {
+    renderPreviewLikes();
+  });
 </script>
