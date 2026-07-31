@@ -1,13 +1,22 @@
 // ============================================================
 // Telegram Webhook — স্ক্রিনশট থেকে লিস্টিং ইম্পোর্ট (multi-step)
+// + মাল্টি-চ্যাট সাপোর্ট: single ADMIN_CHAT_ID এর বদলে
+// `telegram_bot_chats` টেবিল থেকে অনুমোদিত চ্যাট লিস্ট চেক হয়
+// (moderator-দের নিজস্ব চ্যাট + category-ভিত্তিক ডেডিকেটেড চ্যাট,
+// কোড ডিপ্লয় ছাড়াই নতুন চ্যাট যোগ করা যায়)
 //
-// সব ক্যাটাগরির কমন ফ্লো: ছবি -> ক্যাটাগরি বাটন -> উপজিলা বাটন
+// সব ক্যাটাগরির কমন ফ্লো: ছবি -> ক্যাটাগরি বাটন (allowed_categories
+//   অনুযায়ী ফিল্টার হতে পারে) -> উপজিলা বাটন
 //   housing/recycle: -> extraction -> আসল ছবি (একাধিক) -> ✅ শেষ -> listings insert (status: pending)
 //   blood: -> ক্লাব নাম (টেক্সট রিপ্লাই) -> extraction (array) -> manual_blood_donors bulk insert
 //
+// প্রতিটা এন্ট্রিতে submitted_via_label সেভ হয় (accountability —
+// কোন চ্যাট/moderator থেকে এসেছে)
+//
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে:
-// TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GEMINI_API_KEY,
+// TELEGRAM_BOT_TOKEN, GEMINI_API_KEY,
 // PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// (TELEGRAM_CHAT_ID আর লাগে না — telegram_bot_chats টেবিল থেকে আসে)
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -20,12 +29,12 @@ import {
 export const prerender = false;
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const ADMIN_CHAT_ID = String(process.env.TELEGRAM_CHAT_ID);
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 const supabase = createClient(process.env.PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 const CATEGORY_LABELS = { housing: 'বাসা ভাড়া', blood: 'ব্লাড ডোনার', recycle: 'ক্রয়-বিক্রয়' };
+const CATEGORY_EMOJIS = { housing: '🏠', blood: '🩸', recycle: '♻️' };
 
 const UPAZILA_LIST = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 
@@ -36,6 +45,24 @@ async function tg(method, body) {
     body: JSON.stringify(body),
   });
   return res.json();
+}
+
+// চ্যাট আইডি টেবিলে অনুমোদিত+active আছে কিনা চেক করে, থাকলে config রিটার্ন করে
+async function getChatConfig(chatId) {
+  const { data } = await supabase
+    .from('telegram_bot_chats')
+    .select('*')
+    .eq('chat_id', chatId)
+    .eq('is_active', true)
+    .maybeSingle();
+  return data || null;
+}
+
+function getAllowedCategories(chatConfig) {
+  if (!chatConfig.allowed_categories || chatConfig.allowed_categories.length === 0) {
+    return ['housing', 'blood', 'recycle'];
+  }
+  return chatConfig.allowed_categories;
 }
 
 async function downloadTelegramPhoto(fileId) {
@@ -76,7 +103,8 @@ async function getActiveSession(chatId) {
 // ---------- ছবি হ্যান্ডলিং ----------
 async function handlePhotoMessage(message) {
   const chatId = String(message.chat.id);
-  if (chatId !== ADMIN_CHAT_ID) return;
+  const chatConfig = await getChatConfig(chatId);
+  if (!chatConfig) return; // অনুমোদিত না বা inactive — চুপচাপ ইগনোর
 
   const activeSession = await getActiveSession(chatId);
   const largestPhoto = message.photo[message.photo.length - 1];
@@ -101,6 +129,8 @@ async function handlePhotoMessage(message) {
     return;
   }
 
+  const allowedCategories = getAllowedCategories(chatConfig);
+
   // নতুন সেশন শুরু (FB পোস্টের স্ক্রিনশট)
   const { data: row, error } = await supabase
     .from('screenshot_imports')
@@ -110,6 +140,7 @@ async function handlePhotoMessage(message) {
       category: 'unset',
       file_id: largestPhoto.file_id,
       step: 'awaiting_category',
+      submitted_via_label: chatConfig.label,
     })
     .select()
     .single();
@@ -119,26 +150,28 @@ async function handlePhotoMessage(message) {
     return;
   }
 
+  const buttons = [];
+  for (let i = 0; i < allowedCategories.length; i += 2) {
+    const rowBtns = allowedCategories.slice(i, i + 2).map((cat) => ({
+      text: `${CATEGORY_EMOJIS[cat]} ${CATEGORY_LABELS[cat]}`,
+      callback_data: `cat:${row.id}:${cat}`,
+    }));
+    buttons.push(rowBtns);
+  }
+
   await tg('sendMessage', {
     chat_id: chatId,
     reply_to_message_id: message.message_id,
     text: 'কোন ক্যাটাগরির জন্য এই স্ক্রিনশট?',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '🏠 বাসা ভাড়া', callback_data: `cat:${row.id}:housing` },
-          { text: '🩸 ব্লাড ডোনার', callback_data: `cat:${row.id}:blood` },
-        ],
-        [{ text: '♻️ ক্রয়-বিক্রয়', callback_data: `cat:${row.id}:recycle` }],
-      ],
-    },
+    reply_markup: { inline_keyboard: buttons },
   });
 }
 
 // ---------- টেক্সট হ্যান্ডলিং (ক্লাবের নাম) ----------
 async function handleTextMessage(message) {
   const chatId = String(message.chat.id);
-  if (chatId !== ADMIN_CHAT_ID) return;
+  const chatConfig = await getChatConfig(chatId);
+  if (!chatConfig) return;
 
   const session = await getActiveSession(chatId);
   if (!session || session.step !== 'awaiting_club_name') return; // অন্য সাধারণ মেসেজ, ইগনোর
@@ -151,17 +184,18 @@ async function handleTextMessage(message) {
     const { base64, mimeType } = await downloadTelegramPhoto(session.file_id);
     const extractedArray = await extractListingFromScreenshot({ imageBase64: base64, mimeType, category: 'blood' });
 
-    const rawRows = buildBloodDonorRows(extractedArray, session.upazila, clubNameRaw);
+    const rawRows = buildBloodDonorRows(extractedArray, session.upazila, clubNameRaw).map((row) => ({
+      ...row,
+      submitted_via_label: session.submitted_via_label,
+    }));
 
     // একই ব্যাচে ফোন নম্বর ডুপ্লিকেট থাকলে upsert ব্যর্থ হয়
-    // (Postgres: "ON CONFLICT DO UPDATE command cannot affect row a second time")
-    // তাই এখানেই ডিডুপ করে ফেলা হচ্ছে, শেষেরটা রাখা হবে
     const dedupedMap = new Map();
     rawRows.forEach((row) => dedupedMap.set(row.phone, row));
     const rows = Array.from(dedupedMap.values());
 
     const duplicateCount = rawRows.length - rows.length;
-    const skipped = extractedArray.length - rawRows.length; // ফোন নম্বরই নাই
+    const skipped = extractedArray.length - rawRows.length;
 
     if (rows.length === 0) {
       await tg('sendMessage', { chat_id: chatId, text: '❌ কোনো ভ্যালিড ফোন নম্বর সহ ডোনার পাওয়া যায়নি।' });
@@ -263,6 +297,8 @@ async function handleDoneImages(chatId, messageId, importId) {
   }
 
   const listingRow = buildListingRowFromExtraction(row.extracted, row.category, row.upazila, row.extra_image_urls);
+  listingRow.submitted_via_label = row.submitted_via_label;
+
   const { error } = await supabase.from('listings').insert(listingRow);
 
   if (error) {
@@ -298,7 +334,8 @@ export async function POST({ request }) {
 
       await tg('answerCallbackQuery', { callback_query_id: cq.id });
 
-      if (chatId === ADMIN_CHAT_ID) {
+      const chatConfig = await getChatConfig(chatId);
+      if (chatConfig) {
         const [action, importId, extra] = cq.data.split(':');
 
         if (action === 'cat') await handleCategorySelected(chatId, messageId, importId, extra);
