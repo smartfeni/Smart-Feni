@@ -7,6 +7,19 @@
 // সফল হলে product_events এ 'checkout' ইভেন্ট লগ হয় ও কার্ট খালি হয়।
 // প্রতিটা শপের নিজস্ব নাম্বার দিয়ে কল/হোয়াটসঅ্যাপ বাটন দেখায়
 // (কোনো প্ল্যাটফর্ম-লেভেল নাম্বার হার্ডকোড না)।
+//
+// UI REDESIGN (v2):
+// - রিসিট-স্টাইল order summary (dashed divider, শপ আইকন)
+// - ফর্ম সেকশন আইকন-হেডেড, উন্নত ফোকাস স্টেট
+// - দূরত্ব-ভিত্তিক এক্সট্রা ডেলিভারি চার্জ নোট (info banner)
+// - মোবাইলে sticky "অর্ডার করুন" বাটন
+// - Success state এ বড় চেকমার্ক ব্যাজ + প্রিমিয়াম শপ-কন্টাক্ট কার্ড
+// - priceNum() আপডেট: বাংলা সংখ্যা + ইউনিট-টেক্সট ("টাকা/কেজি" ইত্যাদি)
+//   থাকলেও শুধু সংখ্যা বের করে হিসাব করে
+//
+// FIX (v2.1): <style> কে is:global করা হয়েছে — summary/shop-contact
+// ব্লকগুলো JS দিয়ে innerHTML এ রানটাইমে তৈরি হয়, তাই Astro-র ডিফল্ট
+// scoped CSS ওগুলোতে অ্যাপ্লাই হচ্ছিল না
 // ============================================================
 
 export const prerender = false;
@@ -24,14 +37,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       </div>
 
       <div id="loginRequired" class="status-box" style="display:none;">
-        <i class="fas fa-lock"></i>
+        <div class="status-icon-badge"><i class="fas fa-lock"></i></div>
         <h2>লগইন করুন</h2>
         <p>চেকআউট করতে আগে লগইন করতে হবে</p>
         <a href="/" class="primary-link-btn">হোমপেজে যান</a>
       </div>
 
       <div id="emptyCartNotice" class="status-box" style="display:none;">
-        <i class="fas fa-cart-arrow-down"></i>
+        <div class="status-icon-badge"><i class="fas fa-cart-arrow-down"></i></div>
         <h2>কার্ট খালি</h2>
         <p>চেকআউট করার আগে কার্টে প্রোডাক্ট যোগ করুন</p>
         <a href="/shop" class="primary-link-btn">শপ দেখুন</a>
@@ -42,8 +55,13 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
         <div class="order-summary" id="orderSummary"></div>
 
+        <div class="delivery-note-banner">
+          <i class="fas fa-truck-fast"></i>
+          <span>হোম ডেলিভারির জন্য দূরত্ব অনুযায়ী অতিরিক্ত চার্জ প্রযোজ্য হতে পারে</span>
+        </div>
+
         <div class="checkout-form-card">
-          <h3><i class="fas fa-user"></i> ডেলিভারি তথ্য</h3>
+          <h3><span class="form-icon-badge"><i class="fas fa-user"></i></span> ডেলিভারি তথ্য</h3>
 
           <p class="form-msg" id="checkoutMsg"></p>
 
@@ -57,16 +75,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           <textarea class="form-input" id="customerAddressInput" rows="3" placeholder="ডেলিভারির সম্পূর্ণ ঠিকানা"></textarea>
 
           <p class="cod-note"><i class="fas fa-circle-info"></i> কোনো অনলাইন পেমেন্ট নেই — অর্ডার জমা দেওয়ার পর শপ ওউনার আপনাকে কল করে অর্ডার কনফার্ম করবেন</p>
-
-          <button class="place-order-btn" id="placeOrderBtn" type="button">
-            <i class="fas fa-check"></i> <span id="placeOrderBtnText">অর্ডার করুন</span>
-          </button>
         </div>
+
+        <div id="checkoutFooterSpacer"></div>
       </div>
 
-      <div id="successState" class="status-box" style="display:none;">
-        <i class="fas fa-circle-check" style="color:#1B7A3C;"></i>
-        <h2>অর্ডার সফল হয়েছে ✓</h2>
+      <div id="successState" class="status-box success-box" style="display:none;">
+        <div class="success-check-badge"><i class="fas fa-check"></i></div>
+        <h2>অর্ডার সফল হয়েছে</h2>
         <p>শীঘ্রই শপ ওউনার আপনাকে কল করে অর্ডার কনফার্ম করবেন। জরুরি প্রয়োজনে নিচের শপের নাম্বারে সরাসরি যোগাযোগ করতে পারেন</p>
 
         <div id="shopContactList" class="shop-contact-list"></div>
@@ -78,12 +94,20 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       </div>
 
     </div>
+
+    <div id="checkoutFooter" class="checkout-footer" style="display:none;">
+      <div class="container">
+        <button class="place-order-btn" id="placeOrderBtn" type="button">
+          <i class="fas fa-check"></i> <span id="placeOrderBtnText">অর্ডার করুন</span>
+        </button>
+      </div>
+    </div>
   </div>
 
-  <style>
+  <style is:global>
     .checkout-page {
       min-height: 70vh;
-      padding: 32px 0 100px;
+      padding: 28px 0 40px;
       background: #F8FAFC;
     }
 
@@ -113,7 +137,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     .status-box {
       max-width: 420px;
-      margin: 60px auto;
+      margin: 50px auto;
       text-align: center;
       background: #fff;
       border-radius: 24px;
@@ -121,10 +145,20 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
     }
 
-    .status-box i {
-      font-size: 2.4rem;
+    .status-icon-badge {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #FFF0EA, #FFE3D5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 18px;
+    }
+
+    .status-icon-badge i {
+      font-size: 1.7rem;
       color: #FF6B35;
-      margin-bottom: 16px;
     }
 
     .status-box h2 {
@@ -137,7 +171,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     .status-box p {
       color: #5A6E85;
       font-size: 0.88rem;
-      margin-bottom: 18px;
+      margin-bottom: 20px;
     }
 
     .primary-link-btn {
@@ -147,10 +181,17 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       background: #FF6B35;
       color: #fff;
       text-decoration: none;
-      padding: 11px 24px;
-      border-radius: 14px;
+      padding: 12px 26px;
+      border-radius: 40px;
       font-weight: 700;
       font-size: 0.88rem;
+      box-shadow: 0 8px 18px rgba(255, 107, 53, 0.28);
+      transition: all 0.2s ease;
+    }
+
+    .primary-link-btn:hover {
+      background: #e85a28;
+      transform: translateY(-1px);
     }
 
     .secondary-link-btn {
@@ -160,10 +201,36 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       background: #F4F7FC;
       color: #1B2A4A;
       text-decoration: none;
-      padding: 11px 24px;
-      border-radius: 14px;
+      padding: 12px 26px;
+      border-radius: 40px;
       font-weight: 700;
       font-size: 0.88rem;
+      transition: all 0.2s ease;
+    }
+
+    .secondary-link-btn:hover {
+      background: #EAF0F8;
+    }
+
+    .success-box {
+      max-width: 460px;
+    }
+
+    .success-check-badge {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #E9F9EF, #D3F3DF);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 18px;
+      box-shadow: 0 8px 20px rgba(27, 122, 60, 0.18);
+    }
+
+    .success-check-badge i {
+      font-size: 2rem;
+      color: #1B7A3C;
     }
 
     .success-links {
@@ -177,28 +244,38 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       display: flex;
       flex-direction: column;
       gap: 10px;
-      margin-bottom: 20px;
+      margin-bottom: 22px;
       text-align: left;
     }
 
     .shop-contact-row {
       background: #F8FAFC;
-      border-radius: 14px;
-      padding: 12px 14px;
+      border: 1px solid #F0F3F8;
+      border-radius: 16px;
+      padding: 14px;
     }
 
     .shop-contact-row .contact-shop-name {
-      font-size: 0.82rem;
+      font-size: 0.84rem;
       font-weight: 700;
       color: #1B2A4A;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
 
-    .shop-contact-row .contact-shop-name i {
+    .shop-contact-row .contact-shop-name .shop-icon-badge {
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: #FFF0EA;
       color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+      flex-shrink: 0;
     }
 
     .support-btn-row {
@@ -212,11 +289,12 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       align-items: center;
       justify-content: center;
       gap: 6px;
-      padding: 9px;
-      border-radius: 10px;
+      padding: 10px;
+      border-radius: 12px;
       text-decoration: none;
       font-weight: 700;
       font-size: 0.8rem;
+      transition: all 0.15s ease;
     }
 
     .call-btn {
@@ -224,14 +302,24 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       color: #2563EB;
     }
 
+    .call-btn:hover {
+      background: #2563EB;
+      color: #fff;
+    }
+
     .wa-btn {
       background: #E9F9EF;
       color: #1EA952;
     }
 
+    .wa-btn:hover {
+      background: #1EA952;
+      color: #fff;
+    }
+
     .checkout-title {
-      font-size: 1.3rem;
-      font-weight: 700;
+      font-size: 1.35rem;
+      font-weight: 800;
       color: #1B2A4A;
       display: flex;
       align-items: center;
@@ -248,7 +336,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     .order-summary {
       max-width: 560px;
-      margin: 0 auto 18px;
+      margin: 0 auto 14px;
       background: #fff;
       border-radius: 20px;
       padding: 18px;
@@ -258,21 +346,30 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     .summary-shop-block + .summary-shop-block {
       margin-top: 14px;
       padding-top: 14px;
-      border-top: 1px solid #F0F3F8;
+      border-top: 1px dashed #E5EAF0;
     }
 
     .summary-shop-name {
-      font-size: 0.86rem;
+      font-size: 0.87rem;
       font-weight: 700;
       color: #1B2A4A;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
 
-    .summary-shop-name i {
+    .summary-shop-name .shop-icon-badge {
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: #FFF0EA;
       color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+      flex-shrink: 0;
     }
 
     .summary-item-line {
@@ -289,18 +386,40 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       font-size: 0.82rem;
       font-weight: 700;
       color: #1B2A4A;
-      margin-top: 6px;
+      margin-top: 8px;
     }
 
     .summary-grand-line {
       display: flex;
       justify-content: space-between;
-      font-size: 0.95rem;
-      font-weight: 700;
+      font-size: 0.98rem;
+      font-weight: 800;
       color: #1B2A4A;
       margin-top: 14px;
-      padding-top: 12px;
-      border-top: 1.5px solid #F0F3F8;
+      padding-top: 14px;
+      border-top: 1.5px dashed #E5EAF0;
+    }
+
+    .delivery-note-banner {
+      max-width: 560px;
+      margin: 0 auto 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #FFF7EC;
+      border: 1px solid #FFE4BE;
+      color: #A6660A;
+      padding: 12px 14px;
+      border-radius: 14px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .delivery-note-banner i {
+      font-size: 1rem;
+      color: #E8930C;
+      flex-shrink: 0;
     }
 
     .checkout-form-card {
@@ -313,17 +432,26 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     }
 
     .checkout-form-card h3 {
-      font-size: 0.98rem;
+      font-size: 1rem;
       font-weight: 700;
       color: #1B2A4A;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
 
-    .checkout-form-card h3 i {
+    .form-icon-badge {
+      width: 30px;
+      height: 30px;
+      border-radius: 10px;
+      background: #FFF0EA;
       color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      flex-shrink: 0;
     }
 
     .form-msg {
@@ -357,7 +485,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     .form-input {
       width: 100%;
-      padding: 12px 14px;
+      padding: 13px 15px;
       border-radius: 14px;
       border: 1.5px solid #E5EAF0;
       font-size: 0.9rem;
@@ -365,22 +493,45 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       color: #1B2A4A;
       background: #FBFCFE;
       resize: vertical;
+      box-sizing: border-box;
+      transition: all 0.15s ease;
     }
 
     .form-input:focus {
       outline: none;
       border-color: #FF6B35;
       background: #fff;
+      box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
     }
 
     .cod-note {
       font-size: 0.78rem;
       color: #8FA0BC;
       background: #F8FAFC;
-      padding: 10px 12px;
+      padding: 12px 14px;
       border-radius: 12px;
-      margin-top: 16px;
+      margin-top: 18px;
       line-height: 1.5;
+    }
+
+    #checkoutFooterSpacer {
+      height: 88px;
+    }
+
+    .checkout-footer {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #fff;
+      box-shadow: 0 -6px 24px rgba(15, 23, 42, 0.08);
+      padding: 14px 0;
+      z-index: 40;
+      border-top: 1px solid #F0F3F8;
+    }
+
+    .checkout-footer .container {
+      max-width: 560px;
     }
 
     .place-order-btn {
@@ -392,17 +543,23 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       background: #FF6B35;
       color: #fff;
       border: none;
-      padding: 14px;
-      border-radius: 14px;
+      padding: 15px;
+      border-radius: 40px;
       font-weight: 700;
-      font-size: 0.92rem;
+      font-size: 0.94rem;
       cursor: pointer;
-      margin-top: 18px;
+      box-shadow: 0 10px 22px rgba(255, 107, 53, 0.32);
+      transition: all 0.2s ease;
+    }
+
+    .place-order-btn:hover {
+      background: #e85a28;
     }
 
     .place-order-btn:disabled {
       opacity: 0.65;
       cursor: not-allowed;
+      transform: none;
     }
   </style>
 
@@ -413,6 +570,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     const loginRequired = document.getElementById('loginRequired');
     const emptyCartNotice = document.getElementById('emptyCartNotice');
     const checkoutContent = document.getElementById('checkoutContent');
+    const checkoutFooter = document.getElementById('checkoutFooter');
     const successState = document.getElementById('successState');
     const orderSummary = document.getElementById('orderSummary');
     const shopContactList = document.getElementById('shopContactList');
@@ -427,8 +585,21 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     let currentUserId = null;
     let shopGroups = {};
 
+    // বাংলা সংখ্যা → ইংরেজি সংখ্যা কনভার্টার
+    function convertBanglaDigits(str) {
+      const banglaDigits = '০১২৩৪৫৬৭৮৯';
+      return String(str).replace(/[০-৯]/g, (d) => banglaDigits.indexOf(d));
+    }
+
+    // দাম স্ট্রিং থেকে শুধু সংখ্যাটা বের করে আনে —
+    // "৫০০ টাকা/কেজি", "৳৫০০ প্রতি পিস", "৫,৫০০", "৳৫০০/পাউন্ড" — সবই সঠিকভাবে পার্স হয়
     function priceNum(p) {
-      const n = parseFloat(String(p).replace(/[^0-9.]/g, ''));
+      if (p === null || p === undefined) return 0;
+      let str = convertBanglaDigits(String(p));
+      str = str.replace(/,/g, '');
+      const match = str.match(/[0-9]+(\.[0-9]+)?/);
+      if (!match) return 0;
+      const n = parseFloat(match[0]);
       return isNaN(n) ? 0 : n;
     }
 
@@ -473,6 +644,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
       renderSummary();
       checkoutContent.style.display = 'block';
+      checkoutFooter.style.display = 'block';
     }
 
     function renderSummary() {
@@ -487,13 +659,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         let subtotal = 0;
         const linesHtml = group.items.map((item) => {
           const listing = item.listings;
-          const lineTotal = priceNum(listing.price) * item.quantity;
+          const unitPrice = priceNum(listing.price);
+          const lineTotal = unitPrice * item.quantity;
           subtotal += lineTotal;
           return `<div class="summary-item-line"><span>${listing.title || ''} × ${item.quantity}</span><span>৳${lineTotal}</span></div>`;
         }).join('');
 
         block.innerHTML = `
-          <div class="summary-shop-name"><i class="fas fa-store"></i> ${shopName}</div>
+          <div class="summary-shop-name"><span class="shop-icon-badge"><i class="fas fa-store"></i></span> ${shopName}</div>
           ${linesHtml}
           <div class="summary-subtotal-line"><span>সাবটোটাল</span><span>৳${subtotal}</span></div>
         `;
@@ -518,7 +691,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         const row = document.createElement('div');
         row.className = 'shop-contact-row';
         row.innerHTML = `
-          <div class="contact-shop-name"><i class="fas fa-store"></i> ${shop.name || 'শপ'}</div>
+          <div class="contact-shop-name"><span class="shop-icon-badge"><i class="fas fa-store"></i></span> ${shop.name || 'শপ'}</div>
           <div class="support-btn-row">
             <a href="tel:${shop.phone}" class="support-btn call-btn"><i class="fas fa-phone"></i> কল করুন</a>
             <a href="https://wa.me/${shop.phone.replace(/\D/g, '')}" target="_blank" rel="noopener" class="support-btn wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
@@ -584,6 +757,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
         renderShopContacts();
         checkoutContent.style.display = 'none';
+        checkoutFooter.style.display = 'none';
         successState.style.display = 'block';
       } catch (err) {
         showMsg('অর্ডার ব্যর্থ: ' + err.message);
