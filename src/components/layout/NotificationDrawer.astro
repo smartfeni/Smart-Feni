@@ -1,0 +1,444 @@
+<!-- path: src/components/layout/NotificationDrawer.astro -->
+---
+// ============================================================
+// কম্পোনেন্ট: নোটিফিকেশন স্লাইড-ইন ড্রয়ার
+// আগে এই লজিক Header.astro তে ড্রপডাউন প্যানেল হিসেবে ছিল, এখন
+// bottom nav এর "মেসেজ" আইকন থেকে ট্রিগার হওয়া ফুল-হাইট ডান-দিক
+// স্লাইড-ইন ড্রয়ারে move করা হলো (CategoryDrawer এর মতো একই প্যাটার্ন,
+// কনসিস্টেন্ট UX — সব ড্রয়ার ডান দিক থেকে খোলে)।
+// ট্রিগার: window.dispatchEvent(new CustomEvent('smartfeni:open-notification-drawer'))
+// (BottomNav.astro থেকে আসবে, লগইন চেক করার পর)
+// আনরিড কাউন্ট: পেজ লোড হলেই (লগইন থাকলে) চুপচাপ ফেচ করে
+// 'smartfeni:notification-count' ইভেন্ট dispatch করে, যাতে
+// BottomNav এর "মেসেজ" আইকনে badge দেখানো যায় — ড্রয়ার না খুলেও।
+// লজিক (fetch/render/mark-read/relative-time) Header.astro থেকে
+// অপরিবর্তিত রাখা হয়েছে, শুধু dropdown এর বদলে full drawer শেল।
+// ============================================================
+---
+
+<div class="nd-overlay" id="notificationDrawerOverlay">
+  <aside class="nd-panel" id="notificationDrawerPanel">
+    <div class="nd-header">
+      <h2><i class="fas fa-bell"></i> নোটিফিকেশন</h2>
+      <div class="nd-header-actions">
+        <button id="notifMarkAllBtn" type="button">সব পড়া হয়েছে</button>
+        <button class="nd-close" id="notificationDrawerClose" aria-label="বন্ধ করুন">
+          <i class="fas fa-xmark"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="nd-list" id="notifList"></div>
+
+    <p class="nd-empty" id="notifEmpty" style="display:none;">
+      <i class="fas fa-bell-slash"></i>
+      কোনো নোটিফিকেশন নেই
+    </p>
+  </aside>
+</div>
+
+<style>
+  .nd-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+    z-index: 2200;
+  }
+
+  .nd-overlay.open {
+    display: block;
+  }
+
+  .nd-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(380px, 88vw);
+    background: #fff;
+    box-shadow: -8px 0 30px rgba(15, 23, 42, 0.18);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.28s ease;
+  }
+
+  .nd-overlay.open .nd-panel {
+    transform: translateX(0);
+  }
+
+  .nd-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 18px 16px 20px;
+    border-bottom: 1px solid #EEF3F9;
+    gap: 8px;
+  }
+
+  .nd-header h2 {
+    font-size: 1.05rem;
+    color: #1B2A4A;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .nd-header h2 i {
+    color: #FF6B35;
+    font-size: 0.95rem;
+  }
+
+  .nd-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .nd-header-actions button#notifMarkAllBtn {
+    background: none;
+    border: none;
+    color: #FF6B35;
+    font-size: 0.74rem;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 8px;
+    white-space: nowrap;
+  }
+
+  .nd-header-actions button#notifMarkAllBtn:hover {
+    background: #FFF0EA;
+  }
+
+  .nd-close {
+    background: #F4F7FC;
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: #5A6E85;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .nd-close:hover {
+    background: #FF6B35;
+    color: #fff;
+  }
+
+  .nd-list {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .nd-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+    color: #B0BCCB;
+    font-size: 0.85rem;
+    padding: 60px 24px;
+    margin: 0;
+  }
+
+  .nd-empty i {
+    font-size: 1.8rem;
+    color: #D7E0EC;
+  }
+</style>
+
+<!-- ============================================================
+  is:global — .notif-item এলিমেন্টগুলো JS দিয়ে ডাইনামিকালি বানানো
+  হয় বলে Astro এর স্কোপড CSS এদের উপর বসে না (Header.astro থেকে
+  অপরিবর্তিত রাখা হয়েছে)।
+============================================================ -->
+<style is:global>
+  .notif-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid #F4F7FC;
+    padding: 14px 20px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s ease;
+  }
+
+  .notif-item:last-child {
+    border-bottom: none;
+  }
+
+  .notif-item:hover {
+    background: #F8FAFC;
+  }
+
+  .notif-item.unread {
+    background: #FFF8F5;
+  }
+
+  .notif-item.unread:hover {
+    background: #FFF0EA;
+  }
+
+  .notif-item-icon {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #F4F7FC;
+    color: #8FA0BC;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    position: relative;
+  }
+
+  .notif-item.unread .notif-item-icon {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .notif-item.unread .notif-item-icon::after {
+    content: '';
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #FF6B35;
+    border: 2px solid #fff;
+  }
+
+  .notif-item-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .notif-item-msg {
+    font-size: 0.84rem;
+    color: #1B2A4A;
+    line-height: 1.5;
+    white-space: pre-line;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+
+  .notif-item-msg.expanded {
+    -webkit-line-clamp: unset;
+    display: block;
+  }
+
+  .notif-item.unread .notif-item-msg {
+    font-weight: 600;
+  }
+
+  .notif-item-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .notif-item-time {
+    font-size: 0.72rem;
+    color: #8FA0BC;
+  }
+
+  .notif-item-link {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #FF6B35;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .notif-item-link:hover {
+    text-decoration: underline;
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const overlay = document.getElementById('notificationDrawerOverlay');
+  const closeBtn = document.getElementById('notificationDrawerClose');
+  const notifList = document.getElementById('notifList');
+  const notifEmpty = document.getElementById('notifEmpty');
+  const notifMarkAllBtn = document.getElementById('notifMarkAllBtn');
+
+  function toBnDigits(num) {
+    const bn = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+    return num.toString().replace(/[0-9]/g, (d) => bn[d]);
+  }
+
+  function relativeTimeBn(dateString) {
+    const then = new Date(dateString);
+    const diffSec = Math.floor((Date.now() - then.getTime()) / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffSec < 60) return 'এইমাত্র';
+    if (diffMin < 60) return `${toBnDigits(diffMin)} মিনিট আগে`;
+    if (diffHour < 24) return `${toBnDigits(diffHour)} ঘণ্টা আগে`;
+    if (diffDay < 30) return `${toBnDigits(diffDay)} দিন আগে`;
+    return `${toBnDigits(Math.floor(diffDay / 30))} মাস আগে`;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
+  let latestNotifications = [];
+
+  function renderNotifications(items) {
+    notifList.innerHTML = '';
+
+    if (!items || items.length === 0) {
+      notifEmpty.style.display = 'flex';
+      return;
+    }
+    notifEmpty.style.display = 'none';
+
+    items.forEach((n) => {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = `notif-item ${n.is_read ? '' : 'unread'}`;
+      el.innerHTML = `
+        <span class="notif-item-icon"><i class="fas fa-bell"></i></span>
+        <span class="notif-item-body">
+          <span class="notif-item-msg">${escapeHtml(n.message)}</span>
+          <span class="notif-item-footer">
+            <span class="notif-item-time">${relativeTimeBn(n.created_at)}</span>
+            ${n.listing_id ? '<button type="button" class="notif-item-link" data-open-listing>সম্পর্কিত লিস্টিং দেখুন →</button>' : ''}
+          </span>
+        </span>
+      `;
+
+      // মূল আইটেমে ক্লিক করলে — টেক্সট এক্সপ্যান্ড/কোলাপ্স + read মার্ক
+      el.addEventListener('click', async () => {
+        const msgEl = el.querySelector('.notif-item-msg');
+        msgEl.classList.toggle('expanded');
+
+        if (!n.is_read) {
+          n.is_read = true;
+          el.classList.remove('unread');
+          await supabase.from('user_notifications').update({ is_read: true }).eq('id', n.id);
+          updateBadgeCount();
+        }
+      });
+
+      // "সম্পর্কিত লিস্টিং দেখুন" — আলাদাভাবে নেভিগেট করবে, এক্সপ্যান্ড ট্রিগার করবে না
+      const linkBtn = el.querySelector('[data-open-listing]');
+      linkBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.location.href = `/listing/${n.listing_id}`;
+      });
+
+      notifList.appendChild(el);
+    });
+  }
+
+  // আনরিড কাউন্ট bottom nav এর "মেসেজ" আইকনে badge হিসেবে দেখানোর
+  // জন্য কাস্টম ইভেন্ট dispatch করা হয় — ড্রয়ার না খুলেও badge দেখা যায়
+  function updateBadgeCount() {
+    const unreadCount = latestNotifications.filter((n) => !n.is_read).length;
+    window.dispatchEvent(
+      new CustomEvent('smartfeni:notification-count', { detail: { count: unreadCount } })
+    );
+  }
+
+  async function loadNotifications() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      latestNotifications = [];
+      renderNotifications([]);
+      updateBadgeCount();
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('user_notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (error) return;
+
+    latestNotifications = data || [];
+    renderNotifications(latestNotifications);
+    updateBadgeCount();
+  }
+
+  function openDrawer() {
+    overlay?.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    loadNotifications();
+  }
+
+  function closeDrawer() {
+    overlay?.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  window.addEventListener('smartfeni:open-notification-drawer', openDrawer);
+
+  closeBtn?.addEventListener('click', closeDrawer);
+  overlay?.addEventListener('click', (e) => {
+    if (e.target === overlay) closeDrawer();
+  });
+
+  notifMarkAllBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('user_notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
+    loadNotifications();
+  });
+
+  // ============================================================
+  // পেজ লোড হলেই (লগইন থাকলে) চুপচাপ আনরিড কাউন্ট ফেচ করা — ড্রয়ার
+  // না খুলেও bottom nav badge আপ-টু-ডেট থাকার জন্য
+  // ============================================================
+  async function initialBadgeCheck() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    loadNotifications();
+  }
+
+  initialBadgeCheck();
+
+  window.addEventListener('smartfeni:auth-changed', () => {
+    loadNotifications();
+  });
+
+  window.addEventListener('smartfeni:logged-out', () => {
+    latestNotifications = [];
+    updateBadgeCount();
+  });
+</script>
