@@ -1,0 +1,383 @@
+<!-- path: src/components/layout/HamburgerMenu.astro -->
+---
+// ============================================================
+// কম্পোনেন্ট: HamburgerMenu — bottom nav "প্রোফাইল" আইকন থেকে
+// ট্রিগার (লগইন থাকলে) — ডান দিক থেকে স্লাইড-ইন, CategoryDrawer/
+// NotificationDrawer এর সাথে কনসিস্টেন্ট প্যাটার্ন।
+// ট্রিগার: window.dispatchEvent(new CustomEvent('smartfeni:open-hamburger-menu'))
+// (BottomNav.astro থেকে আসবে, লগইন চেক করার পর — না থাকলে সরাসরি
+// AuthModal খুলবে, এই ড্রয়ার ট্রিগার হবে না)
+//
+// রোল-চেক লজিক profile/edit.astro থেকে হুবহু কপি করা হয়েছে
+// কনসিস্টেন্সির জন্য:
+//   isAdminOrMod = role === 'admin' || role === 'moderator'
+//   isShopOwner  = !!is_shop_owner
+//   isClubOwner  = !!is_club_owner
+// লগ আউট একই ২-ক্লিক কনফার্ম প্যাটার্ন + smartfeni:logged-out ইভেন্ট।
+//
+// "আমার পোস্ট" → /my-listings (এইমাত্র বানানো হয়েছে)
+// "ডেলিভারি হিরো টগল" → এখনো কোনো DB কলাম/টেবিল নাই, তাই এই ধাপে
+// শুধু "শীঘ্রই আসছে" ব্যাজ সহ disabled আইটেম হিসেবে রাখা হলো।
+// ============================================================
+---
+
+<div class="hm-overlay" id="hamburgerMenuOverlay">
+  <aside class="hm-panel" id="hamburgerMenuPanel">
+    <div class="hm-header">
+      <button class="hm-close" id="hamburgerMenuClose" aria-label="বন্ধ করুন">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+
+    <a href="/profile/edit" class="hm-profile-row" id="hmProfileRow">
+      <span class="hm-avatar" id="hmAvatar">
+        <img id="hmAvatarImg" src="" alt="প্রোফাইল ছবি" />
+        <i class="fas fa-circle-user" id="hmDefaultIcon"></i>
+      </span>
+      <span class="hm-profile-info">
+        <span class="hm-profile-name" id="hmProfileName">প্রোফাইল</span>
+        <span class="hm-profile-edit-hint">প্রোফাইল এডিট করুন <i class="fas fa-chevron-right"></i></span>
+      </span>
+    </a>
+
+    <div class="hm-list">
+      <a href="/my-shop" class="hm-item" id="hmShopItem" style="display:none;">
+        <span class="hm-item-icon"><i class="fas fa-store"></i></span>
+        <span class="hm-item-label">আমার শপ</span>
+        <i class="fas fa-chevron-right hm-item-chevron"></i>
+      </a>
+
+      <a href="/my-club" class="hm-item" id="hmClubItem" style="display:none;">
+        <span class="hm-item-icon"><i class="fas fa-people-group"></i></span>
+        <span class="hm-item-label">আমার ক্লাব</span>
+        <i class="fas fa-chevron-right hm-item-chevron"></i>
+      </a>
+
+      <a href="/admin" class="hm-item" id="hmAdminItem" style="display:none;">
+        <span class="hm-item-icon"><i class="fas fa-user-shield"></i></span>
+        <span class="hm-item-label">অ্যাডমিন প্যানেল</span>
+        <i class="fas fa-chevron-right hm-item-chevron"></i>
+      </a>
+
+      <a href="/my-listings" class="hm-item">
+        <span class="hm-item-icon"><i class="fas fa-list-check"></i></span>
+        <span class="hm-item-label">আমার পোস্ট</span>
+        <i class="fas fa-chevron-right hm-item-chevron"></i>
+      </a>
+
+      <a href="/my-orders" class="hm-item">
+        <span class="hm-item-icon"><i class="fas fa-receipt"></i></span>
+        <span class="hm-item-label">আমার অর্ডার</span>
+        <i class="fas fa-chevron-right hm-item-chevron"></i>
+      </a>
+
+      <div class="hm-item hm-item-disabled">
+        <span class="hm-item-icon"><i class="fas fa-motorcycle"></i></span>
+        <span class="hm-item-label">ডেলিভারি হিরো</span>
+        <span class="hm-soon-badge">শীঘ্রই</span>
+      </div>
+    </div>
+
+    <button type="button" class="hm-logout-btn" id="hmLogoutBtn">
+      <i class="fas fa-arrow-right-from-bracket"></i>
+      <span id="hmLogoutText">লগ আউট</span>
+    </button>
+  </aside>
+</div>
+
+<style>
+  .hm-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+    z-index: 2200;
+  }
+
+  .hm-overlay.open {
+    display: block;
+  }
+
+  .hm-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(340px, 86vw);
+    background: #fff;
+    box-shadow: -8px 0 30px rgba(15, 23, 42, 0.18);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.28s ease;
+  }
+
+  .hm-overlay.open .hm-panel {
+    transform: translateX(0);
+  }
+
+  .hm-header {
+    display: flex;
+    justify-content: flex-end;
+    padding: 14px 14px 0;
+  }
+
+  .hm-close {
+    background: #F4F7FC;
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: #5A6E85;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .hm-close:hover {
+    background: #FF6B35;
+    color: #fff;
+  }
+
+  .hm-profile-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 20px 18px;
+    text-decoration: none;
+    border-bottom: 1px solid #EEF3F9;
+    margin-bottom: 8px;
+  }
+
+  .hm-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: #FFF0EA;
+    border: 2px solid #FFE3D4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .hm-avatar #hmDefaultIcon {
+    color: #FF6B35;
+    font-size: 1.9rem;
+  }
+
+  .hm-avatar img {
+    display: none;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .hm-avatar.has-photo #hmDefaultIcon {
+    display: none;
+  }
+
+  .hm-avatar.has-photo img {
+    display: block;
+  }
+
+  .hm-profile-info {
+    min-width: 0;
+  }
+
+  .hm-profile-name {
+    display: block;
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hm-profile-edit-hint {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.76rem;
+    color: #FF6B35;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+
+  .hm-profile-edit-hint i {
+    font-size: 0.62rem;
+  }
+
+  .hm-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 10px;
+  }
+
+  .hm-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 10px;
+    border-radius: 14px;
+    text-decoration: none;
+    color: #1B2A4A;
+    transition: background 0.15s ease;
+  }
+
+  a.hm-item:hover,
+  a.hm-item:active {
+    background: #F8FAFC;
+  }
+
+  .hm-item-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+  }
+
+  .hm-item-label {
+    flex: 1;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .hm-item-chevron {
+    color: #C9D4E2;
+    font-size: 0.72rem;
+  }
+
+  .hm-item-disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .hm-item-disabled .hm-item-icon {
+    background: #F4F7FC;
+    color: #A0AFC0;
+  }
+
+  .hm-soon-badge {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: #8FA0BC;
+    background: #F4F7FC;
+    padding: 3px 9px;
+    border-radius: 20px;
+    flex-shrink: 0;
+  }
+
+  .hm-logout-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    margin: 10px 16px calc(16px + env(safe-area-inset-bottom));
+    padding: 13px;
+    border-radius: 14px;
+    background: #FFF0EA;
+    color: #D14343;
+    border: 1.5px solid #FFD9CC;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .hm-logout-btn.confirming {
+    background: #D14343;
+    color: #fff;
+    border-color: #D14343;
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const overlay = document.getElementById('hamburgerMenuOverlay');
+  const closeBtn = document.getElementById('hamburgerMenuClose');
+
+  const avatarWrap = document.getElementById('hmAvatar');
+  const avatarImg = document.getElementById('hmAvatarImg');
+  const profileName = document.getElementById('hmProfileName');
+
+  const shopItem = document.getElementById('hmShopItem');
+  const clubItem = document.getElementById('hmClubItem');
+  const adminItem = document.getElementById('hmAdminItem');
+
+  const logoutBtn = document.getElementById('hmLogoutBtn');
+  const logoutText = document.getElementById('hmLogoutText');
+  let logoutConfirming = false;
+
+  async function loadProfileAndRoles() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name, avatar_url, role, is_shop_owner, is_club_owner')
+      .eq('id', session.user.id)
+      .single();
+
+    if (!profile) return;
+
+    profileName.textContent = profile.full_name || 'প্রোফাইল';
+    if (profile.avatar_url) {
+      avatarImg.src = profile.avatar_url;
+      avatarWrap?.classList.add('has-photo');
+    }
+
+    // profile/edit.astro এর একই রোল-চেক লজিক
+    const isAdminOrMod = profile.role === 'admin' || profile.role === 'moderator';
+    const isShopOwner = !!profile.is_shop_owner;
+    const isClubOwner = !!profile.is_club_owner;
+
+    shopItem.style.display = isShopOwner ? 'flex' : 'none';
+    clubItem.style.display = isClubOwner ? 'flex' : 'none';
+    adminItem.style.display = isAdminOrMod ? 'flex' : 'none';
+  }
+
+  function openMenu() {
+    overlay?.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    loadProfileAndRoles();
+  }
+
+  function closeMenu() {
+    overlay?.classList.remove('open');
+    document.body.style.overflow = '';
+    logoutConfirming = false;
+    logoutBtn?.classList.remove('confirming');
+    if (logoutText) logoutText.textContent = 'লগ আউট';
+  }
+
+  window.addEventListener('smartfeni:open-hamburger-menu', openMenu);
+
+  closeBtn?.addEventListener('click', closeMenu);
+  overlay?.addEventListener('click', (e) => {
+    if (e.target === overlay) closeMenu();
+  });
+
+  // লগ আউট — একই ২-ক্লিক কনফার্ম প্যাটার্ন profile/edit.astro থেকে
+  logoutBtn?.addEventListener('click', async () => {
+    if (!logoutConfirming) {
+      logoutConfirming = true;
+      logoutBtn.classList.add('confirming');
+      if (logoutText) logoutText.textContent = 'নিশ্চিত করুন?';
+      return;
+    }
+    await supabase.auth.signOut();
+    window.dispatchEvent(new CustomEvent('smartfeni:logged-out'));
+    window.location.href = '/';
+  });
+</script>
