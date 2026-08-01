@@ -2,11 +2,15 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: বটম নেভিগেশন বার (মোবাইল-ফার্স্ট)
-// ইন্সপিরেশন: smartfenibd.com এর bottom nav, কিন্তু Smart Feni
-// ব্র্যান্ডিং এ অ্যাডাপ্ট করা — মাঝের "পোস্ট" বাটন elevated/circular।
 // অর্ডার: হোম | ক্যাটাগরি | ➕পোস্ট(elevated) | মেসেজ | প্রোফাইল
-// এই ধাপে শুধু UI/navigation shell — ক্যাটাগরি ও পোস্ট এখনো
-// placeholder (পরের ফেজে আসল ফাংশনালিটি বসবে)।
+//
+// আপডেট (ফাইনাল — সব drawer রেডি হওয়ার পর):
+// - "ক্যাটাগরি" এখন CategoryDrawer ট্রিগার করে
+// - "মেসেজ" — লগইন থাকলে NotificationDrawer, না থাকলে AuthModal।
+//   আনরিড ব্যাজ NotificationDrawer এর dispatch করা
+//   'smartfeni:notification-count' ইভেন্ট শুনে দেখায়।
+// - "প্রোফাইল" — লগইন থাকলে HamburgerMenu, না থাকলে AuthModal
+// - "➕পোস্ট" এখনো placeholder টোস্ট (পরের ফেজে আসল ট্যাব+ফর্ম বসবে)
 // ============================================================
 ---
 
@@ -16,10 +20,10 @@
     <span>হোম</span>
   </a>
 
-  <a href="/" class="bn-item" id="bnCategory">
+  <button type="button" class="bn-item" id="bnCategory">
     <i class="fas fa-grip"></i>
     <span>ক্যাটাগরি</span>
-  </a>
+  </button>
 
   <button type="button" class="bn-item bn-center" id="bnPost">
     <span class="bn-center-circle">
@@ -28,8 +32,11 @@
     <span class="bn-center-label">পোস্ট</span>
   </button>
 
-  <button type="button" class="bn-item" id="bnMessage">
-    <i class="fas fa-comment-dots"></i>
+  <button type="button" class="bn-item bn-msg" id="bnMessage">
+    <span class="bn-icon-wrap">
+      <i class="fas fa-comment-dots"></i>
+      <span class="bn-badge" id="bnMsgBadge" style="display:none;">0</span>
+    </span>
     <span>মেসেজ</span>
   </button>
 
@@ -82,6 +89,30 @@
 
   .bn-item.active {
     color: #FF6B35;
+  }
+
+  .bn-icon-wrap {
+    position: relative;
+    display: flex;
+  }
+
+  .bn-badge {
+    position: absolute;
+    top: -4px;
+    right: -8px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    border-radius: 20px;
+    background: #D14343;
+    color: #fff;
+    font-size: 0.55rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    box-shadow: 0 0 0 2px #fff;
   }
 
   /* ===== মাঝের elevated পোস্ট বাটন ===== */
@@ -141,10 +172,12 @@
 <script>
   import { supabase } from '../../lib/supabase.js';
 
+  const bnCategory = document.getElementById('bnCategory');
   const bnProfile = document.getElementById('bnProfile');
   const bnPost = document.getElementById('bnPost');
   const bnMessage = document.getElementById('bnMessage');
   const bnToast = document.getElementById('bnToast');
+  const bnMsgBadge = document.getElementById('bnMsgBadge');
 
   let toastTimer = null;
   function showToast(text) {
@@ -155,24 +188,51 @@
     toastTimer = setTimeout(() => bnToast.classList.remove('show'), 1800);
   }
 
-  // প্রোফাইল — Header.astro এর একই প্যাটার্ন: লগইন থাকলে সরাসরি
-  // পেজে, না থাকলে AuthModal
-  bnProfile?.addEventListener('click', async () => {
+  // ===== ক্যাটাগরি — সরাসরি CategoryDrawer খুলবে =====
+  bnCategory?.addEventListener('click', () => {
+    window.dispatchEvent(new CustomEvent('smartfeni:open-category-drawer'));
+  });
+
+  // ===== মেসেজ — লগইন থাকলে NotificationDrawer, না থাকলে AuthModal =====
+  bnMessage?.addEventListener('click', async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
-      window.location.href = '/profile/edit';
+      window.dispatchEvent(new CustomEvent('smartfeni:open-notification-drawer'));
     } else {
       window.openAuthModal?.('login');
     }
   });
 
-  // পোস্ট ও মেসেজ — এখনো placeholder (পরের ফেজে আসল ফাংশন বসবে)
+  // ===== প্রোফাইল — লগইন থাকলে HamburgerMenu, না থাকলে AuthModal =====
+  bnProfile?.addEventListener('click', async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      window.dispatchEvent(new CustomEvent('smartfeni:open-hamburger-menu'));
+    } else {
+      window.openAuthModal?.('login');
+    }
+  });
+
+  // ===== পোস্ট — এখনো placeholder (পরের ফেজে আসল ফাংশন বসবে) =====
   bnPost?.addEventListener('click', () => {
     showToast('এই ফিচার শীঘ্রই আসছে');
   });
 
-  bnMessage?.addEventListener('click', () => {
-    showToast('এই ফিচার শীঘ্রই আসছে');
+  // ===== মেসেজ আইকনে আনরিড ব্যাজ — NotificationDrawer এর ইভেন্ট শুনে =====
+  window.addEventListener('smartfeni:notification-count', (e) => {
+    const count = e.detail?.count || 0;
+    if (!bnMsgBadge) return;
+    if (count > 0) {
+      bnMsgBadge.textContent = count > 9 ? '৯+' : String(count);
+      bnMsgBadge.style.display = 'flex';
+    } else {
+      bnMsgBadge.style.display = 'none';
+    }
+  });
+
+  // লগ আউট হলে badge সাথে সাথে সরিয়ে দেওয়া
+  window.addEventListener('smartfeni:logged-out', () => {
+    if (bnMsgBadge) bnMsgBadge.style.display = 'none';
   });
 
   // ===== অ্যাক্টিভ স্টেট (বর্তমান পেজ অনুযায়ী) =====
