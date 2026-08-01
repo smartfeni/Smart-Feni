@@ -20,16 +20,16 @@
 // আপডেট (নতুন): নোটিফিকেশন বেল আইকন যোগ হলো, প্রোফাইল বাটনের পাশে।
 // user_notifications টেবিল থেকে ফেচ হয় (RLS: শুধু নিজের রো)।
 // লগইন না থাকলে বেল লুকানো থাকবে। আনরিড কাউন্ট ব্যাজ, ক্লিক করলে
-// ড্রপডাউন প্যানেল খুলবে, নোটিফিকেশনে ক্লিক করলে read মার্ক হয়ে
-// listing_id থাকলে সেই লিস্টিং এ নিয়ে যাবে।
+// ড্রপডাউন প্যানেল খুলবে।
 //
 // আপডেট (বাগফিক্স): .notif-item এলিমেন্টগুলো JS দিয়ে
 // document.createElement() করে বানানো হয় বলে Astro এর স্কোপড CSS
-// এদের উপর কাজ করছিল না (data-astro-cid অ্যাট্রিবিউট বসে না
-// ডাইনামিক এলিমেন্টে) — ফলে আইটেমগুলো ব্রাউজার-ডিফল্ট বাটন স্টাইলে
-// পাশাপাশি/ওভারল্যাপ হয়ে রেন্ডার হচ্ছিল। এখন এই এলিমেন্টগুলোর
-// স্টাইল আলাদা <style is:global> ব্লকে সরানো হলো, সাথে ডিজাইন
-// আরেকটু পলিশড করা হলো।
+// এদের উপর কাজ করছিল না — এখন <style is:global> ব্লকে সরানো হলো।
+//
+// আপডেট (নতুন): লম্বা মেসেজ (৩ লাইনের বেশি) ক্লিক করলে এখন
+// এক্সপ্যান্ড/কোলাপ্স হয় (আগে সরাসরি নেভিগেট হয়ে যেত, পড়ার সুযোগ
+// পাওয়া যেত না)। listing_id থাকলে ভেতরে আলাদা ছোট লিংক থাকবে
+// ("সম্পর্কিত লিস্টিং দেখুন →"), সেটাতেই শুধু নেভিগেট হবে।
 // ============================================================
 
 import LocationSelector from '../ui/LocationSelector.astro';
@@ -158,7 +158,7 @@ import AuthModal from '../ui/AuthModal.astro';
     white-space: nowrap;
   }
 
-  /* ===== নোটিফিকেশন বেল (স্ট্যাটিক শেল — স্কোপড CSS ঠিকঠাক কাজ করে) ===== */
+  /* ===== নোটিফিকেশন বেল (স্ট্যাটিক শেল) ===== */
   .notif-wrap {
     position: relative;
   }
@@ -403,10 +403,8 @@ import AuthModal from '../ui/AuthModal.astro';
 </style>
 
 <!-- ============================================================
-  গুরুত্বপূর্ণ: এই স্টাইলগুলো is:global — কারণ .notif-item গুলো JS
-  দিয়ে document.createElement() করে ডাইনামিকালি বানানো হয়, তাই
-  Astro এর স্কোপড CSS (data-astro-cid) এদের উপর বসে না। global না
-  করলে ব্রাউজার-ডিফল্ট স্টাইলে রেন্ডার হয়ে লে-আউট ভেঙে যায়।
+  is:global — .notif-item এলিমেন্টগুলো JS দিয়ে ডাইনামিকালি বানানো
+  হয় বলে Astro এর স্কোপড CSS এদের উপর বসে না।
 ============================================================ -->
 <style is:global>
   .notif-item {
@@ -487,15 +485,42 @@ import AuthModal from '../ui/AuthModal.astro';
     -webkit-box-orient: vertical;
   }
 
+  .notif-item-msg.expanded {
+    -webkit-line-clamp: unset;
+    display: block;
+  }
+
   .notif-item.unread .notif-item-msg {
     font-weight: 600;
+  }
+
+  .notif-item-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 6px;
   }
 
   .notif-item-time {
     font-size: 0.72rem;
     color: #8FA0BC;
-    margin-top: 5px;
-    display: block;
+  }
+
+  .notif-item-link {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #FF6B35;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .notif-item-link:hover {
+    text-decoration: underline;
   }
 </style>
 
@@ -550,8 +575,7 @@ import AuthModal from '../ui/AuthModal.astro';
   restoreSession();
 
   // প্রোফাইল বাটন — লগইন করা না থাকলে AuthModal খুলবে, থাকলে সরাসরি
-  // প্রোফাইল পেজে নিয়ে যাবে (রোল-শর্টকাট, ব্লাড ডোনার টগল, লগ আউট —
-  // সবকিছু এখন ওই পেজেই আছে, আলাদা ড্রপডাউন মেনু আর নেই)
+  // প্রোফাইল পেজে নিয়ে যাবে
   profileBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     if (isLoggedIn) {
@@ -561,13 +585,11 @@ import AuthModal from '../ui/AuthModal.astro';
     }
   });
 
-  // AuthModal থেকে সাইনআপ/লগইন সফল হলে এই ইভেন্ট আসবে
   window.addEventListener('smartfeni:auth-changed', (e) => {
     const { name, avatarUrl } = e.detail || {};
     showLoggedInState(name, avatarUrl);
   });
 
-  // প্রোফাইল পেজ থেকে লগ আউট হলে এই ইভেন্ট আসবে
   window.addEventListener('smartfeni:logged-out', () => {
     showLoggedOutState();
   });
@@ -625,22 +647,47 @@ import AuthModal from '../ui/AuthModal.astro';
         <span class="notif-item-icon"><i class="fas fa-bell"></i></span>
         <span class="notif-item-body">
           <span class="notif-item-msg">${escapeHtml(n.message)}</span>
-          <span class="notif-item-time">${relativeTimeBn(n.created_at)}</span>
+          <span class="notif-item-footer">
+            <span class="notif-item-time">${relativeTimeBn(n.created_at)}</span>
+            ${n.listing_id ? '<button type="button" class="notif-item-link" data-open-listing>সম্পর্কিত লিস্টিং দেখুন →</button>' : ''}
+          </span>
         </span>
       `;
+
+      // মূল আইটেমে ক্লিক করলে — টেক্সট এক্সপ্যান্ড/কোলাপ্স + read মার্ক
       el.addEventListener('click', async () => {
+        const msgEl = el.querySelector('.notif-item-msg');
+        msgEl.classList.toggle('expanded');
+
         if (!n.is_read) {
+          n.is_read = true;
+          el.classList.remove('unread');
           await supabase.from('user_notifications').update({ is_read: true }).eq('id', n.id);
-        }
-        if (n.listing_id) {
-          window.location.href = `/listing/${n.listing_id}`;
-        } else {
-          notifPanel.classList.remove('open');
-          loadNotifications();
+          updateBadgeCount();
         }
       });
+
+      // "সম্পর্কিত লিস্টিং দেখুন" — আলাদাভাবে নেভিগেট করবে, এক্সপ্যান্ড ট্রিগার করবে না
+      const linkBtn = el.querySelector('[data-open-listing]');
+      linkBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.location.href = `/listing/${n.listing_id}`;
+      });
+
       notifList.appendChild(el);
     });
+  }
+
+  let latestNotifications = [];
+
+  function updateBadgeCount() {
+    const unreadCount = latestNotifications.filter((n) => !n.is_read).length;
+    if (unreadCount > 0) {
+      notifBadge.textContent = unreadCount > 9 ? '৯+' : toBnDigits(unreadCount);
+      notifBadge.style.display = 'flex';
+    } else {
+      notifBadge.style.display = 'none';
+    }
   }
 
   async function loadNotifications() {
@@ -652,15 +699,9 @@ import AuthModal from '../ui/AuthModal.astro';
 
     if (error) return;
 
-    renderNotifications(data || []);
-
-    const unreadCount = (data || []).filter((n) => !n.is_read).length;
-    if (unreadCount > 0) {
-      notifBadge.textContent = unreadCount > 9 ? '৯+' : toBnDigits(unreadCount);
-      notifBadge.style.display = 'flex';
-    } else {
-      notifBadge.style.display = 'none';
-    }
+    latestNotifications = data || [];
+    renderNotifications(latestNotifications);
+    updateBadgeCount();
   }
 
   notifBtn?.addEventListener('click', (e) => {
@@ -684,8 +725,6 @@ import AuthModal from '../ui/AuthModal.astro';
 
   // ============================================================
   // উপজেলা-ভিত্তিক হেডার ব্যাকগ্রাউন্ড ইমেজ
-  // site_images টেবিল থেকে header_<slug> খোঁজা হয়, না পেলে
-  // header_default, সেটাও না থাকলে প্লেইন সাদা হেডারই থাকবে
   // ============================================================
   const navbar = document.getElementById('siteNavbar');
   const BUCKET = 'listing-images';
@@ -729,18 +768,15 @@ import AuthModal from '../ui/AuthModal.astro';
     }
   }
 
-  // প্রথম লোডে সেভ করা উপজেলা দিয়ে হেডার ব্যাকগ্রাউন্ড সেট করা
   const savedUpazila = localStorage.getItem(STORAGE_KEY);
   loadHeaderBg(savedUpazila);
 
-  // উপজেলা বদলালে (LocationSelector থেকে) লাইভ আপডেট
   window.addEventListener('smartfeni:upazila-changed', (e) => {
     loadHeaderBg(e.detail?.upazila);
   });
 
   // ============================================================
-  // ডাইনামিক লোগো — site_images ('logo' key) থেকে লোড, না পেলে
-  // ইতিমধ্যে HTML-এ থাকা /logo.png ফলব্যাক হিসেবে থেকে যাবে
+  // ডাইনামিক লোগো
   // ============================================================
   const logoImg = document.getElementById('siteLogoImg');
 
