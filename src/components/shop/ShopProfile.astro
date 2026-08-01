@@ -7,18 +7,18 @@
 //   - বেস্ট সেলার ব্যাজ এখন ছবির উপর ওভারলে (বক্সের ভিতরে), আলাদা
 //     বাইরের হেডিং সরানো হয়েছে — বেস্ট সেলার গ্রিডেই থাকে, শুধু
 //     badge highlight করে দেখায়
-//   - এক কার্টে একটাই শপের প্রোডাক্ট থাকতে পারবে (single-shop cart)
+//   - কার্ট মাল্টি-শপ (একাধিক শপের প্রোডাক্ট একই কার্টে থাকতে পারবে) —
+//     checkout এ প্রতি শপের জন্য আলাদা order তৈরি হয় যাতে প্রতিটা
+//     শপের অর্ডার স্ট্যাটাস আলাদাভাবে ট্র্যাক করা যায়
 // props: shop (shops টেবিলের row), products (listings অ্যারে)
 // ============================================================
 
 const { shop, products } = Astro.props;
 
-// বেস্ট সেলার আগে দেখাবে, বাকিগুলো তারিখ অনুযায়ী (products আগে থেকেই created_at desc সাজানো)
 const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) - (a.is_best_seller ? 1 : 0));
 ---
 
 <div class="shop-page">
-  <!-- ===== কমপ্যাক্ট টপবার ===== -->
   <div class="shop-topbar">
     <div class="container topbar-inner">
       {shop.logo_image ? (
@@ -46,7 +46,6 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
     </div>
   </div>
 
-  <!-- ===== কভার ব্যানার ===== -->
   {shop.cover_image && (
     <div class="shop-banner-wrap">
       <img src={shop.cover_image} alt={`${shop.name} ব্যানার`} class="shop-banner-img" />
@@ -54,7 +53,6 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
   )}
 
   <div class="container">
-    <!-- ===== দ্রুত যোগাযোগ ===== -->
     {shop.phone && (
       <div class="quick-contact-row">
         <a href={`tel:${shop.phone}`} class="contact-pill call-pill">
@@ -72,7 +70,6 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
       </div>
     )}
 
-    <!-- ===== প্রোডাক্ট সেকশন ===== -->
     <div class="products-block">
       <div class="products-block-header">
         <p class="section-label"><i class="fas fa-shop"></i> প্রোডাক্টসমূহ</p>
@@ -117,7 +114,7 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
                   <h3 class="product-title">{item.title}</h3>
                   {item.price && <p class="product-price">৳{item.price}</p>}
                   <div class="card-actions-row">
-                    <button type="button" class="add-cart-btn" data-listing-id={item.id} data-shop-id={shop.id} data-owner-id={item.user_id}>
+                    <button type="button" class="add-cart-btn" data-listing-id={item.id} data-shop-id={shop.id}>
                       <i class="fas fa-cart-plus"></i> কার্টে যোগ করুন
                     </button>
                     <button type="button" class="share-product-btn" data-listing-id={item.id} data-title={item.title} aria-label="শেয়ার করুন">
@@ -588,7 +585,6 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
     }
   });
 
-  // ===== কার্টে যোগ করুন — এক কার্টে একটাই শপের প্রোডাক্ট থাকতে পারবে =====
   document.querySelectorAll('.add-cart-btn').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -600,31 +596,9 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
       }
 
       const listingId = btn.dataset.listingId;
-      const ownerId = btn.dataset.ownerId;
       const originalHtml = btn.innerHTML;
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-      const { data: existingCart } = await supabase
-        .from('cart_items')
-        .select('listing_id, listings(user_id)')
-        .eq('user_id', currentUserId);
-
-      const otherShopItem = (existingCart || []).find(
-        (c) => c.listings && c.listings.user_id !== ownerId
-      );
-
-      if (otherShopItem) {
-        const confirmSwitch = confirm(
-          'আপনার কার্টে অন্য একটা শপের প্রোডাক্ট আছে। এক কার্টে একটাই শপের প্রোডাক্ট রাখা যায়। আগের কার্ট খালি করে এটা যোগ করতে চান?'
-        );
-        if (!confirmSwitch) {
-          btn.disabled = false;
-          btn.innerHTML = originalHtml;
-          return;
-        }
-        await supabase.from('cart_items').delete().eq('user_id', currentUserId);
-      }
 
       const { data: existing } = await supabase
         .from('cart_items')
@@ -659,7 +633,6 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
     });
   });
 
-  // ===== প্রোডাক্ট শেয়ার =====
   document.querySelectorAll('.share-product-btn').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -679,7 +652,6 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
     });
   });
 
-  // ===== শপ শেয়ার =====
   document.getElementById('shareShopBtn')?.addEventListener('click', async () => {
     const url = `https://smartfeni.com/${shopMeta.slug}`;
 
