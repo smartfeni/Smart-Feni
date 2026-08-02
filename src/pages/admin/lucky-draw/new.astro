@@ -1,0 +1,603 @@
+---
+// ============================================================
+// পেজ: নতুন লাকি ড্র সেটআপ (/admin/lucky-draw/new)
+// শুধু role === 'admin' অ্যাক্সেস করতে পারবে (moderator ব্লক)।
+// ফিল্টার সিলেক্ট করে lucky_draws এ status='draft' সহ ইনসার্ট করে,
+// তারপর /admin/lucky-draw লিস্ট পেজে ফিরিয়ে দেয়।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="নতুন লাকি ড্র | স্মার্ট ফেনী">
+  <div class="ldn-page">
+    <div class="container ldn-container">
+
+      <!-- ===== লোডিং স্টেট (গার্ড চেক চলাকালীন) ===== -->
+      <div id="adminLoadingState" class="ldn-loading">
+        <div class="ldn-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <!-- ===== আসল কন্টেন্ট (গার্ড পাস হলে দেখা যাবে) ===== -->
+      <div id="adminGuardedContent" class="ldn-content" style="display:none;">
+
+        <a href="/admin/lucky-draw" class="ldn-back-link"><i class="fas fa-arrow-left"></i> লাকি ড্র লিস্টে ফিরুন</a>
+
+        <h1 class="ldn-title"><i class="fas fa-gift"></i> নতুন লাকি ড্র</h1>
+
+        <form id="drawForm" class="ldn-form">
+
+          <!-- ===== হেডার ও ডেস্ক্রিপশন ===== -->
+          <div class="ldn-card">
+            <label class="ldn-label">ড্র হেডার (লাইভ পেজে বড় করে দেখাবে)</label>
+            <input type="text" class="ldn-input" id="drawTitle" value="স্মার্ট ফেনী লাকি ড্র" />
+
+            <label class="ldn-label">ডেস্ক্রিপশন</label>
+            <textarea class="ldn-input ldn-textarea" id="drawDescription" rows="3" placeholder="যেমন: প্রথম ১০০ জন সাইনআপ ইউজারের মধ্য থেকে ভাগ্যবান বিজয়ী নির্বাচন"></textarea>
+          </div>
+
+          <!-- ===== ফিল্টার ===== -->
+          <div class="ldn-card">
+            <h2 class="ldn-card-title"><i class="fas fa-filter"></i> এলিজিবিলিটি ফিল্টার</h2>
+
+            <label class="ldn-label">প্রথম কত জন ইউজার (সাইনআপ অর্ডার অনুযায়ী)</label>
+            <input type="number" class="ldn-input" id="firstN" min="1" placeholder="খালি রাখলে সবাই এলিজিবল" />
+
+            <div class="ldn-checkbox-group">
+              <label class="ldn-checkbox-row">
+                <input type="checkbox" id="excludeAdmin" checked />
+                <span>অ্যাডমিন বাদ</span>
+              </label>
+              <label class="ldn-checkbox-row">
+                <input type="checkbox" id="excludeMod" checked />
+                <span>মডারেটর বাদ</span>
+              </label>
+              <label class="ldn-checkbox-row">
+                <input type="checkbox" id="excludeShopOwner" checked />
+                <span>শপ ওনার বাদ</span>
+              </label>
+              <label class="ldn-checkbox-row">
+                <input type="checkbox" id="excludeClubOwner" checked />
+                <span>ক্লাব ওনার বাদ</span>
+              </label>
+            </div>
+
+            <div class="ldn-toggle-row">
+              <div class="ldn-toggle-text">
+                <span class="ldn-toggle-label">আগে জিতেছে এমন ইউজার বাদ</span>
+                <span class="ldn-toggle-hint">চালু রাখলে আগের বিজয়ীরা এই ড্র-তে এলিজিবল থাকবে না</span>
+              </div>
+              <button type="button" class="ldn-switch on" id="excludePrevWinnersBtn" role="switch" aria-checked="true">
+                <span class="ldn-switch-knob"></span>
+              </button>
+            </div>
+
+            <div class="ldn-eligible-preview" id="eligiblePreview">
+              <div class="ldn-spinner ldn-spinner-sm"></div>
+              <span>এলিজিবল সংখ্যা হিসাব হচ্ছে...</span>
+            </div>
+          </div>
+
+          <!-- ===== এনিমেশন স্টাইল ===== -->
+          <div class="ldn-card">
+            <h2 class="ldn-card-title"><i class="fas fa-wand-magic-sparkles"></i> এনিমেশন স্টাইল</h2>
+
+            <div class="ldn-style-grid">
+              <button type="button" class="ldn-style-card" data-style="slot_machine" id="styleSlotMachine">
+                <i class="fas fa-list"></i>
+                <span>স্লট মেশিন</span>
+                <p>নাম স্ক্রল করে থামবে</p>
+              </button>
+              <button type="button" class="ldn-style-card" data-style="wheel" id="styleWheel">
+                <i class="fas fa-circle-notch"></i>
+                <span>স্পিনিং হুইল</span>
+                <p>চাকা ঘুরে থামবে</p>
+              </button>
+            </div>
+          </div>
+
+          <p class="ldn-error" id="formError"></p>
+
+          <button type="submit" class="ldn-submit" id="submitBtn">
+            <i class="fas fa-check"></i> <span>ড্র তৈরি করুন</span>
+          </button>
+        </form>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .ldn-page {
+      min-height: 60vh;
+      padding: 40px 0 80px;
+      background: #F8FAFC;
+    }
+
+    .ldn-container {
+      max-width: 560px;
+    }
+
+    .ldn-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .ldn-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: ldn-spin 0.8s linear infinite;
+    }
+
+    .ldn-spinner-sm {
+      width: 18px;
+      height: 18px;
+      border-width: 2px;
+    }
+
+    @keyframes ldn-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .ldn-back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.85rem;
+      margin-bottom: 20px;
+    }
+
+    .ldn-back-link:hover {
+      color: #FF6B35;
+    }
+
+    .ldn-title {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .ldn-title i {
+      color: #FF6B35;
+    }
+
+    .ldn-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 24px 22px;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+    }
+
+    .ldn-card-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ldn-card-title i {
+      color: #FF6B35;
+      font-size: 0.9rem;
+    }
+
+    .ldn-label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #1B2A4A;
+      margin-bottom: 6px;
+      margin-top: 16px;
+    }
+
+    .ldn-card > .ldn-label:first-child {
+      margin-top: 0;
+    }
+
+    .ldn-input {
+      width: 100%;
+      padding: 13px 16px;
+      border-radius: 14px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.92rem;
+      font-family: inherit;
+      color: #1B2A4A;
+      background: #FBFCFE;
+      transition: all 0.2s ease;
+    }
+
+    .ldn-input:focus {
+      outline: none;
+      border-color: #FF6B35;
+      background: #fff;
+      box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
+    }
+
+    .ldn-textarea {
+      resize: vertical;
+    }
+
+    .ldn-checkbox-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .ldn-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #1B2A4A;
+      cursor: pointer;
+    }
+
+    .ldn-checkbox-row input {
+      width: 18px;
+      height: 18px;
+      accent-color: #FF6B35;
+      cursor: pointer;
+    }
+
+    .ldn-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      background: #F8FAFC;
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-top: 18px;
+    }
+
+    .ldn-toggle-text {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .ldn-toggle-label {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .ldn-toggle-hint {
+      font-size: 0.72rem;
+      color: #9AA8BC;
+    }
+
+    .ldn-switch {
+      flex-shrink: 0;
+      width: 46px;
+      height: 26px;
+      border-radius: 40px;
+      background: #DDE4EC;
+      border: none;
+      position: relative;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    .ldn-switch.on {
+      background: #FF6B35;
+    }
+
+    .ldn-switch-knob {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+      transition: transform 0.2s ease;
+    }
+
+    .ldn-switch.on .ldn-switch-knob {
+      transform: translateX(20px);
+    }
+
+    .ldn-eligible-preview {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      font-weight: 700;
+      font-size: 0.88rem;
+      padding: 12px 16px;
+      border-radius: 14px;
+      margin-top: 18px;
+    }
+
+    .ldn-style-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .ldn-style-card {
+      background: #F8FAFC;
+      border: 2px solid #E5EAF0;
+      border-radius: 16px;
+      padding: 20px 14px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .ldn-style-card i {
+      font-size: 1.6rem;
+      color: #8FA0BC;
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .ldn-style-card span {
+      display: block;
+      font-weight: 700;
+      color: #1B2A4A;
+      font-size: 0.9rem;
+      margin-bottom: 4px;
+    }
+
+    .ldn-style-card p {
+      font-size: 0.74rem;
+      color: #8FA0BC;
+    }
+
+    .ldn-style-card.selected {
+      border-color: #FF6B35;
+      background: #FFF0EA;
+    }
+
+    .ldn-style-card.selected i {
+      color: #FF6B35;
+    }
+
+    .ldn-error {
+      display: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #D14343;
+      background: #FFF0EA;
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin-bottom: 14px;
+      text-align: center;
+    }
+
+    .ldn-error.show {
+      display: block;
+    }
+
+    .ldn-submit {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #FF6B35;
+      color: #fff;
+      border: none;
+      padding: 15px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      box-shadow: 0 10px 24px rgba(255, 107, 53, 0.24);
+      transition: all 0.2s ease;
+    }
+
+    .ldn-submit:hover {
+      background: #e85a2a;
+      transform: translateY(-2px);
+    }
+
+    .ldn-submit:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    @media (max-width: 480px) {
+      .ldn-card {
+        padding: 20px 16px;
+      }
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../../lib/adminGuard.js';
+    import { supabase } from '../../../lib/supabase.js';
+
+    let currentUserId = null;
+    let selectedStyle = null;
+
+    const drawTitle = document.getElementById('drawTitle');
+    const drawDescription = document.getElementById('drawDescription');
+    const firstN = document.getElementById('firstN');
+    const excludeAdmin = document.getElementById('excludeAdmin');
+    const excludeMod = document.getElementById('excludeMod');
+    const excludeShopOwner = document.getElementById('excludeShopOwner');
+    const excludeClubOwner = document.getElementById('excludeClubOwner');
+    const excludePrevWinnersBtn = document.getElementById('excludePrevWinnersBtn');
+    const eligiblePreview = document.getElementById('eligiblePreview');
+    const styleSlotMachine = document.getElementById('styleSlotMachine');
+    const styleWheel = document.getElementById('styleWheel');
+    const formError = document.getElementById('formError');
+    const submitBtn = document.getElementById('submitBtn');
+    const drawForm = document.getElementById('drawForm');
+
+    let excludePrevWinners = true;
+
+    excludePrevWinnersBtn?.addEventListener('click', () => {
+      excludePrevWinners = !excludePrevWinners;
+      excludePrevWinnersBtn.classList.toggle('on', excludePrevWinners);
+      excludePrevWinnersBtn.setAttribute('aria-checked', String(excludePrevWinners));
+      refreshEligibleCount();
+    });
+
+    function selectStyle(style) {
+      selectedStyle = style;
+      styleSlotMachine.classList.toggle('selected', style === 'slot_machine');
+      styleWheel.classList.toggle('selected', style === 'wheel');
+    }
+
+    styleSlotMachine?.addEventListener('click', () => selectStyle('slot_machine'));
+    styleWheel?.addEventListener('click', () => selectStyle('wheel'));
+
+    // ===== এলিজিবল প্রোফাইল লিস্ট বের করা (ফিল্টার অনুযায়ী) =====
+    async function getEligibleProfileIds() {
+      let query = supabase
+        .from('profiles')
+        .select('id, created_at, role, is_shop_owner, is_club_owner, is_blocked')
+        .eq('is_blocked', false)
+        .order('created_at', { ascending: true });
+
+      const { data: profiles, error } = await query;
+      if (error || !profiles) return [];
+
+      let filtered = profiles.filter((p) => {
+        if (excludeAdmin.checked && p.role === 'admin') return false;
+        if (excludeMod.checked && p.role === 'moderator') return false;
+        if (excludeShopOwner.checked && p.is_shop_owner) return false;
+        if (excludeClubOwner.checked && p.is_club_owner) return false;
+        return true;
+      });
+
+      const n = parseInt(firstN.value, 10);
+      if (n && n > 0) {
+        filtered = filtered.slice(0, n);
+      }
+
+      if (excludePrevWinners) {
+        const { data: winners } = await supabase
+          .from('lucky_draw_winners')
+          .select('profile_id');
+        const winnerIds = new Set((winners || []).map((w) => w.profile_id));
+        filtered = filtered.filter((p) => !winnerIds.has(p.id));
+      }
+
+      return filtered.map((p) => p.id);
+    }
+
+    let refreshTimer = null;
+    function refreshEligibleCount() {
+      clearTimeout(refreshTimer);
+      eligiblePreview.innerHTML = '<div class="ldn-spinner ldn-spinner-sm"></div><span>এলিজিবল সংখ্যা হিসাব হচ্ছে...</span>';
+      refreshTimer = setTimeout(async () => {
+        const ids = await getEligibleProfileIds();
+        eligiblePreview.innerHTML = `<i class="fas fa-users"></i><span>বর্তমানে <strong>${ids.length}</strong> জন এলিজিবল</span>`;
+      }, 350);
+    }
+
+    [firstN, excludeAdmin, excludeMod, excludeShopOwner, excludeClubOwner].forEach((el) => {
+      el?.addEventListener('input', refreshEligibleCount);
+      el?.addEventListener('change', refreshEligibleCount);
+    });
+
+    function showError(msg) {
+      formError.textContent = msg;
+      formError.classList.add('show');
+    }
+
+    function clearError() {
+      formError.textContent = '';
+      formError.classList.remove('show');
+    }
+
+    drawForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearError();
+
+      if (!selectedStyle) {
+        showError('এনিমেশন স্টাইল সিলেক্ট করুন');
+        return;
+      }
+
+      const title = drawTitle.value.trim();
+      if (!title) {
+        showError('হেডার খালি রাখা যাবে না');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.querySelector('span').textContent = 'তৈরি হচ্ছে...';
+
+      const filterCriteria = {
+        first_n: firstN.value ? parseInt(firstN.value, 10) : null,
+        exclude_roles: [
+          ...(excludeAdmin.checked ? ['admin'] : []),
+          ...(excludeMod.checked ? ['moderator'] : []),
+        ],
+        exclude_shop_owners: excludeShopOwner.checked,
+        exclude_club_owners: excludeClubOwner.checked,
+      };
+
+      const { data, error } = await supabase
+        .from('lucky_draws')
+        .insert({
+          title,
+          description: drawDescription.value.trim() || null,
+          filter_criteria: filterCriteria,
+          exclude_previous_winners: excludePrevWinners,
+          animation_style: selectedStyle,
+          status: 'draft',
+          created_by: currentUserId,
+        })
+        .select('id')
+        .single();
+
+      if (error || !data) {
+        showError('ড্র তৈরি করতে সমস্যা হয়েছে: ' + (error?.message || ''));
+        submitBtn.disabled = false;
+        submitBtn.querySelector('span').textContent = 'ড্র তৈরি করুন';
+        return;
+      }
+
+      window.location.href = '/admin/lucky-draw';
+    });
+
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      const { role, profile } = e.detail;
+
+      if (role !== 'admin') {
+        window.location.href = '/admin';
+        return;
+      }
+
+      currentUserId = profile.id;
+      refreshEligibleCount();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
