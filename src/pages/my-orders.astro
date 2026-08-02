@@ -4,13 +4,11 @@
 // ট্র্যাকিং (Pending → Confirmed → Delivered / Cancelled)
 // orders.shop_id → shops.id সরাসরি FK, তাই shop তথ্য embed করা যায়
 //
-// UI FIX (v2): <style> কে is:global করা হয়েছে — অর্ডার কার্ড,
-// স্টেপার, কন্টাক্ট বাটন সবই JS দিয়ে innerHTML এ রানটাইমে তৈরি হয়,
-// তাই Astro-র ডিফল্ট scoped CSS ওগুলোতে অ্যাপ্লাই হচ্ছিল না
-// (cart/checkout পেজে যেই একই বাগ ছিল)।
-// সাথে cart/checkout এর সাথে ভিজুয়াল consistency রাখতে হালকা পলিশ:
-// gradient icon badge, শপ-আইকন ব্যাজ, বড় স্টেপার ডট, dashed divider,
-// কন্টাক্ট বাটনে hover state।
+// আপডেট (Delivery Hero ইন্টিগ্রেশন): shop orders এর পাশাপাশি
+// delivery_requests (বারগেইনিং ডেলিভারি রিকোয়েস্ট) একই লিস্টে
+// created_at অনুযায়ী মার্জ করে দেখানো হয়। status অনুযায়ী দুই ধরনের
+// রেন্ডার: ফাংশনাল (open/negotiating/confirmed/delivered/disputed)
+// ও স্থায়ী হিস্ট্রি (completed/cancelled)।
 // ============================================================
 
 export const prerender = false;
@@ -40,7 +38,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         <div id="emptyOrders" class="status-box" style="display:none;">
           <div class="status-icon-badge"><i class="fas fa-inbox"></i></div>
           <h2>কোনো অর্ডার নেই</h2>
-          <p>এখনো কোনো শপ থেকে অর্ডার করেননি</p>
+          <p>এখনো কোনো শপ থেকে অর্ডার বা ডেলিভারি রিকোয়েস্ট করেননি</p>
           <a href="/shop" class="primary-link-btn">শপ দেখুন</a>
         </div>
 
@@ -204,6 +202,11 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       flex-shrink: 0;
     }
 
+    .shop-icon-badge.delivery-icon {
+      background: #EAF2FF;
+      color: #2563EB;
+    }
+
     .order-date {
       font-size: 0.72rem;
       color: #9AA8BC;
@@ -273,6 +276,21 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       margin: 14px 0;
     }
 
+    .disputed-note {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-align: center;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #B8860B;
+      background: #FFF4E0;
+      padding: 10px;
+      border-radius: 12px;
+      margin: 14px 0;
+    }
+
     .order-items-list {
       background: #F8FAFC;
       border-radius: 14px;
@@ -305,6 +323,9 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       font-size: 0.8rem;
       font-weight: 700;
       transition: all 0.15s ease;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
     }
 
     .order-call-btn {
@@ -326,10 +347,292 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       background: #1EA952;
       color: #fff;
     }
+
+    /* ===== Delivery Hero স্পেসিফিক ===== */
+
+    .delivery-desc {
+      font-size: 0.82rem;
+      color: #5A6E85;
+      margin: 8px 0 12px;
+      line-height: 1.5;
+    }
+
+    .delivery-area {
+      font-size: 0.76rem;
+      color: #9AA8BC;
+      margin-bottom: 12px;
+    }
+
+    .delivery-area i {
+      color: #FF6B35;
+      margin-right: 4px;
+    }
+
+    .asking-price-box {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #FFF0EA;
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #FF6B35;
+    }
+
+    .offer-threads {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .offer-thread {
+      background: #F8FAFC;
+      border: 1px solid #EEF3F9;
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    .offer-thread-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .offer-rider-name {
+      font-size: 0.84rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .offer-price-tag {
+      font-size: 0.9rem;
+      font-weight: 800;
+      color: #FF6B35;
+    }
+
+    .offer-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .offer-actions button {
+      flex: 1;
+      border: none;
+      padding: 9px;
+      border-radius: 10px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+
+    .btn-accept-offer {
+      background: #1B7A3C;
+      color: #fff;
+    }
+
+    .btn-accept-offer:hover {
+      background: #156530;
+    }
+
+    .btn-counter-offer {
+      background: #EAF2FF;
+      color: #2563EB;
+    }
+
+    .btn-counter-offer:hover {
+      background: #2563EB;
+      color: #fff;
+    }
+
+    .counter-input-row {
+      display: none;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .counter-input-row.active {
+      display: flex;
+    }
+
+    .counter-input-row input {
+      flex: 1;
+      border: 1px solid #E5EAF0;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 0.82rem;
+      font-family: inherit;
+      outline: none;
+    }
+
+    .counter-input-row button {
+      background: #FF6B35;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .no-offers-note {
+      text-align: center;
+      color: #9AA8BC;
+      font-size: 0.78rem;
+      padding: 12px 0;
+    }
+
+    .btn-received {
+      width: 100%;
+      background: #1B7A3C;
+      color: #fff;
+      border: none;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-received:hover {
+      background: #156530;
+    }
+
+    .payment-proof-box {
+      margin-top: 12px;
+      border: 1.5px dashed #E5EAF0;
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .payment-proof-box label {
+      font-size: 0.78rem;
+      color: #5A6E85;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .payment-proof-box input[type="file"] {
+      display: none;
+    }
+
+    .proof-thumbs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      justify-content: center;
+    }
+
+    .proof-thumbs img {
+      width: 44px;
+      height: 44px;
+      object-fit: cover;
+      border-radius: 8px;
+    }
+
+    .waiting-note {
+      text-align: center;
+      font-size: 0.8rem;
+      color: #B8860B;
+      background: #FFF4E0;
+      padding: 10px;
+      border-radius: 12px;
+      margin-top: 10px;
+    }
+
+    .dispute-link {
+      display: block;
+      text-align: center;
+      font-size: 0.74rem;
+      color: #D14343;
+      margin-top: 8px;
+      cursor: pointer;
+      text-decoration: underline;
+      background: none;
+      border: none;
+      font-family: inherit;
+      width: 100%;
+    }
+
+    .review-box {
+      margin-top: 12px;
+      border-top: 1px dashed #E5EAF0;
+      padding-top: 12px;
+    }
+
+    .review-stars {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .review-stars button {
+      background: none;
+      border: none;
+      font-size: 1.3rem;
+      color: #E5EAF0;
+      cursor: pointer;
+      padding: 2px;
+    }
+
+    .review-stars button.active {
+      color: #FFB020;
+    }
+
+    .review-box textarea {
+      width: 100%;
+      border: 1px solid #E5EAF0;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 0.8rem;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 50px;
+      margin-bottom: 8px;
+      outline: none;
+    }
+
+    .btn-submit-review {
+      width: 100%;
+      background: #FF6B35;
+      color: #fff;
+      border: none;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .review-submitted-note {
+      text-align: center;
+      font-size: 0.78rem;
+      color: #1B7A3C;
+      margin-top: 10px;
+    }
   </style>
 
   <script>
     import { supabase } from '../lib/supabase.js';
+    import { customerRespond, markReceived, submitReview, uploadPaymentProof, raiseDispute } from '../lib/deliveryClient.js';
 
     const loadingState = document.getElementById('loadingState');
     const loginRequired = document.getElementById('loginRequired');
@@ -340,18 +643,22 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     const STEPS = ['pending', 'confirmed', 'delivered'];
     const STEP_LABELS = { pending: 'পেন্ডিং', confirmed: 'কনফার্মড', delivered: 'ডেলিভার্ড' };
 
+    const DELIVERY_STEPS = ['open', 'confirmed', 'completed'];
+    const DELIVERY_STEP_LABELS = { open: 'রিকোয়েস্ট', confirmed: 'কনফার্মড', completed: 'সম্পন্ন' };
+
+    let currentUserId = null;
+
     function formatDate(iso) {
       return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
 
+    // ============ SHOP ORDER স্টেপার (অপরিবর্তিত) ============
     function renderStepper(status) {
       if (status === 'cancelled') {
         return `<div class="cancelled-note"><i class="fas fa-xmark"></i> অর্ডারটি বাতিল হয়েছে</div>`;
       }
-
       const currentIndex = STEPS.indexOf(status);
       let dotsHtml = '';
-
       STEPS.forEach((step, i) => {
         const isDone = i <= currentIndex;
         dotsHtml += `<div class="step-dot ${isDone ? 'done' : ''}"><i class="fas fa-check"></i></div>`;
@@ -359,77 +666,353 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           dotsHtml += `<div class="step-line ${i < currentIndex ? 'done' : ''}"></div>`;
         }
       });
-
       const labelsHtml = STEPS.map((s) => `<span>${STEP_LABELS[s]}</span>`).join('');
-
-      return `
-        <div class="status-stepper">${dotsHtml}</div>
-        <div class="step-label-row">${labelsHtml}</div>
-      `;
+      return `<div class="status-stepper">${dotsHtml}</div><div class="step-label-row">${labelsHtml}</div>`;
     }
 
-    function renderOrders(orders) {
+    // ============ DELIVERY স্টেপার ============
+    function renderDeliveryStepper(status) {
+      if (status === 'cancelled') {
+        return `<div class="cancelled-note"><i class="fas fa-xmark"></i> রিকোয়েস্টটি বাতিল হয়েছে</div>`;
+      }
+      if (status === 'disputed') {
+        return `<div class="disputed-note"><i class="fas fa-triangle-exclamation"></i> এডমিন পর্যালোচনা করছে</div>`;
+      }
+      let mapped = status;
+      if (status === 'delivered') mapped = 'confirmed'; // delivered ধাপটা confirmed ও completed এর মাঝে দেখাবে
+      const currentIndex = DELIVERY_STEPS.indexOf(mapped === 'open' ? 'open' : mapped);
+      let dotsHtml = '';
+      DELIVERY_STEPS.forEach((step, i) => {
+        const isDone = i <= currentIndex;
+        dotsHtml += `<div class="step-dot ${isDone ? 'done' : ''}"><i class="fas fa-check"></i></div>`;
+        if (i < DELIVERY_STEPS.length - 1) {
+          dotsHtml += `<div class="step-line ${i < currentIndex ? 'done' : ''}"></div>`;
+        }
+      });
+      const labelsHtml = DELIVERY_STEPS.map((s) => `<span>${DELIVERY_STEP_LABELS[s]}</span>`).join('');
+      return `<div class="status-stepper">${dotsHtml}</div><div class="step-label-row">${labelsHtml}</div>`;
+    }
+
+    // ============ SHOP ORDER কার্ড (অপরিবর্তিত) ============
+    function renderShopOrderCard(order) {
+      const card = document.createElement('div');
+      card.className = 'order-card';
+
+      const shop = order.shops;
+      const itemsHtml = (order.order_items || [])
+        .map((it) => `<div class="order-item-line"><span>${it.title || ''} × ${it.quantity}</span><span>৳${it.price || 0}</span></div>`)
+        .join('');
+
+      const contactHtml = shop?.phone
+        ? `
+          <div class="order-contact-row">
+            <a href="tel:${shop.phone}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> কল করুন</a>
+            <a href="https://wa.me/${shop.phone.replace(/\D/g, '')}" target="_blank" rel="noopener" class="order-contact-btn order-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
+          </div>
+        `
+        : '';
+
+      card.innerHTML = `
+        <div class="order-top-row">
+          <div>
+            <p class="order-shop-name"><span class="shop-icon-badge"><i class="fas fa-store"></i></span> ${shop?.name || 'শপ'}</p>
+            <p class="order-date">${formatDate(order.created_at)}</p>
+          </div>
+        </div>
+        ${renderStepper(order.status)}
+        <div class="order-items-list">${itemsHtml}</div>
+        ${contactHtml}
+      `;
+
+      return card;
+    }
+
+    // ============ DELIVERY কার্ড ============
+    function renderDeliveryCard(req) {
+      const card = document.createElement('div');
+      card.className = 'order-card';
+
+      const offers = req.delivery_offers || [];
+      const acceptedRiderProfile = req.accepted_rider?.profiles;
+      const acceptedRiderPhone = acceptedRiderProfile?.phone;
+
+      let bodyHtml = `
+        <div class="order-top-row">
+          <div>
+            <p class="order-shop-name"><span class="shop-icon-badge delivery-icon"><i class="fas fa-motorcycle"></i></span> হোম ডেলিভারি রিকোয়েস্ট</p>
+            <p class="order-date">${formatDate(req.created_at)}</p>
+          </div>
+        </div>
+        ${renderDeliveryStepper(req.status)}
+        <p class="delivery-desc">${req.description || ''}</p>
+        <p class="delivery-area"><i class="fas fa-location-dot"></i> ${req.upazila || ''} — ${req.area_detail || ''}</p>
+      `;
+
+      if (req.status === 'open' || req.status === 'negotiating') {
+        bodyHtml += `<div class="asking-price-box"><span>বর্তমান আস্কিং প্রাইস</span><span>৳${req.current_price}</span></div>`;
+
+        if (offers.length === 0) {
+          bodyHtml += `<p class="no-offers-note">এখনো কোনো রাইডার সাড়া দেয়নি, একটু অপেক্ষা করো...</p>`;
+        } else {
+          bodyHtml += `<div class="offer-threads">`;
+          offers.forEach((offer) => {
+            const riderName = offer.delivery_riders?.profiles?.full_name || 'রাইডার';
+            bodyHtml += `
+              <div class="offer-thread" data-offer-request="${req.id}" data-offer-rider="${offer.rider_profile_id}">
+                <div class="offer-thread-top">
+                  <span class="offer-rider-name"><i class="fas fa-user"></i> ${riderName}</span>
+                  <span class="offer-price-tag">৳${offer.offer_price}</span>
+                </div>
+                <div class="offer-actions">
+                  <button class="btn-accept-offer" data-action="accept">accept করুন</button>
+                  <button class="btn-counter-offer" data-action="show-counter">দাম পরিবর্তন</button>
+                </div>
+                <div class="counter-input-row">
+                  <input type="number" placeholder="নতুন দাম" min="1" />
+                  <button data-action="submit-counter">পাঠান</button>
+                </div>
+              </div>
+            `;
+          });
+          bodyHtml += `</div>`;
+        }
+      } else if (req.status === 'confirmed') {
+        bodyHtml += `
+          <div class="order-contact-row">
+            ${acceptedRiderPhone ? `
+              <a href="tel:${acceptedRiderPhone}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> কল করুন</a>
+              <a href="https://wa.me/${acceptedRiderPhone.replace(/\D/g, '')}" target="_blank" rel="noopener" class="order-contact-btn order-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
+            ` : ''}
+          </div>
+          <button class="btn-received" data-request-id="${req.id}"><i class="fas fa-check-circle"></i> পণ্য রিসিভড</button>
+        `;
+      } else if (req.status === 'delivered') {
+        bodyHtml += `
+          <div class="waiting-note">রাইডারের কনফার্মেশনের অপেক্ষায়...</div>
+          <button class="payment-proof-upload-btn" data-request-id="${req.id}" style="display:none;"></button>
+          <div class="payment-proof-box" data-request-id="${req.id}">
+            <label>
+              <i class="fas fa-camera"></i> পেমেন্ট প্রুফ আপলোড করুন
+              <input type="file" accept="image/*" multiple data-proof-input />
+            </label>
+            <div class="proof-thumbs" data-proof-thumbs></div>
+          </div>
+          <button class="dispute-link" data-request-id="${req.id}">সমস্যা হয়েছে? রিপোর্ট করুন</button>
+        `;
+      }
+
+      if (req.status === 'completed') {
+        if (req.__hasReview) {
+          bodyHtml += `<p class="review-submitted-note"><i class="fas fa-star"></i> রিভিউ দেওয়া হয়েছে, ধন্যবাদ!</p>`;
+        } else {
+          bodyHtml += `
+            <div class="review-box" data-request-id="${req.id}">
+              <div class="review-stars">
+                ${[1, 2, 3, 4, 5].map((n) => `<button data-star="${n}"><i class="fas fa-star"></i></button>`).join('')}
+              </div>
+              <textarea placeholder="মতামত (ঐচ্ছিক)" data-review-comment></textarea>
+              <button class="btn-submit-review">রিভিউ জমা দিন</button>
+            </div>
+          `;
+        }
+      }
+
+      card.innerHTML = bodyHtml;
+      attachDeliveryCardEvents(card, req);
+      return card;
+    }
+
+    function attachDeliveryCardEvents(card, req) {
+      // Accept/Counter থ্রেড বাটন
+      card.querySelectorAll('.offer-thread').forEach((thread) => {
+        const riderProfileId = thread.dataset.offerRider;
+        const requestId = thread.dataset.offerRequest;
+        const counterRow = thread.querySelector('.counter-input-row');
+
+        thread.querySelector('[data-action="accept"]')?.addEventListener('click', async (e) => {
+          e.target.disabled = true;
+          const { error } = await customerRespond({ requestId, riderProfileId, action: 'accept' });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            return;
+          }
+          refreshOrders();
+        });
+
+        thread.querySelector('[data-action="show-counter"]')?.addEventListener('click', () => {
+          counterRow.classList.toggle('active');
+        });
+
+        thread.querySelector('[data-action="submit-counter"]')?.addEventListener('click', async () => {
+          const input = counterRow.querySelector('input');
+          const price = Number(input.value);
+          if (!price || price <= 0) {
+            alert('সঠিক দাম দাও');
+            return;
+          }
+          const { error } = await customerRespond({ requestId, riderProfileId, action: 'counter', offerPrice: price });
+          if (error) {
+            alert(error);
+            return;
+          }
+          refreshOrders();
+        });
+      });
+
+      // রিসিভড বাটন
+      card.querySelector('.btn-received')?.addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        const { error } = await markReceived({ requestId: req.id });
+        if (error) {
+          alert(error);
+          e.target.disabled = false;
+          return;
+        }
+        refreshOrders();
+      });
+
+      // পেমেন্ট প্রুফ আপলোড
+      const proofInput = card.querySelector('[data-proof-input]');
+      proofInput?.addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length === 0) return;
+
+        const thumbsEl = card.querySelector('[data-proof-thumbs]');
+        const imageUrls = [];
+
+        for (const file of files) {
+          const fileName = `${req.id}/${Date.now()}-${file.name}`;
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('delivery-proofs')
+            .upload(fileName, file);
+
+          if (uploadError) {
+            alert('ছবি আপলোড ব্যর্থ: ' + uploadError.message);
+            continue;
+          }
+
+          const { data: urlData } = supabase.storage.from('delivery-proofs').getPublicUrl(uploadData.path);
+          imageUrls.push(urlData.publicUrl);
+
+          const img = document.createElement('img');
+          img.src = urlData.publicUrl;
+          thumbsEl.appendChild(img);
+        }
+
+        if (imageUrls.length > 0) {
+          const { error } = await uploadPaymentProof({ requestId: req.id, imageUrls });
+          if (error) alert('সেভ ব্যর্থ: ' + error);
+        }
+      });
+
+      // ডিসপিউট
+      card.querySelector('.dispute-link')?.addEventListener('click', async () => {
+        const reason = prompt('কী সমস্যা হয়েছে বিস্তারিত লিখো:');
+        if (!reason) return;
+        const { error } = await raiseDispute({ requestId: req.id, reason });
+        if (error) {
+          alert(error);
+          return;
+        }
+        refreshOrders();
+      });
+
+      // রিভিউ
+      const reviewBox = card.querySelector('.review-box');
+      if (reviewBox) {
+        let selectedRating = 0;
+        const starButtons = reviewBox.querySelectorAll('[data-star]');
+        starButtons.forEach((btn) => {
+          btn.addEventListener('click', () => {
+            selectedRating = Number(btn.dataset.star);
+            starButtons.forEach((b) => b.classList.toggle('active', Number(b.dataset.star) <= selectedRating));
+          });
+        });
+
+        reviewBox.querySelector('.btn-submit-review')?.addEventListener('click', async (e) => {
+          if (selectedRating === 0) {
+            alert('রেটিং সিলেক্ট করো');
+            return;
+          }
+          e.target.disabled = true;
+          const comment = reviewBox.querySelector('[data-review-comment]').value.trim();
+          const { error } = await submitReview({ requestId: req.id, rating: selectedRating, comment });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            return;
+          }
+          refreshOrders();
+        });
+      }
+    }
+
+    // ============ মার্জ ও রেন্ডার ============
+    function renderAll(shopOrders, deliveryRequests, reviewedRequestIds) {
       ordersContainer.innerHTML = '';
 
-      if (orders.length === 0) {
+      const combined = [
+        ...shopOrders.map((o) => ({ ...o, __type: 'shop_order' })),
+        ...deliveryRequests.map((d) => ({ ...d, __type: 'delivery', __hasReview: reviewedRequestIds.has(d.id) })),
+      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      if (combined.length === 0) {
         emptyOrders.style.display = 'block';
         return;
       }
       emptyOrders.style.display = 'none';
 
-      orders.forEach((order) => {
-        const card = document.createElement('div');
-        card.className = 'order-card';
-
-        const shop = order.shops;
-        const itemsHtml = (order.order_items || [])
-          .map((it) => `<div class="order-item-line"><span>${it.title || ''} × ${it.quantity}</span><span>৳${it.price || 0}</span></div>`)
-          .join('');
-
-        const contactHtml = shop?.phone
-          ? `
-            <div class="order-contact-row">
-              <a href="tel:${shop.phone}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> কল করুন</a>
-              <a href="https://wa.me/${shop.phone.replace(/\D/g, '')}" target="_blank" rel="noopener" class="order-contact-btn order-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
-            </div>
-          `
-          : '';
-
-        card.innerHTML = `
-          <div class="order-top-row">
-            <div>
-              <p class="order-shop-name"><span class="shop-icon-badge"><i class="fas fa-store"></i></span> ${shop?.name || 'শপ'}</p>
-              <p class="order-date">${formatDate(order.created_at)}</p>
-            </div>
-          </div>
-
-          ${renderStepper(order.status)}
-
-          <div class="order-items-list">${itemsHtml}</div>
-
-          ${contactHtml}
-        `;
-
+      combined.forEach((item) => {
+        const card = item.__type === 'shop_order' ? renderShopOrderCard(item) : renderDeliveryCard(item);
         ordersContainer.appendChild(card);
       });
     }
 
     async function loadOrders(userId) {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*, order_items(*), shops(name, slug, phone)')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+      const [ordersRes, deliveryRes, reviewsRes] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('*, order_items(*), shops(name, slug, phone)')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('delivery_requests')
+          .select(`
+            *,
+            delivery_offers(
+              id, rider_profile_id, offer_price, last_actor, status,
+              delivery_riders(profile_id, vehicle_type, profiles(full_name, phone))
+            ),
+            accepted_rider:delivery_riders(profile_id, vehicle_type, profiles(full_name, phone))
+          `)
+          .eq('customer_profile_id', userId)
+          .order('created_at', { ascending: false }),
+        supabase.from('delivery_reviews').select('request_id').eq('customer_profile_id', userId),
+      ]);
 
       loadingState.style.display = 'none';
       ordersContent.style.display = 'block';
 
-      if (error) {
-        ordersContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+      if (ordersRes.error || deliveryRes.error) {
+        ordersContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি</p>`;
         return;
       }
 
-      renderOrders(data || []);
+      const reviewedRequestIds = new Set((reviewsRes.data || []).map((r) => r.request_id));
+
+      // প্রতিটা delivery request এ শুধু নিজের সাথে সম্পর্কিত (open/negotiating) অফারগুলা রাখা,
+      // closed_by_other/rejected থ্রেড লুকানো (UI ক্লিন রাখতে)
+      const deliveryRequests = (deliveryRes.data || []).map((req) => ({
+        ...req,
+        delivery_offers: (req.delivery_offers || []).filter((o) => ['pending', 'negotiating'].includes(o.status)),
+      }));
+
+      renderAll(ordersRes.data || [], deliveryRequests, reviewedRequestIds);
+    }
+
+    function refreshOrders() {
+      if (currentUserId) loadOrders(currentUserId);
     }
 
     async function init() {
@@ -441,7 +1024,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         return;
       }
 
-      await loadOrders(session.user.id);
+      currentUserId = session.user.id;
+      await loadOrders(currentUserId);
     }
 
     init();
