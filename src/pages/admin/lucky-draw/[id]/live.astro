@@ -1,0 +1,964 @@
+---
+// ============================================================
+// পেজ: লাকি ড্র লাইভ (/admin/lucky-draw/[id]/live)
+// শুধু role === 'admin' অ্যাক্সেস করতে পারবে (moderator ব্লক)।
+// সম্পূর্ণ ইমার্সিভ ফুল-পেজ ওভারলে (fixed, full viewport, high
+// z-index) — Header/Footer এর উপরেই বসে পুরো স্ক্রিন ঢেকে দেয়,
+// BaseLayout না বদলেই।
+//
+// মেকানিজম:
+//   - এলিজিবল লিস্ট একবার লোড হয়।
+//   - "ড্র শুরু করুন" ক্লিকে প্রতিবার নতুন র‍্যান্ডম বিজয়ী সিলেক্ট
+//     হয় (আনলিমিটেড রি-স্পিন, দর্শকদের কাছে সত্যিকারের র‍্যান্ডম
+//     প্রমাণের জন্য)।
+//   - প্রতিটা স্পিন কমপক্ষে ৩০ সেকেন্ড (৩০-৪০স র‍্যান্ডম) চলে।
+//   - স্পিন শেষে "আবার ড্র করুন" (প্রধান বাটন) + কোণায় ছোট্ট
+//     "সেভ" বাটন — সেভ করলেই সেই নির্দিষ্ট ফলাফল DB-তে ফাইনাল
+//     হিসেবে লক হয়ে যায়, আর স্পিন করা যাবে না।
+//   - status === 'completed' হলে সরাসরি লক করা ফাইনাল রেজাল্ট
+//     দেখাবে, স্পিন অপশন থাকবে না।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../../../components/layout/BaseLayout.astro';
+
+const { id } = Astro.params;
+---
+
+<BaseLayout title="লাইভ ড্র | স্মার্ট ফেনী">
+  <div id="ldLiveOverlay" class="ld-live-overlay" data-draw-id={id}>
+
+    <!-- ===== লোডিং স্টেট (গার্ড + ডেটা লোড) ===== -->
+    <div id="adminLoadingState" class="ldl-loading">
+      <div class="ldl-spinner"></div>
+      <p>যাচাই করা হচ্ছে...</p>
+    </div>
+
+    <!-- ===== আসল কন্টেন্ট (গার্ড পাস হলে দেখা যাবে) ===== -->
+    <div id="adminGuardedContent" class="ldl-content" style="display:none;">
+
+      <button type="button" id="exitBtn" class="ldl-exit-btn" title="বের হন">
+        <i class="fas fa-xmark"></i>
+      </button>
+
+      <div class="ldl-header">
+        <h1 id="ldlDrawTitle">লোড হচ্ছে...</h1>
+        <p id="ldlDrawDescription"></p>
+      </div>
+
+      <div class="ldl-stage" id="ldlStage">
+
+        <!-- ===== স্লট মেশিন স্টাইল ===== -->
+        <div class="ldl-slot" id="ldlSlot" style="display:none;">
+          <div class="ldl-slot-window">
+            <div class="ldl-slot-reel" id="ldlSlotReel"></div>
+            <div class="ldl-slot-highlight"></div>
+          </div>
+        </div>
+
+        <!-- ===== স্পিনিং হুইল স্টাইল ===== -->
+        <div class="ldl-wheel-wrap" id="ldlWheelWrap" style="display:none;">
+          <div class="ldl-wheel-pointer"><i class="fas fa-caret-down"></i></div>
+          <div class="ldl-wheel" id="ldlWheel"></div>
+        </div>
+
+      </div>
+
+      <!-- ===== এলিজিবল কাউন্ট / এরর ===== -->
+      <p class="ldl-eligible-count" id="ldlEligibleCount"></p>
+
+      <!-- ===== কন্ট্রোল বাটন ===== -->
+      <div class="ldl-controls">
+        <button type="button" id="spinBtn" class="ldl-spin-btn">
+          <i class="fas fa-play"></i> <span>ড্র শুরু করুন</span>
+        </button>
+      </div>
+
+      <!-- ===== বিজয়ী রিভিল কার্ড ===== -->
+      <div class="ldl-winner-card" id="ldlWinnerCard" style="display:none;">
+        <i class="fas fa-trophy"></i>
+        <p class="ldl-winner-label" id="ldlWinnerLabel">বিজয়ী</p>
+        <h2 class="ldl-winner-name" id="ldlWinnerName"></h2>
+        <p class="ldl-winner-phone" id="ldlWinnerPhone"></p>
+        <button type="button" id="respinBtn" class="ldl-respin-btn">
+          <i class="fas fa-rotate"></i> আবার ড্র করুন
+        </button>
+      </div>
+
+      <!-- ===== ফাইনাল লক করা রেজাল্ট (সেভ করার পর, বা status completed হলে) ===== -->
+      <div class="ldl-final-card" id="ldlFinalCard" style="display:none;">
+        <i class="fas fa-trophy"></i>
+        <p class="ldl-final-label">ফাইনাল বিজয়ী 🎉</p>
+        <h2 class="ldl-final-name" id="ldlFinalName"></h2>
+        <p class="ldl-final-phone" id="ldlFinalPhone"></p>
+        <p class="ldl-final-date" id="ldlFinalDate"></p>
+      </div>
+
+      <!-- ===== ছোট্ট সেভ বাটন — শুধু বিজয়ী রিভিল হলে দেখা যাবে ===== -->
+      <button type="button" id="saveWinnerBtn" class="ldl-save-btn" style="display:none;" title="এই ফলাফল ফাইনাল হিসেবে সেভ করুন">
+        <i class="fas fa-lock"></i>
+      </button>
+
+      <!-- ===== canvas confetti ===== -->
+      <canvas id="ldlConfettiCanvas" class="ldl-confetti-canvas"></canvas>
+
+      <!-- ===== ক্যামেরা PIP বক্স ===== -->
+      <div class="ldl-camera-pip" id="ldlCameraPip">
+        <video id="ldlCameraVideo" autoplay muted playsinline></video>
+        <div class="ldl-camera-placeholder" id="ldlCameraPlaceholder"><i class="fas fa-video-slash"></i></div>
+      </div>
+      <button type="button" id="cameraToggleBtn" class="ldl-camera-toggle">
+        <i class="fas fa-video"></i>
+      </button>
+
+    </div>
+  </div>
+
+  <style>
+    .ld-live-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: radial-gradient(circle at top, #223257 0%, #101a30 65%, #0a1122 100%);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .ldl-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      color: #cfd8e8;
+      font-weight: 600;
+    }
+
+    .ldl-spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255,255,255,0.15);
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: ldl-spin 0.8s linear infinite;
+    }
+
+    @keyframes ldl-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .ldl-content {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      text-align: center;
+    }
+
+    .ldl-exit-btn {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      border: none;
+      color: #cfd8e8;
+      font-size: 1.1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .ldl-exit-btn:hover {
+      background: rgba(255,255,255,0.16);
+      color: #fff;
+    }
+
+    .ldl-header {
+      margin-bottom: 28px;
+    }
+
+    .ldl-header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 8px;
+      text-shadow: 0 4px 20px rgba(255, 107, 53, 0.3);
+    }
+
+    .ldl-header p {
+      color: #a9b6cc;
+      font-size: 1rem;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    .ldl-stage {
+      margin-bottom: 20px;
+    }
+
+    /* ===== স্লট মেশিন ===== */
+    .ldl-slot-window {
+      position: relative;
+      width: min(90vw, 420px);
+      height: 260px;
+      background: rgba(255,255,255,0.06);
+      border: 2px solid rgba(255,107,53,0.4);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4), inset 0 0 40px rgba(0,0,0,0.3);
+    }
+
+    .ldl-slot-reel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .ldl-slot-item {
+      height: 86px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #e8edf7;
+      flex-shrink: 0;
+      padding: 0 16px;
+      text-align: center;
+    }
+
+    .ldl-slot-highlight {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 86px;
+      transform: translateY(-50%);
+      border-top: 2px solid #FF6B35;
+      border-bottom: 2px solid #FF6B35;
+      background: rgba(255,107,53,0.08);
+      pointer-events: none;
+    }
+
+    .ldl-slot-window::before,
+    .ldl-slot-window::after {
+      content: '';
+      position: absolute;
+      left: 0; right: 0;
+      height: 90px;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .ldl-slot-window::before {
+      top: 0;
+      background: linear-gradient(to bottom, rgba(16,26,48,0.95), transparent);
+    }
+
+    .ldl-slot-window::after {
+      bottom: 0;
+      background: linear-gradient(to top, rgba(16,26,48,0.95), transparent);
+    }
+
+    /* ===== স্পিনিং হুইল ===== */
+    .ldl-wheel-wrap {
+      position: relative;
+      width: min(80vw, 340px);
+      height: min(80vw, 340px);
+    }
+
+    .ldl-wheel-pointer {
+      position: absolute;
+      top: -14px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 2.2rem;
+      color: #FF6B35;
+      z-index: 3;
+      filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4));
+    }
+
+    .ldl-wheel {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      position: relative;
+      border: 6px solid #FF6B35;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      overflow: hidden;
+      transition: transform 0.1s linear;
+    }
+
+    .ldl-wheel-label {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 46%;
+      transform-origin: left center;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    }
+
+    .ldl-eligible-count {
+      font-size: 0.9rem;
+      color: #a9b6cc;
+      margin-bottom: 20px;
+      min-height: 1.2em;
+    }
+
+    .ldl-controls {
+      margin-bottom: 20px;
+    }
+
+    .ldl-spin-btn,
+    .ldl-respin-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: #FF6B35;
+      color: #fff;
+      border: none;
+      padding: 16px 40px;
+      border-radius: 50px;
+      font-weight: 800;
+      font-size: 1.05rem;
+      cursor: pointer;
+      box-shadow: 0 14px 34px rgba(255,107,53,0.4);
+      transition: all 0.2s ease;
+    }
+
+    .ldl-spin-btn:hover,
+    .ldl-respin-btn:hover {
+      background: #e85a2a;
+      transform: translateY(-2px);
+    }
+
+    .ldl-spin-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .ldl-winner-card,
+    .ldl-final-card {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.14);
+      backdrop-filter: blur(10px);
+      border-radius: 24px;
+      padding: 32px 40px;
+      margin-top: 8px;
+    }
+
+    .ldl-winner-card i,
+    .ldl-final-card i {
+      font-size: 2.2rem;
+      color: #FFD700;
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .ldl-winner-label,
+    .ldl-final-label {
+      color: #a9b6cc;
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .ldl-winner-name,
+    .ldl-final-name {
+      font-size: 2.2rem;
+      font-weight: 800;
+      color: #fff;
+      margin: 8px 0 4px;
+    }
+
+    .ldl-winner-phone,
+    .ldl-final-phone {
+      color: #a9b6cc;
+      font-size: 0.95rem;
+    }
+
+    .ldl-final-date {
+      color: #6f7f9c;
+      font-size: 0.78rem;
+      margin-top: 8px;
+    }
+
+    .ldl-respin-btn {
+      margin-top: 18px;
+      padding: 12px 28px;
+      font-size: 0.9rem;
+    }
+
+    .ldl-save-btn {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #a9b6cc;
+      font-size: 0.72rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      z-index: 10001;
+    }
+
+    .ldl-save-btn:hover {
+      background: #FF6B35;
+      color: #fff;
+      border-color: #FF6B35;
+    }
+
+    .ldl-confetti-canvas {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10000;
+    }
+
+    /* ===== ক্যামেরা PIP ===== */
+    .ldl-camera-pip {
+      position: fixed;
+      bottom: 70px;
+      left: 20px;
+      width: 130px;
+      height: 130px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 3px solid rgba(255,255,255,0.3);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      cursor: grab;
+      background: #1B2A4A;
+      display: none;
+      z-index: 10002;
+      touch-action: none;
+    }
+
+    .ldl-camera-pip.active {
+      display: block;
+    }
+
+    .ldl-camera-pip video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+
+    .ldl-camera-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #5A6E85;
+      font-size: 1.3rem;
+    }
+
+    .ldl-camera-toggle {
+      position: fixed;
+      bottom: 18px;
+      left: 18px;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #cfd8e8;
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      z-index: 10002;
+    }
+
+    .ldl-camera-toggle:hover {
+      background: rgba(255,255,255,0.18);
+    }
+
+    .ldl-camera-toggle.on {
+      background: #FF6B35;
+      color: #fff;
+      border-color: #FF6B35;
+    }
+
+    @media (max-width: 480px) {
+      .ldl-header h1 { font-size: 1.5rem; }
+      .ldl-winner-name, .ldl-final-name { font-size: 1.6rem; }
+      .ldl-winner-card, .ldl-final-card { padding: 24px 22px; }
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../../../lib/adminGuard.js';
+    import { supabase } from '../../../../lib/supabase.js';
+
+    const overlay = document.getElementById('ldLiveOverlay');
+    const drawId = overlay.dataset.drawId;
+
+    const drawTitleEl = document.getElementById('ldlDrawTitle');
+    const drawDescEl = document.getElementById('ldlDrawDescription');
+    const stageEl = document.getElementById('ldlStage');
+    const slotEl = document.getElementById('ldlSlot');
+    const slotReelEl = document.getElementById('ldlSlotReel');
+    const wheelWrapEl = document.getElementById('ldlWheelWrap');
+    const wheelEl = document.getElementById('ldlWheel');
+    const eligibleCountEl = document.getElementById('ldlEligibleCount');
+    const spinBtn = document.getElementById('spinBtn');
+    const winnerCard = document.getElementById('ldlWinnerCard');
+    const winnerLabel = document.getElementById('ldlWinnerLabel');
+    const winnerNameEl = document.getElementById('ldlWinnerName');
+    const winnerPhoneEl = document.getElementById('ldlWinnerPhone');
+    const respinBtn = document.getElementById('respinBtn');
+    const finalCard = document.getElementById('ldlFinalCard');
+    const finalNameEl = document.getElementById('ldlFinalName');
+    const finalPhoneEl = document.getElementById('ldlFinalPhone');
+    const finalDateEl = document.getElementById('ldlFinalDate');
+    const saveWinnerBtn = document.getElementById('saveWinnerBtn');
+    const exitBtn = document.getElementById('exitBtn');
+    const confettiCanvas = document.getElementById('ldlConfettiCanvas');
+
+    let drawRecord = null;
+    let eligibleProfiles = []; // [{id, full_name, phone}]
+    let currentWinner = null; // profile object of latest spin
+    let isSpinning = false;
+    let currentUserId = null;
+    let idleTimer = null;
+
+    exitBtn?.addEventListener('click', () => {
+      window.location.href = '/admin/lucky-draw';
+    });
+
+    function fmtDate(iso) {
+      if (!iso) return '';
+      return new Date(iso).toLocaleString('bn-BD', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    // ===== এলিজিবল প্রোফাইল লিস্ট (new.astro-র লজিকের সাথে সামঞ্জস্যপূর্ণ) =====
+    async function computeEligibleProfiles(filterCriteria, excludePrevWinners) {
+      const { data: profiles, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, phone, created_at, role, is_shop_owner, is_club_owner, is_blocked')
+        .eq('is_blocked', false)
+        .order('created_at', { ascending: true });
+
+      if (error || !profiles) return [];
+
+      const excludeRoles = new Set(filterCriteria?.exclude_roles || []);
+      let filtered = profiles.filter((p) => {
+        if (excludeRoles.has(p.role)) return false;
+        if (filterCriteria?.exclude_shop_owners && p.is_shop_owner) return false;
+        if (filterCriteria?.exclude_club_owners && p.is_club_owner) return false;
+        return true;
+      });
+
+      if (filterCriteria?.first_n) {
+        filtered = filtered.slice(0, filterCriteria.first_n);
+      }
+
+      if (excludePrevWinners) {
+        const { data: winners } = await supabase.from('lucky_draw_winners').select('profile_id');
+        const winnerIds = new Set((winners || []).map((w) => w.profile_id));
+        filtered = filtered.filter((p) => !winnerIds.has(p.id));
+      }
+
+      return filtered;
+    }
+
+    // ===== স্লট মেশিন রেন্ডার/স্পিন =====
+    const ITEM_HEIGHT = 86;
+
+    function buildSlotIdleReel() {
+      slotReelEl.innerHTML = '';
+      slotReelEl.style.transition = 'none';
+      slotReelEl.style.transform = 'translateY(0)';
+      const names = eligibleProfiles.map((p) => p.full_name || 'ইউজার');
+      const loopNames = [...names, ...names, ...names];
+      loopNames.forEach((name) => {
+        const div = document.createElement('div');
+        div.className = 'ldl-slot-item';
+        div.textContent = name;
+        slotReelEl.appendChild(div);
+      });
+      // ধীর, নিরবচ্ছিন্ন idle স্ক্রল — আপনি কথা বলার সময় চলতে থাকবে
+      let idlePos = 0;
+      if (idleTimer) clearInterval(idleTimer);
+      idleTimer = setInterval(() => {
+        if (isSpinning) return;
+        idlePos -= 1;
+        if (Math.abs(idlePos) >= names.length * ITEM_HEIGHT) idlePos = 0;
+        slotReelEl.style.transform = `translateY(${idlePos}px)`;
+      }, 40);
+    }
+
+    function spinSlot(winnerIndex, durationMs) {
+      if (idleTimer) clearInterval(idleTimer);
+      const names = eligibleProfiles.map((p) => p.full_name || 'ইউজার');
+      const totalLoops = 24; // যথেষ্ট লম্বা রিল, দীর্ঘ স্পিনের জন্য
+      const fullReel = [];
+      for (let i = 0; i < totalLoops; i++) fullReel.push(...names);
+      const finalIndexInReel = (totalLoops - 1) * names.length + winnerIndex;
+
+      slotReelEl.innerHTML = '';
+      fullReel.forEach((name) => {
+        const div = document.createElement('div');
+        div.className = 'ldl-slot-item';
+        div.textContent = name;
+        slotReelEl.appendChild(div);
+      });
+
+      slotReelEl.style.transition = 'none';
+      slotReelEl.style.transform = 'translateY(0)';
+      void slotReelEl.offsetHeight; // ফোর্স রিফ্লো
+
+      const windowCenterOffset = 2 * ITEM_HEIGHT;
+      const targetY = -(finalIndexInReel * ITEM_HEIGHT) + windowCenterOffset;
+
+      slotReelEl.style.transition = `transform ${durationMs}ms cubic-bezier(0.1, 0.75, 0.15, 1)`;
+      requestAnimationFrame(() => {
+        slotReelEl.style.transform = `translateY(${targetY}px)`;
+      });
+    }
+
+    // ===== হুইল রেন্ডার/স্পিন =====
+    let wheelRotation = 0;
+
+    function buildWheel() {
+      wheelEl.innerHTML = '';
+      const n = eligibleProfiles.length;
+      const segAngle = 360 / n;
+      const colors = ['#FF6B35', '#1B2A4A', '#FF8C5A', '#2E3E63'];
+      const gradientParts = eligibleProfiles.map((_, i) => {
+        const color = colors[i % colors.length];
+        return `${color} ${i * segAngle}deg ${(i + 1) * segAngle}deg`;
+      });
+      wheelEl.style.background = `conic-gradient(${gradientParts.join(',')})`;
+
+      eligibleProfiles.forEach((p, i) => {
+        const label = document.createElement('div');
+        label.className = 'ldl-wheel-label';
+        label.textContent = p.full_name || 'ইউজার';
+        const angle = i * segAngle + segAngle / 2;
+        label.style.transform = `rotate(${angle}deg)`;
+        wheelEl.appendChild(label);
+      });
+    }
+
+    function spinWheel(winnerIndex, durationMs) {
+      const n = eligibleProfiles.length;
+      const segAngle = 360 / n;
+      const extraSpins = 10 + Math.floor(Math.random() * 6); // দীর্ঘ স্পিনের জন্য বেশি ঘূর্ণন
+      const targetSegCenter = winnerIndex * segAngle + segAngle / 2;
+      const finalRotation = wheelRotation + extraSpins * 360 + (360 - targetSegCenter);
+
+      wheelEl.style.transition = `transform ${durationMs}ms cubic-bezier(0.1, 0.7, 0.15, 1)`;
+      requestAnimationFrame(() => {
+        wheelEl.style.transform = `rotate(${finalRotation}deg)`;
+      });
+      wheelRotation = finalRotation % 360;
+    }
+
+    // ===== কনফেটি (ছোট্ট ভ্যানিলা ক্যানভাস ইমপ্লিমেন্টেশন) =====
+    let confettiParticles = [];
+    let confettiRunning = false;
+
+    function resizeCanvas() {
+      confettiCanvas.width = window.innerWidth;
+      confettiCanvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function launchConfetti() {
+      const ctx = confettiCanvas.getContext('2d');
+      const colors = ['#FF6B35', '#FFD700', '#1B2A4A', '#4ADE80', '#fff'];
+      confettiParticles = Array.from({ length: 140 }, () => ({
+        x: Math.random() * confettiCanvas.width,
+        y: -20 - Math.random() * 200,
+        r: 4 + Math.random() * 5,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        vy: 2 + Math.random() * 3,
+        vx: -1.5 + Math.random() * 3,
+        rot: Math.random() * 360,
+        vrot: -6 + Math.random() * 12,
+      }));
+
+      if (confettiRunning) return;
+      confettiRunning = true;
+      let frames = 0;
+
+      function tick() {
+        ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+        frames++;
+        let anyAlive = false;
+        confettiParticles.forEach((p) => {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.rot += p.vrot;
+          if (p.y < confettiCanvas.height + 20) anyAlive = true;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate((p.rot * Math.PI) / 180);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 0.6);
+          ctx.restore();
+        });
+        if (anyAlive && frames < 400) {
+          requestAnimationFrame(tick);
+        } else {
+          confettiRunning = false;
+          ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+        }
+      }
+      requestAnimationFrame(tick);
+    }
+
+    // ===== মেইন স্পিন ফ্লো =====
+    function pickRandomWinner() {
+      const idx = Math.floor(Math.random() * eligibleProfiles.length);
+      return { profile: eligibleProfiles[idx], index: idx };
+    }
+
+    function startSpin() {
+      if (isSpinning || eligibleProfiles.length === 0) return;
+      isSpinning = true;
+      spinBtn.disabled = true;
+      winnerCard.style.display = 'none';
+      saveWinnerBtn.style.display = 'none';
+
+      const { profile, index } = pickRandomWinner();
+      currentWinner = profile;
+
+      const durationMs = 30000 + Math.floor(Math.random() * 10000); // ৩০-৪০ সেকেন্ড
+
+      if (drawRecord.animation_style === 'wheel') {
+        spinWheel(index, durationMs);
+      } else {
+        spinSlot(index, durationMs);
+      }
+
+      setTimeout(() => {
+        isSpinning = false;
+        spinBtn.disabled = false;
+        revealWinner(profile);
+      }, durationMs + 200);
+    }
+
+    function revealWinner(profile) {
+      winnerLabel.textContent = 'বিজয়ী';
+      winnerNameEl.textContent = profile.full_name || 'ইউজার';
+      winnerPhoneEl.textContent = profile.phone || '';
+      winnerCard.style.display = 'block';
+      saveWinnerBtn.style.display = 'flex';
+      launchConfetti();
+    }
+
+    spinBtn?.addEventListener('click', startSpin);
+    respinBtn?.addEventListener('click', () => {
+      winnerCard.style.display = 'none';
+      saveWinnerBtn.style.display = 'none';
+      startSpin();
+    });
+
+    // ===== ফাইনাল সেভ (লক) =====
+    saveWinnerBtn?.addEventListener('click', async () => {
+      if (!currentWinner) return;
+      saveWinnerBtn.disabled = true;
+
+      const snapshot = {
+        id: currentWinner.id,
+        name: currentWinner.full_name,
+        phone: currentWinner.phone,
+      };
+
+      const { error: winError } = await supabase.from('lucky_draw_winners').insert({
+        lucky_draw_id: drawId,
+        profile_id: currentWinner.id,
+        name_snapshot: currentWinner.full_name,
+        phone_snapshot: currentWinner.phone,
+      });
+
+      const { error: updateError } = await supabase
+        .from('lucky_draws')
+        .update({
+          status: 'completed',
+          winner_profile_id: currentWinner.id,
+          winner_snapshot: snapshot,
+          drawn_at: new Date().toISOString(),
+        })
+        .eq('id', drawId);
+
+      if (winError || updateError) {
+        saveWinnerBtn.disabled = false;
+        alert('সেভ করতে সমস্যা হয়েছে, আবার চেষ্টা করুন।');
+        return;
+      }
+
+      showFinalLocked(snapshot, new Date().toISOString());
+    });
+
+    function showFinalLocked(snapshot, drawnAt) {
+      if (idleTimer) clearInterval(idleTimer);
+      stageEl.style.display = 'none';
+      eligibleCountEl.style.display = 'none';
+      spinBtn.style.display = 'none';
+      winnerCard.style.display = 'none';
+      saveWinnerBtn.style.display = 'none';
+
+      finalNameEl.textContent = snapshot.name || 'ইউজার';
+      finalPhoneEl.textContent = snapshot.phone || '';
+      finalDateEl.textContent = 'ড্র হয়েছে: ' + fmtDate(drawnAt);
+      finalCard.style.display = 'block';
+    }
+
+    // ===== ক্যামেরা PIP =====
+    const cameraPip = document.getElementById('ldlCameraPip');
+    const cameraVideo = document.getElementById('ldlCameraVideo');
+    const cameraToggleBtn = document.getElementById('cameraToggleBtn');
+    let cameraStream = null;
+
+    cameraToggleBtn?.addEventListener('click', async () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((t) => t.stop());
+        cameraStream = null;
+        cameraVideo.srcObject = null;
+        cameraPip.classList.remove('active');
+        cameraToggleBtn.classList.remove('on');
+        return;
+      }
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        cameraVideo.srcObject = cameraStream;
+        cameraPip.classList.add('active');
+        cameraToggleBtn.classList.add('on');
+      } catch (err) {
+        alert('ক্যামেরা চালু করা যায়নি: ' + err.message);
+      }
+    });
+
+    // ড্র্যাগেবল PIP (মাউস + টাচ)
+    (function makeDraggable(el) {
+      let dragging = false;
+      let offsetX = 0, offsetY = 0;
+
+      function start(clientX, clientY) {
+        dragging = true;
+        const rect = el.getBoundingClientRect();
+        offsetX = clientX - rect.left;
+        offsetY = clientY - rect.top;
+        el.style.cursor = 'grabbing';
+      }
+
+      function move(clientX, clientY) {
+        if (!dragging) return;
+        el.style.left = `${clientX - offsetX}px`;
+        el.style.top = `${clientY - offsetY}px`;
+        el.style.right = 'auto';
+        el.style.bottom = 'auto';
+      }
+
+      function end() {
+        dragging = false;
+        el.style.cursor = 'grab';
+      }
+
+      el.addEventListener('mousedown', (e) => start(e.clientX, e.clientY));
+      window.addEventListener('mousemove', (e) => move(e.clientX, e.clientY));
+      window.addEventListener('mouseup', end);
+
+      el.addEventListener('touchstart', (e) => {
+        const t = e.touches[0];
+        start(t.clientX, t.clientY);
+      }, { passive: true });
+      window.addEventListener('touchmove', (e) => {
+        const t = e.touches[0];
+        move(t.clientX, t.clientY);
+      }, { passive: true });
+      window.addEventListener('touchend', end);
+    })(cameraPip);
+
+    // ===== ইনিশিয়ালাইজেশন =====
+    async function loadDraw() {
+      const { data, error } = await supabase
+        .from('lucky_draws')
+        .select('*')
+        .eq('id', drawId)
+        .single();
+
+      if (error || !data) {
+        drawTitleEl.textContent = 'ড্র পাওয়া যায়নি';
+        eligibleCountEl.textContent = '';
+        stageEl.style.display = 'none';
+        spinBtn.style.display = 'none';
+        return;
+      }
+
+      drawRecord = data;
+      drawTitleEl.textContent = data.title;
+      drawDescEl.textContent = data.description || '';
+
+      if (data.status === 'completed') {
+        showFinalLocked(data.winner_snapshot || {}, data.drawn_at);
+        return;
+      }
+
+      eligibleProfiles = await computeEligibleProfiles(data.filter_criteria, data.exclude_previous_winners);
+
+      if (eligibleProfiles.length === 0) {
+        eligibleCountEl.textContent = 'এই ফিল্টারে কোনো এলিজিবল ইউজার নেই';
+        spinBtn.disabled = true;
+        return;
+      }
+
+      eligibleCountEl.textContent = `মোট এলিজিবল: ${eligibleProfiles.length} জন`;
+
+      if (data.animation_style === 'wheel') {
+        wheelWrapEl.style.display = 'block';
+        buildWheel();
+      } else {
+        slotEl.style.display = 'block';
+        buildSlotIdleReel();
+      }
+    }
+
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      const { role, profile } = e.detail;
+      if (role !== 'admin') {
+        window.location.href = '/admin';
+        return;
+      }
+      currentUserId = profile.id;
+      loadDraw();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
