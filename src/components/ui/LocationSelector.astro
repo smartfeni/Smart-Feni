@@ -1,21 +1,34 @@
+<!-- path: src/components/ui/LocationSelector.astro -->
 ---
 // ============================================================
-// কম্পোনেন্ট: লোকেশন সিলেক্টর (উপজেলা অটো-ডিটেক্ট + ম্যানুয়াল ফলব্যাক)
+// কম্পোনেন্ট: লোকেশন সিলেক্টর (উপজেলা)
 // ফিক্স ১: ব্যাকগ্রাউন্ড বক্স সরিয়ে মিনিমাল (শুধু পিন+নাম), বাম কোণায়
 // ফিক্স ২: ড্রপডাউন এখন header-এর exact নিচ থেকে, বাম পাশে fixed —
-//          প্রতিবার খোলার সময় লাইভ measurement দিয়ে position বসে,
-//          তাই প্রথমবার লোড হওয়ার সময়ও ঠিকভাবে দেখাবে (আর ড্র্যাগ
-//          করে ঠিক করা লাগবে না)
-// আপডেট: উপজেলা সিলেকশনে GA4/Supabase অ্যানালিটিক্স ইভেন্ট যোগ করা হয়েছে
-// আপডেট ২: setUpazila এখন smartfeni:upazila-changed ইভেন্ট fire করে,
-//          যাতে Header.astro লাইভ ব্যাকগ্রাউন্ড বদলাতে পারে
+//          প্রতিবার খোলার সময় লাইভ measurement দিয়ে position বসে
+// আপডেট: উপজেলা সিলেকশনে GA4/Supabase অ্যানালিটিক্স ইভেন্ট
+// আপডেট ২: setUpazila এখন smartfeni:upazila-changed ইভেন্ট fire করে
+//
+// আপডেট (নতুন — GPS auto-detect সম্পূর্ণ বাদ): আগে
+// navigator.geolocation দিয়ে ইউজারের লোকেশন নিয়ে nearest উপজেলা
+// বের করা হতো (৪০কিমি রেডিয়াস চেক সহ) — এটা প্রথম ইম্প্রেশনে
+// অপ্রয়োজনীয় permission popup তৈরি করত। এখন সম্পূর্ণ বাদ।
+//
+// নতুন priority লজিক:
+// ১. লগইন করা থাকলে → profiles.upazila (DB থেকে, ক্রস-ডিভাইস
+//    consistent — profiles টেবিলে এই কলাম already আছে)
+// ২. না থাকলে → localStorage cache (আগের ভিজিটের সিলেকশন)
+// ৩. কোনোটাই না থাকলে (একদম প্রথমবার) → ড্রপডাউন অটোমেটিক খুলে
+//    যাবে, বাধ্যতামূলক সিলেকশন (একটা উপজেলা বেছে না নেওয়া পর্যন্ত
+//    বাইরে ক্লিকে বন্ধ হবে না)
+// ৪. যেকোনো সময় header dropdown থেকে ম্যানুয়াল বদল সম্ভব — লগইন
+//    থাকলে profiles.upazila-ও আপডেট হয়ে যাবে (cross-device sync)
 // ============================================================
 ---
 
 <div class="location-selector" id="locationSelector">
   <button class="location-btn" id="locationBtn" type="button">
     <i class="fas fa-location-dot"></i>
-    <span id="locationLabel">লোকেশন নির্ণয় হচ্ছে...</span>
+    <span id="locationLabel">উপজেলা বেছে নিন</span>
     <i class="fas fa-chevron-down chevron"></i>
   </button>
 
@@ -27,20 +40,15 @@
     <button class="upazila-option" data-upazila="parshuram">পরশুরাম</button>
     <button class="upazila-option" data-upazila="fulgazi">ফুলগাজী</button>
     <button class="upazila-option" data-upazila="sonagazi">সোনাগাজী</button>
-    <button class="detect-again" id="detectAgainBtn">
-      <i class="fas fa-crosshairs"></i> বর্তমান লোকেশন দিয়ে নির্ণয় করুন
-    </button>
   </div>
 </div>
 
 <style>
   .location-selector {
     position: relative;
-    /* container-এর 24px padding কাটিয়ে একদম বাম কোণায় নিয়ে যাওয়া হলো */
     margin-left: -24px;
   }
 
-  /* ===== মিনিমাল বাটন — কোনো ব্যাকগ্রাউন্ড বক্স নেই ===== */
   .location-btn {
     display: flex;
     align-items: center;
@@ -85,7 +93,6 @@
     transform: rotate(180deg);
   }
 
-  /* ===== ডেস্কটপ: বাটনের নিচে normal absolute dropdown ===== */
   .location-dropdown {
     display: none;
     position: absolute;
@@ -135,28 +142,6 @@
     color: #FF6B35;
   }
 
-  .detect-again {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    background: none;
-    border: none;
-    border-top: 1px solid #EEF3F9;
-    margin-top: 8px;
-    padding: 10px 12px 4px;
-    font-size: 0.8rem;
-    color: #5A6E85;
-    cursor: pointer;
-  }
-
-  .detect-again:hover {
-    color: #FF6B35;
-  }
-
-  /* ===== মোবাইল: header-এর exact নিচ থেকে, বাম পাশে fixed =====
-     top এর মান JS দিয়ে প্রতিবার খোলার সময় বসানো হয় (live measurement),
-     তাই স্ক্রিন সাইজ/address bar যাই থাকুক ঠিকভাবে বসবে ===== */
   @media (max-width: 768px) {
     .location-btn {
       max-width: 130px;
@@ -177,109 +162,73 @@
 </style>
 
 <script>
+  import { supabase } from '../../lib/supabase.js';
   import { trackEvent } from '../../lib/analytics.js';
 
   const UPAZILAS = [
-    { id: 'feni-sadar', name: 'ফেনী সদর', lat: 23.0159, lng: 91.3976 },
-    { id: 'chhagalnaiya', name: 'ছাগলনাইয়া', lat: 23.0389, lng: 91.5194 },
-    { id: 'daganbhuiyan', name: 'দাগনভূঞা', lat: 22.9833, lng: 91.1833 },
-    { id: 'parshuram', name: 'পরশুরাম', lat: 23.2250, lng: 91.4500 },
-    { id: 'fulgazi', name: 'ফুলগাজী', lat: 23.0700, lng: 91.4500 },
-    { id: 'sonagazi', name: 'সোনাগাজী', lat: 22.8500, lng: 91.3917 },
+    { id: 'feni-sadar', name: 'ফেনী সদর' },
+    { id: 'chhagalnaiya', name: 'ছাগলনাইয়া' },
+    { id: 'daganbhuiyan', name: 'দাগনভূঞা' },
+    { id: 'parshuram', name: 'পরশুরাম' },
+    { id: 'fulgazi', name: 'ফুলগাজী' },
+    { id: 'sonagazi', name: 'সোনাগাজী' },
   ];
 
   const DEFAULT_UPAZILA = 'feni-sadar';
   const STORAGE_KEY = 'smartfeni_upazila';
-  const MAX_DISTANCE_KM = 40;
-  const FENI_CENTER = { lat: 23.0159, lng: 91.3976 };
 
   const selector = document.getElementById('locationSelector');
   const btn = document.getElementById('locationBtn');
   const label = document.getElementById('locationLabel');
-  const detectAgainBtn = document.getElementById('detectAgainBtn');
   const dropdown = document.getElementById('locationDropdown');
   const options = document.querySelectorAll('.upazila-option');
 
-  function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
-    const R = 6371;
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLng = ((lng2 - lng1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
+  // যতক্ষণ কোনো উপজেলা কনফার্মড না হচ্ছে (প্রথম ভিজিট, বাধ্যতামূলক
+  // সিলেকশন), ততক্ষণ বাইরে ক্লিকে ড্রপডাউন বন্ধ হবে না
+  let hasResolvedUpazila = false;
 
-  function findNearestUpazila(lat: number, lng: number) {
-    let nearest = UPAZILAS[0];
-    let minDist = Infinity;
-    for (const u of UPAZILAS) {
-      const d = haversineDistance(lat, lng, u.lat, u.lng);
-      if (d < minDist) {
-        minDist = d;
-        nearest = u;
-      }
-    }
-    return { nearest, distance: minDist };
-  }
-
-  function setUpazila(id: string, save = true) {
+  function setUpazila(id: string, { save = true, syncProfile = false } = {}) {
     const upazila = UPAZILAS.find((u) => u.id === id) || UPAZILAS.find((u) => u.id === DEFAULT_UPAZILA)!;
     label!.textContent = upazila.name;
     options.forEach((opt) => {
       opt.classList.toggle('active', (opt as HTMLElement).dataset.upazila === upazila.id);
     });
 
-    // ===== অন্য কম্পোনেন্ট (যেমন Header ব্যাকগ্রাউন্ড) এই ইভেন্ট শুনে লাইভ আপডেট করবে =====
+    hasResolvedUpazila = true;
+
+    // অন্য কম্পোনেন্ট (Header ব্যাকগ্রাউন্ড, লোকেশন-সর্টিং) এই ইভেন্ট শুনে
     window.dispatchEvent(new CustomEvent('smartfeni:upazila-changed', { detail: { upazila: upazila.id } }));
 
     if (save) {
       localStorage.setItem(STORAGE_KEY, upazila.id);
-      // ===== অ্যানালিটিক্স: উপজেলা সিলেকশন ইভেন্ট =====
       trackEvent('upazila_selected', { upazila: upazila.id });
     }
+
+    if (syncProfile) {
+      syncUpazilaToProfile(upazila.id);
+    }
+
+    return upazila;
   }
 
-  function openManualSelection() {
-    label!.textContent = 'উপজেলা বেছে নিন';
+  async function syncUpazilaToProfile(id: string) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await supabase.from('profiles').update({ upazila: id }).eq('id', session.user.id);
+  }
+
+  function openDropdown() {
     selector!.classList.add('open');
     updateDropdownPosition();
   }
 
-  function detectLocation() {
-    label!.textContent = 'লোকেশন নির্ণয় হচ্ছে...';
-    if (!navigator.geolocation) {
-      openManualSelection();
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        const distanceFromFeni = haversineDistance(latitude, longitude, FENI_CENTER.lat, FENI_CENTER.lng);
-
-        if (distanceFromFeni > MAX_DISTANCE_KM) {
-          setUpazila(DEFAULT_UPAZILA, false);
-          openManualSelection();
-          return;
-        }
-
-        const { nearest } = findNearestUpazila(latitude, longitude);
-        setUpazila(nearest.id);
-      },
-      () => {
-        setUpazila(DEFAULT_UPAZILA, false);
-        openManualSelection();
-      },
-      { timeout: 8000 }
-    );
+  function closeDropdown() {
+    selector!.classList.remove('open');
   }
 
   // ===== dropdown-কে header-এর exact নিচে, বাম পাশে বসায় (লাইভ measurement) =====
   function updateDropdownPosition() {
     if (window.innerWidth > 768) {
-      // ডেস্কটপে CSS absolute positioning নিজেই সামলাবে
       dropdown!.style.top = '';
       dropdown!.style.left = '';
       return;
@@ -291,24 +240,54 @@
     dropdown!.style.left = '8px';
   }
 
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    setUpazila(saved, false);
-  } else {
-    detectLocation();
+  // ============================================================
+  // প্রাথমিক উপজেলা নির্ণয় — priority: profile → cache → mandatory dropdown
+  // ============================================================
+  async function resolveInitialUpazila() {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (session) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('upazila')
+        .eq('id', session.user.id)
+        .single();
+
+      const profileUpazila = profile?.upazila;
+      if (profileUpazila && UPAZILAS.some((u) => u.id === profileUpazila)) {
+        setUpazila(profileUpazila, { save: true, syncProfile: false });
+        return;
+      }
+    }
+
+    const cached = localStorage.getItem(STORAGE_KEY);
+    if (cached && UPAZILAS.some((u) => u.id === cached)) {
+      setUpazila(cached, { save: false });
+      return;
+    }
+
+    // একদম প্রথমবার — কোনো cache/profile নাই, বাধ্যতামূলক ম্যানুয়াল সিলেকশন
+    label!.textContent = 'উপজেলা বেছে নিন';
+    openDropdown();
   }
+
+  resolveInitialUpazila();
 
   btn!.addEventListener('click', () => {
     const willOpen = !selector!.classList.contains('open');
-    selector!.classList.toggle('open');
     if (willOpen) {
-      updateDropdownPosition();
+      openDropdown();
+    } else {
+      closeDropdown();
     }
   });
 
   document.addEventListener('click', (e) => {
     if (!selector!.contains(e.target as Node)) {
-      selector!.classList.remove('open');
+      // প্রথমবার (কোনো উপজেলা এখনো কনফার্মড না) বাইরে ক্লিকে বন্ধ হবে না —
+      // বাধ্যতামূলক সিলেকশন
+      if (!hasResolvedUpazila) return;
+      closeDropdown();
     }
   });
 
@@ -320,13 +299,9 @@
 
   options.forEach((opt) => {
     opt.addEventListener('click', () => {
-      setUpazila((opt as HTMLElement).dataset.upazila!);
-      selector!.classList.remove('open');
+      const id = (opt as HTMLElement).dataset.upazila!;
+      setUpazila(id, { save: true, syncProfile: true });
+      closeDropdown();
     });
-  });
-
-  detectAgainBtn!.addEventListener('click', () => {
-    detectLocation();
-    selector!.classList.remove('open');
   });
 </script>
