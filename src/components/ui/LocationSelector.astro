@@ -2,26 +2,14 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: লোকেশন সিলেক্টর (উপজেলা)
-// ফিক্স ১: ব্যাকগ্রাউন্ড বক্স সরিয়ে মিনিমাল (শুধু পিন+নাম), বাম কোণায়
-// ফিক্স ২: ড্রপডাউন এখন header-এর exact নিচ থেকে, বাম পাশে fixed —
-//          প্রতিবার খোলার সময় লাইভ measurement দিয়ে position বসে
-// আপডেট: উপজেলা সিলেকশনে GA4/Supabase অ্যানালিটিক্স ইভেন্ট
-// আপডেট ২: setUpazila এখন smartfeni:upazila-changed ইভেন্ট fire করে
+// (আগের সব কমেন্ট/হিস্ট্রি অপরিবর্তিত)
 //
-// আপডেট (নতুন — GPS auto-detect সম্পূর্ণ বাদ): আগে
-// navigator.geolocation দিয়ে ইউজারের লোকেশন নিয়ে nearest উপজেলা
-// বের করা হতো (৪০কিমি রেডিয়াস চেক সহ) — এটা প্রথম ইম্প্রেশনে
-// অপ্রয়োজনীয় permission popup তৈরি করত। এখন সম্পূর্ণ বাদ।
-//
-// নতুন priority লজিক:
-// ১. লগইন করা থাকলে → profiles.upazila (DB থেকে, ক্রস-ডিভাইস
-//    consistent — profiles টেবিলে এই কলাম already আছে)
-// ২. না থাকলে → localStorage cache (আগের ভিজিটের সিলেকশন)
-// ৩. কোনোটাই না থাকলে (একদম প্রথমবার) → ড্রপডাউন অটোমেটিক খুলে
-//    যাবে, বাধ্যতামূলক সিলেকশন (একটা উপজেলা বেছে না নেওয়া পর্যন্ত
-//    বাইরে ক্লিকে বন্ধ হবে না)
-// ৪. যেকোনো সময় header dropdown থেকে ম্যানুয়াল বদল সম্ভব — লগইন
-//    থাকলে profiles.upazila-ও আপডেট হয়ে যাবে (cross-device sync)
+// আপডেট (বাগফিক্স — Supabase চেক করে পাওয়া): profiles.upazila
+// কলামে ডেটা আসলে বাংলা নামে সেভ আছে ("ফেনী সদর", "দাগনভূঞা"),
+// slug ("feni-sadar") ফরম্যাটে না। আগের ভার্সনে slug দিয়ে ম্যাচ
+// করার চেষ্টা হচ্ছিল বলে প্রোফাইল-ম্যাচ কখনো সফল হতো না। এখন
+// বাংলা নাম দিয়ে ম্যাচ/সেভ করা হচ্ছে (existing ডেটার সাথে
+// কনসিস্টেন্ট)।
 // ============================================================
 ---
 
@@ -151,7 +139,7 @@
     .location-dropdown {
       position: fixed;
       left: 8px;
-      top: 70px; /* fallback, JS দিয়ে override হবে */
+      top: 70px;
       width: calc(100vw - 16px);
       max-width: 280px;
       max-height: calc(100vh - 90px);
@@ -183,8 +171,6 @@
   const dropdown = document.getElementById('locationDropdown');
   const options = document.querySelectorAll('.upazila-option');
 
-  // যতক্ষণ কোনো উপজেলা কনফার্মড না হচ্ছে (প্রথম ভিজিট, বাধ্যতামূলক
-  // সিলেকশন), ততক্ষণ বাইরে ক্লিকে ড্রপডাউন বন্ধ হবে না
   let hasResolvedUpazila = false;
 
   function setUpazila(id: string, { save = true, syncProfile = false } = {}) {
@@ -196,7 +182,6 @@
 
     hasResolvedUpazila = true;
 
-    // অন্য কম্পোনেন্ট (Header ব্যাকগ্রাউন্ড, লোকেশন-সর্টিং) এই ইভেন্ট শুনে
     window.dispatchEvent(new CustomEvent('smartfeni:upazila-changed', { detail: { upazila: upazila.id } }));
 
     if (save) {
@@ -205,16 +190,18 @@
     }
 
     if (syncProfile) {
-      syncUpazilaToProfile(upazila.id);
+      // ⚠️ profiles.upazila এ বাংলা নাম সেভ হয় (slug না) — existing
+      // ডেটা ফরম্যাটের সাথে কনসিস্টেন্ট রাখতে
+      syncUpazilaToProfile(upazila.name);
     }
 
     return upazila;
   }
 
-  async function syncUpazilaToProfile(id: string) {
+  async function syncUpazilaToProfile(bengaliName: string) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-    await supabase.from('profiles').update({ upazila: id }).eq('id', session.user.id);
+    await supabase.from('profiles').update({ upazila: bengaliName }).eq('id', session.user.id);
   }
 
   function openDropdown() {
@@ -226,7 +213,6 @@
     selector!.classList.remove('open');
   }
 
-  // ===== dropdown-কে header-এর exact নিচে, বাম পাশে বসায় (লাইভ measurement) =====
   function updateDropdownPosition() {
     if (window.innerWidth > 768) {
       dropdown!.style.top = '';
@@ -241,7 +227,8 @@
   }
 
   // ============================================================
-  // প্রাথমিক উপজেলা নির্ণয় — priority: profile → cache → mandatory dropdown
+  // প্রাথমিক উপজেলা নির্ণয় — priority: profile (বাংলা নাম দিয়ে
+  // ম্যাচ) → cache (slug) → mandatory dropdown
   // ============================================================
   async function resolveInitialUpazila() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -253,9 +240,13 @@
         .eq('id', session.user.id)
         .single();
 
-      const profileUpazila = profile?.upazila;
-      if (profileUpazila && UPAZILAS.some((u) => u.id === profileUpazila)) {
-        setUpazila(profileUpazila, { save: true, syncProfile: false });
+      const profileUpazilaName = profile?.upazila?.trim();
+      const matched = profileUpazilaName
+        ? UPAZILAS.find((u) => u.name === profileUpazilaName)
+        : null;
+
+      if (matched) {
+        setUpazila(matched.id, { save: true, syncProfile: false });
         return;
       }
     }
@@ -266,7 +257,6 @@
       return;
     }
 
-    // একদম প্রথমবার — কোনো cache/profile নাই, বাধ্যতামূলক ম্যানুয়াল সিলেকশন
     label!.textContent = 'উপজেলা বেছে নিন';
     openDropdown();
   }
@@ -284,8 +274,6 @@
 
   document.addEventListener('click', (e) => {
     if (!selector!.contains(e.target as Node)) {
-      // প্রথমবার (কোনো উপজেলা এখনো কনফার্মড না) বাইরে ক্লিকে বন্ধ হবে না —
-      // বাধ্যতামূলক সিলেকশন
       if (!hasResolvedUpazila) return;
       closeDropdown();
     }
