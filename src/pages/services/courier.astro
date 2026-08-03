@@ -1,542 +1,121 @@
 ---
 // ============================================================
-// পেজ: ডেলিভারি হিরো (কুরিয়ার/রাইডার সার্ভিস)
-// ব্র্যান্ড: স্মার্ট ফেনী
-// recycle প্যাটার্ন: হেডার CTA, সার্চ বক্স, কম্প্যাক্ট কার্ড,
-// শেয়ারড ডিটেইলস মডাল, লোকেশন সর্ট
-// শুধু is_online=true এবং status='active' রাইডাররাই দেখানো হয়
-//
-// আপডেট ১: লাইক + রিপোর্ট (অভিযোগ) সিস্টেম (আগের থেকে অপরিবর্তিত)
-//
-// আপডেট ২ (নতুন — কেন্দ্রীভূত ➕পোস্ট ফ্লো, job.astro এর প্যাটার্নে):
-// ইনলাইন "রাইডার হিসেবে যুক্ত হতে চান?" বাটন সরিয়ে শুধু তথ্যমূলক
-// ইন্সট্রাকশন লাইন — এখন bottom nav এর "➕পোস্ট" থেকেই খোলে।
-// URL এ ?openListing=1 থাকলে অটোমেটিক AddListingModal খুলবে।
-//
-// আপডেট ৩ (নতুন — Delivery Hero বারগেইনিং): হেডারের নিচে "হোম
-// ডেলিভারি" CTA (মেইন ফোকাস: বারগেইন রিকোয়েস্ট, সেকেন্ডারি: অনলাইন
-// রাইডার প্যানেল)। রাইডার হওয়ার ফ্লো এখান থেকে সরানো হয়নি — এটা
-// আলাদা, প্রোফাইল পেজের DeliveryRiderSection এ হবে।
+// পেজ: হোম ডেলিভারি (Delivery Hero) — ফাইনাল সরলীকৃত ভার্সন
+// পুরনো DeliveryRequestCTA/DeliveryRequestModal/AddListingModal/
+// ListingDetailModal/ReportModal/listings-ভিত্তিক রাইডার গ্রিড —
+// সব বাদ দেওয়া হলো। এখন শুধু DeliveryHeroCard (ইনলাইন ফর্ম,
+// মার্জড CTA), + কোণায় ছোট অনলাইন-রাইডার লিংক + ফুটারে ছোট
+// "ডেলিভারি হিরো হতে চান" লিংক। ডেটা delivery_riders টেবিল থেকে।
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
-import AddListingModal from '../../components/ui/AddListingModal.astro';
-import ListingDetailModal from '../../components/ui/ListingDetailModal.astro';
-import ReportModal from '../../components/shared/ReportModal.astro';
-import DeliveryRequestCTA from '../../components/delivery/DeliveryRequestCTA.astro';
-import DeliveryRequestModal from '../../components/delivery/DeliveryRequestModal.astro';
+import DeliveryHeroCard from '../../components/delivery/DeliveryHeroCard.astro';
 import OnlineRidersPanel from '../../components/delivery/OnlineRidersPanel.astro';
+import RiderRegisterModal from '../../components/delivery/RiderRegisterModal.astro';
 import { supabase } from '../../lib/supabase.js';
 
-const typeOptions = [{ id: 'rider', label: 'ডেলিভারি রাইডার' }];
+const { data: riderRows } = await supabase
+  .from('delivery_riders')
+  .select('id, vehicle_type, photo_url, profile_id, profiles(full_name)')
+  .eq('verification_status', 'approved')
+  .eq('is_active', true);
 
-const { data: riderListings } = await supabase
-  .from('listings')
-  .select('*')
-  .eq('category', 'courier')
-  .eq('status', 'active')
-  .eq('is_online', true)
-  .order('created_at', { ascending: false });
-
-const riders = riderListings || [];
+const riders = (riderRows || []).map((r) => ({
+  id: r.id,
+  title: r.profiles?.full_name || 'রাইডার',
+  images: r.photo_url ? [r.photo_url] : [],
+  upazila: '',
+}));
 ---
 
-<BaseLayout title="ডেলিভারি হিরো | স্মার্ট ফেনী">
-  <section class="page-header">
-    <div class="container">
-      <span class="section-tag"><i class="fas fa-motorcycle"></i> ডেলিভারি সার্ভিস</span>
-      <h1>ফেনীর <span class="accent">ডেলিভারি হিরো</span></h1>
-      <p>মোটরসাইকেল-চালিত ফ্রিল্যান্স রাইডার — সরাসরি কল করে ডেলিভারি রেট ঠিক করুন</p>
-      <p class="cta-instruction">
-        <i class="fas fa-circle-info"></i> রাইডার হিসেবে যুক্ত হতে চাইলে নিচের <strong>"পোস্ট"</strong> বাটনে ট্যাপ করুন
-      </p>
+<BaseLayout title="হোম ডেলিভারি | স্মার্ট ফেনী">
+  <div class="cr-top-bar">
+    <div class="container cr-top-bar-inner">
+      <a href="/" class="cr-back-link"><i class="fas fa-arrow-left"></i></a>
+      <button class="cr-online-riders-btn" id="openOnlineRidersBtn" type="button">
+        <i class="fas fa-circle cr-online-dot"></i> অনলাইন রাইডার
+      </button>
     </div>
-  </section>
+  </div>
 
-  <DeliveryRequestCTA />
+  <DeliveryHeroCard />
 
-  <section class="courier-section">
-    <div class="container">
-      <div class="search-box">
-        <i class="fas fa-magnifying-glass"></i>
-        <input type="text" id="searchInput" placeholder="রাইডারের নাম বা এলাকা খুঁজুন..." />
-      </div>
+  <div class="cr-become-rider-footer">
+    <button id="becomeRiderLink" type="button">
+      <i class="fas fa-motorcycle"></i> ডেলিভারি হিরো হতে চান?
+    </button>
+  </div>
 
-      {riders.length === 0 ? (
-        <div class="empty-state">
-          <i class="fas fa-motorcycle"></i>
-          <p>এই মুহূর্তে কোনো রাইডার অনলাইনে নেই</p>
-          <span>একটু পর আবার চেষ্টা করুন</span>
-        </div>
-      ) : (
-        <>
-          <div class="rider-grid" id="riderGrid">
-            {riders.map((item, i) => (
-              <div
-                class="rider-card"
-                data-detail-index={i}
-                data-target-id={item.id}
-                data-upazila-name={item.upazila || ''}
-                data-search={`${item.title || ''} ${item.description || ''} ${item.price || ''}`.toLowerCase()}
-                tabindex="0"
-                role="button"
-              >
-                <span class="online-badge"><i class="fas fa-circle"></i> অনলাইন</span>
-
-                <button class="like-btn-preview" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
-                  <i class="fas fa-heart"></i>
-                  <span data-like-count>0</span>
-                </button>
-                <span class="like-count-preview-view" data-like-count-view>
-                  <i class="fas fa-heart"></i>
-                  <span data-like-count>0</span>
-                </span>
-
-                {item.images && item.images.length > 0 ? (
-                  <img src={item.images[0]} alt={item.title} class="rider-photo" />
-                ) : (
-                  <div class="rider-icon">
-                    <i class="fas fa-motorcycle"></i>
-                  </div>
-                )}
-
-                <div class="rider-card-body">
-                  <h3 class="rider-name">{item.title}</h3>
-                  {item.price && <p class="rider-vehicle"><i class="fas fa-motorcycle"></i> {item.price}</p>}
-                  <p class="location-tag"><i class="fas fa-location-dot"></i> {item.upazila}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <p class="no-results" id="noResults" style="display:none;">কোনো ফলাফল পাওয়া যায়নি</p>
-        </>
-      )}
-
-      <div class="cta-card">
-        <i class="fas fa-headset"></i>
-        <p>রাইডার হিসেবে নিবন্ধন করতে স্মার্ট ফেনী কাস্টমার কেয়ারে যোগাযোগ করুন: <a href="tel:+8801816355833">০১৮১৬৩৫৫৮৩৩</a></p>
-      </div>
-    </div>
-  </section>
-
-  <ListingDetailModal />
-  <ReportModal />
-  <AddListingModal
-    category="courier"
-    typeOptions={typeOptions}
-    titleLabel="আপনার নাম"
-    priceLabel="মোটরসাইকেল মডেল"
-  />
-  <DeliveryRequestModal />
   <OnlineRidersPanel />
+  <RiderRegisterModal />
 
   <script type="application/json" id="listingsData" set:html={JSON.stringify(riders)} />
 </BaseLayout>
 
 <style>
-  .page-header {
-    padding: 60px 0 30px;
+  .cr-top-bar {
     background: #fff;
-    text-align: center;
+    padding: 14px 0 4px;
   }
 
-  .page-header h1 {
-    font-size: 2.2rem;
-    font-weight: 700;
-    margin: 12px 0 8px;
+  .cr-top-bar-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
-  .page-header .accent {
-    color: #FF6B35;
-  }
-
-  .page-header p {
+  .cr-back-link {
     color: #5A6E85;
-    font-size: 1.05rem;
-    margin-bottom: 20px;
-  }
-
-  .cta-instruction {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: #FFF0EA;
-    border: 1.5px dashed #FFD3BC;
-    color: #FF6B35;
-    font-weight: 600;
-    font-size: 0.88rem;
-    padding: 11px 22px;
-    border-radius: 40px;
-    cursor: default;
-  }
-
-  .cta-instruction strong {
-    font-weight: 800;
-  }
-
-  .courier-section {
-    padding: 30px 0 70px;
-    background: #F8FAFC;
-  }
-
-  .search-box {
-    max-width: 480px;
-    margin: 0 auto 32px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #fff;
-    border: 1px solid #EEF3F9;
-    border-radius: 40px;
-    padding: 12px 20px;
-  }
-
-  .search-box i {
-    color: #A0AFC0;
-  }
-
-  .search-box input {
-    border: none;
-    outline: none;
-    flex: 1;
-    font-size: 0.9rem;
-    font-family: inherit;
-    background: transparent;
-    color: #1B2A4A;
-  }
-
-  .empty-state {
-    text-align: center;
-    background: #fff;
-    border-radius: 20px;
-    padding: 50px 24px;
-    border: 1px dashed #E5EAF0;
-    margin-bottom: 30px;
-  }
-
-  .empty-state i {
-    font-size: 2rem;
-    color: #D7E0EC;
-    margin-bottom: 12px;
-  }
-
-  .empty-state p {
-    font-weight: 700;
-    color: #1B2A4A;
-    margin-bottom: 4px;
-  }
-
-  .empty-state span {
-    color: #8FA0BC;
-    font-size: 0.85rem;
-  }
-
-  .rider-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 16px;
-    margin-bottom: 30px;
-  }
-
-  .rider-card {
-    background: #fff;
-    border-radius: 18px;
-    border: 1px solid #EEF3F9;
-    padding: 0;
-    text-align: left;
-    cursor: pointer;
-    overflow: hidden;
-    transition: all 0.2s ease;
-    font-family: inherit;
-    position: relative;
-  }
-
-  .rider-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
-  }
-
-  .rider-card.hidden {
-    display: none;
-  }
-
-  .online-badge {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    z-index: 1;
-    font-size: 0.65rem;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: 20px;
-    background: rgba(22, 163, 74, 0.9);
-    color: #fff;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .online-badge i {
-    font-size: 0.4rem;
-  }
-
-  .like-btn-preview,
-  .like-count-preview-view {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.68rem;
-    font-weight: 700;
-    padding: 4px 9px;
-    border-radius: 20px;
-    background: rgba(255, 255, 255, 0.92);
-    color: #8FA0BC;
-  }
-
-  .like-btn-preview {
-    border: none;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .like-btn-preview.liked {
-    color: #FF6B35;
-  }
-
-  .like-btn-preview.liked i {
-    color: #FF6B35;
-  }
-
-  .rider-icon {
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    background: #FFF0EA;
-    color: #FF6B35;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.8rem;
-  }
-
-  .rider-photo {
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    object-fit: cover;
-    object-position: center;
-    display: block;
-  }
-
-  .rider-card-body {
-    padding: 14px;
-  }
-
-  .rider-name {
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: #1B2A4A;
-    margin-bottom: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .rider-vehicle {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #FF6B35;
-    margin-bottom: 4px;
-  }
-
-  .location-tag {
-    font-size: 0.72rem;
-    color: #8FA0BC;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .no-results {
-    text-align: center;
-    color: #A0AFC0;
-    font-size: 0.95rem;
-    padding: 40px 0;
-  }
-
-  .cta-card {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    background: #fff;
-    border: 1px solid #EEF3F9;
-    border-radius: 16px;
-    padding: 16px 20px;
-    max-width: 620px;
-    margin: 0 auto;
-  }
-
-  .cta-card i {
-    color: #FF6B35;
-    font-size: 1.2rem;
-    flex-shrink: 0;
-  }
-
-  .cta-card p {
-    font-size: 0.88rem;
-    color: #5A6E85;
-    margin: 0;
-  }
-
-  .cta-card a {
-    color: #1B2A4A;
-    font-weight: 700;
+    font-size: 1.1rem;
     text-decoration: none;
   }
 
-  .cta-card a:hover {
-    color: #FF6B35;
+  .cr-online-riders-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #F8FAFC;
+    border: 1px solid #EEF3F9;
+    color: #5A6E85;
+    padding: 6px 14px;
+    border-radius: 40px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
   }
 
-  @media (max-width: 768px) {
-    .page-header h1 {
-      font-size: 1.7rem;
-    }
+  .cr-online-dot {
+    color: #22C55E;
+    font-size: 0.5rem;
+  }
 
-    .cta-card {
-      flex-direction: column;
-      text-align: center;
-    }
+  .cr-become-rider-footer {
+    text-align: center;
+    padding: 18px 0 60px;
+  }
+
+  .cr-become-rider-footer button {
+    background: none;
+    border: none;
+    color: #9AA8BC;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: underline;
   }
 </style>
 
 <script>
-  import { supabase } from '../../lib/supabase.js';
-  import { initListingDetailModal } from '../../lib/listingDetailModal.js';
-  import { reorderByUserLocation } from '../../lib/locationSort.js';
-  import { fetchLikeData, toggleLike, isLoggedIn } from '../../lib/contentEngagement.js';
-  import { initReportModal } from '../../lib/reportModal.js';
-
-  const typeNameMap = { rider: 'ডেলিভারি রাইডার' };
-  const typeIcons = { rider: 'fa-motorcycle' };
-
-  const dataEl = document.getElementById('listingsData');
-  const listings = dataEl ? JSON.parse(dataEl.textContent) : [];
-
-  const grid = document.getElementById('riderGrid');
-  const cards = document.querySelectorAll('.rider-card');
-  const searchInput = document.getElementById('searchInput');
-  const noResults = document.getElementById('noResults');
-
-  searchInput?.addEventListener('input', () => {
-    const keyword = searchInput.value.trim().toLowerCase();
-    let visibleCount = 0;
-
-    cards.forEach((card) => {
-      const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
-      if (matches) {
-        card.classList.remove('hidden');
-        visibleCount++;
-      } else {
-        card.classList.add('hidden');
-      }
-    });
-
-    if (noResults) {
-      noResults.style.display = visibleCount === 0 ? 'block' : 'none';
-    }
+  document.getElementById('openOnlineRidersBtn')?.addEventListener('click', () => {
+    window.openOnlineRidersPanel?.();
   });
 
-  // ============================================================
-  // রিপোর্ট মডাল (কুরিয়ার রাইডার-স্পেসিফিক রিজন)
-  // ============================================================
-  const report = initReportModal({
-    reasons: [
-      { value: 'unavailable', label: 'এভেইলেবল না / সার্ভিস বন্ধ' },
-      { value: 'behavior', label: 'আচরণ খারাপ' },
-      { value: 'wrong_info', label: 'ভুল তথ্য (নাম/নাম্বার ভুল)' },
-      { value: 'other', label: 'অন্যান্য' },
-    ],
-  });
-
-  initListingDetailModal({ listings, typeNameMap, typeIcons, cardSelector: '.rider-card', report });
-  reorderByUserLocation(grid, 'upazilaName');
-
-  // ============================================================
-  // নতুন — ➕পোস্ট ফ্লো: URL এ ?openListing=1 থাকলে অটোমেটিক মোডাল
-  // খুলবে (ইনলাইন CTA বাটন সরানো হয়েছে, এখন এটাই একমাত্র পথ)
-  // ============================================================
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('openListing') === '1') {
-    setTimeout(async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        window.openListingModal?.();
-      } else {
-        window.openAuthModal?.('login');
-      }
-      window.history.replaceState({}, '', window.location.pathname);
-    }, 150);
-  }
-
-  // ============================================================
-  // প্রিভিউ কার্ডে লাইক (লগইন-গেটেড, ভিউ-অনলি/ইন্টারঅ্যাকটিভ)
-  // ============================================================
-  let boundLikeButtons = new WeakSet();
-
-  async function renderPreviewLikes() {
-    const loggedIn = await isLoggedIn();
-    const ids = Array.from(cards).map((c) => c.dataset.targetId).filter(Boolean);
-    const { counts, likedByMe } = await fetchLikeData('listing', ids);
-
-    cards.forEach((card) => {
-      const id = card.dataset.targetId;
-      if (!id) return;
-
-      const count = counts[id] || 0;
-      const liked = likedByMe.has(id);
-
-      const viewEl = card.querySelector('[data-like-count-view]');
-      const btnEl = card.querySelector('[data-like-btn]');
-
-      viewEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = count));
-      btnEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = count));
-      btnEl.classList.toggle('liked', liked);
-
-      if (loggedIn) {
-        viewEl.style.display = 'none';
-        btnEl.style.display = 'flex';
-
-        if (!boundLikeButtons.has(btnEl)) {
-          boundLikeButtons.add(btnEl);
-
-          btnEl.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            btnEl.disabled = true;
-            const result = await toggleLike('listing', id);
-            btnEl.disabled = false;
-            if (result.error) return;
-            const currentCount = parseInt(btnEl.querySelector('[data-like-count]').textContent, 10) || 0;
-            const newCount = result.liked ? currentCount + 1 : Math.max(currentCount - 1, 0);
-            btnEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = newCount));
-            viewEl.querySelectorAll('[data-like-count]').forEach((el) => (el.textContent = newCount));
-            btnEl.classList.toggle('liked', result.liked);
-          });
-        }
-      } else {
-        viewEl.style.display = 'flex';
-        btnEl.style.display = 'none';
-      }
-    });
-  }
-
-  renderPreviewLikes();
-  window.addEventListener('smartfeni:auth-changed', () => {
-    renderPreviewLikes();
+  document.getElementById('becomeRiderLink')?.addEventListener('click', () => {
+    window.openRiderRegisterModal?.();
   });
 </script>
