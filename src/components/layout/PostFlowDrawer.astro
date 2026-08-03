@@ -1,0 +1,307 @@
+<!-- path: src/components/layout/PostFlowDrawer.astro -->
+---
+// ============================================================
+// কম্পোনেন্ট: PostFlowDrawer — bottom nav "➕পোস্ট" থেকে ট্রিগার
+// bottom-sheet স্টাইল (নিচ থেকে উঠবে, অন্য ৩টা ড্রয়ারের ডান-স্লাইড
+// থেকে আলাদা — কারণ এটা multi-step action flow)।
+//
+// Step 1: ২ ট্যাব (লিস্টিং দিন / সার্ভিস দিন)
+// Step 2: ট্যাব অনুযায়ী ক্যাটাগরি গ্রিড
+// Step 3: ক্লিকে redirect —
+//   - বেশিরভাগ ক্যাটাগরি → /services/[slug]?openListing=1
+//     (সেই পেজের script এই query param দেখে AddListingModal
+//     অটো-ওপেন করবে — আগের ধাপে সব পেজে যোগ করা হয়েছে)
+//   - blood → /profile/edit (ডোনার status listings টেবিলে না,
+//     প্রোফাইলের is_blood_donor টগলে — বাল্ক এন্ট্রি শুধু ক্লাব/
+//     অ্যাডমিন করতে পারে, individual user নিজেরটাই দিতে পারে)
+//   - online-shop → /become-a-shop-owner (শপ রিকোয়েস্ট ফ্লো)
+//   - health/legal/home-food/club owner → এখনো ব্যাকএন্ড রেডি না
+//     (service_provider_requests টেবিল বাকি), তাই disabled +
+//     "শীঘ্রই আসছে" ব্যাজ
+//
+// ট্রিগার: window.dispatchEvent(new CustomEvent('smartfeni:open-post-flow'))
+// ============================================================
+
+const listingCategories = [
+  { id: 'housing', name: 'বাসা ভাড়া', icon: 'fa-house', slug: 'housing' },
+  { id: 'job', name: 'চাকরির খবর', icon: 'fa-briefcase', slug: 'job' },
+  { id: 'recycle', name: 'রিসাইকেল মার্কেট', icon: 'fa-rotate-left', slug: 'recycle' },
+  { id: 'tuition', name: 'টিউশন', icon: 'fa-chalkboard-user', slug: 'tuition' },
+  { id: 'sports', name: 'খেলাধুলা ও ইভেন্টস', icon: 'fa-football', slug: 'sports' },
+  { id: 'lost-found', name: 'লস্ট এন্ড ফাউন্ড', icon: 'fa-magnifying-glass', slug: 'lost-found' },
+  { id: 'event', name: 'ইভেন্ট ম্যানেজমেন্ট', icon: 'fa-calendar-check', slug: 'event' },
+  { id: 'blood', name: 'ব্লাড ডোনার', icon: 'fa-droplet', slug: 'blood', target: '/profile/edit' },
+];
+
+const serviceCategories = [
+  { id: 'repair', name: 'রিপেয়ার সার্ভিস', icon: 'fa-screwdriver-wrench', slug: 'repair' },
+  { id: 'courier', name: 'ডেলিভারি হিরো', icon: 'fa-truck-fast', slug: 'courier' },
+  { id: 'online-shop', name: 'শপ ওনার', icon: 'fa-store', target: '/become-a-shop-owner' },
+  { id: 'health', name: 'স্বাস্থ্য পরামর্শক', icon: 'fa-user-doctor', soon: true },
+  { id: 'legal', name: 'আইনি পরামর্শক', icon: 'fa-scale-balanced', soon: true },
+  { id: 'home-food', name: 'হোম মেস ফুড ওনার', icon: 'fa-utensils', soon: true },
+  { id: 'club', name: 'ক্লাব ওনার', icon: 'fa-people-group', soon: true },
+];
+---
+
+<div class="pf-overlay" id="postFlowOverlay">
+  <div class="pf-sheet" id="postFlowSheet">
+    <div class="pf-handle"></div>
+
+    <div class="pf-header">
+      <h2>কী পোস্ট করতে চান?</h2>
+      <button class="pf-close" id="postFlowClose" aria-label="বন্ধ করুন">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+
+    <div class="pf-tabs">
+      <button class="pf-tab active" data-tab="listing" type="button">লিস্টিং দিন</button>
+      <button class="pf-tab" data-tab="service" type="button">সার্ভিস দিন</button>
+    </div>
+
+    <div class="pf-panel active" id="pfPanelListing">
+      <div class="pf-grid">
+        {listingCategories.map((cat) => (
+          <a
+            href={cat.target || `/services/${cat.slug}?openListing=1`}
+            class="pf-item"
+          >
+            <span class="pf-item-icon"><i class={`fas ${cat.icon}`}></i></span>
+            <span class="pf-item-name">{cat.name}</span>
+          </a>
+        ))}
+      </div>
+    </div>
+
+    <div class="pf-panel" id="pfPanelService">
+      <div class="pf-grid">
+        {serviceCategories.map((cat) => (
+          cat.soon ? (
+            <div class="pf-item pf-item-disabled">
+              <span class="pf-item-icon"><i class={`fas ${cat.icon}`}></i></span>
+              <span class="pf-item-name">{cat.name}</span>
+              <span class="pf-soon-badge">শীঘ্রই</span>
+            </div>
+          ) : (
+            <a
+              href={cat.target || `/services/${cat.slug}?openListing=1`}
+              class="pf-item"
+            >
+              <span class="pf-item-icon"><i class={`fas ${cat.icon}`}></i></span>
+              <span class="pf-item-name">{cat.name}</span>
+            </a>
+          )
+        ))}
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .pf-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+    z-index: 2300;
+  }
+
+  .pf-overlay.open {
+    display: block;
+  }
+
+  .pf-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 80vh;
+    background: #fff;
+    border-radius: 24px 24px 0 0;
+    box-shadow: 0 -10px 40px rgba(15, 23, 42, 0.2);
+    display: flex;
+    flex-direction: column;
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .pf-overlay.open .pf-sheet {
+    transform: translateY(0);
+  }
+
+  .pf-handle {
+    width: 40px;
+    height: 4px;
+    border-radius: 4px;
+    background: #E5EAF0;
+    margin: 12px auto 4px;
+  }
+
+  .pf-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px 8px;
+  }
+
+  .pf-header h2 {
+    font-size: 1.05rem;
+    color: #1B2A4A;
+  }
+
+  .pf-close {
+    background: #F4F7FC;
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: #5A6E85;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .pf-close:hover {
+    background: #FF6B35;
+    color: #fff;
+  }
+
+  .pf-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 8px 20px 16px;
+  }
+
+  .pf-tab {
+    flex: 1;
+    background: #F4F7FC;
+    border: none;
+    color: #5A6E85;
+    font-weight: 700;
+    font-size: 0.88rem;
+    padding: 11px;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .pf-tab.active {
+    background: #FF6B35;
+    color: #fff;
+  }
+
+  .pf-panel {
+    display: none;
+    overflow-y: auto;
+    padding: 0 16px 20px;
+  }
+
+  .pf-panel.active {
+    display: block;
+  }
+
+  .pf-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .pf-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-align: center;
+    text-decoration: none;
+    color: #1B2A4A;
+    background: #F8FAFC;
+    border-radius: 16px;
+    padding: 16px 8px;
+    transition: all 0.15s ease;
+    position: relative;
+  }
+
+  a.pf-item:hover,
+  a.pf-item:active {
+    background: #FFF0EA;
+  }
+
+  .pf-item-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+  }
+
+  .pf-item-name {
+    font-size: 0.76rem;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .pf-item-disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .pf-item-disabled .pf-item-icon {
+    background: #F4F7FC;
+    color: #A0AFC0;
+  }
+
+  .pf-soon-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 0.58rem;
+    font-weight: 700;
+    color: #8FA0BC;
+    background: #EEF3F9;
+    padding: 2px 7px;
+    border-radius: 20px;
+  }
+</style>
+
+<script>
+  const overlay = document.getElementById('postFlowOverlay');
+  const closeBtn = document.getElementById('postFlowClose');
+  const tabs = document.querySelectorAll('.pf-tab');
+  const panels = document.querySelectorAll('.pf-panel');
+
+  function openDrawer() {
+    overlay?.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeDrawer() {
+    overlay?.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  window.addEventListener('smartfeni:open-post-flow', openDrawer);
+
+  closeBtn?.addEventListener('click', closeDrawer);
+  overlay?.addEventListener('click', (e) => {
+    if (e.target === overlay) closeDrawer();
+  });
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      tabs.forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      panels.forEach((panel) => {
+        panel.classList.toggle('active', panel.id === `pfPanel${target === 'listing' ? 'Listing' : 'Service'}`);
+      });
+    });
+  });
+</script>
