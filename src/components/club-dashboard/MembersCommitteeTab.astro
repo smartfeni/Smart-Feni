@@ -1,21 +1,15 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: /my-club ড্যাশবোর্ড — সদস্য/কমিটি ম্যানেজমেন্ট
-// আপডেট: "নতুন সদস্য যোগ করুন" ফর্ম এখন CTA বক্সে (আগে সবসময়
-// খোলা থাকত) — বাটনে ক্লিক করলে খুলবে
-// নোট: ইচ্ছাকৃতভাবে এখানে কোনো "এডিট" বাটন নেই — ভুল তথ্য দিলে
-// ডিলিট করে নতুন এন্ট্রি দেওয়াই সহজ, তাই শুধু ডিলিট রাখা হয়েছে
 //
-// আপডেট ২: deleteMember() এখন club_members থেকে delete করার পাশাপাশি,
-// যদি ওই মেম্বারের user_id থাকে (রেজিস্টার্ড ইউজার থেকে এসেছিল), তাহলে
-// সংশ্লিষ্ট club_join_requests row-ও status='rejected' এ আপডেট করে দেয়।
-//
-// আপডেট ৩: join_request-এর জন্য .delete() এর বদলে .update() ব্যবহার
-// করা হচ্ছে — কারণ club_join_requests টেবিলে RLS পলিসিতে কোনো DELETE
-// পলিসি নেই (শুধু owner-এর জন্য UPDATE পলিসি আছে), তাই delete() কল
-// কোনো error ছাড়াই silently ০ row affect করছিল, status স্টেল
-// (accepted) থেকে যাচ্ছিল। update() ব্যবহার করলে বিদ্যমান UPDATE
-// পলিসির আওতায় পড়ে, তাই ঠিকভাবে কাজ করবে।
+// আপডেট ৫ (সর্বশেষ):
+// - আলাদা "কমিটি তালিকা" সেকশন সরানো হয়েছে। এখন শুধু একটা
+//   "সদস্য তালিকা" — যেখানে কমিটি সদস্যরা position_order
+//   অনুযায়ী আগে দেখাবে, তারপর সাধারণ সদস্যরা (created_at অনুযায়ী,
+//   ডিফল্ট ক্রমে) পরে দেখাবে।
+// - "কমিটি সদস্য?" চেকবক্স আগের মতোই আছে (অ্যাড ও এডিট ফর্ম দুই
+//   জায়গাতেই) — টিক দিলে পদবি ও ক্রমিক নাম্বার ফিল্ড খুলবে, তাই
+//   যেকোনো সাধারণ সদস্যকে পরে এডিট করে কমিটিতে ঢোকানো যাবে।
 // ============================================================
 ---
 
@@ -47,7 +41,7 @@
     <label class="form-label">পদবি</label>
     <input type="text" class="form-input" id="memberPositionInput" placeholder="যেমন: সভাপতি, সম্পাদক" />
 
-    <label class="form-label">ক্রম (উপরে দেখানোর জন্য, ছোট সংখ্যা আগে — সভাপতির জন্য 0 দিন)</label>
+    <label class="form-label">ক্রম (উপরে দেখানোর জন্য, ছোট সংখ্যা আগে — সভাপতির জন্য 1 দিন)</label>
     <input type="number" class="form-input" id="memberOrderInput" placeholder="0" />
   </div>
 
@@ -57,15 +51,45 @@
 </div>
 
 <div class="dash-card">
-  <h3><i class="fas fa-users-gear"></i> কমিটি তালিকা</h3>
-  <div id="committeeList"></div>
-  <p class="empty-note" id="committeeEmpty" style="display:none;">এখনো কোনো কমিটি সদস্য যোগ করা হয়নি</p>
-</div>
-
-<div class="dash-card">
-  <h3><i class="fas fa-user-group"></i> সাধারণ সদস্য তালিকা</h3>
+  <h3><i class="fas fa-user-group"></i> সদস্য তালিকা</h3>
+  <p class="hint-note">কমিটি সদস্যরা ক্রমিক অনুযায়ী আগে, সাধারণ সদস্যরা পরে দেখাবে</p>
   <div id="membersList"></div>
   <p class="empty-note" id="membersEmpty" style="display:none;">এখনো কোনো সদস্য যোগ করা হয়নি</p>
+</div>
+
+<!-- ===== এডিট মোডাল ===== -->
+<div class="edit-modal" id="editModal">
+  <div class="edit-modal-backdrop" id="editModalBackdrop"></div>
+  <div class="edit-modal-body">
+    <button class="edit-modal-close" id="editModalClose" type="button"><i class="fas fa-xmark"></i></button>
+    <h3><i class="fas fa-pen"></i> সদস্য তথ্য এডিট</h3>
+    <p class="form-msg" id="editMsg"></p>
+
+    <div class="photo-upload-circle" id="editPhotoCircle">
+      <img id="editPhotoPreview" src="" alt="ছবি" />
+      <i class="fas fa-user"></i>
+    </div>
+    <input type="file" id="editPhotoInput" accept="image/*" style="display:none;" />
+
+    <label class="form-label">নাম</label>
+    <input type="text" class="form-input" id="editNameInput" />
+
+    <label class="form-label" style="display:flex;align-items:center;gap:8px;margin-top:16px;">
+      <input type="checkbox" id="editIsCommitteeInput" style="width:auto;" /> কমিটি সদস্য?
+    </label>
+
+    <div id="editCommitteeFields" style="display:none;">
+      <label class="form-label">পদবি</label>
+      <input type="text" class="form-input" id="editPositionInput" placeholder="যেমন: সভাপতি, সম্পাদক" />
+
+      <label class="form-label">ক্রম (একই ক্রম আরেকজনের থাকলে, সেই ও পরের সবাই ১ ধাপ সরে যাবে)</label>
+      <input type="number" class="form-input" id="editOrderInput" placeholder="0" />
+    </div>
+
+    <button class="primary-btn" id="saveEditBtn" type="button">
+      <i class="fas fa-check"></i> <span>সেভ করুন</span>
+    </button>
+  </div>
 </div>
 
 <style>
@@ -91,6 +115,92 @@
     color: #fff;
     border-color: #FF6B35;
   }
+
+  .hint-note {
+    font-size: 0.76rem;
+    color: #8FA0BC;
+    margin: -6px 0 12px;
+  }
+
+  .item-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .icon-btn.edit {
+    background: #EAF2FF;
+    color: #2F6FE0;
+  }
+
+  .committee-badge {
+    display: inline-block;
+    font-size: 0.66rem;
+    font-weight: 700;
+    color: #FF6B35;
+    background: #FFF0EA;
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin-left: 6px;
+  }
+
+  /* ===== এডিট মোডাল ===== */
+  .edit-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 400;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .edit-modal.open {
+    display: flex;
+  }
+
+  .edit-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+  }
+
+  .edit-modal-body {
+    position: relative;
+    background: #fff;
+    width: 100%;
+    max-width: 480px;
+    max-height: 90vh;
+    overflow-y: auto;
+    border-radius: 24px 24px 0 0;
+    padding: 26px 20px 34px;
+  }
+
+  .edit-modal-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: #F4F7FC;
+    border: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: #5A6E85;
+    cursor: pointer;
+    z-index: 2;
+  }
+
+  .edit-modal-body h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .edit-modal-body h3 i {
+    color: #FF6B35;
+  }
 </style>
 
 <script>
@@ -98,7 +208,9 @@
 
   let clubId = null;
   let selectedPhotoFile = null;
+  let editSelectedPhotoFile = null;
   let allMembers = [];
+  let editingMemberId = null;
 
   document.getElementById('showMemberFormBtn')?.addEventListener('click', () => {
     document.getElementById('memberFormBox').style.display = 'block';
@@ -109,6 +221,12 @@
   function showMsg(text, type = 'error') {
     msgEl.textContent = text;
     msgEl.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
+  }
+
+  const editMsgEl = document.getElementById('editMsg');
+  function showEditMsg(text, type = 'error') {
+    editMsgEl.textContent = text;
+    editMsgEl.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
   }
 
   document.getElementById('memberPhotoCircle')?.addEventListener('click', () => {
@@ -131,11 +249,39 @@
     document.getElementById('committeeFields').style.display = e.target.checked ? 'block' : 'none';
   });
 
+  // ===== এডিট মোডাল ফটো =====
+  document.getElementById('editPhotoCircle')?.addEventListener('click', () => {
+    document.getElementById('editPhotoInput').click();
+  });
+
+  document.getElementById('editPhotoInput')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    editSelectedPhotoFile = file;
+    const reader = new FileReader();
+    reader.onload = () => {
+      document.getElementById('editPhotoPreview').src = reader.result;
+      document.getElementById('editPhotoCircle').classList.add('has-photo');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('editIsCommitteeInput')?.addEventListener('change', (e) => {
+    document.getElementById('editCommitteeFields').style.display = e.target.checked ? 'block' : 'none';
+  });
+
+  document.getElementById('editModalBackdrop')?.addEventListener('click', closeEditModal);
+  document.getElementById('editModalClose')?.addEventListener('click', closeEditModal);
+
+  function closeEditModal() {
+    document.getElementById('editModal').classList.remove('open');
+    editingMemberId = null;
+    editSelectedPhotoFile = null;
+  }
+
   // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
-  // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
-  // কল হতো, কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
-  // হচ্ছিল ("new row violates row-level security policy" — লগে
-  // কনফার্ম করা হয়েছে)।
+  // key ব্যবহার করে)। ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
+  // কল করলে JWT ভেরিফাই ব্যর্থ হয় (RLS ভায়োলেশন)।
   async function uploadPhoto(file) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return null;
@@ -177,6 +323,13 @@
     if (selectedPhotoFile) photoUrl = await uploadPhoto(selectedPhotoFile);
 
     const isCommittee = document.getElementById('memberIsCommitteeInput').checked;
+    const newOrder = isCommittee ? (parseInt(document.getElementById('memberOrderInput').value) || 0) : 0;
+
+    // ক্রমিক নাম্বার কনফ্লিক্ট চেক (কমিটি সদস্যদের মধ্যে) — কনফ্লিক্ট
+    // থাকলে সেই নাম্বার ও তার পরের সবাইকে ১ ধাপ শিফট করে দেওয়া হয়
+    if (isCommittee) {
+      await shiftOrdersIfNeeded(newOrder, null);
+    }
 
     const { error } = await supabase.from('club_members').insert({
       club_id: clubId,
@@ -185,7 +338,7 @@
       dob: document.getElementById('memberDobInput').value || null,
       is_committee: isCommittee,
       position: isCommittee ? document.getElementById('memberPositionInput').value.trim() : null,
-      position_order: isCommittee ? (parseInt(document.getElementById('memberOrderInput').value) || 0) : 0,
+      position_order: newOrder,
     });
 
     span.textContent = 'যোগ করুন';
@@ -209,6 +362,118 @@
     loadMembers();
   });
 
+  // নতুন/এডিট করা এন্ট্রির ক্রমিক নাম্বার যদি আরেকজন কমিটি মেম্বারের
+  // সাথে কনফ্লিক্ট করে, তাহলে সেই ও তার পরের সবার ক্রমিক ১ ধাপ করে
+  // বাড়িয়ে দেওয়া হয় (cascade shift), যাতে ডুপ্লিকেট না থাকে।
+  // excludeId: এডিট করার সময় নিজেকে বাদ দিতে হবে হিসাব থেকে।
+  async function shiftOrdersIfNeeded(targetOrder, excludeId) {
+    let query = supabase
+      .from('club_members')
+      .select('id, position_order')
+      .eq('club_id', clubId)
+      .eq('is_committee', true)
+      .gte('position_order', targetOrder)
+      .order('position_order', { ascending: true });
+
+    if (excludeId) query = query.neq('id', excludeId);
+
+    const { data: toShift } = await query;
+    if (!toShift || toShift.length === 0) return;
+
+    // ধারাবাহিক ব্লক (কোনো গ্যাপ ছাড়া) যতদূর আছে ততদূর শিফট করবো,
+    // যাতে অপ্রয়োজনীয়ভাবে সবার ক্রমিক না বাড়ে
+    let expected = targetOrder;
+    const idsToShift = [];
+    for (const m of toShift) {
+      if (m.position_order === expected) {
+        idsToShift.push(m.id);
+        expected += 1;
+      } else {
+        break;
+      }
+    }
+
+    // পেছন থেকে সামনের দিকে আপডেট করা হচ্ছে যাতে মাঝপথে কোনো
+    // ইউনিক-জাতীয় কনফ্লিক্ট না হয়
+    for (let i = idsToShift.length - 1; i >= 0; i--) {
+      const id = idsToShift[i];
+      const oldOrder = toShift.find((m) => m.id === id).position_order;
+      await supabase.from('club_members').update({ position_order: oldOrder + 1 }).eq('id', id);
+    }
+  }
+
+  function openEditModal(member) {
+    editingMemberId = member.id;
+    editSelectedPhotoFile = null;
+
+    document.getElementById('editNameInput').value = member.name || '';
+    document.getElementById('editPositionInput').value = member.position || '';
+    document.getElementById('editOrderInput').value = member.position_order ?? 0;
+    document.getElementById('editIsCommitteeInput').checked = !!member.is_committee;
+    document.getElementById('editCommitteeFields').style.display = member.is_committee ? 'block' : 'none';
+
+    const preview = document.getElementById('editPhotoPreview');
+    const circle = document.getElementById('editPhotoCircle');
+    if (member.photo) {
+      preview.src = member.photo;
+      circle.classList.add('has-photo');
+    } else {
+      preview.src = '';
+      circle.classList.remove('has-photo');
+    }
+
+    editMsgEl.textContent = '';
+    document.getElementById('editModal').classList.add('open');
+  }
+
+  document.getElementById('saveEditBtn')?.addEventListener('click', async () => {
+    if (!editingMemberId) return;
+
+    const name = document.getElementById('editNameInput').value.trim();
+    if (!name) {
+      showEditMsg('নাম দিন');
+      return;
+    }
+
+    const btn = document.getElementById('saveEditBtn');
+    const span = btn.querySelector('span');
+    span.textContent = 'সেভ হচ্ছে...';
+    btn.disabled = true;
+
+    let photoUrl = undefined; // undefined মানে ছবি বদলানো হয়নি
+    if (editSelectedPhotoFile) {
+      photoUrl = await uploadPhoto(editSelectedPhotoFile);
+    }
+
+    const isCommittee = document.getElementById('editIsCommitteeInput').checked;
+    const newOrder = isCommittee ? (parseInt(document.getElementById('editOrderInput').value) || 0) : 0;
+
+    if (isCommittee) {
+      await shiftOrdersIfNeeded(newOrder, editingMemberId);
+    }
+
+    const updatePayload = {
+      name,
+      is_committee: isCommittee,
+      position: isCommittee ? document.getElementById('editPositionInput').value.trim() : null,
+      position_order: newOrder,
+    };
+    if (photoUrl !== undefined && photoUrl !== null) updatePayload.photo = photoUrl;
+
+    const { error } = await supabase.from('club_members').update(updatePayload).eq('id', editingMemberId);
+
+    span.textContent = 'সেভ করুন';
+    btn.disabled = false;
+
+    if (error) {
+      showEditMsg('সেভ ব্যর্থ: ' + error.message);
+      return;
+    }
+
+    closeEditModal();
+    loadMembers();
+  });
+
   function renderList(container, emptyEl, items) {
     container.innerHTML = '';
     if (items.length === 0) {
@@ -223,13 +488,15 @@
       card.innerHTML = `
         ${m.photo ? `<img class="item-photo" src="${m.photo}" alt="${m.name}" />` : `<div class="item-photo-placeholder"><i class="fas fa-user"></i></div>`}
         <div class="item-body">
-          <p class="item-title">${m.name}</p>
+          <p class="item-title">${m.name}${m.is_committee ? '<span class="committee-badge">কমিটি</span>' : ''}</p>
           <p class="item-sub">${m.position || (m.dob ? new Date(m.dob).toLocaleDateString('bn-BD') : '')}</p>
         </div>
         <div class="item-actions">
+          <button class="icon-btn edit"><i class="fas fa-pen"></i></button>
           <button class="icon-btn delete"><i class="fas fa-trash"></i></button>
         </div>
       `;
+      card.querySelector('.edit').addEventListener('click', () => openEditModal(m));
       card.querySelector('.delete').addEventListener('click', () => deleteMember(m.id));
       container.appendChild(card);
     });
@@ -273,18 +540,26 @@
   }
 
   async function loadMembers() {
-    const { data } = await supabase
+    // কমিটি সদস্যরা position_order অনুযায়ী, তারপর সাধারণ সদস্যরা
+    // created_at অনুযায়ী — দুইটা আলাদা কোয়েরি করে একসাথে জোড়া
+    // লাগানো হচ্ছে
+    const { data: committeeData } = await supabase
       .from('club_members')
       .select('*')
       .eq('club_id', clubId)
+      .eq('is_committee', true)
       .order('position_order', { ascending: true });
 
-    allMembers = data || [];
-    const committee = allMembers.filter((m) => m.is_committee);
-    const regular = allMembers.filter((m) => !m.is_committee);
+    const { data: regularData } = await supabase
+      .from('club_members')
+      .select('*')
+      .eq('club_id', clubId)
+      .eq('is_committee', false)
+      .order('created_at', { ascending: true });
 
-    renderList(document.getElementById('committeeList'), document.getElementById('committeeEmpty'), committee);
-    renderList(document.getElementById('membersList'), document.getElementById('membersEmpty'), regular);
+    allMembers = [...(committeeData || []), ...(regularData || [])];
+
+    renderList(document.getElementById('membersList'), document.getElementById('membersEmpty'), allMembers);
   }
 
   window.addEventListener('smartfeni:club-ready', (e) => {
