@@ -8,18 +8,9 @@
 // প্রতিটা শপের নিজস্ব নাম্বার দিয়ে কল/হোয়াটসঅ্যাপ বাটন দেখায়
 // (কোনো প্ল্যাটফর্ম-লেভেল নাম্বার হার্ডকোড না)।
 //
-// UI REDESIGN (v2):
-// - রিসিট-স্টাইল order summary (dashed divider, শপ আইকন)
-// - ফর্ম সেকশন আইকন-হেডেড, উন্নত ফোকাস স্টেট
-// - দূরত্ব-ভিত্তিক এক্সট্রা ডেলিভারি চার্জ নোট (info banner)
-// - মোবাইলে sticky "অর্ডার করুন" বাটন
-// - Success state এ বড় চেকমার্ক ব্যাজ + প্রিমিয়াম শপ-কন্টাক্ট কার্ড
-// - priceNum() আপডেট: বাংলা সংখ্যা + ইউনিট-টেক্সট ("টাকা/কেজি" ইত্যাদি)
-//   থাকলেও শুধু সংখ্যা বের করে হিসাব করে
-//
-// FIX (v2.1): <style> কে is:global করা হয়েছে — summary/shop-contact
-// ব্লকগুলো JS দিয়ে innerHTML এ রানটাইমে তৈরি হয়, তাই Astro-র ডিফল্ট
-// scoped CSS ওগুলোতে অ্যাপ্লাই হচ্ছিল না
+// PHASE G: প্রতিটা অর্ডার তৈরি হওয়ার পর /api/shop-telegram-notify কল
+// হয় (fire-and-forget) — শপ ওউনার Telegram কানেক্ট করা থাকলে সাথে
+// সাথে নোটিফিকেশন পাবে। ব্যর্থ হলেও চেকআউট ফ্লো আটকাবে না।
 // ============================================================
 
 export const prerender = false;
@@ -585,14 +576,11 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     let currentUserId = null;
     let shopGroups = {};
 
-    // বাংলা সংখ্যা → ইংরেজি সংখ্যা কনভার্টার
     function convertBanglaDigits(str) {
       const banglaDigits = '০১২৩৪৫৬৭৮৯';
       return String(str).replace(/[০-৯]/g, (d) => banglaDigits.indexOf(d));
     }
 
-    // দাম স্ট্রিং থেকে শুধু সংখ্যাটা বের করে আনে —
-    // "৫০০ টাকা/কেজি", "৳৫০০ প্রতি পিস", "৫,৫০০", "৳৫০০/পাউন্ড" — সবই সঠিকভাবে পার্স হয়
     function priceNum(p) {
       if (p === null || p === undefined) return 0;
       let str = convertBanglaDigits(String(p));
@@ -743,6 +731,13 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
           const { error: itemsError } = await supabase.from('order_items').insert(orderItemsPayload);
           if (itemsError) throw itemsError;
+
+          // Telegram নোটিফিকেশন — fire-and-forget, ব্যর্থ হলেও checkout আটকাবে না
+          fetch('/api/shop-telegram-notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderId: order.id }),
+          }).catch(() => {});
 
           const checkoutEvents = group.items.map((item) => ({
             event_type: 'checkout',
