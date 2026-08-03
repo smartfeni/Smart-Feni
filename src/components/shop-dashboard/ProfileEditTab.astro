@@ -1,9 +1,12 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: ProfileEditTab (shop-dashboard) — শপ প্রোফাইল এডিট
-// আপডেট: শপের নাম এখন ওউনার নিজে বদলাতে পারবে (আগে শুধু এডমিন
-// পারত)। নতুন "বাজার/এলাকার নাম" ফিল্ড যোগ (পাবলিকলি দেখানো হবে) —
-// উপজেলা ফিল্ড থাকবে কিন্তু পাবলিক পেজে আর দেখানো হবে না।
+// শপের নাম, লোগো, কভার, বিবরণ, বাজার/এলাকার নাম, ফোন এডিট করা যায়।
+// আপডেট (Phase G): Telegram অর্ডার নোটিফিকেশন কানেক্ট সেকশন যোগ —
+// Connect বাটনে ক্লিক করলে t.me/SmartFeniShopBoT?start={shopId} এ
+// যায়, /start চাপলে shop-telegram-webhook চ্যাট আইডি সেভ করে দেয়।
+// প্যারেন্ট পেজ (my-shop.astro) থেকে 'smartfeni:shop-ready' ইভেন্ট
+// দিয়ে shop ডেটা পায়।
 // ============================================================
 ---
 
@@ -32,9 +35,6 @@
   <label class="form-label">শপের নাম</label>
   <input type="text" class="form-input" id="shopNameInput" placeholder="আপনার শপের নাম" />
 
-  <label class="form-label">ট্যাগলাইন</label>
-  <input type="text" class="form-input" id="taglineInput" placeholder="যেমন: সেরা মানের কাপড়ের দোকান" />
-
   <label class="form-label">বিবরণ</label>
   <textarea class="form-input" id="descriptionInput" rows="3" placeholder="আপনার শপ সম্পর্কে সংক্ষেপে লিখুন"></textarea>
 
@@ -53,18 +53,31 @@
     <option value="sonagazi">সোনাগাজী</option>
   </select>
 
-  <label class="form-label">ঠিকানা</label>
-  <input type="text" class="form-input" id="addressInput" placeholder="দোকানের সম্পূর্ণ ঠিকানা" />
-
   <label class="form-label">যোগাযোগের ফোন নম্বর</label>
   <input type="text" class="form-input" id="phoneInput" placeholder="01xxxxxxxxx" />
-
-  <label class="form-label">ফেসবুক পেজ লিংক (ঐচ্ছিক)</label>
-  <input type="text" class="form-input" id="facebookInput" placeholder="https://facebook.com/yourpage" />
 
   <button class="primary-btn" id="saveProfileBtn" type="button">
     <i class="fas fa-check"></i> <span id="saveProfileBtnText">সেভ করুন</span>
   </button>
+</div>
+
+<div class="dash-card">
+  <h3><i class="fab fa-telegram"></i> অর্ডার নোটিফিকেশন</h3>
+
+  <div id="telegramNotConnected">
+    <p class="form-hint" style="margin-top:0; margin-bottom:12px;">
+      Telegram কানেক্ট করলে নতুন অর্ডার এলেই সাথে সাথে নোটিফিকেশন পাবেন
+    </p>
+    <a href="#" id="telegramConnectBtn" class="secondary-btn" style="display:block; text-align:center; text-decoration:none;">
+      <i class="fab fa-telegram"></i> Telegram Connect করুন
+    </a>
+  </div>
+
+  <div id="telegramConnected" style="display:none;">
+    <p class="form-hint" style="margin-top:0; color:#1B7A3C; font-weight:700;">
+      <i class="fas fa-circle-check"></i> কানেক্টেড
+    </p>
+  </div>
 </div>
 
 <style>
@@ -105,12 +118,9 @@
   const profileMsg = document.getElementById('profileMsg');
   const shopNameInput = document.getElementById('shopNameInput');
   const locationNameInput = document.getElementById('locationNameInput');
-  const taglineInput = document.getElementById('taglineInput');
   const descriptionInput = document.getElementById('descriptionInput');
   const upazilaInput = document.getElementById('upazilaInput');
-  const addressInput = document.getElementById('addressInput');
   const phoneInput = document.getElementById('phoneInput');
-  const facebookInput = document.getElementById('facebookInput');
   const saveBtn = document.getElementById('saveProfileBtn');
   const saveBtnText = document.getElementById('saveProfileBtnText');
 
@@ -210,13 +220,10 @@
 
     const updates = {
       name: shopName,
-      tagline: taglineInput.value.trim(),
       description: descriptionInput.value.trim(),
       location_name: locationNameInput.value.trim() || null,
       upazila: upazilaInput.value || null,
-      address: addressInput.value.trim(),
       phone: phoneInput.value.trim(),
-      facebook_link: facebookInput.value.trim() || null,
     };
     if (logoUrl) updates.logo_image = logoUrl;
     if (coverUrl) updates.cover_image = coverUrl;
@@ -239,13 +246,10 @@
     currentShopId = shop.id;
 
     shopNameInput.value = shop.name || '';
-    taglineInput.value = shop.tagline || '';
     descriptionInput.value = shop.description || '';
     locationNameInput.value = shop.location_name || '';
     upazilaInput.value = shop.upazila || '';
-    addressInput.value = shop.address || '';
     phoneInput.value = shop.phone || '';
-    facebookInput.value = shop.facebook_link || '';
 
     if (shop.logo_image) {
       logoPreview.src = shop.logo_image;
@@ -255,6 +259,23 @@
       coverPreview.src = shop.cover_image;
       coverPreview.style.display = 'block';
       coverPlaceholder.style.display = 'none';
+    }
+
+    // ===== Telegram কানেকশন স্ট্যাটাস =====
+    const telegramConnectBtn = document.getElementById('telegramConnectBtn');
+    const telegramNotConnected = document.getElementById('telegramNotConnected');
+    const telegramConnected = document.getElementById('telegramConnected');
+
+    if (telegramConnectBtn) {
+      telegramConnectBtn.href = `https://t.me/SmartFeniShopBoT?start=${shop.id}`;
+    }
+
+    if (shop.telegram_chat_id) {
+      telegramNotConnected.style.display = 'none';
+      telegramConnected.style.display = 'block';
+    } else {
+      telegramNotConnected.style.display = 'block';
+      telegramConnected.style.display = 'none';
     }
   });
 </script>
