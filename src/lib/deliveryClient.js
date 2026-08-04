@@ -96,3 +96,7 @@ export function verifyRider({ riderId, decision, rejectionReason }) {
 export function resolveDispute({ requestId, resolution }) {
   return callDeliveryApi('admin/resolve-dispute', { requestId, resolution });
 }
+
+export function deleteRider({ riderId }) {
+  return callDeliveryApi('admin/delete-rider', { riderId });
+}
