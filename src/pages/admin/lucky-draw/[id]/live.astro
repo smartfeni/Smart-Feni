@@ -205,15 +205,15 @@ const { id } = Astro.params;
       letter-spacing: 0.5px;
     }
 
-    /* ===== ক্যামেরা বাটন — ডিফল্টে ছোট, চালু করলে বড় ===== */
+    /* ===== ক্যামেরা বাটন — রেক্টেঙ্গেল, ডিফল্টে ছোট, চালু করলে বড় ===== */
     .ldl-camera-circle {
       position: absolute;
       top: 50%;
       right: 16px;
       transform: translateY(-50%);
-      width: 38px;
-      height: 38px;
-      border-radius: 50%;
+      width: 50px;
+      height: 36px;
+      border-radius: 10px;
       background: #FFF0EA;
       border: 2px solid #FFE3D4;
       display: flex;
@@ -222,7 +222,7 @@ const { id } = Astro.params;
       overflow: hidden;
       cursor: pointer;
       padding: 0;
-      transition: width 0.3s ease, height 0.3s ease, border-color 0.2s ease;
+      transition: width 0.3s ease, height 0.3s ease, border-color 0.2s ease, top 0.3s ease, border-radius 0.3s ease;
       z-index: 6;
     }
 
@@ -244,10 +244,11 @@ const { id } = Astro.params;
     }
 
     .ldl-camera-circle.active {
-      width: 108px;
-      height: 108px;
+      width: 168px;
+      height: 126px;
+      border-radius: 16px;
       border-color: #FF6B35;
-      top: 66px;
+      top: 78px;
     }
 
     .ldl-camera-circle.active i {
@@ -667,9 +668,7 @@ const { id } = Astro.params;
     function randomIndexExcluding(exclude) {
       const n = cardEls.length;
       if (n <= 1) return 0;
-      let idx = Math.floor(Math.random() * n);
-      if (idx === exclude) idx = (idx + 1) % n;
-      return idx;
+      return (exclude + 1) % n;
     }
 
     // ===== idle — সবসময় ধীরে ধীরে এলোমেলো ঘুরতে থাকবে =====
@@ -690,28 +689,34 @@ const { id } = Astro.params;
       if (idleTimer) clearTimeout(idleTimer);
     }
 
-    // ===== স্পিন — দ্রুত থেকে ধীরে, বিজয়ীর কার্ডে থেমে যাওয়া =====
-    function spinToWinner(winnerIndex, durationMs, onDone) {
+    // ===== স্পিন — সিরিয়ালি এক এক করে এগোবে, দ্রুত থেকে ধীরে, ঠিক
+    // বিজয়ীর কার্ডে গিয়ে থামবে (কোনো জাম্প নাই, ধাপ গণনা করে
+    // নিশ্চিত করা হয়) =====
+    function spinToWinner(winnerIndex, onDone) {
       stopIdle();
-      const startTs = performance.now();
+      const n = cardEls.length;
+      const startIndex = glowIndex >= 0 ? glowIndex : 0;
+      const loops = 4 + Math.floor(Math.random() * 3); // ৪-৬টা পূর্ণ লুপ, উত্তেজনার জন্য
+      let stepsToWinner = (winnerIndex - startIndex + n) % n;
+      if (stepsToWinner === 0) stepsToWinner = n; // একদম প্রথমেই বিজয়ী হলেও অন্তত একবার ঘুরবে
+      const totalSteps = loops * n + stepsToWinner;
+
+      let idx = startIndex;
+      let step = 0;
 
       function tick() {
-        const elapsed = performance.now() - startTs;
-        const t = Math.min(1, elapsed / durationMs);
+        step++;
+        idx = (idx + 1) % n;
+        setGlow(idx);
 
-        if (t >= 1) {
-          setGlow(winnerIndex);
+        if (step >= totalSteps) {
           onDone();
           return;
         }
 
-        setGlow(randomIndexExcluding(glowIndex));
-
-        // শুরুতে খুব দ্রুত (~40ms লাফ, পুরো গ্রিড ২-৩ সেকেন্ডে কভার),
-        // শেষের দিকে ধীরে ধীরে বাড়তে বাড়তে ৪৫০-৫৫০ms পর্যন্ত
+        const t = step / totalSteps;
         const eased = Math.pow(t, 3); // কিউবিক ইজ-ইন — শেষদিকে বেশি স্লো
-        const delay = 40 + eased * 500;
-
+        const delay = 40 + eased * 480;
         setTimeout(tick, delay);
       }
       tick();
@@ -784,12 +789,11 @@ const { id } = Astro.params;
       spinBtn.disabled = true;
 
       const { profile, index } = pickRandomWinner();
-      const durationMs = 18000 + Math.floor(Math.random() * 8000); // ~১৮-২৬ সেকেন্ড
 
-      spinToWinner(index, durationMs, () => {
+      spinToWinner(index, () => {
         isSpinning = false;
         spinBtn.disabled = false;
-        setTimeout(() => showWinner(profile), 500); // গ্লো থামার পর সামান্য বিরতি
+        setTimeout(() => showWinner(profile), 400); // গ্লো থামার পর সামান্য বিরতি
       });
     }
 
@@ -808,8 +812,15 @@ const { id } = Astro.params;
 
       gridView.style.display = 'none';
       spinBtn.style.display = 'none';
+      respinBtn.style.display = 'none'; // আগে শুধু কার্ড দেখাবে, বাটন এখনো লুকানো
       winnerView.style.display = 'flex';
-      launchConfetti();
+
+      // ২ সেকেন্ড শুধু বিজয়ীর কার্ড স্থির দেখাবে, তারপর সেলিব্রেশন
+      // (কনফেটি + "আবার ড্র করুন" বাটন) শুরু হবে
+      setTimeout(() => {
+        respinBtn.style.display = 'inline-flex';
+        launchConfetti();
+      }, 2000);
     }
 
     function backToGrid() {
