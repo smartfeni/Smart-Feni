@@ -2,14 +2,14 @@
 // ============================================================
 // কম্পোনেন্ট: "ডেলিভারি হিরো হতে চাই" আবেদন মডাল
 // courier.astro ও প্রোফাইল পেজ — দুই জায়গাতেই বসবে (window.openRiderRegisterModal)
-// ছবি ও আইডি কার্ডের ছবি সরাসরি এই মডাল থেকে Supabase Storage এর
-// "rider-verification" bucket এ আপলোড হয়, তারপর rider-register API
-// কল করে URL গুলো সেভ করা হয়।
 //
-// বাগফিক্স: সব ক্লাস নাম "rr-" প্রিফিক্স দিয়ে ইউনিক করা হলো — আগে
-// generic নাম (.form-group, .upload-box ইত্যাদি) ব্যবহার করায়
-// AddListingModal এর <style is:global> এর সাথে ক্ল্যাশ করে লেআউট
-// ভেঙে যাচ্ছিল (is:global কোনো scoping ছাড়াই সাইটওয়াইড apply হয়)।
+// বাগফিক্স (bucket পুনর্গঠন): নিজের ছবি এখন পাবলিক bucket
+// "rider-photos" এ যায় (getPublicUrl কাজ করে, কারণ courier পেজে
+// পাবলিকলি দেখানো লাগে) — আইডি কার্ডের ছবি এখনো প্রাইভেট
+// "rider-verification" bucket এ যায়, কিন্তু getPublicUrl() এর বদলে
+// এখন শুধু storage path সেভ হয় (URL না) — কারণ প্রাইভেট bucket এ
+// getPublicUrl() কাজ করে না। Admin panel এ signed URL দিয়ে এই path
+// থেকে temporary দেখার লিংক জেনারেট করা হয়।
 // ============================================================
 ---
 
@@ -478,13 +478,17 @@
     const userId = session.user.id;
 
     try {
+      // নিজের ছবি — পাবলিক bucket, পাবলিক URL সেভ হবে (courier পেজে দেখানো লাগে)
       const photoPath = `${userId}/photo-${Date.now()}-${photoFile.name}`;
       const { error: photoUploadError } = await supabase.storage
-        .from('rider-verification')
+        .from('rider-photos')
         .upload(photoPath, photoFile);
 
       if (photoUploadError) throw new Error('ছবি আপলোড ব্যর্থ: ' + photoUploadError.message);
 
+      const { data: photoUrlData } = supabase.storage.from('rider-photos').getPublicUrl(photoPath);
+
+      // আইডি কার্ড — প্রাইভেট bucket, শুধু path সেভ হবে (admin panel এ signed URL দিয়ে দেখা হবে)
       const idCardPath = `${userId}/id-card-${Date.now()}-${idCardFile.name}`;
       const { error: idCardUploadError } = await supabase.storage
         .from('rider-verification')
@@ -492,13 +496,10 @@
 
       if (idCardUploadError) throw new Error('আইডি কার্ড আপলোড ব্যর্থ: ' + idCardUploadError.message);
 
-      const { data: photoUrlData } = supabase.storage.from('rider-verification').getPublicUrl(photoPath);
-      const { data: idCardUrlData } = supabase.storage.from('rider-verification').getPublicUrl(idCardPath);
-
-      const { data, error } = await registerRider({
+      const { error } = await registerRider({
         vehicleType: vehicleInput.value,
         photoUrl: photoUrlData.publicUrl,
-        idCardPhotoUrl: idCardUrlData.publicUrl,
+        idCardPhotoUrl: idCardPath,
       });
 
       submitBtn.disabled = false;
