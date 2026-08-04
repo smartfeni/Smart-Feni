@@ -13,6 +13,10 @@
 // আপডেট ৫: ক্লাব কার্ড এখন শুধু admin role দেখতে পাবে (moderator না)
 //           — moderatorNavCard-এর মতোই ডিফল্টে লুকানো, role==='admin'
 //           হলে দেখানো হয়
+// আপডেট ৬ (এই সেশন — Delivery Hero): "ডেলিভারি হিরো ভেরিফিকেশন"
+//           কার্ড যোগ করা হলো (/admin/delivery-riders), pending
+//           রাইডার আবেদনের কাউন্ট ব্যাজ সহ (রিভিউ বাকি স্ট্যাটস
+//           কার্ডের মতোই লজিক, delivery_riders থেকে গণনা করা হয়)
 // ============================================================
 
 export const prerender = false;
@@ -83,6 +87,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             <i class="fas fa-store"></i>
             <h3>শপ ম্যানেজমেন্ট</h3>
             <p>নতুন শপ তৈরি করুন, active/deactivate ও সিরিয়াল সাজান</p>
+          </a>
+
+          <a href="/admin/delivery-riders" class="admin-nav-card admin-nav-card-badge-wrap">
+            <span class="admin-nav-badge" id="riderPendingBadge" style="display:none;">0</span>
+            <i class="fas fa-motorcycle"></i>
+            <h3>ডেলিভারি হিরো ভেরিফিকেশন</h3>
+            <p>রাইডার আবেদন যাচাই করুন, ছবি/আইডি কার্ড দেখে approve/reject করুন</p>
           </a>
 
           <a href="/admin/clubs" class="admin-nav-card" id="clubNavCard" style="display:none;">
@@ -240,6 +251,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       text-decoration: none;
       box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
       transition: all 0.2s ease;
+      position: relative;
     }
 
     .admin-nav-card:hover {
@@ -266,6 +278,24 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       color: #5A6E85;
     }
 
+    .admin-nav-badge {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: #D14343;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 800;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 0 2px #fff;
+    }
+
     @media (max-width: 768px) {
       .admin-stats {
         grid-template-columns: 1fr;
@@ -281,19 +311,30 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     import { supabase } from '../../lib/supabase.js';
 
     async function loadStats() {
-      const [{ count: userCount }, { count: listingCount }, { count: pendingCount }] = await Promise.all([
+      const [{ count: userCount }, { count: listingCount }, { count: pendingCount }, { count: riderPendingCount }] = await Promise.all([
         supabase.from('profiles').select('*', { count: 'exact', head: true }),
         supabase.from('listings').select('*', { count: 'exact', head: true }),
         supabase.from('listings').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        supabase.from('delivery_riders').select('*', { count: 'exact', head: true }).eq('verification_status', 'pending'),
       ]);
 
       const statUsers = document.getElementById('statUsers');
       const statListings = document.getElementById('statListings');
       const statPending = document.getElementById('statPending');
+      const riderBadge = document.getElementById('riderPendingBadge');
 
       if (statUsers) statUsers.textContent = userCount ?? '0';
       if (statListings) statListings.textContent = listingCount ?? '0';
       if (statPending) statPending.textContent = pendingCount ?? '0';
+
+      if (riderBadge) {
+        if (riderPendingCount && riderPendingCount > 0) {
+          riderBadge.textContent = riderPendingCount > 99 ? '৯৯+' : riderPendingCount;
+          riderBadge.style.display = 'flex';
+        } else {
+          riderBadge.style.display = 'none';
+        }
+      }
     }
 
     window.addEventListener('smartfeni:admin-ready', (e) => {
