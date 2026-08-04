@@ -15,9 +15,15 @@
 //   isClubOwner  = !!is_club_owner
 // লগ আউট একই ২-ক্লিক কনফার্ম প্যাটার্ন + smartfeni:logged-out ইভেন্ট।
 //
-// "আমার পোস্ট" → /my-listings (এইমাত্র বানানো হয়েছে)
-// "ডেলিভারি হিরো টগল" → এখনো কোনো DB কলাম/টেবিল নাই, তাই এই ধাপে
-// শুধু "শীঘ্রই আসছে" ব্যাজ সহ disabled আইটেম হিসেবে রাখা হলো।
+// "আমার পোস্ট" → /my-listings
+//
+// আপডেট (নতুন):
+// - "ডেলিভারি হিরো" এখন placeholder না — delivery_riders টেবিলে
+//   নিজের রো থাকলেই (pending/rejected/approved যেকোনো স্ট্যাটাস)
+//   দেখাবে, ক্লিক করলে /profile/edit এ যাবে (রাইডার ড্যাশবোর্ড
+//   সেখানেই বসানো — অনলাইন/অফলাইন টগল, স্ট্যাটস, রিকোয়েস্ট লিস্ট)
+// - "লাকি ড্র" যোগ হলো, শুধু role==='admin' হলে দেখাবে (strict,
+//   moderator না — profile/edit.astro এর isAdmin এর সাথে কনসিস্টেন্ট)
 // ============================================================
 ---
 
@@ -59,6 +65,18 @@
         <i class="fas fa-chevron-right hm-item-chevron"></i>
       </a>
 
+      <a href="/admin/lucky-draw" class="hm-item" id="hmLuckyDrawItem" style="display:none;">
+        <span class="hm-item-icon"><i class="fas fa-gift"></i></span>
+        <span class="hm-item-label">লাকি ড্র</span>
+        <i class="fas fa-chevron-right hm-item-chevron"></i>
+      </a>
+
+      <a href="/profile/edit" class="hm-item" id="hmRiderItem" style="display:none;">
+        <span class="hm-item-icon"><i class="fas fa-motorcycle"></i></span>
+        <span class="hm-item-label">ডেলিভারি হিরো</span>
+        <i class="fas fa-chevron-right hm-item-chevron"></i>
+      </a>
+
       <a href="/my-listings" class="hm-item">
         <span class="hm-item-icon"><i class="fas fa-list-check"></i></span>
         <span class="hm-item-label">আমার পোস্ট</span>
@@ -70,12 +88,6 @@
         <span class="hm-item-label">আমার অর্ডার</span>
         <i class="fas fa-chevron-right hm-item-chevron"></i>
       </a>
-
-      <div class="hm-item hm-item-disabled">
-        <span class="hm-item-icon"><i class="fas fa-motorcycle"></i></span>
-        <span class="hm-item-label">ডেলিভারি হিরো</span>
-        <span class="hm-soon-badge">শীঘ্রই</span>
-      </div>
     </div>
 
     <button type="button" class="hm-logout-btn" id="hmLogoutBtn">
@@ -257,26 +269,6 @@
     font-size: 0.72rem;
   }
 
-  .hm-item-disabled {
-    opacity: 0.55;
-    cursor: default;
-  }
-
-  .hm-item-disabled .hm-item-icon {
-    background: #F4F7FC;
-    color: #A0AFC0;
-  }
-
-  .hm-soon-badge {
-    font-size: 0.62rem;
-    font-weight: 700;
-    color: #8FA0BC;
-    background: #F4F7FC;
-    padding: 3px 9px;
-    border-radius: 20px;
-    flex-shrink: 0;
-  }
-
   .hm-logout-btn {
     display: flex;
     align-items: center;
@@ -314,6 +306,8 @@
   const shopItem = document.getElementById('hmShopItem');
   const clubItem = document.getElementById('hmClubItem');
   const adminItem = document.getElementById('hmAdminItem');
+  const luckyDrawItem = document.getElementById('hmLuckyDrawItem');
+  const riderItem = document.getElementById('hmRiderItem');
 
   const logoutBtn = document.getElementById('hmLogoutBtn');
   const logoutText = document.getElementById('hmLogoutText');
@@ -339,12 +333,27 @@
 
     // profile/edit.astro এর একই রোল-চেক লজিক
     const isAdminOrMod = profile.role === 'admin' || profile.role === 'moderator';
+    const isAdmin = profile.role === 'admin';
     const isShopOwner = !!profile.is_shop_owner;
     const isClubOwner = !!profile.is_club_owner;
 
     shopItem.style.display = isShopOwner ? 'flex' : 'none';
     clubItem.style.display = isClubOwner ? 'flex' : 'none';
     adminItem.style.display = isAdminOrMod ? 'flex' : 'none';
+    luckyDrawItem.style.display = isAdmin ? 'flex' : 'none';
+
+    // ডেলিভারি হিরো — শুধু delivery_riders টেবিলে নিজের রো থাকলে
+    // দেখাবে (pending/rejected/approved যেকোনো স্ট্যাটাসেই — নিজের
+    // আবেদনের অবস্থা দেখতে চাইলেও দরকার হতে পারে)। ক্লিক করলে
+    // /profile/edit এ যাবে, কারণ রাইডার ড্যাশবোর্ড সেখানেই বসানো —
+    // আলাদা কোনো পেজ নাই এর জন্য।
+    const { data: riderRow } = await supabase
+      .from('delivery_riders')
+      .select('id')
+      .eq('profile_id', session.user.id)
+      .maybeSingle();
+
+    riderItem.style.display = riderRow ? 'flex' : 'none';
   }
 
   function openMenu() {
