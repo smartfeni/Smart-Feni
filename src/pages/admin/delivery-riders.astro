@@ -1,27 +1,18 @@
 ---
 // ============================================================
 // পেজ: অ্যাডমিন — ডেলিভারি হিরো ভেরিফিকেশন (/admin/delivery-riders)
-// শুধু admin/moderator রোল অ্যাক্সেস করতে পারবে — adminGuard.js
-// প্যাটার্ন অনুসরণ করে (admin/index.astro এর মতোই)।
-// ৩টা ট্যাব: পেন্ডিং (ডিফল্ট) / অ্যাপ্রুভড / রিজেক্টেড
-// Approve/Reject করলে admin/verify-rider API কল হয় (deliveryClient.js)
 //
-// বাগফিক্স ১: profiles(...) embed ambiguous FK এরর দিচ্ছিল
-// (delivery_riders এ profiles এর দিকে profile_id ও reviewed_by দুইটা
-// FK আছে) — এখন profiles!delivery_riders_profile_id_fkey(...) দিয়ে
-// এক্সপ্লিসিটলি সঠিক FK বলে দেওয়া হলো।
-// বাগফিক্স ২: <style> কে is:global করা হলো — কার্ডগুলো JS দিয়ে
-// innerHTML এ dynamically তৈরি হয় বলে Astro এর scoped CSS
-// (data-astro-cid) সেগুলোতে অ্যাপ্লাই হচ্ছিল না।
+// বাগফিক্স ১: profiles(...) embed ambiguous FK — profiles!delivery_
+// riders_profile_id_fkey(...) দিয়ে ফিক্সড।
+// বাগফিক্স ২: <style> is:global করা হলো (dynamic innerHTML কার্ডে
+// scoped CSS বসে না)।
+// বাগফিক্স ৩ (এই সেশন): id_card_photo_url এখন প্রাইভেট bucket এর
+// path (URL না) — রেন্ডার করার আগে createSignedUrl() দিয়ে প্রতিটা
+// রাইডারের জন্য টেম্পোরারি ভিউ-লিংক জেনারেট করা হয় (১ ঘণ্টার জন্য
+// ভ্যালিড)। photo_url এখন পাবলিক bucket এর URL, সরাসরি দেখানো যায়।
 //
-// আপডেট (এই সেশন): Approved ট্যাবে ২টা নতুন বাটন —
-//   - "রিজেক্ট/ইনঅ্যাকটিভ করুন" (soft — verify-rider API দিয়েই,
-//     decision='reject', ইতিহাস অক্ষত থাকে, চাইলে পরে আবার approve
-//     করা যাবে)
-//   - "ডিলিট করুন" (hard delete — delete-rider API, নতুন ফাইল)।
-//     এই রাইডারের delivery_offers/delivery_requests/delivery_reviews
-//     এ রেফারেন্স থাকলে FK constraint এ ব্যর্থ হবে, তখন এরর মেসেজে
-//     soft reject ব্যবহার করতে বলা হবে।
+// আপডেট: Rejected কার্ডেও এখন "Approve" বাটন যোগ হলো (রিঅ্যাক্টিভেট
+// করার জন্য) — verify-rider API দিয়েই, decision='approve'।
 // ============================================================
 
 export const prerender = false;
@@ -52,6 +43,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           </button>
           <button class="dr-tab" data-tab="approved">অ্যাপ্রুভড</button>
           <button class="dr-tab" data-tab="rejected">রিজেক্টেড</button>
+        </div>
+
+        <div id="riderListLoading" class="dr-loading" style="display:none;">
+          <div class="admin-spinner"></div>
         </div>
 
         <div id="riderList" class="dr-list"></div>
@@ -95,6 +90,12 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     @keyframes spin {
       to { transform: rotate(360deg); }
+    }
+
+    .dr-loading {
+      display: flex;
+      justify-content: center;
+      padding: 40px 0;
     }
 
     .dr-back-link {
@@ -270,6 +271,16 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       object-fit: cover;
     }
 
+    .dr-doc-box.dr-doc-missing {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #B0BCCB;
+      font-size: 0.7rem;
+      text-align: center;
+      cursor: default;
+    }
+
     .dr-doc-label {
       position: absolute;
       bottom: 0;
@@ -434,6 +445,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       padding: 10px 12px;
       border-radius: 10px;
       margin-top: 4px;
+      margin-bottom: 10px;
     }
 
     .dr-empty {
@@ -492,6 +504,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     const riderList = document.getElementById('riderList');
     const riderEmpty = document.getElementById('riderEmpty');
+    const riderListLoading = document.getElementById('riderListLoading');
     const pendingCountEl = document.getElementById('pendingCount');
     const tabs = document.querySelectorAll('.dr-tab');
 
@@ -500,27 +513,60 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     const VEHICLE_LABELS = { bike: 'বাইক', cycle: 'সাইকেল' };
 
+    // ===== প্রাইভেট bucket এর path থেকে সাইনড URL জেনারেট =====
+    // পুরনো টেস্ট ডেটায় full URL সেভ থাকতে পারে (আগের bucket থেকে) —
+    // সেক্ষেত্রে signed URL জেনারেট না করে সরাসরি সেটাই ফেরত দেওয়া হয়
+    // (যদিও প্রাইভেট bucket এর পুরনো public URL কাজ নাও করতে পারে)
+    async function getSignedIdCardUrl(pathOrUrl) {
+      if (!pathOrUrl) return null;
+      if (pathOrUrl.startsWith('http')) return pathOrUrl;
+
+      const { data, error } = await supabase.storage
+        .from('rider-verification')
+        .createSignedUrl(pathOrUrl, 3600);
+
+      if (error) {
+        console.error('Signed URL এরর:', error.message);
+        return null;
+      }
+      return data?.signedUrl || null;
+    }
+
     async function loadRiders() {
+      riderListLoading.style.display = 'flex';
+      riderList.innerHTML = '';
+      riderEmpty.style.display = 'none';
+
       const { data, error } = await supabase
         .from('delivery_riders')
         .select('id, vehicle_type, photo_url, id_card_photo_url, verification_status, rejection_reason, created_at, profile_id, profiles!delivery_riders_profile_id_fkey(full_name, phone)')
         .order('created_at', { ascending: false });
 
       if (error) {
+        riderListLoading.style.display = 'none';
         console.error('রাইডার লোড এরর:', error.message);
         riderEmpty.textContent = 'লোড করতে সমস্যা হয়েছে: ' + error.message;
         riderEmpty.style.display = 'block';
         return;
       }
 
+      // প্রতিটা রাইডারের আইডি কার্ডের জন্য signed URL জেনারেট (parallel)
+      const withSignedUrls = await Promise.all(
+        (data || []).map(async (r) => ({
+          ...r,
+          id_card_signed_url: await getSignedIdCardUrl(r.id_card_photo_url),
+        }))
+      );
+
       allRiders = { pending: [], approved: [], rejected: [] };
-      (data || []).forEach((r) => {
+      withSignedUrls.forEach((r) => {
         if (r.verification_status === 'pending') allRiders.pending.push(r);
         else if (r.verification_status === 'approved') allRiders.approved.push(r);
         else if (r.verification_status === 'rejected') allRiders.rejected.push(r);
       });
 
       pendingCountEl.textContent = allRiders.pending.length;
+      riderListLoading.style.display = 'none';
       renderTab();
     }
 
@@ -583,7 +629,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         } else if (rider.verification_status === 'rejected') {
           actionsHtml = `
             ${rider.rejection_reason ? `<p class="dr-rejected-reason"><i class="fas fa-circle-info"></i> কারণ: ${rider.rejection_reason}</p>` : ''}
-            <div class="dr-actions" style="margin-top: 10px;">
+            <div class="dr-actions">
+              <button class="dr-btn-approve" data-action="approve"><i class="fas fa-rotate-left"></i> রিঅ্যাক্টিভেট (Approve)</button>
               <button class="dr-btn-delete" data-action="show-delete"><i class="fas fa-trash"></i> ডিলিট করুন</button>
             </div>
             <div class="dr-delete-panel">
@@ -595,6 +642,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             </div>
           `;
         }
+
+        const photoBoxHtml = rider.photo_url
+          ? `<div class="dr-doc-box" data-img="${rider.photo_url}"><img src="${rider.photo_url}" alt="নিজের ছবি" /><span class="dr-doc-label">নিজের ছবি</span></div>`
+          : `<div class="dr-doc-box dr-doc-missing"><span>ছবি নেই</span></div>`;
+
+        const idCardBoxHtml = rider.id_card_signed_url
+          ? `<div class="dr-doc-box" data-img="${rider.id_card_signed_url}"><img src="${rider.id_card_signed_url}" alt="আইডি কার্ড" /><span class="dr-doc-label">আইডি কার্ড (NID)</span></div>`
+          : `<div class="dr-doc-box dr-doc-missing"><span>আইডি কার্ড দেখা যাচ্ছে না</span></div>`;
 
         card.innerHTML = `
           <div class="dr-card-top">
@@ -609,21 +664,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           </div>
 
           <div class="dr-docs-row">
-            <div class="dr-doc-box" data-img="${rider.photo_url || ''}">
-              ${rider.photo_url ? `<img src="${rider.photo_url}" alt="নিজের ছবি" />` : ''}
-              <span class="dr-doc-label">নিজের ছবি</span>
-            </div>
-            <div class="dr-doc-box" data-img="${rider.id_card_photo_url || ''}">
-              ${rider.id_card_photo_url ? `<img src="${rider.id_card_photo_url}" alt="আইডি কার্ড" />` : ''}
-              <span class="dr-doc-label">আইডি কার্ড (NID)</span>
-            </div>
+            ${photoBoxHtml}
+            ${idCardBoxHtml}
           </div>
 
           ${actionsHtml}
         `;
 
         // lightbox বাইন্ড
-        card.querySelectorAll('.dr-doc-box').forEach((box) => {
+        card.querySelectorAll('.dr-doc-box[data-img]').forEach((box) => {
           box.addEventListener('click', () => {
             const url = box.dataset.img;
             if (!url) return;
@@ -631,7 +680,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           });
         });
 
-        // approve (শুধু pending কার্ডে থাকবে)
+        // approve (pending ও rejected দুই কার্ডেই থাকতে পারে — rejected এ রিঅ্যাক্টিভেট হিসেবে)
         card.querySelector('[data-action="approve"]')?.addEventListener('click', async (e) => {
           e.target.disabled = true;
           const { error } = await verifyRider({ riderId: rider.id, decision: 'approve' });
@@ -643,7 +692,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           loadRiders();
         });
 
-        // reject/ইনঅ্যাকটিভ flow (pending ও approved দুই কার্ডেই থাকতে পারে)
+        // reject/ইনঅ্যাকটিভ flow (pending ও approved কার্ডে)
         const rejectPanel = card.querySelector('.dr-reject-panel');
         card.querySelector('[data-action="show-reject"]')?.addEventListener('click', () => {
           rejectPanel?.classList.add('active');
@@ -663,7 +712,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           loadRiders();
         });
 
-        // delete flow (approved ও rejected কার্ডে থাকবে)
+        // delete flow (approved ও rejected কার্ডে)
         const deletePanel = card.querySelector('.dr-delete-panel');
         card.querySelector('[data-action="show-delete"]')?.addEventListener('click', () => {
           deletePanel?.classList.add('active');
