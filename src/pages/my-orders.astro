@@ -9,6 +9,14 @@
 // created_at অনুযায়ী মার্জ করে দেখানো হয়। status অনুযায়ী দুই ধরনের
 // রেন্ডার: ফাংশনাল (open/negotiating/confirmed/delivered/disputed)
 // ও স্থায়ী হিস্ট্রি (completed/cancelled)।
+//
+// বাগফিক্স (এই সেশন): delivery_riders টেবিলে profiles এর দিকে ২টা
+// FK আছে (profile_id ও reviewed_by), তাই profiles(...) embed
+// ambiguous FK এরর দিচ্ছিল ("লোড করা যায়নি")। এখন
+// profiles!delivery_riders_profile_id_fkey(...) দিয়ে এক্সপ্লিসিটলি
+// সঠিক FK বলে দেওয়া হলো। একই কারণে accepted_rider:delivery_riders
+// embed এও delivery_requests_accepted_rider_id_fkey এক্সপ্লিসিট
+// করা হলো।
 // ============================================================
 
 export const prerender = false;
@@ -789,7 +797,6 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       } else if (req.status === 'delivered') {
         bodyHtml += `
           <div class="waiting-note">রাইডারের কনফার্মেশনের অপেক্ষায়...</div>
-          <button class="payment-proof-upload-btn" data-request-id="${req.id}" style="display:none;"></button>
           <div class="payment-proof-box" data-request-id="${req.id}">
             <label>
               <i class="fas fa-camera"></i> পেমেন্ট প্রুফ আপলোড করুন
@@ -982,9 +989,9 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
             *,
             delivery_offers(
               id, rider_profile_id, offer_price, last_actor, status,
-              delivery_riders(profile_id, vehicle_type, profiles(full_name, phone))
+              delivery_riders(profile_id, vehicle_type, profiles!delivery_riders_profile_id_fkey(full_name, phone))
             ),
-            accepted_rider:delivery_riders(profile_id, vehicle_type, profiles(full_name, phone))
+            accepted_rider:delivery_riders!delivery_requests_accepted_rider_id_fkey(profile_id, vehicle_type, profiles!delivery_riders_profile_id_fkey(full_name, phone))
           `)
           .eq('customer_profile_id', userId)
           .order('created_at', { ascending: false }),
@@ -995,14 +1002,15 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       ordersContent.style.display = 'block';
 
       if (ordersRes.error || deliveryRes.error) {
-        ordersContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি</p>`;
+        console.error('অর্ডার লোড এরর:', ordersRes.error?.message, deliveryRes.error?.message);
+        ordersContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${ordersRes.error?.message || deliveryRes.error?.message || ''}</p>`;
         return;
       }
 
       const reviewedRequestIds = new Set((reviewsRes.data || []).map((r) => r.request_id));
 
-      // প্রতিটা delivery request এ শুধু নিজের সাথে সম্পর্কিত (open/negotiating) অফারগুলা রাখা,
-      // closed_by_other/rejected থ্রেড লুকানো (UI ক্লিন রাখতে)
+      // প্রতিটা delivery request এ শুধু নিজের সাথে সম্পর্কিত (pending/negotiating) অফারগুলা রাখা,
+      // closed_by_other/accepted/rejected থ্রেড লুকানো (UI ক্লিন রাখতে)
       const deliveryRequests = (deliveryRes.data || []).map((req) => ({
         ...req,
         delivery_offers: (req.delivery_offers || []).filter((o) => ['pending', 'negotiating'].includes(o.status)),
