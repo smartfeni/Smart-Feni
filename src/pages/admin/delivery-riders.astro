@@ -1,0 +1,591 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — ডেলিভারি হিরো ভেরিফিকেশন (/admin/delivery-riders)
+// শুধু admin/moderator রোল অ্যাক্সেস করতে পারবে — adminGuard.js
+// প্যাটার্ন অনুসরণ করে (admin/index.astro এর মতোই)।
+// ৩টা ট্যাব: পেন্ডিং (ডিফল্ট) / অ্যাপ্রুভড / রিজেক্টেড
+// Approve/Reject করলে admin/verify-rider API কল হয় (deliveryClient.js)
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="ডেলিভারি হিরো ভেরিফিকেশন | স্মার্ট ফেনী">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="dr-back-link"><i class="fas fa-arrow-left"></i> অ্যাডমিন ড্যাশবোর্ডে ফিরুন</a>
+
+        <div class="dr-header">
+          <h1><i class="fas fa-motorcycle"></i> ডেলিভারি হিরো ভেরিফিকেশন</h1>
+        </div>
+
+        <div class="dr-tabs">
+          <button class="dr-tab active" data-tab="pending">
+            পেন্ডিং <span class="dr-tab-count" id="pendingCount">0</span>
+          </button>
+          <button class="dr-tab" data-tab="approved">অ্যাপ্রুভড</button>
+          <button class="dr-tab" data-tab="rejected">রিজেক্টেড</button>
+        </div>
+
+        <div id="riderList" class="dr-list"></div>
+
+        <p class="dr-empty" id="riderEmpty" style="display:none;">এই ট্যাবে কোনো রাইডার নেই</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ছবি lightbox (ক্লিক করলে বড় করে দেখাবে) ===== -->
+  <div class="dr-lightbox-overlay" id="drLightboxOverlay">
+    <button class="dr-lightbox-close" id="drLightboxClose" type="button"><i class="fas fa-xmark"></i></button>
+    <img id="drLightboxImg" src="" alt="" />
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 48px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .dr-back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .dr-back-link:hover {
+      color: #FF6B35;
+    }
+
+    .dr-header {
+      margin-bottom: 20px;
+    }
+
+    .dr-header h1 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .dr-header h1 i {
+      color: #FF6B35;
+    }
+
+    .dr-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid #EEF3F9;
+    }
+
+    .dr-tab {
+      background: none;
+      border: none;
+      padding: 10px 16px;
+      font-size: 0.86rem;
+      font-weight: 700;
+      color: #8FA0BC;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dr-tab.active {
+      color: #FF6B35;
+      border-bottom-color: #FF6B35;
+    }
+
+    .dr-tab-count {
+      background: #FFF0EA;
+      color: #FF6B35;
+      font-size: 0.7rem;
+      font-weight: 800;
+      padding: 1px 8px;
+      border-radius: 20px;
+    }
+
+    .dr-tab:not(.active) .dr-tab-count {
+      background: #F4F7FC;
+      color: #8FA0BC;
+    }
+
+    .dr-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .dr-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    .dr-card-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .dr-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: #FFF0EA;
+      color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    .dr-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .dr-name {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .dr-meta {
+      font-size: 0.76rem;
+      color: #8FA0BC;
+      display: flex;
+      gap: 10px;
+      margin-top: 2px;
+    }
+
+    .dr-status-badge {
+      margin-left: auto;
+      font-size: 0.68rem;
+      font-weight: 800;
+      padding: 4px 12px;
+      border-radius: 20px;
+      flex-shrink: 0;
+    }
+
+    .dr-status-badge.pending {
+      background: #FFF4E0;
+      color: #B8860B;
+    }
+
+    .dr-status-badge.approved {
+      background: #EAFBF0;
+      color: #1B7A3C;
+    }
+
+    .dr-status-badge.rejected {
+      background: #FFF0EA;
+      color: #D14343;
+    }
+
+    .dr-docs-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .dr-doc-box {
+      position: relative;
+      aspect-ratio: 4 / 3;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #F8FAFC;
+      cursor: pointer;
+      border: 1px solid #EEF3F9;
+    }
+
+    .dr-doc-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .dr-doc-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(15, 23, 42, 0.6);
+      color: #fff;
+      font-size: 0.66rem;
+      font-weight: 700;
+      padding: 4px 8px;
+      text-align: center;
+    }
+
+    .dr-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .dr-actions button {
+      flex: 1;
+      border: none;
+      padding: 11px;
+      border-radius: 12px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .dr-btn-approve {
+      background: #1B7A3C;
+      color: #fff;
+    }
+
+    .dr-btn-approve:hover {
+      background: #156530;
+    }
+
+    .dr-btn-reject {
+      background: #FFF0EA;
+      color: #D14343;
+    }
+
+    .dr-btn-reject:hover {
+      background: #D14343;
+      color: #fff;
+    }
+
+    .dr-reject-panel {
+      display: none;
+      margin-top: 10px;
+      gap: 8px;
+      flex-direction: column;
+    }
+
+    .dr-reject-panel.active {
+      display: flex;
+    }
+
+    .dr-reject-panel input {
+      width: 100%;
+      border: 1px solid #E5EAF0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.82rem;
+      font-family: inherit;
+      outline: none;
+      box-sizing: border-box;
+    }
+
+    .dr-reject-panel-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dr-reject-panel-actions button {
+      flex: 1;
+      border: none;
+      padding: 9px;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .dr-btn-confirm-reject {
+      background: #D14343;
+      color: #fff;
+    }
+
+    .dr-btn-cancel-reject {
+      background: #F4F7FC;
+      color: #5A6E85;
+    }
+
+    .dr-rejected-reason {
+      font-size: 0.8rem;
+      color: #5A6E85;
+      background: #F8FAFC;
+      padding: 10px 12px;
+      border-radius: 10px;
+      margin-top: 4px;
+    }
+
+    .dr-empty {
+      text-align: center;
+      color: #9AA8BC;
+      font-size: 0.9rem;
+      padding: 60px 0;
+    }
+
+    .dr-lightbox-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.88);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .dr-lightbox-overlay.active {
+      display: flex;
+    }
+
+    .dr-lightbox-overlay img {
+      max-width: 100%;
+      max-height: 90vh;
+      border-radius: 12px;
+    }
+
+    .dr-lightbox-close {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      border: none;
+      color: #fff;
+      font-size: 1.1rem;
+      cursor: pointer;
+    }
+
+    @media (max-width: 480px) {
+      .dr-docs-row {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { verifyRider } from '../../lib/deliveryClient.js';
+
+    const riderList = document.getElementById('riderList');
+    const riderEmpty = document.getElementById('riderEmpty');
+    const pendingCountEl = document.getElementById('pendingCount');
+    const tabs = document.querySelectorAll('.dr-tab');
+
+    let allRiders = { pending: [], approved: [], rejected: [] };
+    let currentTab = 'pending';
+
+    const VEHICLE_LABELS = { bike: 'বাইক', cycle: 'সাইকেল' };
+
+    async function loadRiders() {
+      const { data, error } = await supabase
+        .from('delivery_riders')
+        .select('id, vehicle_type, photo_url, id_card_photo_url, verification_status, rejection_reason, created_at, profile_id, profiles(full_name, phone)')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('রাইডার লোড এরর:', error.message);
+        return;
+      }
+
+      allRiders = { pending: [], approved: [], rejected: [] };
+      (data || []).forEach((r) => {
+        if (r.verification_status === 'pending') allRiders.pending.push(r);
+        else if (r.verification_status === 'approved') allRiders.approved.push(r);
+        else if (r.verification_status === 'rejected') allRiders.rejected.push(r);
+      });
+
+      pendingCountEl.textContent = allRiders.pending.length;
+      renderTab();
+    }
+
+    function renderTab() {
+      const list = allRiders[currentTab] || [];
+      riderList.innerHTML = '';
+
+      if (list.length === 0) {
+        riderEmpty.style.display = 'block';
+        return;
+      }
+      riderEmpty.style.display = 'none';
+
+      list.forEach((rider) => {
+        const card = document.createElement('div');
+        card.className = 'dr-card';
+
+        const name = rider.profiles?.full_name || 'নাম নেই';
+        const phone = rider.profiles?.phone || '—';
+        const vehicleLabel = VEHICLE_LABELS[rider.vehicle_type] || rider.vehicle_type;
+
+        let actionsHtml = '';
+        if (rider.verification_status === 'pending') {
+          actionsHtml = `
+            <div class="dr-actions">
+              <button class="dr-btn-approve" data-action="approve"><i class="fas fa-check"></i> Approve</button>
+              <button class="dr-btn-reject" data-action="show-reject"><i class="fas fa-xmark"></i> Reject</button>
+            </div>
+            <div class="dr-reject-panel">
+              <input type="text" placeholder="বাতিলের কারণ (ঐচ্ছিক)" />
+              <div class="dr-reject-panel-actions">
+                <button class="dr-btn-cancel-reject" data-action="cancel-reject">বাতিল</button>
+                <button class="dr-btn-confirm-reject" data-action="confirm-reject">রিজেক্ট নিশ্চিত করুন</button>
+              </div>
+            </div>
+          `;
+        } else if (rider.verification_status === 'rejected' && rider.rejection_reason) {
+          actionsHtml = `<p class="dr-rejected-reason"><i class="fas fa-circle-info"></i> কারণ: ${rider.rejection_reason}</p>`;
+        }
+
+        card.innerHTML = `
+          <div class="dr-card-top">
+            <span class="dr-avatar">${rider.photo_url ? `<img src="${rider.photo_url}" alt="${name}" />` : '<i class="fas fa-user"></i>'}</span>
+            <div>
+              <p class="dr-name">${name}</p>
+              <p class="dr-meta"><span><i class="fas fa-phone"></i> ${phone}</span><span><i class="fas fa-motorcycle"></i> ${vehicleLabel}</span></p>
+            </div>
+            <span class="dr-status-badge ${rider.verification_status}">${
+              rider.verification_status === 'pending' ? 'পেন্ডিং' : rider.verification_status === 'approved' ? 'অ্যাপ্রুভড' : 'রিজেক্টেড'
+            }</span>
+          </div>
+
+          <div class="dr-docs-row">
+            <div class="dr-doc-box" data-img="${rider.photo_url || ''}">
+              ${rider.photo_url ? `<img src="${rider.photo_url}" alt="নিজের ছবি" />` : ''}
+              <span class="dr-doc-label">নিজের ছবি</span>
+            </div>
+            <div class="dr-doc-box" data-img="${rider.id_card_photo_url || ''}">
+              ${rider.id_card_photo_url ? `<img src="${rider.id_card_photo_url}" alt="আইডি কার্ড" />` : ''}
+              <span class="dr-doc-label">আইডি কার্ড (NID)</span>
+            </div>
+          </div>
+
+          ${actionsHtml}
+        `;
+
+        // lightbox বাইন্ড
+        card.querySelectorAll('.dr-doc-box').forEach((box) => {
+          box.addEventListener('click', () => {
+            const url = box.dataset.img;
+            if (!url) return;
+            openLightbox(url);
+          });
+        });
+
+        // approve
+        card.querySelector('[data-action="approve"]')?.addEventListener('click', async (e) => {
+          e.target.disabled = true;
+          const { error } = await verifyRider({ riderId: rider.id, decision: 'approve' });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            return;
+          }
+          loadRiders();
+        });
+
+        // reject flow
+        const rejectPanel = card.querySelector('.dr-reject-panel');
+        card.querySelector('[data-action="show-reject"]')?.addEventListener('click', () => {
+          rejectPanel.classList.add('active');
+        });
+        card.querySelector('[data-action="cancel-reject"]')?.addEventListener('click', () => {
+          rejectPanel.classList.remove('active');
+        });
+        card.querySelector('[data-action="confirm-reject"]')?.addEventListener('click', async (e) => {
+          const reason = rejectPanel.querySelector('input').value.trim();
+          e.target.disabled = true;
+          const { error } = await verifyRider({ riderId: rider.id, decision: 'reject', rejectionReason: reason || null });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            return;
+          }
+          loadRiders();
+        });
+
+        riderList.appendChild(card);
+      });
+    }
+
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        tabs.forEach((t) => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentTab = tab.dataset.tab;
+        renderTab();
+      });
+    });
+
+    // ===== lightbox =====
+    const lightboxOverlay = document.getElementById('drLightboxOverlay');
+    const lightboxImg = document.getElementById('drLightboxImg');
+
+    function openLightbox(url) {
+      lightboxImg.src = url;
+      lightboxOverlay.classList.add('active');
+    }
+
+    document.getElementById('drLightboxClose')?.addEventListener('click', () => {
+      lightboxOverlay.classList.remove('active');
+    });
+
+    lightboxOverlay?.addEventListener('click', (e) => {
+      if (e.target === lightboxOverlay) lightboxOverlay.classList.remove('active');
+    });
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadRiders();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
