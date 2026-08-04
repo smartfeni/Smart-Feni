@@ -3,6 +3,18 @@
 // দুই ধরনের ক্লায়েন্ট বানানোর ফাংশন এখানে আছে:
 // 1. getUserClient()  -> ইউজারের নিজের সেশন টোকেন দিয়ে (RLS respect করে)
 // 2. getAdminClient()  -> service role key দিয়ে (RLS বাইপাস, শুধু admin route এ ব্যবহার হবে)
+//
+// বাগফিক্স (গুরুত্বপূর্ণ): getAuthedUser() এ client.auth.getUser()
+// কল হচ্ছিল কোনো টোকেন প্যারামিটার ছাড়া। supabase-js এ getUser()
+// কে জোর করে টোকেন না দিলে এটা client এর internal stored session
+// থেকে টোকেন খোঁজে (localStorage/memory) — কিন্তু আমাদের এই client
+// টা প্রতি রিকোয়েস্টে fresh তৈরি হয়, persistSession:false দিয়ে,
+// কখনো auth.setSession() কল হয়নি। ফলে getUser() সবসময় "Auth
+// session missing" এরর দিচ্ছিল, যদিও Authorization হেডারে সঠিক
+// টোকেন পাঠানো হচ্ছিল। এখন getUser(token) — এক্সপ্লিসিটলি টোকেন
+// পাস করা হচ্ছে, যেটা সরাসরি সেই টোকেন verify করে (session state
+// এর উপর নির্ভর করে না)। এটাই ছিল create-request সহ প্রায় সব
+// customer/rider/admin রুট ব্যর্থ হওয়ার মূল কারণ।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -34,12 +46,12 @@ export function getUserClient(request) {
 }
 
 // ইউজারের টোকেন দিয়ে client বানিয়ে, সেই ইউজারের প্রোফাইল ভেরিফাই করে
-// (auth.getUser() দিয়ে টোকেন ভ্যালিড কিনা চেক করে, id রিটার্ন করে)
+// (auth.getUser(token) দিয়ে টোকেন ভ্যালিড কিনা চেক করে, id রিটার্ন করে)
 export async function getAuthedUser(request) {
-  const { client, error } = getUserClient(request);
+  const { client, token, error } = getUserClient(request);
   if (error) return { client: null, user: null, error };
 
-  const { data, error: userError } = await client.auth.getUser();
+  const { data, error: userError } = await client.auth.getUser(token);
   if (userError || !data?.user) {
     return { client: null, user: null, error: 'সেশন মেয়াদোত্তীর্ণ বা অবৈধ, আবার লগইন করো' };
   }
