@@ -6,12 +6,22 @@
 // ৩টা ট্যাব: পেন্ডিং (ডিফল্ট) / অ্যাপ্রুভড / রিজেক্টেড
 // Approve/Reject করলে admin/verify-rider API কল হয় (deliveryClient.js)
 //
-// বাগফিক্স: delivery_riders টেবিলে profiles এর দিকে ২টা FK আছে
-// (profile_id ও reviewed_by), তাই profiles(...) embed সিনট্যাক্স
-// ambiguous FK error দিচ্ছিল (silently fail, তালিকা খালি দেখাচ্ছিল
-// যদিও pending badge এ count ঠিকই আসছিল কারণ badge count query
-// join ছাড়া ছিল)। এখন profiles!delivery_riders_profile_id_fkey(...)
-// দিয়ে এক্সপ্লিসিটলি সঠিক FK বলে দেওয়া হলো।
+// বাগফিক্স ১: profiles(...) embed ambiguous FK এরর দিচ্ছিল
+// (delivery_riders এ profiles এর দিকে profile_id ও reviewed_by দুইটা
+// FK আছে) — এখন profiles!delivery_riders_profile_id_fkey(...) দিয়ে
+// এক্সপ্লিসিটলি সঠিক FK বলে দেওয়া হলো।
+// বাগফিক্স ২: <style> কে is:global করা হলো — কার্ডগুলো JS দিয়ে
+// innerHTML এ dynamically তৈরি হয় বলে Astro এর scoped CSS
+// (data-astro-cid) সেগুলোতে অ্যাপ্লাই হচ্ছিল না।
+//
+// আপডেট (এই সেশন): Approved ট্যাবে ২টা নতুন বাটন —
+//   - "রিজেক্ট/ইনঅ্যাকটিভ করুন" (soft — verify-rider API দিয়েই,
+//     decision='reject', ইতিহাস অক্ষত থাকে, চাইলে পরে আবার approve
+//     করা যাবে)
+//   - "ডিলিট করুন" (hard delete — delete-rider API, নতুন ফাইল)।
+//     এই রাইডারের delivery_offers/delivery_requests/delivery_reviews
+//     এ রেফারেন্স থাকলে FK constraint এ ব্যর্থ হবে, তখন এরর মেসেজে
+//     soft reject ব্যবহার করতে বলা হবে।
 // ============================================================
 
 export const prerender = false;
@@ -57,7 +67,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     <img id="drLightboxImg" src="" alt="" />
   </div>
 
-  <style>
+  <style is:global>
     .admin-page {
       min-height: 60vh;
       padding: 48px 0 80px;
@@ -312,6 +322,16 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       color: #fff;
     }
 
+    .dr-btn-delete {
+      background: #F4F7FC;
+      color: #5A6E85;
+    }
+
+    .dr-btn-delete:hover {
+      background: #1B2A4A;
+      color: #fff;
+    }
+
     .dr-reject-panel {
       display: none;
       margin-top: 10px;
@@ -357,6 +377,53 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     .dr-btn-cancel-reject {
       background: #F4F7FC;
+      color: #5A6E85;
+    }
+
+    .dr-delete-panel {
+      display: none;
+      margin-top: 10px;
+      background: #FFF0EA;
+      border-radius: 12px;
+      padding: 12px;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .dr-delete-panel.active {
+      display: flex;
+    }
+
+    .dr-delete-panel p {
+      font-size: 0.78rem;
+      color: #D14343;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .dr-delete-panel-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dr-delete-panel-actions button {
+      flex: 1;
+      border: none;
+      padding: 9px;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .dr-btn-confirm-delete {
+      background: #D14343;
+      color: #fff;
+    }
+
+    .dr-btn-cancel-delete {
+      background: #fff;
       color: #5A6E85;
     }
 
@@ -421,7 +488,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
-    import { verifyRider } from '../../lib/deliveryClient.js';
+    import { verifyRider, deleteRider } from '../../lib/deliveryClient.js';
 
     const riderList = document.getElementById('riderList');
     const riderEmpty = document.getElementById('riderEmpty');
@@ -477,6 +544,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const vehicleLabel = VEHICLE_LABELS[rider.vehicle_type] || rider.vehicle_type;
 
         let actionsHtml = '';
+
         if (rider.verification_status === 'pending') {
           actionsHtml = `
             <div class="dr-actions">
@@ -491,8 +559,41 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
               </div>
             </div>
           `;
-        } else if (rider.verification_status === 'rejected' && rider.rejection_reason) {
-          actionsHtml = `<p class="dr-rejected-reason"><i class="fas fa-circle-info"></i> কারণ: ${rider.rejection_reason}</p>`;
+        } else if (rider.verification_status === 'approved') {
+          actionsHtml = `
+            <div class="dr-actions">
+              <button class="dr-btn-reject" data-action="show-reject"><i class="fas fa-ban"></i> রিজেক্ট/ইনঅ্যাকটিভ করুন</button>
+              <button class="dr-btn-delete" data-action="show-delete"><i class="fas fa-trash"></i> ডিলিট করুন</button>
+            </div>
+            <div class="dr-reject-panel">
+              <input type="text" placeholder="ইনঅ্যাকটিভ করার কারণ (ঐচ্ছিক)" />
+              <div class="dr-reject-panel-actions">
+                <button class="dr-btn-cancel-reject" data-action="cancel-reject">বাতিল</button>
+                <button class="dr-btn-confirm-reject" data-action="confirm-reject">নিশ্চিত করুন</button>
+              </div>
+            </div>
+            <div class="dr-delete-panel">
+              <p><i class="fas fa-triangle-exclamation"></i> এটা স্থায়ীভাবে ডিলিট হবে, ইতিহাস থাকলে (ডেলিভারি/রিভিউ) ব্যর্থ হবে</p>
+              <div class="dr-delete-panel-actions">
+                <button class="dr-btn-cancel-delete" data-action="cancel-delete">বাতিল</button>
+                <button class="dr-btn-confirm-delete" data-action="confirm-delete">স্থায়ীভাবে ডিলিট করুন</button>
+              </div>
+            </div>
+          `;
+        } else if (rider.verification_status === 'rejected') {
+          actionsHtml = `
+            ${rider.rejection_reason ? `<p class="dr-rejected-reason"><i class="fas fa-circle-info"></i> কারণ: ${rider.rejection_reason}</p>` : ''}
+            <div class="dr-actions" style="margin-top: 10px;">
+              <button class="dr-btn-delete" data-action="show-delete"><i class="fas fa-trash"></i> ডিলিট করুন</button>
+            </div>
+            <div class="dr-delete-panel">
+              <p><i class="fas fa-triangle-exclamation"></i> এটা স্থায়ীভাবে ডিলিট হবে, ইতিহাস থাকলে (ডেলিভারি/রিভিউ) ব্যর্থ হবে</p>
+              <div class="dr-delete-panel-actions">
+                <button class="dr-btn-cancel-delete" data-action="cancel-delete">বাতিল</button>
+                <button class="dr-btn-confirm-delete" data-action="confirm-delete">স্থায়ীভাবে ডিলিট করুন</button>
+              </div>
+            </div>
+          `;
         }
 
         card.innerHTML = `
@@ -530,7 +631,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           });
         });
 
-        // approve
+        // approve (শুধু pending কার্ডে থাকবে)
         card.querySelector('[data-action="approve"]')?.addEventListener('click', async (e) => {
           e.target.disabled = true;
           const { error } = await verifyRider({ riderId: rider.id, decision: 'approve' });
@@ -542,18 +643,37 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           loadRiders();
         });
 
-        // reject flow
+        // reject/ইনঅ্যাকটিভ flow (pending ও approved দুই কার্ডেই থাকতে পারে)
         const rejectPanel = card.querySelector('.dr-reject-panel');
         card.querySelector('[data-action="show-reject"]')?.addEventListener('click', () => {
-          rejectPanel.classList.add('active');
+          rejectPanel?.classList.add('active');
         });
         card.querySelector('[data-action="cancel-reject"]')?.addEventListener('click', () => {
-          rejectPanel.classList.remove('active');
+          rejectPanel?.classList.remove('active');
         });
         card.querySelector('[data-action="confirm-reject"]')?.addEventListener('click', async (e) => {
-          const reason = rejectPanel.querySelector('input').value.trim();
+          const reason = rejectPanel?.querySelector('input')?.value.trim();
           e.target.disabled = true;
           const { error } = await verifyRider({ riderId: rider.id, decision: 'reject', rejectionReason: reason || null });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            return;
+          }
+          loadRiders();
+        });
+
+        // delete flow (approved ও rejected কার্ডে থাকবে)
+        const deletePanel = card.querySelector('.dr-delete-panel');
+        card.querySelector('[data-action="show-delete"]')?.addEventListener('click', () => {
+          deletePanel?.classList.add('active');
+        });
+        card.querySelector('[data-action="cancel-delete"]')?.addEventListener('click', () => {
+          deletePanel?.classList.remove('active');
+        });
+        card.querySelector('[data-action="confirm-delete"]')?.addEventListener('click', async (e) => {
+          e.target.disabled = true;
+          const { error } = await deleteRider({ riderId: rider.id });
           if (error) {
             alert(error);
             e.target.disabled = false;
