@@ -5,6 +5,13 @@
 // প্যাটার্ন অনুসরণ করে (admin/index.astro এর মতোই)।
 // ৩টা ট্যাব: পেন্ডিং (ডিফল্ট) / অ্যাপ্রুভড / রিজেক্টেড
 // Approve/Reject করলে admin/verify-rider API কল হয় (deliveryClient.js)
+//
+// বাগফিক্স: delivery_riders টেবিলে profiles এর দিকে ২টা FK আছে
+// (profile_id ও reviewed_by), তাই profiles(...) embed সিনট্যাক্স
+// ambiguous FK error দিচ্ছিল (silently fail, তালিকা খালি দেখাচ্ছিল
+// যদিও pending badge এ count ঠিকই আসছিল কারণ badge count query
+// join ছাড়া ছিল)। এখন profiles!delivery_riders_profile_id_fkey(...)
+// দিয়ে এক্সপ্লিসিটলি সঠিক FK বলে দেওয়া হলো।
 // ============================================================
 
 export const prerender = false;
@@ -429,11 +436,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     async function loadRiders() {
       const { data, error } = await supabase
         .from('delivery_riders')
-        .select('id, vehicle_type, photo_url, id_card_photo_url, verification_status, rejection_reason, created_at, profile_id, profiles(full_name, phone)')
+        .select('id, vehicle_type, photo_url, id_card_photo_url, verification_status, rejection_reason, created_at, profile_id, profiles!delivery_riders_profile_id_fkey(full_name, phone)')
         .order('created_at', { ascending: false });
 
       if (error) {
         console.error('রাইডার লোড এরর:', error.message);
+        riderEmpty.textContent = 'লোড করতে সমস্যা হয়েছে: ' + error.message;
+        riderEmpty.style.display = 'block';
         return;
       }
 
@@ -453,6 +462,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       riderList.innerHTML = '';
 
       if (list.length === 0) {
+        riderEmpty.textContent = 'এই ট্যাবে কোনো রাইডার নেই';
         riderEmpty.style.display = 'block';
         return;
       }
