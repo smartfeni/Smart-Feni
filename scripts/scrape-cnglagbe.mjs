@@ -8,8 +8,11 @@
 // উপজেলা ম্যাচ পেলে -> সরাসরি লাইভ (status: active)
 // উপজেলা ম্যাচ না পেলে (ফেনীর বাইরের এলাকা হতে পারে) -> upazila খালি,
 // status: pending রেখে সেভ হয়, ডিলিট হয় না — এডমিন পরে ম্যানুয়ালি
-// রিভিউ করে upazila বসিয়ে approve করতে পারবে (raw এলাকার টেক্সট
-// description এ থাকে, তাই বাদ পড়ার কারণ বোঝা যায়)
+// রিভিউ করে upazila বসিয়ে approve করতে পারবে
+//
+// আপডেট: scraper_blocklist চেক করে — এডমিন যেসব ফোন নম্বর ইচ্ছাকৃতভাবে
+// ডিলিট করেছে, সেগুলো upsert করার আগে বাদ দেওয়া হয় (পরের দিন আবার
+// ফিরে আসা আটকাতে)
 // ============================================================
 
 import { chromium } from 'playwright';
@@ -26,6 +29,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const SOURCE_URL = 'https://www.cnglagbe.com/directory';
+const SOURCE_NAME = 'cnglagbe';
 
 const VEHICLE_TYPES = [
   { filterText: 'সিএনজি', type: 'cng' },
@@ -53,7 +57,7 @@ function matchUpazila(areaText) {
       return upazila;
     }
   }
-  return null; // ফেনী জেলার বাইরের এলাকা হতে পারে
+  return null;
 }
 
 function parseDriversFromText(rawText) {
@@ -127,8 +131,6 @@ async function scrapeVehicleType(page, vehicleType) {
   return rawDrivers;
 }
 
-// upazila ম্যাচ পেলে active/লাইভ, না পেলে pending + upazila null
-// (কিন্তু কখনোই বাদ/ডিলিট হয় না — সব ডিটেইলস description এ থাকে)
 function buildListingRow(driver, vehicleType) {
   const upazila = matchUpazila(driver.area);
 
@@ -138,15 +140,30 @@ function buildListingRow(driver, vehicleType) {
     title: driver.name,
     description: driver.area,
     price: null,
-    upazila: upazila, // null হতে পারে
+    upazila: upazila,
     images: [],
     contact_phone: driver.phone,
     status: upazila ? 'active' : 'pending',
     is_reviewed: false,
     is_verified: false,
-    source: 'cnglagbe',
+    source: SOURCE_NAME,
     user_id: null,
   };
+}
+
+// এডমিন যেসব ফোন নম্বর ব্লক করেছে (ডিলিট করেছে) সেগুলো ফেচ করা
+async function fetchBlockedPhones() {
+  const { data, error } = await supabase
+    .from('scraper_blocklist')
+    .select('phone')
+    .eq('source', SOURCE_NAME);
+
+  if (error) {
+    console.error('ব্লকলিস্ট ফেচ করতে ব্যর্থ (তাই কিছুই বাদ যাবে না):', error.message);
+    return new Set();
+  }
+
+  return new Set((data || []).map((row) => row.phone));
 }
 
 async function main() {
@@ -179,18 +196,23 @@ async function main() {
     return true;
   });
 
-  const outOfFeniCount = uniqueRows.filter((r) => !r.upazila).length;
-  console.log(`ফেনীর বাইরের এলাকা (pending, upazila খালি): ${outOfFeniCount} টি`);
-  console.log(`মোট আপসার্ট হবে: ${uniqueRows.length} টি এন্ট্রি`);
+  const blockedPhones = await fetchBlockedPhones();
+  const finalRows = uniqueRows.filter((row) => !blockedPhones.has(row.contact_phone));
+  const blockedSkippedCount = uniqueRows.length - finalRows.length;
 
-  if (uniqueRows.length === 0) {
+  const outOfFeniCount = finalRows.filter((r) => !r.upazila).length;
+  console.log(`ব্লকলিস্টে থাকায় স্কিপ হয়েছে: ${blockedSkippedCount} টি`);
+  console.log(`ফেনীর বাইরের এলাকা (pending, upazila খালি): ${outOfFeniCount} টি`);
+  console.log(`মোট আপসার্ট হবে: ${finalRows.length} টি এন্ট্রি`);
+
+  if (finalRows.length === 0) {
     console.log('কোনো এন্ট্রি পাওয়া যায়নি — সাইটের স্ট্রাকচার বদলেছে কিনা চেক করা দরকার হতে পারে।');
     return;
   }
 
   const { error } = await supabase
     .from('listings')
-    .upsert(uniqueRows, { onConflict: 'source,contact_phone' });
+    .upsert(finalRows, { onConflict: 'source,contact_phone' });
 
   if (error) {
     console.error('Supabase upsert ব্যর্থ:', error.message);
