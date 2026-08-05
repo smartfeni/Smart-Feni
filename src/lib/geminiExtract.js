@@ -2,9 +2,13 @@
 // শেয়ার্ড Gemini Vision Extraction ফাংশন
 //
 // housing / recycle: একটা স্ক্রিনশট = একটা লিস্টিং (single object)
-// blood: একটা স্ক্রিনশট = একাধিক ডোনার (array) — উপজিলা ও ক্লাব
-//        নাম আলাদাভাবে অ্যাডমিনের কাছ থেকে নেওয়া হয়, তাই
-//        extraction শুধু নাম/ব্লাড গ্রুপ/ফোন বের করে
+// blood: একটা স্ক্রিনশট = একাধিক ডোনার (array)
+//
+// SUPPORTED_CATEGORIES হলো এই সিস্টেমের একমাত্র "সোর্স অফ ট্রুথ" —
+// telegram-webhook.js এবং admin/bot-chats.astro দুটোই এখান থেকে
+// ক্যাটাগরি লিস্ট নেয়। নতুন ক্যাটাগরি extraction সাপোর্ট যোগ করতে
+// চাইলে এখানে CATEGORY_CONFIG + CATEGORY_META তে একটা এন্ট্রি যোগ
+// করলেই বাকি জায়গায় automatically দেখাবে।
 //
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে: GEMINI_API_KEY, GEMINI_MODEL (ঐচ্ছিক)
 // ============================================================
@@ -69,15 +73,37 @@ const CATEGORY_CONFIG = {
       },
     },
   },
+
+  // নতুন ক্যাটাগরি extraction সাপোর্ট যোগ করতে চাইলে এখানে একটা
+  // নতুন এন্ট্রি যোগ করুন (উদাহরণ কমেন্ট আকারে):
+  // job: {
+  //   instruction: '...',
+  //   isArray: false,
+  //   schema: { ... },
+  // },
 };
+
+// প্রতিটা ক্যাটাগরির বাংলা লেবেল + ইমোজি — Telegram বাটন ও Admin UI তে দেখানোর জন্য
+const CATEGORY_META = {
+  housing: { label: 'বাসা ভাড়া', emoji: '🏠' },
+  recycle: { label: 'ক্রয়-বিক্রয়', emoji: '♻️' },
+  blood: { label: 'ব্লাড ডোনার', emoji: '🩸' },
+};
+
+// telegram-webhook.js ও admin/bot-chats.astro এই লিস্ট থেকে ক্যাটাগরি বাটন/চেকবক্স বানায়
+export const SUPPORTED_CATEGORIES = Object.keys(CATEGORY_CONFIG).map((id) => ({
+  id,
+  label: CATEGORY_META[id]?.label || id,
+  emoji: CATEGORY_META[id]?.emoji || '📋',
+}));
 
 /**
  * স্ক্রিনশট থেকে structured ডেটা extract করে।
  * @param {Object} params
  * @param {string} params.imageBase64
  * @param {string} params.mimeType
- * @param {'housing'|'blood'|'recycle'} params.category
- * @returns {Promise<Object|Array>} housing/recycle -> object, blood -> array
+ * @param {string} params.category
+ * @returns {Promise<Object|Array>}
  */
 export async function extractListingFromScreenshot({ imageBase64, mimeType, category }) {
   const config = CATEGORY_CONFIG[category];
@@ -123,10 +149,6 @@ export async function extractListingFromScreenshot({ imageBase64, mimeType, cate
 /**
  * housing/recycle: extract হওয়া single object + উপজিলা + সংগ্রহ করা
  * আসল ছবি -> `listings` টেবিলের row ফরম্যাটে রূপান্তর করে।
- * @param {Object} extracted
- * @param {'housing'|'recycle'} category
- * @param {string} upazila
- * @param {string[]} imageUrls - Storage এ আপলোড হওয়া আসল ছবির URL গুলো
  */
 export function buildListingRowFromExtraction(extracted, category, upazila, imageUrls = []) {
   const base = {
@@ -168,13 +190,10 @@ export function buildListingRowFromExtraction(extracted, category, upazila, imag
 
 /**
  * blood: extract হওয়া array + কমন উপজিলা/ক্লাব নাম -> `manual_blood_donors` rows
- * @param {Array} extractedArray
- * @param {string} upazila
- * @param {string} clubNameRaw
  */
 export function buildBloodDonorRows(extractedArray, upazila, clubNameRaw) {
   return extractedArray
-    .filter((d) => d.phone) // ফোন নাম্বার ছাড়া এন্ট্রি বাদ (unique constraint আছে)
+    .filter((d) => d.phone)
     .map((d) => ({
       name: d.name,
       phone: d.phone,
