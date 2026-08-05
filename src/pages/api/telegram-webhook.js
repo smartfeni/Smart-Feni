@@ -1,21 +1,14 @@
 // ============================================================
 // Telegram Webhook — স্ক্রিনশট থেকে লিস্টিং ইম্পোর্ট (multi-step)
-// + মাল্টি-চ্যাট সাপোর্ট: single ADMIN_CHAT_ID এর বদলে
-// `telegram_bot_chats` টেবিল থেকে অনুমোদিত চ্যাট লিস্ট চেক হয়
-// (moderator-দের নিজস্ব চ্যাট + category-ভিত্তিক ডেডিকেটেড চ্যাট,
-// কোড ডিপ্লয় ছাড়াই নতুন চ্যাট যোগ করা যায়)
+// + মাল্টি-চ্যাট সাপোর্ট: `telegram_bot_chats` টেবিল থেকে অনুমোদিত
+// চ্যাট লিস্ট চেক হয় (moderator + category-ভিত্তিক ডেডিকেটেড চ্যাট)
 //
 // অনুমোদিত না এমন চ্যাট থেকে মেসেজ এলে অটো-ডিটেক্ট করে pending
-// row হিসেবে সেভ হয় (is_active: false) — Admin panel এ
-// /admin/bot-chats পেজে দেখা যাবে, সেখান থেকে Activate করলেই কাজ শুরু
+// row হিসেবে সেভ হয় — Admin panel এ /admin/bot-chats পেজে
+// Approve করলেই কাজ শুরু
 //
-// সব ক্যাটাগরির কমন ফ্লো: ছবি -> ক্যাটাগরি বাটন (allowed_categories
-//   অনুযায়ী ফিল্টার হতে পারে) -> উপজিলা বাটন
-//   housing/recycle: -> extraction -> আসল ছবি (একাধিক) -> ✅ শেষ -> listings insert (status: pending)
-//   blood: -> ক্লাব নাম (টেক্সট রিপ্লাই) -> extraction (array) -> manual_blood_donors bulk insert
-//   (আগে থেকে থাকা ফোন নম্বরের status প্রিজার্ভ হয়)
-//
-// প্রতিটা এন্ট্রিতে submitted_via_label সেভ হয় (accountability)
+// ক্যাটাগরি লিস্ট geminiExtract.js এর SUPPORTED_CATEGORIES থেকে
+// আসে — নতুন ক্যাটাগরি যোগ হলে এখানে কিছু বদলাতে হবে না
 //
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে:
 // TELEGRAM_BOT_TOKEN, GEMINI_API_KEY,
@@ -27,6 +20,7 @@ import {
   extractListingFromScreenshot,
   buildListingRowFromExtraction,
   buildBloodDonorRows,
+  SUPPORTED_CATEGORIES,
 } from '../../lib/geminiExtract.js';
 
 export const prerender = false;
@@ -36,8 +30,9 @@ const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 const supabase = createClient(process.env.PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-const CATEGORY_LABELS = { housing: 'বাসা ভাড়া', blood: 'ব্লাড ডোনার', recycle: 'ক্রয়-বিক্রয়' };
-const CATEGORY_EMOJIS = { housing: '🏠', blood: '🩸', recycle: '♻️' };
+const CATEGORY_LABELS = Object.fromEntries(SUPPORTED_CATEGORIES.map((c) => [c.id, c.label]));
+const CATEGORY_EMOJIS = Object.fromEntries(SUPPORTED_CATEGORIES.map((c) => [c.id, c.emoji]));
+const ALL_CATEGORY_IDS = SUPPORTED_CATEGORIES.map((c) => c.id);
 
 const UPAZILA_LIST = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 
@@ -50,10 +45,6 @@ async function tg(method, body) {
   return res.json();
 }
 
-// চ্যাট আইডি টেবিলে অনুমোদিত+active আছে কিনা চেক করে, থাকলে config রিটার্ন করে।
-// না থাকলে একটা pending row অটো-তৈরি করে (Admin panel এ দেখা যাবে) এবং
-// প্রেরককে একটা তথ্যমূলক মেসেজ পাঠায় — কিন্তু একই চ্যাট থেকে বারবার
-// মেসেজ এলে বারবার pending row তৈরি না হয়ে যায় সেটা নিশ্চিত করা হয়
 async function getChatConfig(chatId, senderName) {
   const { data } = await supabase
     .from('telegram_bot_chats')
@@ -65,7 +56,6 @@ async function getChatConfig(chatId, senderName) {
     return data.is_active ? data : null;
   }
 
-  // এই চ্যাট আগে কখনো দেখা যায়নি — pending row তৈরি করা হচ্ছে
   const { error } = await supabase.from('telegram_bot_chats').insert({
     chat_id: chatId,
     label: senderName ? `${senderName} (অনুমোদন অপেক্ষমান)` : 'অজানা — অনুমোদন অপেক্ষমান',
@@ -86,9 +76,9 @@ async function getChatConfig(chatId, senderName) {
 
 function getAllowedCategories(chatConfig) {
   if (!chatConfig.allowed_categories || chatConfig.allowed_categories.length === 0) {
-    return ['housing', 'blood', 'recycle'];
+    return ALL_CATEGORY_IDS;
   }
-  return chatConfig.allowed_categories;
+  return chatConfig.allowed_categories.filter((c) => ALL_CATEGORY_IDS.includes(c));
 }
 
 async function downloadTelegramPhoto(fileId) {
@@ -113,7 +103,6 @@ async function uploadToStorage(buffer, mimeType, path) {
   return data.publicUrl;
 }
 
-// এই চ্যাটের সবচেয়ে সাম্প্রতিক 'চলমান' সেশন খুঁজে বের করে
 async function getActiveSession(chatId) {
   const { data } = await supabase
     .from('screenshot_imports')
@@ -137,13 +126,11 @@ function senderDisplayName(from) {
 async function handlePhotoMessage(message) {
   const chatId = String(message.chat.id);
   const chatConfig = await getChatConfig(chatId, senderDisplayName(message.from));
-  if (!chatConfig) return; // অনুমোদিত না বা inactive — চুপচাপ ইগনোর
+  if (!chatConfig) return;
 
   const activeSession = await getActiveSession(chatId);
   const largestPhoto = message.photo[message.photo.length - 1];
 
-  // housing/recycle "আসল ছবি" ধাপে থাকলে, নতুন সেশন না বানিয়ে
-  // এই ছবিটা extra_image_urls এ যোগ হবে
   if (activeSession && activeSession.step === 'awaiting_extra_images') {
     const { buffer, mimeType } = await downloadTelegramPhoto(largestPhoto.file_id);
     const path = `screenshot-imports/${activeSession.id}-${Date.now()}.${mimeType === 'image/png' ? 'png' : 'jpg'}`;
@@ -164,7 +151,6 @@ async function handlePhotoMessage(message) {
 
   const allowedCategories = getAllowedCategories(chatConfig);
 
-  // নতুন সেশন শুরু (FB পোস্টের স্ক্রিনশট)
   const { data: row, error } = await supabase
     .from('screenshot_imports')
     .insert({
@@ -207,7 +193,7 @@ async function handleTextMessage(message) {
   if (!chatConfig) return;
 
   const session = await getActiveSession(chatId);
-  if (!session || session.step !== 'awaiting_club_name') return; // অন্য সাধারণ মেসেজ, ইগনোর
+  if (!session || session.step !== 'awaiting_club_name') return;
 
   const clubNameRaw = message.text.trim();
 
@@ -222,7 +208,6 @@ async function handleTextMessage(message) {
       submitted_via_label: session.submitted_via_label,
     }));
 
-    // একই ব্যাচে ফোন নম্বর ডুপ্লিকেট থাকলে upsert ব্যর্থ হয়
     const dedupedMap = new Map();
     rawRows.forEach((row) => dedupedMap.set(row.phone, row));
     let rows = Array.from(dedupedMap.values());
@@ -236,7 +221,6 @@ async function handleTextMessage(message) {
       return;
     }
 
-    // আগে থেকে থাকা ফোন নম্বরগুলার status প্রিজার্ভ করা হচ্ছে
     const phones = rows.map((r) => r.phone);
     const { data: existingRows } = await supabase
       .from('manual_blood_donors')
