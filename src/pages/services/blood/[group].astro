@@ -4,20 +4,15 @@
 // পেজ: নির্দিষ্ট ব্লাড গ্রুপের ডোনার লিস্ট
 // URL: /services/blood/{slug} (যেমন /services/blood/a-positive)
 // দুই সোর্স মার্জ করে দেখানো হয়:
-//   ১. profiles (is_blood_donor=true, donor_disabled=false)
+//   ১. profiles (is_blood_donor=true, donor_disabled=false) — club_id
+//      লিংকড থাকলে (ইউজার নিজে প্রোফাইল এডিট থেকে বেছেছেন) clubs
+//      টেবিল থেকে নাম+লোগো এমবেড হয়ে আসে
 //   ২. manual_blood_donors (status='active') — club_id লিংকড থাকলে
-//      clubs টেবিল থেকে নাম+লোগো এমবেড হয়ে আসে (Supabase FK join),
-//      না থাকলে club_name_raw টেক্সট ফলব্যাক হিসেবে ব্যবহৃত হয়
-// ফিল্টার: উপজেলা (ড্রপডাউন) + সংগঠনের নাম (সার্চ বক্স) — একই রো
+//      একইভাবে clubs থেকে নাম+লোগো, না থাকলে club_name_raw ফলব্যাক
+// ফিল্টার: উপজেলা (ড্রপডাউন) + সংগঠনের নাম (সার্চ বক্স)
 // সর্টিং: শেয়ারড locationSort.js — initLocationReorder()
 // লাইক + রিপোর্ট সিস্টেম অপরিবর্তিত (contentEngagement.js, reportModal.js)
 // SSR পেজ — prerender = false আবশ্যক।
-//
-// UI REDESIGN (v3):
-// - কার্ড ফুটার রো: গ্রিড (1fr auto 1fr) — বামে লাইক, মাঝখানে বড়
-//   rectangular কল বাটন, ডানে ফ্ল্যাগ। আগের আলাদা engagement-row
-//   সরিয়ে সব এক রো-তে নিচে আনা হয়েছে।
-// - কল বাটন: rectangular (rounded-rect), বড়, স্পেস ভালোভাবে ফিল করে
 // ============================================================
 
 export const prerender = false;
@@ -49,7 +44,7 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
 const [{ data: profileDonors }, { data: manualDonors }] = await Promise.all([
   supabase
     .from('profiles')
-    .select('id, full_name, phone, blood_group, upazila, avatar_url')
+    .select('id, full_name, phone, blood_group, upazila, avatar_url, club_id, clubs(name, logo_image)')
     .eq('is_blood_donor', true)
     .eq('donor_disabled', false)
     .eq('blood_group', bloodGroup)
@@ -70,9 +65,9 @@ const normalizedProfileDonors = (profileDonors || []).map((d) => ({
   blood_group: d.blood_group,
   upazila: d.upazila,
   avatar_url: d.avatar_url,
-  clubDisplayName: null,
-  clubLogo: null,
-  isClubSourced: false,
+  clubDisplayName: d.clubs?.name || null,
+  clubLogo: d.clubs?.logo_image || null,
+  isClubSourced: Boolean(d.clubs),
 }));
 
 const normalizedManualDonors = (manualDonors || []).map((d) => ({
@@ -83,11 +78,9 @@ const normalizedManualDonors = (manualDonors || []).map((d) => ({
   blood_group: d.blood_group,
   upazila: d.upazila,
   avatar_url: null,
-  // ক্লাব লিংকড থাকলে clubs.name/logo_image প্রাধান্য পায়,
-  // না থাকলে স্ক্রিনশট থেকে আসা raw টেক্সট ফলব্যাক
   clubDisplayName: d.clubs?.name || d.club_name_raw || null,
   clubLogo: d.clubs?.logo_image || null,
-  isClubSourced: Boolean(d.club_name_raw || d.club_id),
+  isClubSourced: Boolean(d.clubs || d.club_name_raw),
 }));
 
 const donors = [...normalizedProfileDonors, ...normalizedManualDonors];
@@ -96,12 +89,11 @@ const hasDonors = donors.length > 0;
 
 <BaseLayout title={`${bloodGroup} রক্তদাতা | স্মার্ট ফেনী`}>
   <section class="page-header">
-    <div class="header-decor" aria-hidden="true"></div>
     <div class="container">
       <a href="/services/blood" class="back-link">
         <i class="fas fa-arrow-left"></i> সব গ্রুপ
       </a>
-      <h1><i class="fas fa-droplet drop-icon"></i> <span class="accent">{bloodGroup}</span> রক্তদাতা</h1>
+      <h1><span class="accent">{bloodGroup}</span> রক্তদাতা</h1>
       <p>ফেনীর {bloodGroup} গ্রুপের স্বেচ্ছাসেবী রক্তদাতাদের সাথে সরাসরি যোগাযোগ করুন</p>
     </div>
   </section>
@@ -109,17 +101,19 @@ const hasDonors = donors.length > 0;
   <section class="donor-section">
     <div class="container">
       {hasDonors && (
-        <div class="filters-row">
-          <div class="dropdown-wrap">
-            <button class="dropdown-btn" id="upazilaBtn" type="button">
-              <span id="upazilaLabel">উপজেলা</span>
-              <i class="fas fa-chevron-down"></i>
-            </button>
-            <div class="dropdown-panel" id="upazilaPanel">
-              <button class="dropdown-option active" data-value="all">সব উপজেলা</button>
-              {upazilas.map((u) => (
-                <button class="dropdown-option" data-value={u}>{u}</button>
-              ))}
+        <>
+          <div class="filter-dropdowns">
+            <div class="dropdown-wrap">
+              <button class="dropdown-btn" id="upazilaBtn" type="button">
+                <span id="upazilaLabel">উপজেলা</span>
+                <i class="fas fa-chevron-down"></i>
+              </button>
+              <div class="dropdown-panel" id="upazilaPanel">
+                <button class="dropdown-option active" data-value="all">সব উপজেলা</button>
+                {upazilas.map((u) => (
+                  <button class="dropdown-option" data-value={u}>{u}</button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -132,7 +126,7 @@ const hasDonors = donors.length > 0;
               autocomplete="off"
             />
           </div>
-        </div>
+        </>
       )}
 
       {donors.length === 0 ? (
@@ -166,6 +160,20 @@ const hasDonors = donors.length > 0;
                   <span class="blood-badge">{donor.blood_group || '—'}</span>
                 </div>
 
+                <div class="engagement-row" data-engagement-row>
+                  <span class="like-count-view" data-like-count-view>
+                    <i class="fas fa-heart"></i>
+                    <span data-like-count>0</span>
+                  </span>
+                  <button class="like-btn" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
+                    <i class="fas fa-heart"></i>
+                    <span class="like-count" data-like-count>0</span>
+                  </button>
+                  <button class="flag-btn" type="button" data-flag-btn aria-label="অভিযোগ করুন" style="display:none;">
+                    <i class="fas fa-flag"></i>
+                  </button>
+                </div>
+
                 <h3 class="donor-name">{donor.full_name}</h3>
 
                 {donor.upazila && (
@@ -177,30 +185,15 @@ const hasDonors = donors.length > 0;
                     {donor.clubLogo ? (
                       <img src={donor.clubLogo} alt={donor.clubDisplayName} class="club-badge-logo" />
                     ) : (
-                      <i class="fas fa-users club-badge-icon"></i>
+                      <i class="fas fa-users"></i>
                     )}
                     {donor.clubDisplayName}
                   </p>
                 )}
 
-                <div class="card-footer">
-                  <span class="like-count-view footer-left" data-like-count-view>
-                    <i class="fas fa-heart"></i>
-                    <span data-like-count>0</span>
-                  </span>
-                  <button class="like-btn footer-left" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
-                    <i class="fas fa-heart"></i>
-                    <span class="like-count" data-like-count>0</span>
-                  </button>
-
-                  <a href={`tel:${donor.phone}`} class="btn-contact-icon" aria-label="ফোন করুন">
-                    <i class="fas fa-phone"></i>
-                  </a>
-
-                  <button class="flag-btn footer-right" type="button" data-flag-btn aria-label="অভিযোগ করুন" style="display:none;">
-                    <i class="fas fa-flag"></i>
-                  </button>
-                </div>
+                <a href={`tel:${donor.phone}`} class="btn-contact">
+                  <i class="fas fa-phone"></i> যোগাযোগ করুন
+                </a>
               </div>
             ))}
           </div>
@@ -218,68 +211,30 @@ const hasDonors = donors.length > 0;
 
 <style>
   .page-header {
-    position: relative;
-    padding: 14px 0 22px;
-    background: linear-gradient(180deg, #FFFFFF 0%, #FFF7F4 100%);
+    padding: 40px 0 30px;
+    background: #fff;
     text-align: center;
-    overflow: hidden;
-  }
-
-  .header-decor {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      radial-gradient(120px 120px at 92% 10%, rgba(209, 67, 67, 0.10), transparent 70%),
-      radial-gradient(160px 160px at 6% 90%, rgba(255, 107, 53, 0.08), transparent 70%);
   }
 
   .back-link {
-    position: absolute;
-    top: 12px;
-    left: 16px;
-    z-index: 3;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: #fff;
-    border: 1px solid #EEF3F9;
-    color: #5A6E85;
+    color: #8FA0BC;
     text-decoration: none;
-    font-size: 0.78rem;
-    font-weight: 700;
-    padding: 8px 14px 8px 12px;
-    border-radius: 40px;
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.07);
-    transition: all 0.2s ease;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 16px;
   }
 
   .back-link:hover {
     color: #FF6B35;
-    border-color: #FFD9C7;
-  }
-
-  .container {
-    position: relative;
   }
 
   .page-header h1 {
-    position: relative;
-    z-index: 2;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    font-size: 1.9rem;
-    font-weight: 800;
-    margin: 0 0 6px;
-    padding-top: 2px;
-  }
-
-  .drop-icon {
-    color: #D14343;
-    font-size: 1.5rem;
-    filter: drop-shadow(0 4px 8px rgba(209, 67, 67, 0.25));
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 8px;
   }
 
   .page-header .accent {
@@ -287,29 +242,27 @@ const hasDonors = donors.length > 0;
   }
 
   .page-header p {
-    position: relative;
-    z-index: 2;
     color: #5A6E85;
-    font-size: 0.95rem;
-    max-width: 520px;
+    font-size: 1.05rem;
+    max-width: 560px;
     margin: 0 auto;
   }
 
   .donor-section {
-    padding: 22px 0 70px;
+    padding: 30px 0 70px;
     background: #F8FAFC;
   }
 
-  .filters-row {
+  .filter-dropdowns {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 20px;
+    gap: 12px;
+    margin-bottom: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
   }
 
   .dropdown-wrap {
     position: relative;
-    flex: 0 0 auto;
   }
 
   .dropdown-btn {
@@ -324,7 +277,6 @@ const hasDonors = donors.length > 0;
     font-weight: 600;
     font-size: 0.9rem;
     cursor: pointer;
-    white-space: nowrap;
     transition: all 0.2s ease;
   }
 
@@ -392,9 +344,9 @@ const hasDonors = donors.length > 0;
   }
 
   .club-search-wrap {
+    max-width: 420px;
+    margin: 0 auto 28px;
     position: relative;
-    flex: 1 1 auto;
-    min-width: 0;
   }
 
   .club-search-wrap i {
@@ -415,7 +367,6 @@ const hasDonors = donors.length > 0;
     font-size: 0.9rem;
     font-family: inherit;
     color: #1B2A4A;
-    box-sizing: border-box;
   }
 
   .club-search-wrap input:focus {
@@ -477,14 +428,14 @@ const hasDonors = donors.length > 0;
   .donor-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 16px;
+    gap: 20px;
     align-items: stretch;
   }
 
   .donor-card {
     background: #fff;
-    border-radius: 18px;
-    padding: 14px;
+    border-radius: 20px;
+    padding: 20px;
     border: 1px solid #EEF3F9;
     transition: all 0.25s ease;
     display: flex;
@@ -493,8 +444,8 @@ const hasDonors = donors.length > 0;
   }
 
   .donor-card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.07);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
   }
 
   .donor-card.hidden {
@@ -505,12 +456,12 @@ const hasDonors = donors.length > 0;
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
   }
 
   .donor-avatar {
-    width: 44px;
-    height: 44px;
+    width: 52px;
+    height: 52px;
     border-radius: 50%;
     background: #FFF0EA;
     display: flex;
@@ -528,85 +479,24 @@ const hasDonors = donors.length > 0;
 
   .donor-avatar i {
     color: #D14343;
-    font-size: 1.25rem;
+    font-size: 1.5rem;
   }
 
   .blood-badge {
     background: #FFF0EA;
     color: #D14343;
     font-weight: 800;
-    font-size: 0.85rem;
-    padding: 5px 12px;
+    font-size: 0.95rem;
+    padding: 6px 14px;
     border-radius: 12px;
     white-space: nowrap;
   }
 
-  .donor-name {
-    font-size: 0.98rem;
-    font-weight: 700;
-    color: #1B2A4A;
-    margin: 0 0 4px;
-  }
-
-  .donor-location {
-    color: #5A6E85;
-    font-size: 0.8rem;
-    margin: 0 0 6px;
+  .engagement-row {
     display: flex;
     align-items: center;
-    gap: 5px;
-  }
-
-  .donor-location i {
-    color: #FF6B35;
-    font-size: 0.72rem;
-  }
-
-  /* ক্লাব ব্যাজ: লোগো float:left, টেক্সট এর ২য় লাইন লোগোর নিচ থেকেই শুরু হয় */
-  .club-badge {
-    color: #1D6FE0;
-    font-size: 0.7rem;
-    line-height: 1.35;
-    font-weight: 700;
-    margin: 0 0 10px;
-    background: #E8F2FF;
-    padding: 5px 8px;
-    border-radius: 10px;
-    max-height: calc(0.7rem * 1.35 * 2 + 2px);
-    overflow: hidden;
-  }
-
-  .club-badge-logo {
-    float: left;
-    width: 15px;
-    height: 15px;
-    border-radius: 50%;
-    object-fit: cover;
-    margin: 1px 5px 0 0;
-  }
-
-  .club-badge-icon {
-    float: left;
-    font-size: 0.7rem;
-    margin: 2px 5px 0 0;
-  }
-
-  /* ফুটার রো: বামে লাইক, মাঝে বড় rectangular কল বাটন, ডানে ফ্ল্যাগ */
-  .card-footer {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    gap: 8px;
-    margin-top: auto;
-    padding-top: 8px;
-  }
-
-  .footer-left {
-    justify-self: start;
-  }
-
-  .footer-right {
-    justify-self: end;
+    justify-content: space-between;
+    margin-bottom: 12px;
   }
 
   .like-count-view {
@@ -614,15 +504,13 @@ const hasDonors = donors.length > 0;
     align-items: center;
     gap: 6px;
     color: #8FA0BC;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-weight: 700;
-    padding: 4px 10px;
-    background: #F4F7FC;
-    border-radius: 20px;
+    padding: 6px 12px;
   }
 
   .like-count-view i {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
   }
 
   .like-btn {
@@ -631,17 +519,17 @@ const hasDonors = donors.length > 0;
     gap: 6px;
     background: #F4F7FC;
     border: none;
-    padding: 4px 10px;
+    padding: 6px 12px;
     border-radius: 20px;
     color: #8FA0BC;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-weight: 700;
     cursor: pointer;
     transition: all 0.15s ease;
   }
 
   .like-btn i {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
   }
 
   .like-btn.liked {
@@ -663,10 +551,9 @@ const hasDonors = donors.length > 0;
     border: none;
     border-radius: 50%;
     color: #B0BCCB;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     cursor: pointer;
     transition: all 0.15s ease;
-    flex-shrink: 0;
   }
 
   .flag-btn:hover {
@@ -674,58 +561,83 @@ const hasDonors = donors.length > 0;
     color: #D14343;
   }
 
-  .btn-contact-icon {
+  .donor-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 6px;
+  }
+
+  .donor-location {
+    color: #5A6E85;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .donor-location i {
+    color: #FF6B35;
+    font-size: 0.75rem;
+  }
+
+  .club-badge {
+    color: #1D6FE0;
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    margin-top: -4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #E8F2FF;
+    padding: 6px 10px;
+    border-radius: 10px;
+    width: fit-content;
+  }
+
+  .club-badge-logo {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  .btn-contact {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 76px;
-    height: 46px;
-    padding: 0 22px;
-    border-radius: 14px;
-    background: #16A34A;
+    gap: 8px;
+    width: 100%;
+    background: #1B2A4A;
     color: #fff;
     text-decoration: none;
-    box-shadow: 0 8px 18px rgba(22, 163, 74, 0.32);
-    transition: all 0.2s ease;
+    padding: 12px;
+    border-radius: 40px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: background 0.2s ease;
+    margin-top: auto;
   }
 
-  .btn-contact-icon i {
-    font-size: 1.15rem;
-  }
-
-  .btn-contact-icon:hover {
-    background: #15803D;
-    transform: translateY(-1px);
+  .btn-contact:hover {
+    background: #FF6B35;
   }
 
   @media (max-width: 768px) {
     .donor-grid {
-      grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     }
 
     .page-header h1 {
-      font-size: 1.5rem;
-    }
-
-    .drop-icon {
-      font-size: 1.2rem;
+      font-size: 1.6rem;
     }
 
     .dropdown-btn {
-      padding: 10px 14px;
-      font-size: 0.82rem;
-    }
-
-    .back-link {
-      font-size: 0.72rem;
-      padding: 7px 12px 7px 10px;
-    }
-
-    .btn-contact-icon {
-      min-width: 64px;
-      height: 42px;
-      padding: 0 16px;
+      padding: 10px 16px;
+      font-size: 0.85rem;
     }
   }
 </style>
