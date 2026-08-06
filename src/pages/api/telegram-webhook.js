@@ -5,10 +5,10 @@
 //
 // অনুমোদিত না এমন চ্যাট থেকে মেসেজ এলে অটো-ডিটেক্ট করে pending
 // row হিসেবে সেভ হয় — Admin panel এ /admin/bot-chats পেজে
-// Approve করলেই কাজ শুরু
+// Approve করলেই কাজ শুরু। নতুন pending রিকোয়েস্ট এলে
+// notify_on_new_request=true থাকা চ্যাটগুলাতে নোটিফিকেশন যায়
 //
-// ক্যাটাগরি লিস্ট geminiExtract.js এর SUPPORTED_CATEGORIES থেকে
-// আসে — নতুন ক্যাটাগরি যোগ হলে এখানে কিছু বদলাতে হবে না
+// ক্যাটাগরি লিস্ট geminiExtract.js এর SUPPORTED_CATEGORIES থেকে আসে
 //
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে:
 // TELEGRAM_BOT_TOKEN, GEMINI_API_KEY,
@@ -45,6 +45,21 @@ async function tg(method, body) {
   return res.json();
 }
 
+// notify_on_new_request=true থাকা সব চ্যাটে নোটিফিকেশন পাঠায়
+async function notifyAdminsOfNewRequest(label, chatId) {
+  const { data: notifyChats } = await supabase
+    .from('telegram_bot_chats')
+    .select('chat_id')
+    .eq('notify_on_new_request', true)
+    .eq('is_active', true);
+
+  if (!notifyChats || notifyChats.length === 0) return;
+
+  const text = `🔔 নতুন Bot Chat অ্যাক্সেস রিকোয়েস্ট\n${label}\n(chat_id: ${chatId})\n\nAdmin panel > Bot Chats থেকে Approve করুন।`;
+
+  await Promise.all(notifyChats.map((c) => tg('sendMessage', { chat_id: c.chat_id, text })));
+}
+
 async function getChatConfig(chatId, senderName) {
   const { data } = await supabase
     .from('telegram_bot_chats')
@@ -56,12 +71,15 @@ async function getChatConfig(chatId, senderName) {
     return data.is_active ? data : null;
   }
 
+  const label = senderName ? `${senderName} (অনুমোদন অপেক্ষমান)` : 'অজানা — অনুমোদন অপেক্ষমান';
+
   const { error } = await supabase.from('telegram_bot_chats').insert({
     chat_id: chatId,
-    label: senderName ? `${senderName} (অনুমোদন অপেক্ষমান)` : 'অজানা — অনুমোদন অপেক্ষমান',
+    label,
     purpose: 'listing_import',
     allowed_categories: null,
     is_active: false,
+    notify_on_new_request: false,
   });
 
   if (!error) {
@@ -69,6 +87,7 @@ async function getChatConfig(chatId, senderName) {
       chat_id: chatId,
       text: '👋 আপনার অ্যাক্সেস রিকোয়েস্ট পাঠানো হয়েছে। অ্যাডমিন অনুমোদন করলে বট ব্যবহার করতে পারবেন।',
     });
+    await notifyAdminsOfNewRequest(label, chatId);
   }
 
   return null;
