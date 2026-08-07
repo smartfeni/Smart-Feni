@@ -1,3 +1,4 @@
+<!-- path: src/pages/admin/shops.astro -->
 ---
 // ============================================================
 // পেজ: অ্যাডমিন — শপ ম্যানেজমেন্ট (/admin/shops)
@@ -8,6 +9,10 @@
 //      shop_requests টেবিল থেকে pending রিকোয়েস্ট দেখায়)
 //   ৩. প্রতিটা শপে "ওউনার পরিবর্তন" বাটন — কোনো শপের owner_id
 //      অন্য existing ইউজার অ্যাকাউন্টে রিলিংক করার জন্য
+//   ৪. প্রতিটা শপে "ডিলিট" বাটন (২-ক্লিক কনফার্ম) — পার্মানেন্ট
+//      ডিলিট, /api/delete-shop.js এন্ডপয়েন্ট cascade delete করে
+//      (শপের online-shop listings + moderators রো + shops রো,
+//      আর ওউনারের profiles ফ্ল্যাগ রিসেট করে)
 // ============================================================
 
 export const prerender = false;
@@ -755,7 +760,68 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       toggleBtn.addEventListener('click', () => toggleActive(shop.id, !shop.is_active));
       actions.appendChild(toggleBtn);
 
+      // ===== ডিলিট বাটন — ২-ক্লিক কনফার্ম =====
+      const deleteBtn = document.createElement('button');
+      deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+      deleteBtn.title = 'শপ ডিলিট করুন';
+      deleteBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;width:34px;height:34px;border-radius:10px;cursor:pointer;flex-shrink:0;';
+      let deleteConfirming = false;
+      deleteBtn.addEventListener('click', () => {
+        if (!deleteConfirming) {
+          deleteConfirming = true;
+          deleteBtn.innerHTML = '<span style="font-size:0.68rem;font-weight:700;white-space:nowrap;">নিশ্চিত?</span>';
+          deleteBtn.style.width = 'auto';
+          deleteBtn.style.padding = '0 10px';
+          deleteBtn.style.background = '#D14343';
+          deleteBtn.style.color = '#fff';
+          setTimeout(() => {
+            if (deleteConfirming) {
+              deleteConfirming = false;
+              deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+              deleteBtn.style.width = '34px';
+              deleteBtn.style.padding = '0';
+              deleteBtn.style.background = '#FFF0EA';
+              deleteBtn.style.color = '#D14343';
+            }
+          }, 3000);
+          return;
+        }
+        deleteShop(shop, deleteBtn);
+      });
+      actions.appendChild(deleteBtn);
+
       return card;
+    }
+
+    async function deleteShop(shop, btn) {
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      btn.disabled = true;
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/delete-shop', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ shopId: shop.id }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          alert('ডিলিট ব্যর্থ: ' + (result.error || 'অজানা ত্রুটি'));
+          btn.innerHTML = '<i class="fas fa-trash"></i>';
+          btn.disabled = false;
+          return;
+        }
+
+        loadShops();
+      } catch (err) {
+        alert('নেটওয়ার্ক ত্রুটি: ' + err.message);
+        btn.innerHTML = '<i class="fas fa-trash"></i>';
+        btn.disabled = false;
+      }
     }
 
     let allShops = [];
