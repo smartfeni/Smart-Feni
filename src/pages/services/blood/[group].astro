@@ -4,9 +4,10 @@
 // পেজ: নির্দিষ্ট ব্লাড গ্রুপের ডোনার লিস্ট
 // URL: /services/blood/{slug} (যেমন /services/blood/a-positive)
 // দুই সোর্স মার্জ করে দেখানো হয়:
-//   ১. profiles (is_blood_donor=true, donor_disabled=false) — club_id
-//      লিংকড থাকলে (ইউজার প্রোফাইল এডিট থেকে ক্লাব বেছেছেন) clubs
-//      টেবিল থেকে নাম+লোগো এমবেড হয়ে আসে
+//   ১. profiles (is_blood_donor=true, donor_disabled=false) — এখন
+//      club_id লিংকড থাকলে (ইউজার প্রোফাইল এডিট থেকে ক্লাব বেছেছেন)
+//      clubs টেবিল থেকে নাম+লোগো এমবেড হয়ে আসে (আগে এখানে ক্লাব
+//      সাপোর্ট ছিল না, hardcoded null/false ছিল)
 //   ২. manual_blood_donors (status='active') — club_id লিংকড থাকলে
 //      clubs টেবিল থেকে নাম+লোগো এমবেড হয়ে আসে (Supabase FK join),
 //      না থাকলে club_name_raw টেক্সট ফলব্যাক হিসেবে ব্যবহৃত হয়
@@ -17,16 +18,23 @@
 //
 // UI REDESIGN (v3):
 // - কার্ড ফুটার রো: গ্রিড (1fr auto 1fr) — বামে লাইক, মাঝখানে বড়
-//   rectangular কল বাটন, ডানে ফ্ল্যাগ।
+//   rectangular কল বাটন, ডানে ফ্ল্যাগ। আগের আলাদা engagement-row
+//   সরিয়ে সব এক রো-তে নিচে আনা হয়েছে।
 // - কল বাটন: rectangular (rounded-rect), বড়, স্পেস ভালোভাবে ফিল করে
 //
-// বাগ ফিক্স (নতুন — ক্লাব সার্চ): manual_blood_donors club_id দিয়ে
+// বাগ ফিক্স ১ (ক্লাব সার্চ): manual_blood_donors club_id দিয়ে
 // অফিসিয়াল ক্লাবের সাথে লিংকড হলে সার্চ/ডিসপ্লে অফিসিয়াল নামকে
 // (clubs.name) অগ্রাধিকার দিত, কিন্তু ইমপোর্টের সময় ব্যবহৃত রও নাম
-// (club_name_raw) হারিয়ে যেত সার্চ থেকে — অফিসিয়াল নাম বানানে/শব্দে
-// ভিন্ন হলে পুরনো নাম দিয়ে সার্চ করলে কার্ড পাওয়া যেত না। এখন
-// data-club-name এ দুটো নামই (অফিসিয়াল + রও ইমপোর্ট) একসাথে রাখা
-// হচ্ছে, তাই যেকোনো একটা দিয়ে সার্চ করলেই মিলবে।
+// (club_name_raw) সার্চ থেকে হারিয়ে যেত। এখন data-club-name এ
+// দুটো নামই (অফিসিয়াল + রও ইমপোর্ট) একসাথে রাখা হচ্ছে।
+//
+// বাগ ফিক্স ২ (য়া/নুক্তা ইউনিকোড): বাংলা কিছু কনজাংক্ট ক্যারেক্টার
+// (যেমন "য়া") composed/decomposed দুই ফর্মেই এনকোড হতে পারে —
+// ডাটাবেজে এক ফর্মে সেভ, সার্চ ইনপুটে আরেক ফর্মে টাইপ হলে .includes()
+// মিলত না। এখন সার্চ টার্ম ও ডেটা দুটোই .normalize('NFC') দিয়ে
+// একই ফর্মে কনভার্ট করে কম্পেয়ার হচ্ছে (৩ জায়গায়: সার্ভার-সাইড
+// attribute বসানোর সময়, ক্লায়েন্ট ইনপুট নেওয়ার সময়, ফিল্টার
+// কম্পেয়ারের সময়)।
 // ============================================================
 
 export const prerender = false;
@@ -163,7 +171,7 @@ const hasDonors = donors.length > 0;
               <div
                 class="donor-card"
                 data-upazila-name={donor.upazila || ''}
-                data-club-name={`${donor.clubDisplayName || ''} ${donor.clubNameRaw || ''}`.toLowerCase().trim()}
+                data-club-name={`${donor.clubDisplayName || ''} ${donor.clubNameRaw || ''}`.toLowerCase().trim().normalize('NFC')}
                 data-target-type={donor.targetType}
                 data-target-id={donor.id}
               >
@@ -775,7 +783,8 @@ const hasDonors = donors.length > 0;
 
     cards.forEach((card) => {
       const matchesUpazila = activeUpazila === 'all' || card.dataset.upazilaName === activeUpazila;
-      const matchesClub = clubSearchTerm === '' || (card.dataset.clubName || '').includes(clubSearchTerm);
+      const clubName = (card.dataset.clubName || '').normalize('NFC');
+      const matchesClub = clubSearchTerm === '' || clubName.includes(clubSearchTerm);
 
       if (matchesUpazila && matchesClub) {
         card.classList.remove('hidden');
@@ -825,7 +834,7 @@ const hasDonors = donors.length > 0;
   const clubSearchInput = document.getElementById('clubSearchInput');
   if (clubSearchInput) {
     clubSearchInput.addEventListener('input', (e) => {
-      clubSearchTerm = e.target.value.trim().toLowerCase();
+      clubSearchTerm = e.target.value.trim().toLowerCase().normalize('NFC');
       applyFilters();
     });
   }
