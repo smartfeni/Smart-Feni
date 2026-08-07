@@ -4,10 +4,9 @@
 // পেজ: নির্দিষ্ট ব্লাড গ্রুপের ডোনার লিস্ট
 // URL: /services/blood/{slug} (যেমন /services/blood/a-positive)
 // দুই সোর্স মার্জ করে দেখানো হয়:
-//   ১. profiles (is_blood_donor=true, donor_disabled=false) — এখন
-//      club_id লিংকড থাকলে (ইউজার প্রোফাইল এডিট থেকে ক্লাব বেছেছেন)
-//      clubs টেবিল থেকে নাম+লোগো এমবেড হয়ে আসে (আগে এখানে ক্লাব
-//      সাপোর্ট ছিল না, hardcoded null/false ছিল)
+//   ১. profiles (is_blood_donor=true, donor_disabled=false) — club_id
+//      লিংকড থাকলে (ইউজার প্রোফাইল এডিট থেকে ক্লাব বেছেছেন) clubs
+//      টেবিল থেকে নাম+লোগো এমবেড হয়ে আসে
 //   ২. manual_blood_donors (status='active') — club_id লিংকড থাকলে
 //      clubs টেবিল থেকে নাম+লোগো এমবেড হয়ে আসে (Supabase FK join),
 //      না থাকলে club_name_raw টেক্সট ফলব্যাক হিসেবে ব্যবহৃত হয়
@@ -18,9 +17,16 @@
 //
 // UI REDESIGN (v3):
 // - কার্ড ফুটার রো: গ্রিড (1fr auto 1fr) — বামে লাইক, মাঝখানে বড়
-//   rectangular কল বাটন, ডানে ফ্ল্যাগ। আগের আলাদা engagement-row
-//   সরিয়ে সব এক রো-তে নিচে আনা হয়েছে।
+//   rectangular কল বাটন, ডানে ফ্ল্যাগ।
 // - কল বাটন: rectangular (rounded-rect), বড়, স্পেস ভালোভাবে ফিল করে
+//
+// বাগ ফিক্স (নতুন — ক্লাব সার্চ): manual_blood_donors club_id দিয়ে
+// অফিসিয়াল ক্লাবের সাথে লিংকড হলে সার্চ/ডিসপ্লে অফিসিয়াল নামকে
+// (clubs.name) অগ্রাধিকার দিত, কিন্তু ইমপোর্টের সময় ব্যবহৃত রও নাম
+// (club_name_raw) হারিয়ে যেত সার্চ থেকে — অফিসিয়াল নাম বানানে/শব্দে
+// ভিন্ন হলে পুরনো নাম দিয়ে সার্চ করলে কার্ড পাওয়া যেত না। এখন
+// data-club-name এ দুটো নামই (অফিসিয়াল + রও ইমপোর্ট) একসাথে রাখা
+// হচ্ছে, তাই যেকোনো একটা দিয়ে সার্চ করলেই মিলবে।
 // ============================================================
 
 export const prerender = false;
@@ -91,6 +97,9 @@ const normalizedManualDonors = (manualDonors || []).map((d) => ({
   clubDisplayName: d.clubs?.name || d.club_name_raw || null,
   clubLogo: d.clubs?.logo_image || null,
   isClubSourced: Boolean(d.clubs || d.club_name_raw),
+  // রও ইমপোর্ট নাম আলাদাভাবে রাখা হচ্ছে — লিংক হওয়ার পর
+  // অফিসিয়াল ক্লাব নাম ভিন্ন হলেও রও নাম দিয়ে যেন সার্চে পাওয়া যায়
+  clubNameRaw: d.club_name_raw || null,
 }));
 
 const donors = [...normalizedProfileDonors, ...normalizedManualDonors];
@@ -154,7 +163,7 @@ const hasDonors = donors.length > 0;
               <div
                 class="donor-card"
                 data-upazila-name={donor.upazila || ''}
-                data-club-name={(donor.clubDisplayName || '').toLowerCase()}
+                data-club-name={`${donor.clubDisplayName || ''} ${donor.clubNameRaw || ''}`.toLowerCase().trim()}
                 data-target-type={donor.targetType}
                 data-target-id={donor.id}
               >
