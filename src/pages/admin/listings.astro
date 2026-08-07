@@ -4,8 +4,9 @@
 // ট্যাব ১: সব ক্যাটাগরির লিস্টিং (listings টেবিল)
 // ট্যাব ২: ম্যানুয়াল ব্লাড ডোনার রিভিউ + বাল্ক ক্লাব-লিংক (manual_blood_donors টেবিল)
 // ট্যাব ৩: অভিযোগ/রিপোর্ট (content_reports টেবিল)
-// আপডেট: cnglagbe সোর্সের লিস্টিং ডিলিট করলে ফোন নম্বর scraper_blocklist এ
-//         যোগ হয়, যাতে পরের দিন স্ক্র্যাপার আবার একই এন্ট্রি ফিরিয়ে না আনে
+// আপডেট: cnglagbe সোর্সের লিস্টিং ডিলিট/Approve/Reject/Edit করলে ফোন নম্বর
+//         scraper_blocklist এ যোগ হয়, যাতে পরের দিন স্ক্র্যাপার আবার একই
+//         এন্ট্রি ওভাররাইট/পুনরায় তৈরি না করে
 // ============================================================
 
 export const prerender = false;
@@ -418,6 +419,22 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' });
     }
 
+    // স্ক্র্যাপ করা লিস্টিং-এ কোনো এডমিন একশন (approve/reject/edit/delete)
+    // নেওয়ার আগে ফোন নম্বরটা scraper_blocklist এ upsert করে — যাতে
+    // স্ক্র্যাপার পরের রানে এই এন্ট্রি আর ওভাররাইট/রিক্রিয়েট না করে
+    async function lockFromScraper(listing) {
+      if (!listing.source || !listing.contact_phone) return;
+      const { error } = await supabase
+        .from('scraper_blocklist')
+        .upsert(
+          { source: listing.source, phone: listing.contact_phone },
+          { onConflict: 'source,phone' }
+        );
+      if (error) {
+        console.error('ব্লকলিস্টে যোগ করতে ব্যর্থ:', error.message);
+      }
+    }
+
     // ============================================================
     // ট্যাব সুইচিং
     // ============================================================
@@ -510,6 +527,11 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         saveBtn.textContent = 'সেভ হচ্ছে...';
         saveBtn.disabled = true;
 
+        // এডিট করে সেভ করলে ফোন নম্বর ব্লকলিস্টে যোগ — স্ক্র্যাপার যেন এই
+        // এডিটেড ডেটা আর ওভাররাইট না করে (পুরনো ফোন নম্বর দিয়ে ব্লক করা
+        // হচ্ছে, কারণ cnglagbe সাইটে এন্ট্রিটা এই নম্বরেই থাকবে)
+        await lockFromScraper(listing);
+
         const updates = {
           title: form.querySelector('[data-field="title"]').value.trim(),
           description: form.querySelector('[data-field="description"]').value.trim(),
@@ -586,7 +608,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         const approveBtn = document.createElement('button');
         approveBtn.textContent = 'Approve করুন';
         approveBtn.style.cssText = 'background:#1B7A3C;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
-        approveBtn.addEventListener('click', () => updateStatus(listing.id, 'active'));
+        approveBtn.addEventListener('click', () => updateStatusAndLock(listing, 'active'));
         actionsWrap.appendChild(approveBtn);
       }
 
@@ -594,7 +616,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         const rejectBtn = document.createElement('button');
         rejectBtn.textContent = 'Reject করুন';
         rejectBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
-        rejectBtn.addEventListener('click', () => updateStatus(listing.id, 'rejected'));
+        rejectBtn.addEventListener('click', () => updateStatusAndLock(listing, 'rejected'));
         actionsWrap.appendChild(rejectBtn);
       }
 
@@ -646,8 +668,6 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
           deleteBtn.style.cssText = 'background:#D14343;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
           return;
         }
-        // পুরো listing অবজেক্ট পাস করা হচ্ছে (শুধু id না), কারণ ব্লকলিস্টে
-        // যোগ করার জন্য source + contact_phone লাগবে
         deleteListing(listing);
       });
       actionsWrap.appendChild(deleteBtn);
@@ -661,8 +681,21 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       loadListings();
     }
 
+    // পুরনো updateStatus() রেখে দেওয়া হলো (অন্য কোথাও রেফারেন্স থাকলে
+    // যেন না ভাঙে), কিন্তু approve/reject বাটন এখন updateStatusAndLock ব্যবহার করে
     async function updateStatus(id, status) {
       const { error } = await supabase.from('listings').update({ status }).eq('id', id);
+      if (error) { alert('আপডেট ব্যর্থ: ' + error.message); return; }
+      loadListings();
+    }
+
+    // Approve/Reject করার সাথে সাথে ফোন নম্বর ব্লকলিস্টে যোগ করে দেয় (যদি
+    // সোর্স-ট্যাগড হয়) — যাতে স্ক্র্যাপার এই এন্ট্রি আর নতুন করে upsert
+    // করে এডমিনের সিদ্ধান্ত ওভাররাইট না করে দেয়
+    async function updateStatusAndLock(listing, status) {
+      await lockFromScraper(listing);
+
+      const { error } = await supabase.from('listings').update({ status }).eq('id', listing.id);
       if (error) { alert('আপডেট ব্যর্থ: ' + error.message); return; }
       loadListings();
     }
@@ -676,21 +709,10 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     // ============================================================
     // ডিলিট — সোর্স-ট্যাগড (স্ক্র্যাপড) লিস্টিং হলে আগে ফোন নম্বর
     // scraper_blocklist এ যোগ করে, যাতে পরের স্ক্র্যাপ রানে এই এন্ট্রি
-    // আর ফিরিয়ে আনা না হয়। insert ব্যর্থ হলেও ডিলিট থামানো হয় না
-    // (ব্লকলিস্ট এন্ট্রি সবচেয়ে গুরুত্বপূর্ণ কাজ না, ডিলিটটাই আসল কাজ)
+    // আর ফিরিয়ে আনা না হয়
     // ============================================================
     async function deleteListing(listing) {
-      if (listing.source && listing.contact_phone) {
-        const { error: blockError } = await supabase
-          .from('scraper_blocklist')
-          .upsert(
-            { source: listing.source, phone: listing.contact_phone },
-            { onConflict: 'source,phone' }
-          );
-        if (blockError) {
-          console.error('ব্লকলিস্টে যোগ করতে ব্যর্থ:', blockError.message);
-        }
-      }
+      await lockFromScraper(listing);
 
       const { error } = await supabase.from('listings').delete().eq('id', listing.id);
       if (error) { alert('ডিলিট ব্যর্থ: ' + error.message); return; }
