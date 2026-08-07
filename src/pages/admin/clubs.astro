@@ -1,4 +1,15 @@
+<!-- path: src/pages/admin/clubs.astro -->
 ---
+// ============================================================
+// পেজ: অ্যাডমিন — ক্লাব ম্যানেজমেন্ট (/admin/clubs)
+// verify/active টগল, পার্মানেন্ট ডিলিট — আগে থেকেই ছিল।
+//
+// আপডেট (নতুন): "ওউনার পরিবর্তন" বাটন + মোডাল যোগ হলো —
+// admin/shops.astro এর reassign প্যাটার্নের সাথে কনসিস্টেন্ট।
+// নতুন /api/reassign-club-owner.js এন্ডপয়েন্ট ব্যবহার করে,
+// ফোন নম্বর দিয়ে exact-match সার্চ করে existing ইউজার খুঁজে
+// owner_id রিলিংক করে (profiles.is_club_owner/club_id সহ sync)।
+// ============================================================
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
@@ -73,6 +84,21 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
   <div class="toast-container" id="toastContainer"></div>
 
+  <!-- ===== ওউনার পরিবর্তন মোডাল ===== -->
+  <div class="modal-overlay" id="reassignOverlay">
+    <div class="modal-box">
+      <button class="modal-close" id="reassignClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      <h2 class="modal-title"><i class="fas fa-user-pen"></i> ওউনার পরিবর্তন</h2>
+      <p class="modal-club-name" id="reassignClubName"></p>
+      <p class="modal-message" id="reassignMessage"></p>
+      <label class="form-label">নতুন ওউনারের ফোন নম্বর (তার অ্যাকাউন্ট আগে থেকে থাকতে হবে)</label>
+      <input type="text" class="form-input" id="reassignPhoneInput" placeholder="01xxxxxxxxx" />
+      <button class="create-btn" id="reassignSubmitBtn" type="button">
+        <i class="fas fa-check"></i> <span id="reassignBtnText">পরিবর্তন করুন</span>
+      </button>
+    </div>
+  </div>
+
   <style>
     .admin-page { min-height: 60vh; padding: 32px 0 80px; }
     .admin-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
@@ -109,6 +135,18 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .toast.fade-out { animation: toastOut 0.25s ease forwards; }
     @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes toastOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(12px); } }
+
+    /* ===== ওউনার পরিবর্তন মোডাল (admin/shops.astro এর সাথে কনসিস্টেন্ট) ===== */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
+    .modal-overlay.open { display: flex; }
+    .modal-box { background: #fff; border-radius: 20px; padding: 26px 22px; max-width: 420px; width: 100%; position: relative; }
+    .modal-close { position: absolute; top: 16px; right: 16px; background: #F4F7FC; border: none; width: 32px; height: 32px; border-radius: 50%; color: #5A6E85; cursor: pointer; }
+    .modal-title { font-size: 1.05rem; font-weight: 700; color: #1B2A4A; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .modal-title i { color: #FF6B35; }
+    .modal-club-name { font-size: 0.85rem; color: #8FA0BC; margin-bottom: 14px; }
+    .modal-message { display: none; font-size: 0.82rem; font-weight: 600; padding: 10px 14px; border-radius: 12px; margin-bottom: 12px; text-align: center; }
+    .modal-message.show-error { display: block; background: #FFF0EA; color: #D14343; }
+    .modal-message.show-success { display: block; background: #EAFBF0; color: #1B7A3C; }
   </style>
 
   <script>
@@ -162,6 +200,89 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       createMessage.textContent = '';
       createMessage.className = 'form-message';
     }
+
+    // ===== ওউনার পরিবর্তন মোডাল =====
+    const reassignOverlay = document.getElementById('reassignOverlay');
+    const reassignClose = document.getElementById('reassignClose');
+    const reassignClubName = document.getElementById('reassignClubName');
+    const reassignMessage = document.getElementById('reassignMessage');
+    const reassignPhoneInput = document.getElementById('reassignPhoneInput');
+    const reassignSubmitBtn = document.getElementById('reassignSubmitBtn');
+    const reassignBtnText = document.getElementById('reassignBtnText');
+    let reassignTargetClub = null;
+
+    function showModalMsg(text, type = 'error') {
+      reassignMessage.textContent = text;
+      reassignMessage.className = `modal-message ${type === 'error' ? 'show-error' : 'show-success'}`;
+    }
+
+    function clearModalMsg() {
+      reassignMessage.textContent = '';
+      reassignMessage.className = 'modal-message';
+    }
+
+    function openReassign(club) {
+      reassignTargetClub = club;
+      reassignClubName.textContent = club.name;
+      reassignPhoneInput.value = '';
+      clearModalMsg();
+      reassignOverlay.classList.add('open');
+    }
+
+    function closeReassign() {
+      reassignOverlay.classList.remove('open');
+      reassignTargetClub = null;
+    }
+
+    reassignClose?.addEventListener('click', closeReassign);
+    reassignOverlay?.addEventListener('click', (e) => {
+      if (e.target === reassignOverlay) closeReassign();
+    });
+
+    reassignSubmitBtn?.addEventListener('click', async () => {
+      clearModalMsg();
+      const newPhone = reassignPhoneInput.value.trim();
+
+      if (!newPhone) {
+        showModalMsg('ফোন নম্বর দিন');
+        return;
+      }
+
+      if (!currentAccessToken) {
+        showModalMsg('সেশন পাওয়া যায়নি, আবার লগইন করুন');
+        return;
+      }
+
+      reassignBtnText.textContent = 'পরিবর্তন হচ্ছে...';
+      reassignSubmitBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/reassign-club-owner', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentAccessToken}`,
+          },
+          body: JSON.stringify({ clubId: reassignTargetClub.id, newOwnerPhone: newPhone }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          showModalMsg(result.error || 'পরিবর্তন ব্যর্থ');
+        } else {
+          showModalMsg('ওউনার পরিবর্তন হয়েছে ✓', 'success');
+          setTimeout(() => {
+            closeReassign();
+            loadClubs();
+          }, 800);
+        }
+      } catch (err) {
+        showModalMsg('নেটওয়ার্ক ত্রুটি: ' + err.message);
+      }
+
+      reassignBtnText.textContent = 'পরিবর্তন করুন';
+      reassignSubmitBtn.disabled = false;
+    });
 
     createBtn?.addEventListener('click', async () => {
       clearMsg();
@@ -238,6 +359,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       verifyBtn.addEventListener('click', () => toggleVerified(club.id, !club.is_verified));
       actions.appendChild(verifyBtn);
 
+      const reassignBtn = document.createElement('button');
+      reassignBtn.innerHTML = '<i class="fas fa-user-pen"></i>';
+      reassignBtn.title = 'ওউনার পরিবর্তন';
+      reassignBtn.style.cssText = 'background:#EFF6FF;color:#2563EB;border:none;width:34px;height:34px;border-radius:10px;cursor:pointer;flex-shrink:0;';
+      reassignBtn.addEventListener('click', () => openReassign(club));
+      actions.appendChild(reassignBtn);
+
       const toggleBtn = document.createElement('button');
       toggleBtn.textContent = club.is_active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন';
       toggleBtn.style.cssText = club.is_active
@@ -255,8 +383,6 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       return card;
     }
 
-    // ===== এখন RLS-নির্ভর সরাসরি টেবিল আপডেট না, বরং সিকিউর RPC
-    // ফাংশন কল করা হয় — এটা RLS-এর যেকোনো silent-block সমস্যা এড়িয়ে যায় =====
     async function toggleActive(id, newValue) {
       const { error } = await supabase.rpc('admin_set_club_active', {
         target_club_id: id,
