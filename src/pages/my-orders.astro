@@ -1,22 +1,14 @@
 ---
 // ============================================================
 // পেজ: /my-orders — কাস্টমারের নিজের অর্ডার হিস্ট্রি ও স্ট্যাটাস
-// ট্র্যাকিং (Pending → Confirmed → Delivered / Cancelled)
-// orders.shop_id → shops.id সরাসরি FK, তাই shop তথ্য embed করা যায়
+// ট্র্যাকিং
 //
-// আপডেট (Delivery Hero ইন্টিগ্রেশন): shop orders এর পাশাপাশি
-// delivery_requests (বারগেইনিং ডেলিভারি রিকোয়েস্ট) একই লিস্টে
-// created_at অনুযায়ী মার্জ করে দেখানো হয়। status অনুযায়ী দুই ধরনের
-// রেন্ডার: ফাংশনাল (open/negotiating/confirmed/delivered/disputed)
-// ও স্থায়ী হিস্ট্রি (completed/cancelled)।
-//
-// বাগফিক্স (এই সেশন): delivery_riders টেবিলে profiles এর দিকে ২টা
-// FK আছে (profile_id ও reviewed_by), তাই profiles(...) embed
-// ambiguous FK এরর দিচ্ছিল ("লোড করা যায়নি")। এখন
-// profiles!delivery_riders_profile_id_fkey(...) দিয়ে এক্সপ্লিসিটলি
-// সঠিক FK বলে দেওয়া হলো। একই কারণে accepted_rider:delivery_riders
-// embed এও delivery_requests_accepted_rider_id_fkey এক্সপ্লিসিট
-// করা হলো।
+// আপডেট (এই সেশন): 
+//   - পেজ লোডে expireRequests() silent কল (১ ঘণ্টা পার হওয়া
+//     ওপেন রিকোয়েস্ট auto-cancel)
+//   - প্রতি ১৫ সেকেন্ডে silent auto-refresh (ম্যানুয়াল রিফ্রেশ
+//     ছাড়াই বারগেইন আপডেট দেখা যাবে)
+//   - open/negotiating কার্ডে "রিকোয়েস্ট বাতিল করুন" বাটন
 // ============================================================
 
 export const prerender = false;
@@ -376,6 +368,18 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       margin-right: 4px;
     }
 
+    .delivery-expiry-note {
+      font-size: 0.7rem;
+      color: #B8860B;
+      background: #FFF4E0;
+      padding: 6px 10px;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
     .asking-price-box {
       display: flex;
       justify-content: space-between;
@@ -494,6 +498,28 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       color: #9AA8BC;
       font-size: 0.78rem;
       padding: 12px 0;
+    }
+
+    .btn-cancel-request {
+      width: 100%;
+      background: #FFF0EA;
+      color: #D14343;
+      border: none;
+      padding: 11px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn-cancel-request:hover {
+      background: #D14343;
+      color: #fff;
     }
 
     .btn-received {
@@ -640,7 +666,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase.js';
-    import { customerRespond, markReceived, submitReview, uploadPaymentProof, raiseDispute } from '../lib/deliveryClient.js';
+    import { customerRespond, markReceived, submitReview, uploadPaymentProof, raiseDispute, cancelRequest, expireRequests } from '../lib/deliveryClient.js';
 
     const loadingState = document.getElementById('loadingState');
     const loginRequired = document.getElementById('loginRequired');
@@ -655,9 +681,19 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     const DELIVERY_STEP_LABELS = { open: 'রিকোয়েস্ট', confirmed: 'কনফার্মড', completed: 'সম্পন্ন' };
 
     let currentUserId = null;
+    let refreshTimer = null;
 
     function formatDate(iso) {
       return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function formatMinutesLeft(expiresAt) {
+      if (!expiresAt) return null;
+      const diffMs = new Date(expiresAt).getTime() - Date.now();
+      if (diffMs <= 0) return null;
+      const mins = Math.ceil(diffMs / 60000);
+      if (mins >= 60) return `${Math.ceil(mins / 60)} ঘণ্টা বাকি`;
+      return `${mins} মিনিট বাকি`;
     }
 
     // ============ SHOP ORDER স্টেপার (অপরিবর্তিত) ============
@@ -687,7 +723,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         return `<div class="disputed-note"><i class="fas fa-triangle-exclamation"></i> এডমিন পর্যালোচনা করছে</div>`;
       }
       let mapped = status;
-      if (status === 'delivered') mapped = 'confirmed'; // delivered ধাপটা confirmed ও completed এর মাঝে দেখাবে
+      if (status === 'delivered') mapped = 'confirmed';
       const currentIndex = DELIVERY_STEPS.indexOf(mapped === 'open' ? 'open' : mapped);
       let dotsHtml = '';
       DELIVERY_STEPS.forEach((step, i) => {
@@ -757,6 +793,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       `;
 
       if (req.status === 'open' || req.status === 'negotiating') {
+        const minutesLeft = formatMinutesLeft(req.expires_at);
+        if (minutesLeft) {
+          bodyHtml += `<span class="delivery-expiry-note"><i class="fas fa-hourglass-half"></i> ${minutesLeft}, তারপর অটো বাতিল হবে</span>`;
+        }
         bodyHtml += `<div class="asking-price-box"><span>বর্তমান আস্কিং প্রাইস</span><span>৳${req.current_price}</span></div>`;
 
         if (offers.length === 0) {
@@ -784,6 +824,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           });
           bodyHtml += `</div>`;
         }
+
+        bodyHtml += `<button class="btn-cancel-request" data-request-id="${req.id}"><i class="fas fa-ban"></i> রিকোয়েস্ট বাতিল করুন</button>`;
       } else if (req.status === 'confirmed') {
         bodyHtml += `
           <div class="order-contact-row">
@@ -865,6 +907,19 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           }
           refreshOrders();
         });
+      });
+
+      // রিকোয়েস্ট বাতিল
+      card.querySelector('.btn-cancel-request')?.addEventListener('click', async (e) => {
+        if (!confirm('রিকোয়েস্টটি বাতিল করতে চাও?')) return;
+        e.target.disabled = true;
+        const { error } = await cancelRequest({ requestId: req.id });
+        if (error) {
+          alert(error);
+          e.target.disabled = false;
+          return;
+        }
+        refreshOrders();
       });
 
       // রিসিভড বাটন
@@ -976,7 +1031,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       });
     }
 
-    async function loadOrders(userId) {
+    async function loadOrders(userId, { silent = false } = {}) {
       const [ordersRes, deliveryRes, reviewsRes] = await Promise.all([
         supabase
           .from('orders')
@@ -998,19 +1053,21 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         supabase.from('delivery_reviews').select('request_id').eq('customer_profile_id', userId),
       ]);
 
-      loadingState.style.display = 'none';
-      ordersContent.style.display = 'block';
+      if (!silent) {
+        loadingState.style.display = 'none';
+        ordersContent.style.display = 'block';
+      }
 
       if (ordersRes.error || deliveryRes.error) {
-        console.error('অর্ডার লোড এরর:', ordersRes.error?.message, deliveryRes.error?.message);
-        ordersContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${ordersRes.error?.message || deliveryRes.error?.message || ''}</p>`;
+        if (!silent) {
+          console.error('অর্ডার লোড এরর:', ordersRes.error?.message, deliveryRes.error?.message);
+          ordersContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${ordersRes.error?.message || deliveryRes.error?.message || ''}</p>`;
+        }
         return;
       }
 
       const reviewedRequestIds = new Set((reviewsRes.data || []).map((r) => r.request_id));
 
-      // প্রতিটা delivery request এ শুধু নিজের সাথে সম্পর্কিত (pending/negotiating) অফারগুলা রাখা,
-      // closed_by_other/accepted/rejected থ্রেড লুকানো (UI ক্লিন রাখতে)
       const deliveryRequests = (deliveryRes.data || []).map((req) => ({
         ...req,
         delivery_offers: (req.delivery_offers || []).filter((o) => ['pending', 'negotiating'].includes(o.status)),
@@ -1033,8 +1090,20 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       }
 
       currentUserId = session.user.id;
+
+      // silent housekeeping — expired ওপেন রিকোয়েস্ট বাতিল
+      await expireRequests();
       await loadOrders(currentUserId);
+
+      // প্রতি ১৫ সেকেন্ডে silent auto-refresh (লোডিং স্পিনার ছাড়াই)
+      refreshTimer = setInterval(() => {
+        loadOrders(currentUserId, { silent: true });
+      }, 15000);
     }
+
+    window.addEventListener('beforeunload', () => {
+      if (refreshTimer) clearInterval(refreshTimer);
+    });
 
     init();
   </script>
