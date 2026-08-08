@@ -1,20 +1,12 @@
-<!-- path: src/pages/delivery-hero.astro -->
 ---
 // ============================================================
 // পেজ: /delivery-hero — ডেলিভারি হিরো (রাইডার) ড্যাশবোর্ড
-// আগে এই পুরো সেকশন profile/edit.astro-তে ছিল, এখন আলাদা পেজে
-// সরানো হলো (HamburgerMenu-র "ডেলিভারি হিরো" আইটেম এখন এখানে
-// পয়েন্ট করে, রাইডার হলেই দেখা যায়)।
 //
-// লজিক অপরিবর্তিত (delivery_riders টেবিল, riderRespond/
-// confirmDelivery via deliveryClient.js), শুধু UI সম্পূর্ণ
-// রিডিজাইন করা হয়েছে — বিশেষ করে "ওপেন রিকোয়েস্ট"/বারগেইন কার্ড:
-//   - দাম এখন সবচেয়ে বড়/প্রধান হাইলাইট
-//   - vehicle badge এখন orange-tinted (ব্র্যান্ড থিমের সাথে মিল)
-//   - "accept করুন" → "গ্রহণ করুন"
-//   - counter-offer ইনপুট এখন smooth expand (max-height transition)
-//   - কার্ডে হালকা shadow+border, আইকন সহ বাটন, my-offer এখন
-//     pill/badge স্টাইলে
+// আপডেট (এই সেশন):
+//   - expireRequests() silent কল + প্রতি ১৫ সেকেন্ডে auto-refresh
+//   - "চলমান ডেলিভারি" কার্ডে এখন কাস্টমারের নাম+কল+হোয়াটসঅ্যাপ
+//     দেখা যাবে (mutual reveal — শুধু confirmed/delivered অবস্থায়,
+//     ঠিক কাস্টমার সাইডে রাইডারের তথ্য দেখানোর মতোই)
 // ============================================================
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
@@ -109,811 +101,912 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       </div>
     </div>
   </section>
-</BaseLayout>
 
-<style is:global>
-  .dh-section {
-    padding: 40px 0 70px;
-    background: #F8FAFC;
-    min-height: 60vh;
-  }
+  <style is:global>
+    .dh-section {
+      padding: 40px 0 70px;
+      background: #F8FAFC;
+      min-height: 60vh;
+    }
+
+    .dh-container {
+      max-width: 520px;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 24px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .auth-gate {
+      background: #fff;
+      border-radius: 20px;
+      padding: 50px 24px;
+      text-align: center;
+      border: 1px dashed #E5EAF0;
+    }
+
+    .auth-gate i {
+      font-size: 2rem;
+      color: #D7E0EC;
+      margin-bottom: 12px;
+    }
+
+    .auth-gate p {
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 6px;
+    }
+
+    .not-rider-hint {
+      font-size: 0.8rem;
+      color: #9AA8BC;
+    }
+
+    .edit-message {
+      display: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin-bottom: 14px;
+      text-align: center;
+    }
+
+    .edit-message.show-error {
+      display: block;
+      background: #FFF0EA;
+      color: #D14343;
+    }
+
+    .edit-message.show-success {
+      display: block;
+      background: #EAFBF0;
+      color: #1B7A3C;
+    }
 
-  .dh-container {
-    max-width: 520px;
-  }
-
-  .back-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: #5A6E85;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 0.88rem;
-    margin-bottom: 24px;
-  }
-
-  .back-link:hover {
-    color: #FF6B35;
-  }
-
-  .auth-gate {
-    background: #fff;
-    border-radius: 20px;
-    padding: 50px 24px;
-    text-align: center;
-    border: 1px dashed #E5EAF0;
-  }
-
-  .auth-gate i {
-    font-size: 2rem;
-    color: #D7E0EC;
-    margin-bottom: 12px;
-  }
-
-  .auth-gate p {
-    font-weight: 700;
-    color: #1B2A4A;
-    margin-bottom: 6px;
-  }
-
-  .not-rider-hint {
-    font-size: 0.8rem;
-    color: #9AA8BC;
-  }
-
-  .edit-message {
-    display: none;
-    font-size: 0.82rem;
-    font-weight: 600;
-    padding: 10px 14px;
-    border-radius: 12px;
-    margin-bottom: 14px;
-    text-align: center;
-  }
-
-  .edit-message.show-error {
-    display: block;
-    background: #FFF0EA;
-    color: #D14343;
-  }
-
-  .edit-message.show-success {
-    display: block;
-    background: #EAFBF0;
-    color: #1B7A3C;
-  }
-
-  .dh-card {
-    background: #fff;
-    border-radius: 20px;
-    padding: 24px 22px;
-    margin-bottom: 16px;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
-  }
-
-  /* ===== স্ট্যাটাস কার্ড (pending/rejected) ===== */
-  .dh-status-card {
-    text-align: center;
-  }
-
-  .dh-status-icon {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5rem;
-    margin: 0 auto 14px;
-  }
-
-  .dh-status-icon.pending {
-    background: #FFF4E0;
-    color: #B8860B;
-  }
-
-  .dh-status-icon.rejected {
-    background: #FFF0EA;
-    color: #D14343;
-  }
-
-  .dh-status-card h3 {
-    font-size: 1.05rem;
-    font-weight: 800;
-    color: #1B2A4A;
-    margin-bottom: 8px;
-  }
-
-  .dh-status-card p {
-    font-size: 0.85rem;
-    color: #5A6E85;
-    line-height: 1.5;
-    margin-bottom: 4px;
-  }
-
-  .dh-status-contact {
-    margin-top: 10px;
-    font-size: 0.8rem;
-  }
-
-  .dh-status-contact a {
-    color: #FF6B35;
-    font-weight: 700;
-    text-decoration: none;
-  }
-
-  /* ===== অনলাইন/অফলাইন টগল ===== */
-  .dh-toggle-card {
-    padding-bottom: 18px;
-  }
-
-  .dh-status-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-  }
-
-  .dh-status-label {
-    font-size: 0.78rem;
-    color: #8FA0BC;
-    font-weight: 600;
-    margin-bottom: 4px;
-  }
-
-  .dh-status-text {
-    font-size: 0.92rem;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .dh-status-text i {
-    font-size: 0.6rem;
-  }
-
-  .dh-status-text.online {
-    color: #16A34A;
-  }
-
-  .dh-status-text.offline {
-    color: #94A3B8;
-  }
-
-  .dh-toggle-switch {
-    position: relative;
-    display: inline-block;
-    width: 52px;
-    height: 28px;
-    flex-shrink: 0;
-    cursor: pointer;
-  }
-
-  .dh-toggle-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-
-  .dh-toggle-slider {
-    position: absolute;
-    inset: 0;
-    background: #D7E0EC;
-    border-radius: 40px;
-    transition: 0.25s;
-  }
-
-  .dh-toggle-slider::before {
-    content: '';
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 22px;
-    height: 22px;
-    background: #fff;
-    border-radius: 50%;
-    transition: 0.25s;
-  }
-
-  .dh-toggle-switch input:checked + .dh-toggle-slider {
-    background: #4ADE80;
-  }
-
-  .dh-toggle-switch input:checked + .dh-toggle-slider::before {
-    transform: translateX(24px);
-  }
-
-  /* ===== স্ট্যাটস গ্রিড ===== */
-  .dh-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    margin-bottom: 20px;
-  }
-
-  .dh-stat-box {
-    background: #fff;
-    border-radius: 16px;
-    padding: 16px 8px;
-    text-align: center;
-    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
-  }
-
-  .dh-stat-icon {
-    display: block;
-    color: #FF6B35;
-    font-size: 1rem;
-    margin-bottom: 6px;
-  }
-
-  .dh-stat-value {
-    display: block;
-    font-size: 1.15rem;
-    font-weight: 800;
-    color: #1B2A4A;
-    margin-bottom: 2px;
-  }
-
-  .dh-stat-label {
-    font-size: 0.64rem;
-    color: #9AA8BC;
-    font-weight: 600;
-  }
-
-  .dh-section-heading {
-    font-size: 0.9rem;
-    font-weight: 800;
-    color: #1B2A4A;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 22px 4px 12px;
-  }
-
-  .dh-section-heading i {
-    color: #FF6B35;
-    font-size: 0.8rem;
-  }
-
-  .dh-empty-note {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    text-align: center;
-    color: #B0BCCB;
-    font-size: 0.82rem;
-    background: #fff;
-    border-radius: 16px;
-    padding: 30px 20px;
-  }
-
-  .dh-empty-note i {
-    font-size: 1.5rem;
-    color: #D7E0EC;
-  }
-
-  /* ============================================================
-     ওপেন রিকোয়েস্ট / বারগেইন কার্ড — রিডিজাইনড
-     ============================================================ */
-  .dh-req-card {
-    background: #fff;
-    border-radius: 18px;
-    padding: 16px;
-    margin-bottom: 12px;
-    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
-    border: 1px solid #F0F3F8;
-  }
-
-  .dh-req-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 10px;
-    gap: 10px;
-  }
-
-  .dh-req-price-wrap {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .dh-req-price-label {
-    font-size: 0.64rem;
-    color: #9AA8BC;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    margin-bottom: 1px;
-  }
-
-  .dh-req-price {
-    font-size: 1.35rem;
-    font-weight: 800;
-    color: #FF6B35;
-    line-height: 1.1;
-  }
-
-  .dh-req-vehicle-badge {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.68rem;
-    font-weight: 700;
-    padding: 5px 11px;
-    border-radius: 20px;
-    background: #FFF0EA;
-    color: #FF6B35;
-    margin-top: 2px;
-  }
-
-  .dh-req-desc {
-    font-size: 0.84rem;
-    color: #1B2A4A;
-    font-weight: 500;
-    line-height: 1.5;
-    margin-bottom: 8px;
-  }
-
-  .dh-req-area {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.75rem;
-    color: #8FA0BC;
-    font-weight: 600;
-    margin-bottom: 12px;
-  }
-
-  .dh-req-area i {
-    color: #FF6B35;
-  }
-
-  .dh-req-my-offer {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.76rem;
-    font-weight: 700;
-    color: #1B7A3C;
-    background: #EAFBF0;
-    padding: 6px 12px;
-    border-radius: 20px;
-    margin-bottom: 12px;
-  }
-
-  .dh-req-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .dh-req-actions button {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    border: none;
-    padding: 11px;
-    border-radius: 12px;
-    font-size: 0.82rem;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: inherit;
-    transition: all 0.15s ease;
-  }
-
-  .btn-dh-accept {
-    background: #16A34A;
-    color: #fff;
-  }
-
-  .btn-dh-accept:hover {
-    background: #128a3e;
-  }
-
-  .btn-dh-counter {
-    background: #F8FAFC;
-    color: #1B2A4A;
-    border: 1.5px solid #EEF3F9 !important;
-  }
-
-  .btn-dh-counter:hover {
-    border-color: #FF6B35 !important;
-    color: #FF6B35;
-  }
-
-  .btn-dh-counter.active {
-    background: #FFF0EA;
-    border-color: #FFD3BC !important;
-    color: #FF6B35;
-  }
-
-  /* কাউন্টার-অফার ইনপুট — smooth expand */
-  .dh-counter-row {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows 0.25s ease;
-  }
-
-  .dh-counter-row.active {
-    grid-template-rows: 1fr;
-    margin-top: 10px;
-  }
-
-  .dh-counter-row-inner {
-    overflow: hidden;
-    display: flex;
-    gap: 8px;
-  }
-
-  .dh-counter-row input {
-    flex: 1;
-    border: 1.5px solid #E5EAF0;
-    border-radius: 12px;
-    padding: 10px 14px;
-    font-size: 0.86rem;
-    font-family: inherit;
-    outline: none;
-    background: #FBFCFE;
-    transition: border-color 0.2s ease;
-  }
-
-  .dh-counter-row input:focus {
-    border-color: #FF6B35;
-    background: #fff;
-  }
-
-  .dh-counter-row button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #FF6B35;
-    color: #fff;
-    border: none;
-    padding: 0 18px;
-    border-radius: 12px;
-    font-size: 0.86rem;
-    font-weight: 700;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-
-  .dh-counter-row button:hover {
-    background: #e85a2a;
-  }
-
-  /* ===== চলমান ডেলিভারি কার্ড ===== */
-  .dh-active-card {
-    background: #EAFBF0;
-    border: 1px solid #C8ECD5;
-    border-radius: 18px;
-    padding: 16px;
-    margin-bottom: 12px;
-  }
-
-  .dh-active-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.76rem;
-    font-weight: 700;
-    color: #1B7A3C;
-    margin-bottom: 8px;
-  }
-
-  .dh-active-status i {
-    font-size: 0.55rem;
-  }
-
-  .dh-active-price {
-    font-size: 1.1rem;
-    font-weight: 800;
-    color: #1B2A4A;
-    margin: 4px 0 2px;
-  }
-
-  .btn-confirm-delivery {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    background: #1B7A3C;
-    color: #fff;
-    border: none;
-    padding: 12px;
-    border-radius: 12px;
-    font-size: 0.84rem;
-    font-weight: 700;
-    cursor: pointer;
-    margin-top: 10px;
-  }
-
-  .btn-confirm-delivery:hover {
-    background: #145c2d;
-  }
-
-  @media (max-width: 480px) {
     .dh-card {
-      padding: 20px 16px;
+      background: #fff;
+      border-radius: 20px;
+      padding: 24px 22px;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+    }
+
+    /* ===== স্ট্যাটাস কার্ড (pending/rejected) ===== */
+    .dh-status-card {
+      text-align: center;
+    }
+
+    .dh-status-icon {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      margin: 0 auto 14px;
+    }
+
+    .dh-status-icon.pending {
+      background: #FFF4E0;
+      color: #B8860B;
+    }
+
+    .dh-status-icon.rejected {
+      background: #FFF0EA;
+      color: #D14343;
+    }
+
+    .dh-status-card h3 {
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      margin-bottom: 8px;
+    }
+
+    .dh-status-card p {
+      font-size: 0.85rem;
+      color: #5A6E85;
+      line-height: 1.5;
+      margin-bottom: 4px;
+    }
+
+    .dh-status-contact {
+      margin-top: 10px;
+      font-size: 0.8rem;
+    }
+
+    .dh-status-contact a {
+      color: #FF6B35;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    /* ===== অনলাইন/অফলাইন টগল ===== */
+    .dh-toggle-card {
+      padding-bottom: 18px;
+    }
+
+    .dh-status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .dh-status-label {
+      font-size: 0.78rem;
+      color: #8FA0BC;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .dh-status-text {
+      font-size: 0.92rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dh-status-text i {
+      font-size: 0.6rem;
+    }
+
+    .dh-status-text.online {
+      color: #16A34A;
+    }
+
+    .dh-status-text.offline {
+      color: #94A3B8;
+    }
+
+    .dh-toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 52px;
+      height: 28px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .dh-toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .dh-toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #D7E0EC;
+      border-radius: 40px;
+      transition: 0.25s;
+    }
+
+    .dh-toggle-slider::before {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 22px;
+      height: 22px;
+      background: #fff;
+      border-radius: 50%;
+      transition: 0.25s;
+    }
+
+    .dh-toggle-switch input:checked + .dh-toggle-slider {
+      background: #4ADE80;
+    }
+
+    .dh-toggle-switch input:checked + .dh-toggle-slider::before {
+      transform: translateX(24px);
+    }
+
+    /* ===== স্ট্যাটস গ্রিড ===== */
+    .dh-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .dh-stat-box {
+      background: #fff;
       border-radius: 16px;
-    }
-  }
-</style>
-
-<script>
-  import { supabase } from '../lib/supabase.js';
-  import { riderRespond, confirmDelivery } from '../lib/deliveryClient.js';
-
-  const authGate = document.getElementById('authGate');
-  const notRiderGate = document.getElementById('notRiderGate');
-  const dhContent = document.getElementById('dhContent');
-
-  const riderPendingCard = document.getElementById('riderPendingCard');
-  const riderRejectedCard = document.getElementById('riderRejectedCard');
-  const riderRejectedReason = document.getElementById('riderRejectedReason');
-  const riderCard = document.getElementById('riderCard');
-  const riderMessage = document.getElementById('riderMessage');
-  const riderStatusText = document.getElementById('riderStatusText');
-  const riderOnlineToggle = document.getElementById('riderOnlineToggle');
-  const riderStatCompleted = document.getElementById('riderStatCompleted');
-  const riderStatEarned = document.getElementById('riderStatEarned');
-  const riderStatRating = document.getElementById('riderStatRating');
-  const riderActiveDeliverySection = document.getElementById('riderActiveDeliverySection');
-  const riderActiveDeliveryList = document.getElementById('riderActiveDeliveryList');
-  const riderOpenRequestsList = document.getElementById('riderOpenRequestsList');
-  const riderOpenRequestsEmpty = document.getElementById('riderOpenRequestsEmpty');
-
-  let currentUserId = null;
-  let currentRiderRow = null;
-
-  function showMsg(el, text, type = 'error') {
-    if (!el) return;
-    el.textContent = text;
-    el.className = `edit-message ${type === 'error' ? 'show-error' : 'show-success'}`;
-  }
-
-  function clearMsg(el) {
-    if (!el) return;
-    el.textContent = '';
-    el.className = 'edit-message';
-  }
-
-  function renderStatus(el, isOnline) {
-    el.className = `dh-status-text ${isOnline ? 'online' : 'offline'}`;
-    el.innerHTML = isOnline
-      ? '<i class="fas fa-circle"></i> <span>অনলাইন — কাস্টমাররা আপনাকে দেখতে পাচ্ছেন</span>'
-      : '<i class="fas fa-circle"></i> <span>অফলাইন — কাস্টমাররা আপনাকে দেখছেন না</span>';
-  }
-
-  function hideAllRiderCards() {
-    riderPendingCard.style.display = 'none';
-    riderRejectedCard.style.display = 'none';
-    riderCard.style.display = 'none';
-  }
-
-  async function loadRiderSection() {
-    const { data: riderRow } = await supabase
-      .from('delivery_riders')
-      .select('*')
-      .eq('profile_id', currentUserId)
-      .maybeSingle();
-
-    if (!riderRow) {
-      dhContent.style.display = 'none';
-      notRiderGate.style.display = 'block';
-      return;
+      padding: 16px 8px;
+      text-align: center;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
     }
 
-    dhContent.style.display = 'block';
-    notRiderGate.style.display = 'none';
-    hideAllRiderCards();
-
-    currentRiderRow = riderRow;
-
-    if (riderRow.verification_status === 'pending') {
-      riderPendingCard.style.display = 'block';
-      return;
+    .dh-stat-icon {
+      display: block;
+      color: #FF6B35;
+      font-size: 1rem;
+      margin-bottom: 6px;
     }
 
-    if (riderRow.verification_status === 'rejected') {
-      riderRejectedReason.textContent = riderRow.rejection_reason || 'যাচাই করতে সমস্যা হয়েছে';
-      riderRejectedCard.style.display = 'block';
-      return;
+    .dh-stat-value {
+      display: block;
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      margin-bottom: 2px;
     }
 
-    // approved
-    riderCard.style.display = 'block';
-    riderOnlineToggle.checked = riderRow.is_active;
-    renderStatus(riderStatusText, riderRow.is_active);
-    riderStatCompleted.textContent = riderRow.total_completed || 0;
-    riderStatEarned.textContent = `৳${riderRow.total_earned || 0}`;
-    riderStatRating.textContent = riderRow.avg_rating ? `${riderRow.avg_rating} ★` : '—';
-
-    await loadActiveDeliveries(riderRow.id);
-    await loadOpenRequests(riderRow.vehicle_type);
-  }
-
-  // ===== অনলাইন/অফলাইন টগল =====
-  riderOnlineToggle?.addEventListener('change', async () => {
-    const isActive = riderOnlineToggle.checked;
-    renderStatus(riderStatusText, isActive);
-    clearMsg(riderMessage);
-
-    const { error } = await supabase
-      .from('delivery_riders')
-      .update({ is_active: isActive })
-      .eq('id', currentRiderRow.id);
-
-    if (error) {
-      showMsg(riderMessage, 'স্ট্যাটাস আপডেট ব্যর্থ: ' + error.message);
-      riderOnlineToggle.checked = !isActive;
-      renderStatus(riderStatusText, !isActive);
-      return;
+    .dh-stat-label {
+      font-size: 0.64rem;
+      color: #9AA8BC;
+      font-weight: 600;
     }
 
-    currentRiderRow.is_active = isActive;
-  });
-
-  // ===== চলমান ডেলিভারি =====
-  async function loadActiveDeliveries(riderId) {
-    const { data: activeRequests } = await supabase
-      .from('delivery_requests')
-      .select('id, description, upazila, area_detail, final_price, status')
-      .eq('accepted_rider_id', riderId)
-      .in('status', ['confirmed', 'delivered'])
-      .order('created_at', { ascending: false });
-
-    riderActiveDeliveryList.innerHTML = '';
-
-    if (!activeRequests || activeRequests.length === 0) {
-      riderActiveDeliverySection.style.display = 'none';
-      return;
+    .dh-section-heading {
+      font-size: 0.9rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 22px 4px 12px;
     }
 
-    riderActiveDeliverySection.style.display = 'block';
+    .dh-section-heading i {
+      color: #FF6B35;
+      font-size: 0.8rem;
+    }
 
-    activeRequests.forEach((req) => {
-      const card = document.createElement('div');
-      card.className = 'dh-active-card';
+    .dh-empty-note {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      text-align: center;
+      color: #B0BCCB;
+      font-size: 0.82rem;
+      background: #fff;
+      border-radius: 16px;
+      padding: 30px 20px;
+    }
 
-      const statusLabel = req.status === 'confirmed' ? 'কনফার্মড — ডেলিভারি চলছে' : 'কাস্টমার রিসিভড মার্ক করেছে';
+    .dh-empty-note i {
+      font-size: 1.5rem;
+      color: #D7E0EC;
+    }
 
-      card.innerHTML = `
-        <p class="dh-active-status"><i class="fas fa-circle"></i> ${statusLabel}</p>
-        <p class="dh-req-desc">${req.description || ''}</p>
-        <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.upazila || ''} — ${req.area_detail || ''}</p>
-        <p class="dh-active-price">৳${req.final_price || 0}</p>
-        ${req.status === 'delivered' ? `<button class="btn-confirm-delivery" data-request-id="${req.id}"><i class="fas fa-check"></i> ডেলিভারি কনফার্ম করুন</button>` : ''}
-      `;
+    /* ============================================================
+       ওপেন রিকোয়েস্ট / বারগেইন কার্ড
+       ============================================================ */
+    .dh-req-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+      border: 1px solid #F0F3F8;
+    }
 
-      card.querySelector('.btn-confirm-delivery')?.addEventListener('click', async (e) => {
-        e.target.disabled = true;
-        const { error } = await confirmDelivery({ requestId: req.id });
-        if (error) {
-          alert(error);
-          e.target.disabled = false;
-          return;
+    .dh-req-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 10px;
+      gap: 10px;
+    }
+
+    .dh-req-price-wrap {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .dh-req-price-label {
+      font-size: 0.64rem;
+      color: #9AA8BC;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 1px;
+    }
+
+    .dh-req-price {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #FF6B35;
+      line-height: 1.1;
+    }
+
+    .dh-req-vehicle-badge {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 5px 11px;
+      border-radius: 20px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      margin-top: 2px;
+    }
+
+    .dh-req-desc {
+      font-size: 0.84rem;
+      color: #1B2A4A;
+      font-weight: 500;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+
+    .dh-req-area {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.75rem;
+      color: #8FA0BC;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .dh-req-area i {
+      color: #FF6B35;
+    }
+
+    .dh-req-my-offer {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #1B7A3C;
+      background: #EAFBF0;
+      padding: 6px 12px;
+      border-radius: 20px;
+      margin-bottom: 12px;
+    }
+
+    .dh-req-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dh-req-actions button {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: none;
+      padding: 11px;
+      border-radius: 12px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+
+    .btn-dh-accept {
+      background: #16A34A;
+      color: #fff;
+    }
+
+    .btn-dh-accept:hover {
+      background: #128a3e;
+    }
+
+    .btn-dh-counter {
+      background: #F8FAFC;
+      color: #1B2A4A;
+      border: 1.5px solid #EEF3F9 !important;
+    }
+
+    .btn-dh-counter:hover {
+      border-color: #FF6B35 !important;
+      color: #FF6B35;
+    }
+
+    .btn-dh-counter.active {
+      background: #FFF0EA;
+      border-color: #FFD3BC !important;
+      color: #FF6B35;
+    }
+
+    /* কাউন্টার-অফার ইনপুট — smooth expand */
+    .dh-counter-row {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.25s ease;
+    }
+
+    .dh-counter-row.active {
+      grid-template-rows: 1fr;
+      margin-top: 10px;
+    }
+
+    .dh-counter-row-inner {
+      overflow: hidden;
+      display: flex;
+      gap: 8px;
+    }
+
+    .dh-counter-row input {
+      flex: 1;
+      border: 1.5px solid #E5EAF0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 0.86rem;
+      font-family: inherit;
+      outline: none;
+      background: #FBFCFE;
+      transition: border-color 0.2s ease;
+    }
+
+    .dh-counter-row input:focus {
+      border-color: #FF6B35;
+      background: #fff;
+    }
+
+    .dh-counter-row button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #FF6B35;
+      color: #fff;
+      border: none;
+      padding: 0 18px;
+      border-radius: 12px;
+      font-size: 0.86rem;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .dh-counter-row button:hover {
+      background: #e85a2a;
+    }
+
+    /* ===== চলমান ডেলিভারি কার্ড ===== */
+    .dh-active-card {
+      background: #EAFBF0;
+      border: 1px solid #C8ECD5;
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .dh-active-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #1B7A3C;
+      margin-bottom: 8px;
+    }
+
+    .dh-active-status i {
+      font-size: 0.55rem;
+    }
+
+    .dh-active-price {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      margin: 4px 0 10px;
+    }
+
+    .dh-customer-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+
+    .dh-customer-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #EAF2FF;
+      color: #2563EB;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      flex-shrink: 0;
+    }
+
+    .dh-customer-name {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .dh-customer-contact-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .dh-customer-contact-row a {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 9px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .dh-call-btn {
+      background: #EAF2FF;
+      color: #2563EB;
+    }
+
+    .dh-call-btn:hover {
+      background: #2563EB;
+      color: #fff;
+    }
+
+    .dh-wa-btn {
+      background: #E9F9EF;
+      color: #1EA952;
+    }
+
+    .dh-wa-btn:hover {
+      background: #1EA952;
+      color: #fff;
+    }
+
+    .btn-confirm-delivery {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #1B7A3C;
+      color: #fff;
+      border: none;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+
+    .btn-confirm-delivery:hover {
+      background: #145c2d;
+    }
+
+    @media (max-width: 480px) {
+      .dh-card {
+        padding: 20px 16px;
+        border-radius: 16px;
+      }
+    }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+    import { riderRespond, confirmDelivery, expireRequests } from '../lib/deliveryClient.js';
+
+    const authGate = document.getElementById('authGate');
+    const notRiderGate = document.getElementById('notRiderGate');
+    const dhContent = document.getElementById('dhContent');
+
+    const riderPendingCard = document.getElementById('riderPendingCard');
+    const riderRejectedCard = document.getElementById('riderRejectedCard');
+    const riderRejectedReason = document.getElementById('riderRejectedReason');
+    const riderCard = document.getElementById('riderCard');
+    const riderMessage = document.getElementById('riderMessage');
+    const riderStatusText = document.getElementById('riderStatusText');
+    const riderOnlineToggle = document.getElementById('riderOnlineToggle');
+    const riderStatCompleted = document.getElementById('riderStatCompleted');
+    const riderStatEarned = document.getElementById('riderStatEarned');
+    const riderStatRating = document.getElementById('riderStatRating');
+    const riderActiveDeliverySection = document.getElementById('riderActiveDeliverySection');
+    const riderActiveDeliveryList = document.getElementById('riderActiveDeliveryList');
+    const riderOpenRequestsList = document.getElementById('riderOpenRequestsList');
+    const riderOpenRequestsEmpty = document.getElementById('riderOpenRequestsEmpty');
+
+    let currentUserId = null;
+    let currentRiderRow = null;
+    let refreshTimer = null;
+
+    function showMsg(el, text, type = 'error') {
+      if (!el) return;
+      el.textContent = text;
+      el.className = `edit-message ${type === 'error' ? 'show-error' : 'show-success'}`;
+    }
+
+    function clearMsg(el) {
+      if (!el) return;
+      el.textContent = '';
+      el.className = 'edit-message';
+    }
+
+    function renderStatus(el, isOnline) {
+      el.className = `dh-status-text ${isOnline ? 'online' : 'offline'}`;
+      el.innerHTML = isOnline
+        ? '<i class="fas fa-circle"></i> <span>অনলাইন — কাস্টমাররা আপনাকে দেখতে পাচ্ছেন</span>'
+        : '<i class="fas fa-circle"></i> <span>অফলাইন — কাস্টমাররা আপনাকে দেখছেন না</span>';
+    }
+
+    function hideAllRiderCards() {
+      riderPendingCard.style.display = 'none';
+      riderRejectedCard.style.display = 'none';
+      riderCard.style.display = 'none';
+    }
+
+    async function loadRiderSection({ silent = false } = {}) {
+      const { data: riderRow } = await supabase
+        .from('delivery_riders')
+        .select('*')
+        .eq('profile_id', currentUserId)
+        .maybeSingle();
+
+      if (!riderRow) {
+        if (!silent) {
+          dhContent.style.display = 'none';
+          notRiderGate.style.display = 'block';
         }
-        loadRiderSection();
-      });
+        return;
+      }
 
-      riderActiveDeliveryList.appendChild(card);
+      if (!silent) {
+        dhContent.style.display = 'block';
+        notRiderGate.style.display = 'none';
+        hideAllRiderCards();
+      }
+
+      currentRiderRow = riderRow;
+
+      if (riderRow.verification_status === 'pending') {
+        if (!silent) riderPendingCard.style.display = 'block';
+        return;
+      }
+
+      if (riderRow.verification_status === 'rejected') {
+        if (!silent) {
+          riderRejectedReason.textContent = riderRow.rejection_reason || 'যাচাই করতে সমস্যা হয়েছে';
+          riderRejectedCard.style.display = 'block';
+        }
+        return;
+      }
+
+      // approved
+      if (!silent) riderCard.style.display = 'block';
+      riderOnlineToggle.checked = riderRow.is_active;
+      renderStatus(riderStatusText, riderRow.is_active);
+      riderStatCompleted.textContent = riderRow.total_completed || 0;
+      riderStatEarned.textContent = `৳${riderRow.total_earned || 0}`;
+      riderStatRating.textContent = riderRow.avg_rating ? `${riderRow.avg_rating} ★` : '—';
+
+      await loadActiveDeliveries(riderRow.id);
+      await loadOpenRequests(riderRow.vehicle_type);
+    }
+
+    // ===== অনলাইন/অফলাইন টগল =====
+    riderOnlineToggle?.addEventListener('change', async () => {
+      const isActive = riderOnlineToggle.checked;
+      renderStatus(riderStatusText, isActive);
+      clearMsg(riderMessage);
+
+      const { error } = await supabase
+        .from('delivery_riders')
+        .update({ is_active: isActive })
+        .eq('id', currentRiderRow.id);
+
+      if (error) {
+        showMsg(riderMessage, 'স্ট্যাটাস আপডেট ব্যর্থ: ' + error.message);
+        riderOnlineToggle.checked = !isActive;
+        renderStatus(riderStatusText, !isActive);
+        return;
+      }
+
+      currentRiderRow.is_active = isActive;
     });
-  }
 
-  // ===== ওপেন রিকোয়েস্ট / বারগেইন =====
-  async function loadOpenRequests(vehicleType) {
-    const { data: openRequests } = await supabase
-      .from('delivery_requests')
-      .select('id, description, upazila, area_detail, current_price, vehicle_type')
-      .eq('status', 'open')
-      .or(`vehicle_type.eq.${vehicleType},vehicle_type.eq.any`)
-      .order('created_at', { ascending: false });
+    // ===== চলমান ডেলিভারি (এখন কাস্টমারের তথ্য সহ) =====
+    async function loadActiveDeliveries(riderId) {
+      const { data: activeRequests } = await supabase
+        .from('delivery_requests')
+        .select('id, description, upazila, area_detail, final_price, status, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .eq('accepted_rider_id', riderId)
+        .in('status', ['confirmed', 'delivered'])
+        .order('created_at', { ascending: false });
 
-    const { data: myOffers } = await supabase
-      .from('delivery_offers')
-      .select('request_id, offer_price, status')
-      .eq('rider_profile_id', currentUserId);
+      riderActiveDeliveryList.innerHTML = '';
 
-    const myOfferMap = new Map((myOffers || []).map((o) => [o.request_id, o]));
+      if (!activeRequests || activeRequests.length === 0) {
+        riderActiveDeliverySection.style.display = 'none';
+        return;
+      }
 
-    riderOpenRequestsList.innerHTML = '';
+      riderActiveDeliverySection.style.display = 'block';
 
-    if (!openRequests || openRequests.length === 0) {
-      riderOpenRequestsEmpty.style.display = 'flex';
-      return;
+      activeRequests.forEach((req) => {
+        const card = document.createElement('div');
+        card.className = 'dh-active-card';
+
+        const statusLabel = req.status === 'confirmed' ? 'কনফার্মড — ডেলিভারি চলছে' : 'কাস্টমার রিসিভড মার্ক করেছে';
+        const customer = req.profiles;
+        const customerName = customer?.full_name || 'কাস্টমার';
+        const customerPhone = customer?.phone;
+
+        card.innerHTML = `
+          <p class="dh-active-status"><i class="fas fa-circle"></i> ${statusLabel}</p>
+          <p class="dh-req-desc">${req.description || ''}</p>
+          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.upazila || ''} — ${req.area_detail || ''}</p>
+          <p class="dh-active-price">৳${req.final_price || 0}</p>
+          <div class="dh-customer-info">
+            <span class="dh-customer-avatar"><i class="fas fa-user"></i></span>
+            <span class="dh-customer-name">${customerName}</span>
+          </div>
+          ${customerPhone ? `
+            <div class="dh-customer-contact-row">
+              <a href="tel:${customerPhone}" class="dh-call-btn"><i class="fas fa-phone"></i> কল করুন</a>
+              <a href="https://wa.me/${customerPhone.replace(/\D/g, '')}" target="_blank" rel="noopener" class="dh-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
+            </div>
+          ` : ''}
+          ${req.status === 'delivered' ? `<button class="btn-confirm-delivery" data-request-id="${req.id}"><i class="fas fa-check"></i> ডেলিভারি কনফার্ম করুন</button>` : ''}
+        `;
+
+        card.querySelector('.btn-confirm-delivery')?.addEventListener('click', async (e) => {
+          e.target.disabled = true;
+          const { error } = await confirmDelivery({ requestId: req.id });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            return;
+          }
+          loadRiderSection();
+        });
+
+        riderActiveDeliveryList.appendChild(card);
+      });
     }
-    riderOpenRequestsEmpty.style.display = 'none';
 
-    openRequests.forEach((req) => {
-      const myOffer = myOfferMap.get(req.id);
-      const card = document.createElement('div');
-      card.className = 'dh-req-card';
+    // ===== ওপেন রিকোয়েস্ট / বারগেইন =====
+    async function loadOpenRequests(vehicleType) {
+      const { data: openRequests } = await supabase
+        .from('delivery_requests')
+        .select('id, description, upazila, area_detail, current_price, vehicle_type')
+        .eq('status', 'open')
+        .or(`vehicle_type.eq.${vehicleType},vehicle_type.eq.any`)
+        .order('created_at', { ascending: false });
 
-      const vehicleIcon = req.vehicle_type === 'bike' ? 'fa-motorcycle' : req.vehicle_type === 'cycle' ? 'fa-bicycle' : 'fa-shuffle';
-      const vehicleLabel = req.vehicle_type === 'bike' ? 'বাইক' : req.vehicle_type === 'cycle' ? 'সাইকেল' : 'যেকোনো';
+      const { data: myOffers } = await supabase
+        .from('delivery_offers')
+        .select('request_id, offer_price, status')
+        .eq('rider_profile_id', currentUserId);
 
-      card.innerHTML = `
-        <div class="dh-req-top">
-          <div class="dh-req-price-wrap">
-            <span class="dh-req-price-label">প্রস্তাবিত দাম</span>
-            <span class="dh-req-price">৳${req.current_price}</span>
+      const myOfferMap = new Map((myOffers || []).map((o) => [o.request_id, o]));
+
+      riderOpenRequestsList.innerHTML = '';
+
+      if (!openRequests || openRequests.length === 0) {
+        riderOpenRequestsEmpty.style.display = 'flex';
+        return;
+      }
+      riderOpenRequestsEmpty.style.display = 'none';
+
+      openRequests.forEach((req) => {
+        const myOffer = myOfferMap.get(req.id);
+        const card = document.createElement('div');
+        card.className = 'dh-req-card';
+
+        const vehicleIcon = req.vehicle_type === 'bike' ? 'fa-motorcycle' : req.vehicle_type === 'cycle' ? 'fa-bicycle' : 'fa-shuffle';
+        const vehicleLabel = req.vehicle_type === 'bike' ? 'বাইক' : req.vehicle_type === 'cycle' ? 'সাইকেল' : 'যেকোনো';
+
+        card.innerHTML = `
+          <div class="dh-req-top">
+            <div class="dh-req-price-wrap">
+              <span class="dh-req-price-label">প্রস্তাবিত দাম</span>
+              <span class="dh-req-price">৳${req.current_price}</span>
+            </div>
+            <span class="dh-req-vehicle-badge"><i class="fas ${vehicleIcon}"></i> ${vehicleLabel}</span>
           </div>
-          <span class="dh-req-vehicle-badge"><i class="fas ${vehicleIcon}"></i> ${vehicleLabel}</span>
-        </div>
-        <p class="dh-req-desc">${req.description || ''}</p>
-        <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.upazila || ''} — ${req.area_detail || ''}</p>
-        ${myOffer && myOffer.status === 'negotiating' ? `<span class="dh-req-my-offer"><i class="fas fa-clock"></i> আপনার প্রস্তাব: ৳${myOffer.offer_price} (অপেক্ষমাণ)</span>` : ''}
-        <div class="dh-req-actions">
-          <button class="btn-dh-accept" data-action="accept"><i class="fas fa-check"></i> গ্রহণ করুন</button>
-          <button class="btn-dh-counter" data-action="show-counter"><i class="fas fa-comment-dollar"></i> দাম প্রস্তাব</button>
-        </div>
-        <div class="dh-counter-row">
-          <div class="dh-counter-row-inner">
-            <input type="number" placeholder="আপনার দাম লিখুন" min="1" />
-            <button type="button" data-action="submit-counter"><i class="fas fa-paper-plane"></i></button>
+          <p class="dh-req-desc">${req.description || ''}</p>
+          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.upazila || ''} — ${req.area_detail || ''}</p>
+          ${myOffer && myOffer.status === 'negotiating' ? `<span class="dh-req-my-offer"><i class="fas fa-clock"></i> আপনার প্রস্তাব: ৳${myOffer.offer_price} (অপেক্ষমাণ)</span>` : ''}
+          <div class="dh-req-actions">
+            <button class="btn-dh-accept" data-action="accept"><i class="fas fa-check"></i> গ্রহণ করুন</button>
+            <button class="btn-dh-counter" data-action="show-counter"><i class="fas fa-comment-dollar"></i> দাম প্রস্তাব</button>
           </div>
-        </div>
-      `;
+          <div class="dh-counter-row">
+            <div class="dh-counter-row-inner">
+              <input type="number" placeholder="আপনার দাম লিখুন" min="1" />
+              <button type="button" data-action="submit-counter"><i class="fas fa-paper-plane"></i></button>
+            </div>
+          </div>
+        `;
 
-      const counterRow = card.querySelector('.dh-counter-row');
-      const counterBtn = card.querySelector('[data-action="show-counter"]');
+        const counterRow = card.querySelector('.dh-counter-row');
+        const counterBtn = card.querySelector('[data-action="show-counter"]');
 
-      card.querySelector('[data-action="accept"]')?.addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        const { error } = await riderRespond({ requestId: req.id, action: 'accept' });
-        if (error) {
-          alert(error);
-          btn.disabled = false;
-          return;
-        }
-        loadRiderSection();
+        card.querySelector('[data-action="accept"]')?.addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          const { error } = await riderRespond({ requestId: req.id, action: 'accept' });
+          if (error) {
+            alert(error);
+            btn.disabled = false;
+            return;
+          }
+          loadRiderSection();
+        });
+
+        counterBtn?.addEventListener('click', () => {
+          const isOpening = !counterRow.classList.contains('active');
+          counterRow.classList.toggle('active');
+          counterBtn.classList.toggle('active');
+          if (isOpening) card.querySelector('input')?.focus();
+        });
+
+        card.querySelector('[data-action="submit-counter"]')?.addEventListener('click', async () => {
+          const input = card.querySelector('.dh-counter-row input');
+          const price = Number(input.value);
+          if (!price || price <= 0) {
+            alert('সঠিক দাম দিন');
+            return;
+          }
+          const { error } = await riderRespond({ requestId: req.id, action: 'counter', offerPrice: price });
+          if (error) {
+            alert(error);
+            return;
+          }
+          loadOpenRequests(vehicleType);
+        });
+
+        riderOpenRequestsList.appendChild(card);
       });
+    }
 
-      counterBtn?.addEventListener('click', () => {
-        const isOpening = !counterRow.classList.contains('active');
-        counterRow.classList.toggle('active');
-        counterBtn.classList.toggle('active');
-        if (isOpening) card.querySelector('input')?.focus();
-      });
+    // ===== পেজ লোড হলে সেশন চেক =====
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
 
-      card.querySelector('[data-action="submit-counter"]')?.addEventListener('click', async () => {
-        const input = card.querySelector('.dh-counter-row input');
-        const price = Number(input.value);
-        if (!price || price <= 0) {
-          alert('সঠিক দাম দিন');
-          return;
+      if (!session) {
+        authGate.style.display = 'block';
+        return;
+      }
+
+      currentUserId = session.user.id;
+
+      await expireRequests();
+      await loadRiderSection();
+
+      // প্রতি ১৫ সেকেন্ডে silent auto-refresh (শুধু approved রাইডারের ক্ষেত্রে কার্যকর হবে)
+      refreshTimer = setInterval(async () => {
+        if (currentRiderRow?.verification_status === 'approved') {
+          await loadRiderSection({ silent: true });
         }
-        const { error } = await riderRespond({ requestId: req.id, action: 'counter', offerPrice: price });
-        if (error) {
-          alert(error);
-          return;
-        }
-        loadOpenRequests(vehicleType);
-      });
+      }, 15000);
+    }
 
-      riderOpenRequestsList.appendChild(card);
+    window.addEventListener('beforeunload', () => {
+      if (refreshTimer) clearInterval(refreshTimer);
     });
-  }
 
-  // ===== পেজ লোড হলে সেশন চেক =====
-  async function init() {
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
-      authGate.style.display = 'block';
-      return;
-    }
-
-    currentUserId = session.user.id;
-    await loadRiderSection();
-  }
-
-  init();
-</script>
+    init();
+  </script>
+</BaseLayout>
