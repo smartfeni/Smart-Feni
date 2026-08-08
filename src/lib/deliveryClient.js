@@ -39,6 +39,17 @@ async function callDeliveryApi(endpoint, body) {
   }
 }
 
+// ============ পাবলিক/হাউজকিপিং (auth লাগে না) ============
+
+export async function expireRequests() {
+  try {
+    await fetch('/api/delivery/expire-requests', { method: 'POST' });
+  } catch (err) {
+    // silent — housekeeping কল, ব্যর্থ হলেও UI ব্লক করবে না
+    console.error('expire-requests কল ব্যর্থ:', err.message);
+  }
+}
+
 // ============ কাস্টমার সাইড ============
 
 export function createDeliveryRequest({ upazila, areaDetail, description, vehicleType, initialPrice }) {
@@ -53,6 +64,10 @@ export function createDeliveryRequest({ upazila, areaDetail, description, vehicl
 
 export function customerRespond({ requestId, riderProfileId, action, offerPrice }) {
   return callDeliveryApi('customer-respond', { requestId, riderProfileId, action, offerPrice });
+}
+
+export function cancelRequest({ requestId }) {
+  return callDeliveryApi('cancel-request', { requestId });
 }
 
 export function markReceived({ requestId }) {
