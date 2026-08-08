@@ -1,0 +1,439 @@
+<!-- path: src/components/club-dashboard/ModeratorsTab.astro -->
+---
+// ============================================================
+// কম্পোনেন্ট: ModeratorsTab (club-dashboard) — ক্লাব মডারেটর ম্যানেজমেন্ট
+// shop-dashboard/ModeratorsTab.astro এর হুবহু একই প্যাটার্ন —
+// entity_type='club', 'smartfeni:club-ready' ইভেন্ট থেকে clubId পায়।
+// এক্সাক্ট ফোন সার্চ (privacy রুল অনুযায়ী কোনো partial match না)
+// + গ্র্যানুলার পারমিশন (লিস্টিং/পোস্ট এডিট, ডিলিট, ইভেন্ট/অর্ডার
+// ম্যানেজ, সেটিংস এডিট)। moderators টেবিল সরাসরি ক্লায়েন্ট থেকে
+// ব্যবহার (RLS policy owner_manage_moderators অনুমতি দেয়)।
+// ============================================================
+---
+
+<div class="dash-card">
+  <h3><i class="fas fa-user-plus"></i> মডারেটর যোগ করুন</h3>
+
+  <p class="form-msg" id="searchMsg"></p>
+
+  <label class="form-label">মোবাইল নম্বর (সম্পূর্ণ ১১ সংখ্যা)</label>
+  <div class="mod-search-row">
+    <input type="text" class="form-input" id="searchPhoneInput" placeholder="01xxxxxxxxx" maxlength="11" />
+    <button class="secondary-btn mod-search-btn" id="searchUserBtn" type="button">
+      <i class="fas fa-magnifying-glass"></i> খুঁজুন
+    </button>
+  </div>
+
+  <div class="mod-found-user" id="foundUserBox" style="display:none;">
+    <div class="mod-found-avatar" id="foundAvatarWrap">
+      <img id="foundAvatarImg" src="" alt="" />
+      <i class="fas fa-circle-user"></i>
+    </div>
+    <div class="mod-found-info">
+      <p class="mod-found-name" id="foundUserName"></p>
+      <p class="mod-found-phone" id="foundUserPhone"></p>
+    </div>
+  </div>
+
+  <div class="mod-permissions" id="newModPermissions" style="display:none;">
+    <p class="form-label" style="margin-top:16px;">পারমিশন দিন</p>
+    <label class="mod-perm-check"><input type="checkbox" id="permEditListings" /> পোস্ট/অর্জন/ইভেন্ট এডিট করতে পারবে</label>
+    <label class="mod-perm-check"><input type="checkbox" id="permDeleteListings" /> পোস্ট/অর্জন/ইভেন্ট ডিলিট করতে পারবে</label>
+    <label class="mod-perm-check"><input type="checkbox" id="permManageOrders" /> জয়েন রিকোয়েস্ট/সদস্য ম্যানেজ করতে পারবে</label>
+    <label class="mod-perm-check"><input type="checkbox" id="permEditSettings" /> ক্লাব সেটিংস এডিট করতে পারবে</label>
+
+    <button class="primary-btn" id="addModeratorBtn" type="button">
+      <i class="fas fa-check"></i> <span id="addModeratorBtnText">মডারেটর যোগ করুন</span>
+    </button>
+  </div>
+</div>
+
+<div class="dash-card">
+  <h3><i class="fas fa-users-gear"></i> বর্তমান মডারেটররা</h3>
+  <div id="moderatorsList"></div>
+  <p class="empty-note" id="noModeratorsMsg" style="display:none;">এখনো কোনো মডারেটর যোগ করা হয়নি</p>
+</div>
+
+<style>
+  .mod-search-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .mod-search-row .form-input {
+    flex: 1;
+  }
+
+  .mod-search-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 0 16px;
+  }
+
+  .mod-found-user {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin-top: 14px;
+  }
+
+  .mod-found-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .mod-found-avatar img {
+    display: none;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .mod-found-avatar.has-photo img {
+    display: block;
+  }
+
+  .mod-found-avatar.has-photo i {
+    display: none;
+  }
+
+  .mod-found-name {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
+  .mod-found-phone {
+    font-size: 0.78rem;
+    color: #8FA0BC;
+  }
+
+  .mod-perm-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.84rem;
+    color: #1B2A4A;
+    padding: 9px 0;
+    cursor: pointer;
+  }
+
+  .mod-perm-check input {
+    width: 17px;
+    height: 17px;
+    accent-color: #FF6B35;
+    cursor: pointer;
+  }
+
+  .mod-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+
+  .mod-row-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .mod-row-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .mod-row-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .mod-row-name {
+    font-size: 0.87rem;
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
+  .mod-row-phone {
+    font-size: 0.74rem;
+    color: #8FA0BC;
+    margin-bottom: 8px;
+  }
+
+  .mod-row-perms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .mod-perm-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 4px 9px;
+    border-radius: 20px;
+    background: #EAF2FF;
+    color: #2563EB;
+    cursor: pointer;
+    border: none;
+  }
+
+  .mod-perm-pill.off {
+    background: #F4F7FC;
+    color: #B0BCCB;
+  }
+
+  .mod-row-remove {
+    background: #FFF0EA;
+    color: #D14343;
+    border: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const ENTITY_TYPE = 'club';
+  let currentEntityId = null;
+  let currentUserId = null;
+  let foundUser = null;
+
+  const searchMsg = document.getElementById('searchMsg');
+  const searchPhoneInput = document.getElementById('searchPhoneInput');
+  const searchUserBtn = document.getElementById('searchUserBtn');
+  const foundUserBox = document.getElementById('foundUserBox');
+  const foundAvatarWrap = document.getElementById('foundAvatarWrap');
+  const foundAvatarImg = document.getElementById('foundAvatarImg');
+  const foundUserName = document.getElementById('foundUserName');
+  const foundUserPhone = document.getElementById('foundUserPhone');
+  const newModPermissions = document.getElementById('newModPermissions');
+  const addModeratorBtn = document.getElementById('addModeratorBtn');
+  const addModeratorBtnText = document.getElementById('addModeratorBtnText');
+
+  const moderatorsList = document.getElementById('moderatorsList');
+  const noModeratorsMsg = document.getElementById('noModeratorsMsg');
+
+  function showMsg(text, type = 'error') {
+    searchMsg.textContent = text;
+    searchMsg.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
+  }
+
+  function clearMsg() {
+    searchMsg.textContent = '';
+    searchMsg.className = 'form-msg';
+  }
+
+  function resetSearch() {
+    foundUser = null;
+    foundUserBox.style.display = 'none';
+    newModPermissions.style.display = 'none';
+    ['permEditListings', 'permDeleteListings', 'permManageOrders', 'permEditSettings'].forEach((id) => {
+      document.getElementById(id).checked = false;
+    });
+  }
+
+  searchUserBtn?.addEventListener('click', async () => {
+    clearMsg();
+    resetSearch();
+
+    const digits = searchPhoneInput.value.trim().replace(/\D/g, '');
+    if (digits.length !== 11) {
+      showMsg('সম্পূর্ণ ১১ সংখ্যার মোবাইল নম্বর দিন');
+      return;
+    }
+
+    searchUserBtn.disabled = true;
+
+    const { data: user, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, avatar_url, phone')
+      .eq('phone', digits)
+      .maybeSingle();
+
+    searchUserBtn.disabled = false;
+
+    if (error || !user) {
+      showMsg('এই নম্বরে কোনো ইউজার পাওয়া যায়নি');
+      return;
+    }
+
+    if (user.id === currentUserId) {
+      showMsg('নিজেকে মডারেটর বানানো যাবে না');
+      return;
+    }
+
+    foundUser = user;
+    foundUserName.textContent = user.full_name || 'নাম নেই';
+    foundUserPhone.textContent = user.phone;
+    if (user.avatar_url) {
+      foundAvatarImg.src = user.avatar_url;
+      foundAvatarWrap.classList.add('has-photo');
+    } else {
+      foundAvatarWrap.classList.remove('has-photo');
+    }
+
+    foundUserBox.style.display = 'flex';
+    newModPermissions.style.display = 'block';
+  });
+
+  addModeratorBtn?.addEventListener('click', async () => {
+    if (!foundUser) return;
+
+    addModeratorBtnText.textContent = 'যোগ হচ্ছে...';
+    addModeratorBtn.disabled = true;
+
+    const { data: { session } } = await supabase.auth.getSession();
+
+    const { error } = await supabase.from('moderators').insert({
+      entity_type: ENTITY_TYPE,
+      entity_id: currentEntityId,
+      profile_id: foundUser.id,
+      can_edit_listings: document.getElementById('permEditListings').checked,
+      can_delete_listings: document.getElementById('permDeleteListings').checked,
+      can_manage_orders: document.getElementById('permManageOrders').checked,
+      can_edit_settings: document.getElementById('permEditSettings').checked,
+      added_by: session?.user?.id || null,
+    });
+
+    addModeratorBtnText.textContent = 'মডারেটর যোগ করুন';
+    addModeratorBtn.disabled = false;
+
+    if (error) {
+      showMsg(
+        error.code === '23505'
+          ? 'এই ইউজার ইতিমধ্যে মডারেটর হিসেবে যোগ করা আছে'
+          : 'যোগ করা যায়নি: ' + error.message
+      );
+      return;
+    }
+
+    showMsg('মডারেটর সফলভাবে যোগ হয়েছে ✓', 'success');
+    searchPhoneInput.value = '';
+    resetSearch();
+    loadModerators();
+  });
+
+  function permPill(label, active, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `mod-perm-pill ${active ? '' : 'off'}`;
+    btn.innerHTML = `<i class="fas ${active ? 'fa-check' : 'fa-xmark'}"></i> ${label}`;
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  async function togglePermission(modId, field, currentValue) {
+    const { error } = await supabase
+      .from('moderators')
+      .update({ [field]: !currentValue })
+      .eq('id', modId);
+
+    if (error) {
+      alert('আপডেট ব্যর্থ: ' + error.message);
+      return;
+    }
+    loadModerators();
+  }
+
+  async function removeModerator(modId) {
+    if (!confirm('এই মডারেটরকে সরিয়ে দিতে চান?')) return;
+
+    const { error } = await supabase.from('moderators').delete().eq('id', modId);
+    if (error) {
+      alert('সরানো যায়নি: ' + error.message);
+      return;
+    }
+    loadModerators();
+  }
+
+  async function loadModerators() {
+    const { data: mods, error } = await supabase
+      .from('moderators')
+      .select('*')
+      .eq('entity_type', ENTITY_TYPE)
+      .eq('entity_id', currentEntityId)
+      .order('created_at', { ascending: false });
+
+    moderatorsList.innerHTML = '';
+
+    if (error || !mods || mods.length === 0) {
+      noModeratorsMsg.style.display = 'block';
+      return;
+    }
+    noModeratorsMsg.style.display = 'none';
+
+    const profileIds = mods.map((m) => m.profile_id);
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, full_name, avatar_url, phone')
+      .in('id', profileIds);
+
+    const profileMap = new Map((profilesData || []).map((p) => [p.id, p]));
+
+    mods.forEach((mod) => {
+      const profile = profileMap.get(mod.profile_id);
+      const row = document.createElement('div');
+      row.className = 'mod-row';
+
+      row.innerHTML = `
+        <div class="mod-row-avatar">
+          ${profile?.avatar_url ? `<img src="${profile.avatar_url}" alt="" />` : '<i class="fas fa-circle-user"></i>'}
+        </div>
+        <div class="mod-row-body">
+          <p class="mod-row-name">${profile?.full_name || 'নাম নেই'}</p>
+          <p class="mod-row-phone">${profile?.phone || ''}</p>
+          <div class="mod-row-perms"></div>
+        </div>
+        <button class="mod-row-remove" type="button" title="সরিয়ে দিন"><i class="fas fa-trash"></i></button>
+      `;
+
+      const permsWrap = row.querySelector('.mod-row-perms');
+      permsWrap.appendChild(permPill('পোস্ট/ইভেন্ট এডিট', mod.can_edit_listings, () => togglePermission(mod.id, 'can_edit_listings', mod.can_edit_listings)));
+      permsWrap.appendChild(permPill('পোস্ট/ইভেন্ট ডিলিট', mod.can_delete_listings, () => togglePermission(mod.id, 'can_delete_listings', mod.can_delete_listings)));
+      permsWrap.appendChild(permPill('সদস্য/জয়েন ম্যানেজ', mod.can_manage_orders, () => togglePermission(mod.id, 'can_manage_orders', mod.can_manage_orders)));
+      permsWrap.appendChild(permPill('সেটিংস এডিট', mod.can_edit_settings, () => togglePermission(mod.id, 'can_edit_settings', mod.can_edit_settings)));
+
+      row.querySelector('.mod-row-remove').addEventListener('click', () => removeModerator(mod.id));
+
+      moderatorsList.appendChild(row);
+    });
+  }
+
+  window.addEventListener('smartfeni:club-ready', async (e) => {
+    currentEntityId = e.detail.clubId;
+    const { data: { session } } = await supabase.auth.getSession();
+    currentUserId = session?.user?.id || null;
+    loadModerators();
+  });
+</script>
