@@ -1,9 +1,12 @@
 // ============================================================
 // API এন্ডপয়েন্ট: কাস্টমার নতুন ডেলিভারি রিকোয়েস্ট তৈরি করবে (/api/delivery/create-request)
 // লগইন করা কাস্টমার কল করবে (Authorization: Bearer <token> হেডার সহ)।
-// ইউজারের নিজের সেশন টোকেন দিয়ে insert হয় (RLS respect করে) —
-// delivery_requests এর "Customers can create requests" পলিসি অনুযায়ী
-// শুধু নিজের customer_profile_id দিয়েই রিকোয়েস্ট বানাতে পারবে।
+// ইউজারের নিজের সেশন টোকেন দিয়ে insert হয় (RLS respect করে)।
+//
+// আপডেট (এই সেশন): expires_at = তৈরির সময় + ১ ঘণ্টা সেট হয় —
+// এই সময়ের মধ্যে কোনো রাইডার accept না করলে রিকোয়েস্ট auto-expire
+// হয়ে যাবে (expire-requests.js এই কলামটা চেক করে)। accept হয়ে
+// গেলে (status='confirmed') এই expiry আর প্রযোজ্য না।
 // ============================================================
 
 import { getAuthedUser } from '../../../lib/deliverySupabase.js';
@@ -11,6 +14,7 @@ import { getAuthedUser } from '../../../lib/deliverySupabase.js';
 export const prerender = false;
 
 const VALID_VEHICLE_TYPES = ['bike', 'cycle', 'any'];
+const EXPIRY_HOURS = 1;
 
 export async function POST({ request }) {
   try {
@@ -40,6 +44,7 @@ export async function POST({ request }) {
     }
 
     const finalVehicleType = VALID_VEHICLE_TYPES.includes(vehicleType) ? vehicleType : 'any';
+    const expiresAt = new Date(Date.now() + EXPIRY_HOURS * 60 * 60 * 1000).toISOString();
 
     const { data, error: insertError } = await client
       .from('delivery_requests')
@@ -52,6 +57,7 @@ export async function POST({ request }) {
         initial_price: price,
         current_price: price,
         status: 'open',
+        expires_at: expiresAt,
       })
       .select()
       .single();
@@ -64,7 +70,6 @@ export async function POST({ request }) {
     }
 
     // TODO: এখানে Telegram bot এর ১ম নোটিফিকেশন ট্রিগার হবে
-    // (সব active রেজিস্টার্ড রাইডারকে "নতুন অর্ডার এসেছে" এলার্ট) — পরে যোগ হবে
 
     return new Response(
       JSON.stringify({ success: true, request: data }),
