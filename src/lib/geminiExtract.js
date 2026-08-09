@@ -7,9 +7,7 @@
 //
 // SUPPORTED_CATEGORIES হলো এই সিস্টেমের একমাত্র "সোর্স অফ ট্রুথ" —
 // telegram-webhook.js এবং admin/bot-chats.astro দুটোই এখান থেকে
-// ক্যাটাগরি লিস্ট নেয়। নতুন ক্যাটাগরি extraction সাপোর্ট যোগ করতে
-// চাইলে এখানে CATEGORY_CONFIG + CATEGORY_META তে একটা এন্ট্রি যোগ
-// করলেই বাকি জায়গায় automatically দেখাবে।
+// ক্যাটাগরি লিস্ট নেয়।
 //
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে: GEMINI_API_KEY, GEMINI_MODEL (ঐচ্ছিক)
 // ============================================================
@@ -146,10 +144,6 @@ const CATEGORY_CONFIG = {
       },
     },
   },
-
-  // নতুন ক্যাটাগরি extraction সাপোর্ট যোগ করতে চাইলে এখানে একটা
-  // নতুন এন্ট্রি যোগ করুন — buildListingRowFromExtraction ফাংশনেও
-  // একটা নতুন if-ব্লক যোগ করতে হবে
 };
 
 // প্রতিটা ক্যাটাগরির বাংলা লেবেল + ইমোজি — Telegram বাটন ও Admin UI তে দেখানোর জন্য
@@ -172,11 +166,6 @@ export const SUPPORTED_CATEGORIES = Object.keys(CATEGORY_CONFIG).map((id) => ({
 
 /**
  * স্ক্রিনশট থেকে structured ডেটা extract করে।
- * @param {Object} params
- * @param {string} params.imageBase64
- * @param {string} params.mimeType
- * @param {string} params.category
- * @returns {Promise<Object|Array>}
  */
 export async function extractListingFromScreenshot({ imageBase64, mimeType, category }) {
   const config = CATEGORY_CONFIG[category];
