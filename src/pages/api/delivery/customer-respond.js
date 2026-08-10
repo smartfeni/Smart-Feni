@@ -2,9 +2,16 @@
 // API এন্ডপয়েন্ট: কাস্টমার কোনো রাইডারের অফারে সাড়া দিবে (/api/delivery/customer-respond)
 // দুইটা action:
 //   - "counter": নির্দিষ্ট রাইডারের থ্রেডে নতুন দাম প্রস্তাব করবে, এবং এই নতুন দাম
-//                delivery_requests.current_price ও আপডেট হবে (যারা এখনো অফার করেনি
-//                তারা এই নতুন দামই দেখবে — যেমনটা প্ল্যানে ঠিক হয়েছিল)
+//                delivery_requests.current_price ও আপডেট হবে
 //   - "accept": এই নির্দিষ্ট রাইডারের থ্রেডের দামে ডিল কনফার্ম, বাকি সব থ্রেড বন্ধ
+//
+// বাগফিক্স (এই সেশন): আগে কাস্টমার নিজের করা কাউন্টারের উপরও নিজেই
+// accept করে ফেলতে পারত — রাইডারের কোনো সম্মতি ছাড়াই দাম লক করে
+// ফেলা যেত। এখন accept করার আগে চেক করা হয় offer.last_actor
+// === 'rider' কিনা — মানে সর্বশেষ মুভটা রাইডারের করা হতে হবে
+// (রাইডারের initial অফার বা রাইডারের counter), তবেই কাস্টমার সেটা
+// accept করতে পারবে। নিজের করা সর্বশেষ কাউন্টার নিজে accept করা
+// যাবে না।
 // ============================================================
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
@@ -54,7 +61,7 @@ export async function POST({ request }) {
     // সংশ্লিষ্ট থ্রেড খুঁজে বের করা
     const { data: offer, error: offerFetchError } = await client
       .from('delivery_offers')
-      .select('id, rider_id, offer_price, status')
+      .select('id, rider_id, offer_price, status, last_actor')
       .eq('request_id', requestId)
       .eq('rider_profile_id', riderProfileId)
       .maybeSingle();
@@ -112,6 +119,16 @@ export async function POST({ request }) {
     }
 
     // ============ ACCEPT: এই থ্রেডের দামে ডিল কনফার্ম ============
+
+    // গুরুত্বপূর্ণ চেক: সর্বশেষ মুভ রাইডারের করা হতে হবে (নিজের করা
+    // কাউন্টার নিজে accept করা যাবে না — রাইডারের প্রকৃত সম্মতি লাগবে)
+    if (offer.last_actor !== 'rider') {
+      return new Response(
+        JSON.stringify({ error: 'রাইডার এখনো এই দামে সাড়া দেয়নি, তাই এখন accept করা যাবে না — রাইডারের উত্তরের অপেক্ষা করো' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { client: adminClient, error: adminError } = getAdminClient();
     if (adminError) {
       return new Response(JSON.stringify({ error: adminError }), {
