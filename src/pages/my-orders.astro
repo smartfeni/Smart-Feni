@@ -3,17 +3,12 @@
 // পেজ: /my-orders — কাস্টমারের নিজের অর্ডার হিস্ট্রি ও স্ট্যাটাস
 // ট্র্যাকিং
 //
-// আপডেট (এই সেশন): 
-//   - পেজ লোডে expireRequests() silent কল (১ ঘণ্টা পার হওয়া
-//     ওপেন রিকোয়েস্ট auto-cancel)
-//   - প্রতি ১৫ সেকেন্ডে silent auto-refresh (ম্যানুয়াল রিফ্রেশ
-//     ছাড়াই বারগেইন আপডেট দেখা যাবে)
-//   - open/negotiating কার্ডে "রিকোয়েস্ট বাতিল করুন" বাটন
-//
-// আপডেট: WhatsApp লিংক এখন toWhatsAppNumber() হেল্পার দিয়ে কান্ট্রি
-// কোডসহ (88) বসানো হচ্ছে (শপ ফোন ও accepted rider ফোন — দুই
-// জায়গাতেই) — প্রবাস থেকে ক্লিক করলে আগে নম্বর খুঁজে পেত না, এখন
-// ঠিকভাবে কাজ করবে।
+// আপডেট (এই সেশন):
+//   - offer-thread এ এখন last_actor অনুযায়ী UI বদলায় — রাইডার
+//     সর্বশেষ অফার/কাউন্টার দিলে "Accept" বাটন দেখাবে + pulsing
+//     dot দিয়ে "নতুন" ইঙ্গিত, কাস্টমার নিজে কাউন্টার দিলে Accept
+//     বাটন সরে গিয়ে "রাইডারের উত্তরের অপেক্ষায়" দেখাবে (ব্যাকএন্ডে
+//     customer-respond.js এ যোগ হওয়া গার্ডের সাথে UI মিলিয়ে)
 // ============================================================
 
 export const prerender = false;
@@ -410,25 +405,80 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       border: 1px solid #EEF3F9;
       border-radius: 14px;
       padding: 12px;
+      position: relative;
+    }
+
+    .offer-thread.turn-rider {
+      border-color: #FFD3BC;
+      background: #FFFAF7;
     }
 
     .offer-thread-top {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
     .offer-rider-name {
       font-size: 0.84rem;
       font-weight: 700;
       color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     .offer-price-tag {
       font-size: 0.9rem;
       font-weight: 800;
       color: #FF6B35;
+    }
+
+    /* ===== "নতুন" পালস ডট — রাইডার সর্বশেষ মুভ দিলে ===== */
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #FF6B35;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .pulse-dot::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: #FF6B35;
+      animation: pulseDot 1.4s ease-out infinite;
+    }
+
+    @keyframes pulseDot {
+      0% { transform: scale(1); opacity: 0.7; }
+      100% { transform: scale(2.8); opacity: 0; }
+    }
+
+    /* ===== "পালা" ইন্ডিকেটর লাইন ===== */
+    .turn-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .turn-indicator.turn-rider-text {
+      color: #FF6B35;
+    }
+
+    .turn-indicator.turn-waiting-text {
+      color: #9AA8BC;
+    }
+
+    .turn-indicator i {
+      font-size: 0.66rem;
     }
 
     .offer-actions {
@@ -465,6 +515,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     .btn-counter-offer:hover {
       background: #2563EB;
       color: #fff;
+    }
+
+    .btn-counter-offer.full-width {
+      flex: 1;
     }
 
     .counter-input-row {
@@ -671,7 +725,6 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
   <script>
     import { supabase } from '../lib/supabase.js';
-    import { toWhatsAppNumber } from '../lib/whatsapp.js';
     import { customerRespond, markReceived, submitReview, uploadPaymentProof, raiseDispute, cancelRequest, expireRequests } from '../lib/deliveryClient.js';
 
     const loadingState = document.getElementById('loadingState');
@@ -757,7 +810,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         ? `
           <div class="order-contact-row">
             <a href="tel:${shop.phone}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> কল করুন</a>
-            <a href="https://wa.me/${toWhatsAppNumber(shop.phone)}" target="_blank" rel="noopener" class="order-contact-btn order-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
+            <a href="https://wa.me/${shop.phone.replace(/\D/g, '')}" target="_blank" rel="noopener" class="order-contact-btn order-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
           </div>
         `
         : '';
@@ -811,16 +864,35 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           bodyHtml += `<div class="offer-threads">`;
           offers.forEach((offer) => {
             const riderName = offer.delivery_riders?.profiles?.full_name || 'রাইডার';
-            bodyHtml += `
-              <div class="offer-thread" data-offer-request="${req.id}" data-offer-rider="${offer.rider_profile_id}">
-                <div class="offer-thread-top">
-                  <span class="offer-rider-name"><i class="fas fa-user"></i> ${riderName}</span>
-                  <span class="offer-price-tag">৳${offer.offer_price}</span>
-                </div>
+            const ridersTurn = offer.last_actor === 'rider';
+
+            const turnIndicatorHtml = ridersTurn
+              ? `<div class="turn-indicator turn-rider-text"><span class="pulse-dot"></span> রাইডার নতুন দাম দিয়েছে</div>`
+              : `<div class="turn-indicator turn-waiting-text"><i class="fas fa-clock"></i> রাইডারের উত্তরের অপেক্ষায়</div>`;
+
+            const actionsHtml = ridersTurn
+              ? `
                 <div class="offer-actions">
-                  <button class="btn-accept-offer" data-action="accept">accept করুন</button>
+                  <button class="btn-accept-offer" data-action="accept">গ্রহণ করুন</button>
                   <button class="btn-counter-offer" data-action="show-counter">দাম পরিবর্তন</button>
                 </div>
+              `
+              : `
+                <div class="offer-actions">
+                  <button class="btn-counter-offer full-width" data-action="show-counter">আবার দাম পরিবর্তন করুন</button>
+                </div>
+              `;
+
+            bodyHtml += `
+              <div class="offer-thread ${ridersTurn ? 'turn-rider' : ''}" data-offer-request="${req.id}" data-offer-rider="${offer.rider_profile_id}">
+                <div class="offer-thread-top">
+                  <span class="offer-rider-name">
+                    <i class="fas fa-user"></i> ${riderName}
+                  </span>
+                  <span class="offer-price-tag">৳${offer.offer_price}</span>
+                </div>
+                ${turnIndicatorHtml}
+                ${actionsHtml}
                 <div class="counter-input-row">
                   <input type="number" placeholder="নতুন দাম" min="1" />
                   <button data-action="submit-counter">পাঠান</button>
@@ -837,7 +909,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           <div class="order-contact-row">
             ${acceptedRiderPhone ? `
               <a href="tel:${acceptedRiderPhone}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> কল করুন</a>
-              <a href="https://wa.me/${toWhatsAppNumber(acceptedRiderPhone)}" target="_blank" rel="noopener" class="order-contact-btn order-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
+              <a href="https://wa.me/${acceptedRiderPhone.replace(/\D/g, '')}" target="_blank" rel="noopener" class="order-contact-btn order-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
             ` : ''}
           </div>
           <button class="btn-received" data-request-id="${req.id}"><i class="fas fa-check-circle"></i> পণ্য রিসিভড</button>
@@ -1097,11 +1169,9 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
       currentUserId = session.user.id;
 
-      // silent housekeeping — expired ওপেন রিকোয়েস্ট বাতিল
       await expireRequests();
       await loadOrders(currentUserId);
 
-      // প্রতি ১৫ সেকেন্ডে silent auto-refresh (লোডিং স্পিনার ছাড়াই)
       refreshTimer = setInterval(() => {
         loadOrders(currentUserId, { silent: true });
       }, 15000);
