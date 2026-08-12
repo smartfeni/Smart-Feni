@@ -36,6 +36,12 @@ const { data: tuitionListings } = await supabase
   .order('created_at', { ascending: false });
 
 const listings = tuitionListings || [];
+
+const typeCounts = {};
+typeOptions.forEach((opt) => {
+  typeCounts[opt.id] = listings.filter((item) => (item.type || 'other') === opt.id).length;
+});
+const totalCount = listings.length;
 ---
 
 <BaseLayout title="টিউশন খুঁজুন | স্মার্ট ফেনী">
@@ -57,6 +63,31 @@ const listings = tuitionListings || [];
         <input type="text" id="searchInput" placeholder="বিষয়, ক্লাস বা এলাকা খুঁজুন..." />
       </div>
 
+      {listings.length > 0 && (
+
+        <div class="filter-row" id="filterRow">
+
+          <button class="filter-pill active" data-type="all" type="button">
+
+            সব <span class="pill-count">({totalCount})</span>
+
+          </button>
+
+          {typeOptions.map((opt) => (
+
+            <button class="filter-pill" data-type={opt.id} type="button">
+
+              {opt.label} <span class="pill-count">({typeCounts[opt.id]})</span>
+
+            </button>
+
+          ))}
+
+        </div>
+
+      )}
+
+
       {listings.length === 0 ? (
         <div class="empty-state">
           <i class="fas fa-book"></i>
@@ -70,6 +101,8 @@ const listings = tuitionListings || [];
               <a
                 href={`/listing/${item.id}`}
                 class="tuition-card"
+                data-target-id={item.id}
+                data-type={item.type || 'other'}
                 data-upazila-name={item.upazila || ''}
                 data-search={`${item.title || ''} ${item.description || ''} ${typeNameMap[item.type] || ''}`.toLowerCase()}
               >
@@ -157,7 +190,7 @@ const listings = tuitionListings || [];
 
   .search-box {
     max-width: 480px;
-    margin: 0 auto 32px;
+    margin: 0 auto 20px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -179,6 +212,53 @@ const listings = tuitionListings || [];
     font-family: inherit;
     background: transparent;
     color: #1B2A4A;
+  }
+
+  .filter-row {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    margin-bottom: 28px;
+    padding: 2px 4px 10px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .filter-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-pill {
+    flex-shrink: 0;
+    white-space: nowrap;
+    background: #fff;
+    border: 1.5px solid #EEF3F9;
+    color: #5A6E85;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 7px 16px;
+    border-radius: 30px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+  }
+
+  .filter-pill:hover {
+    border-color: #FFD3BC;
+    color: #FF6B35;
+  }
+
+  .filter-pill.active {
+    background: #FF6B35;
+    border-color: #FF6B35;
+    color: #fff;
+  }
+
+  .pill-count {
+    font-size: 0.78rem;
+    opacity: 0.75;
+    margin-left: 2px;
   }
 
   .empty-state {
@@ -334,13 +414,19 @@ const listings = tuitionListings || [];
   const cards = document.querySelectorAll('.tuition-card');
   const searchInput = document.getElementById('searchInput');
   const noResults = document.getElementById('noResults');
+  const filterPills = document.querySelectorAll('.filter-pill');
 
-  searchInput?.addEventListener('input', () => {
-    const keyword = searchInput.value.trim().toLowerCase();
+  let activeType = 'all';
+
+  function applyFilters() {
+    const keyword = (searchInput?.value || '').trim().toLowerCase();
     let visibleCount = 0;
 
     cards.forEach((card) => {
-      const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
+      const matchesType = activeType === 'all' || card.dataset.type === activeType;
+      const matchesSearch = keyword === '' || (card.dataset.search || '').includes(keyword);
+      const matches = matchesType && matchesSearch;
+
       if (matches) {
         card.classList.remove('hidden');
         visibleCount++;
@@ -352,9 +438,37 @@ const listings = tuitionListings || [];
     if (noResults) {
       noResults.style.display = visibleCount === 0 ? 'block' : 'none';
     }
+  }
+
+  searchInput?.addEventListener('input', applyFilters);
+
+  filterPills.forEach((pill) => {
+    pill.addEventListener('click', () => {
+      filterPills.forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      activeType = pill.dataset.type;
+      applyFilters();
+    });
   });
 
-  reorderByUserLocation(grid, 'upazilaName');
+  reorderByUserLocation(grid, 'upazilaName', 'latest');
+
+  // ============================================================
+  // সোয়াইপ-টু-নেক্সট-লিস্টিং — বর্তমান সর্ট+ফিল্টার অর্ডারের আইডি-লিস্ট
+  // sessionStorage-এ সেভ, /listing/[id].astro এটা পড়ে সোয়াইপে দ্রুত
+  // পরের/আগের লিস্টিং দেখায় (পেজ রিলোড ছাড়াই)
+  // ============================================================
+  grid?.addEventListener('click', (e) => {
+    const card = e.target.closest('.tuition-card');
+    if (!card) return;
+
+    const ids = Array.from(grid.children)
+      .filter((c) => c.classList.contains('tuition-card') && !c.classList.contains('hidden'))
+      .map((c) => c.dataset.targetId)
+      .filter(Boolean);
+
+    sessionStorage.setItem('smartfeni_swipe_queue', JSON.stringify({ category: 'tuition', ids }));
+  });
 
   // ============================================================
   // ➕পোস্ট ফ্লো — শেয়ার্ড ফাংশন: লগইন থাকলে সরাসরি লিস্টিং মোডাল
