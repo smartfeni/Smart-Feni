@@ -213,11 +213,14 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     <div class="listing-detail-page">
       <div class="container">
 
-        <a href={config.backLink} class="back-link">
-          <i class="fas fa-arrow-left"></i> {config.pageLabel} এ ফিরে যান
+        <a href={config.backLink} class="back-link" id="backLink">
+          <i class="fas fa-arrow-left"></i> <span id="backLinkText">{config.pageLabel} এ ফিরে যান</span>
         </a>
 
-        <div class="listing-card">
+        <div class="listing-card" id="listingCard" data-category={item.category}>
+          <span class="swipe-edge-hint prev" id="swipeHintPrev"><i class="fas fa-chevron-left"></i></span>
+          <span class="swipe-edge-hint next" id="swipeHintNext"><i class="fas fa-chevron-right"></i></span>
+
           <div class="top-row">
             <span class="type-badge"><i class={`fas ${config.icon}`}></i> {typeLabel}</span>
 
@@ -256,6 +259,8 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
           ) : (
             <div class="listing-img-placeholder"><i class={`fas ${config.icon}`}></i></div>
           )}
+
+          <span class="swipe-position-pill" id="swipePositionPill" style="display:none;"></span>
 
           <div class="listing-body">
             <div class="listing-title-row">
@@ -342,6 +347,88 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
     max-width: 620px;
     margin: 0 auto;
+    position: relative;
+    touch-action: pan-y;
+  }
+
+  /* ===== সোয়াইপ-টু-নেক্সট-লিস্টিং ===== */
+  .listing-card.swipe-out-left {
+    animation: swipeOutLeft 0.18s ease forwards;
+  }
+
+  .listing-card.swipe-out-right {
+    animation: swipeOutRight 0.18s ease forwards;
+  }
+
+  .listing-card.swipe-in-left {
+    animation: swipeInLeft 0.22s ease;
+  }
+
+  .listing-card.swipe-in-right {
+    animation: swipeInRight 0.22s ease;
+  }
+
+  @keyframes swipeOutLeft {
+    to { transform: translateX(-40px); opacity: 0; }
+  }
+
+  @keyframes swipeOutRight {
+    to { transform: translateX(40px); opacity: 0; }
+  }
+
+  @keyframes swipeInLeft {
+    from { transform: translateX(40px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  @keyframes swipeInRight {
+    from { transform: translateX(-40px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  .swipe-position-pill {
+    position: absolute;
+    top: 62px;
+    right: 14px;
+    z-index: 3;
+    background: rgba(15, 23, 42, 0.6);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 20px;
+  }
+
+  .swipe-edge-hint {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.92);
+    color: #5A6E85;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+    z-index: 3;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .swipe-edge-hint.show {
+    opacity: 1;
+  }
+
+  .swipe-edge-hint.prev {
+    left: 10px;
+  }
+
+  .swipe-edge-hint.next {
+    right: 10px;
   }
 
   .top-row {
@@ -629,71 +716,223 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
   import { fetchLikeData, toggleLike, isLoggedIn } from '../../lib/contentEngagement.js';
   import { initReportModal } from '../../lib/reportModal.js';
 
-  function showListingShareToast() {
-    const toast = document.getElementById('listingShareToast');
-    if (!toast) return;
-    toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 2000);
+  // ============================================================
+  // সোয়াইপ-টু-নেক্সট-লিস্টিং সিস্টেম
+  // ক্যাটাগরি গ্রিড পেজ (যেমন housing.astro) থেকে ক্লিক করার সময়
+  // sessionStorage-এ 'smartfeni_swipe_queue' নামে {category, ids[]}
+  // সেভ হয় (বর্তমান সর্ট+ফিল্টার অর্ডার অনুযায়ী)। এই পেজে সেই
+  // লিস্ট থেকে বর্তমান আইডির আগে/পরের আইডি বের করে সোয়াইপে দ্রুত
+  // (পেজ রিলোড ছাড়া) পরের লিস্টিং দেখানো হয় — fetch() দিয়ে সার্ভার-
+  // রেন্ডারড HTML আনা হয়, DOMParser দিয়ে #listingCard বের করে সোয়াপ
+  // করা হয় (একই টেমপ্লেট, তাই দুই জায়গায় আলাদা রেন্ডার-লজিক
+  // মেইনটেইন করার দরকার নেই)।
+  // ============================================================
+
+  let currentListingId = null;
+  let currentCategory = null;
+  let swipeQueue = [];
+  const htmlCache = new Map(); // id -> { doc, cardHTML, title }
+  let report = null; // একবারই তৈরি হবে, সোয়াইপে বারবার না (নাহলে ইভেন্ট লিসেনার স্ট্যাক হয়ে যাবে)
+
+  function loadSwipeQueue() {
+    try {
+      const raw = sessionStorage.getItem('smartfeni_swipe_queue');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (parsed.category !== currentCategory) return [];
+      return parsed.ids || [];
+    } catch {
+      return [];
+    }
   }
 
-  document.querySelectorAll('.share-btn').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const path = btn.dataset.shareUrl;
-      const title = btn.dataset.shareTitle;
-      const fullUrl = `${window.location.origin}${path}`;
+  function getNeighborIds() {
+    const idx = swipeQueue.indexOf(currentListingId);
+    if (idx === -1) return { prevId: null, nextId: null, position: null };
+    return {
+      prevId: idx > 0 ? swipeQueue[idx - 1] : null,
+      nextId: idx < swipeQueue.length - 1 ? swipeQueue[idx + 1] : null,
+      position: { index: idx + 1, total: swipeQueue.length },
+    };
+  }
 
-      if (navigator.share) {
-        try {
-          await navigator.share({ title, url: fullUrl });
-        } catch (err) {
-          // ইউজার শেয়ার শীট ক্যানসেল করলে কিছু করার দরকার নেই
-        }
+  async function fetchListingDoc(id) {
+    if (htmlCache.has(id)) return htmlCache.get(id);
+    const res = await fetch(`/listing/${id}`);
+    if (!res.ok) return null;
+    const text = await res.text();
+    const doc = new DOMParser().parseFromString(text, 'text/html');
+    const cardEl = doc.getElementById('listingCard');
+    if (!cardEl) return null;
+    const entry = { cardHTML: cardEl.outerHTML, title: doc.title };
+    htmlCache.set(id, entry);
+    return entry;
+  }
+
+  function preloadNeighbors() {
+    const { prevId, nextId } = getNeighborIds();
+    if (prevId) fetchListingDoc(prevId);
+    if (nextId) fetchListingDoc(nextId);
+  }
+
+  function updateSwipeUI() {
+    const { prevId, nextId, position } = getNeighborIds();
+    const pill = document.getElementById('swipePositionPill');
+    const hintPrev = document.getElementById('swipeHintPrev');
+    const hintNext = document.getElementById('swipeHintNext');
+
+    if (pill) {
+      if (position) {
+        pill.textContent = `${position.index} / ${position.total}`;
+        pill.style.display = 'inline-block';
       } else {
-        try {
-          await navigator.clipboard.writeText(fullUrl);
-          showListingShareToast();
-        } catch (err) {
-          console.error('কপি করা যায়নি:', err);
-        }
+        pill.style.display = 'none';
       }
-    });
-  });
+    }
 
-  // ছবিতে ক্লিক করলে গ্লোবাল ImageLightbox খুলবে (জুম + prev/next + swipe)
-  // পুরো ইমেজ অ্যারে + ক্লিক করা ছবির ইনডেক্স পাঠানো হচ্ছে
-  document.querySelectorAll('.zoomable-listing-img').forEach((imgEl, index) => {
-    imgEl.addEventListener('click', () => {
-      const allUrls = Array.from(document.querySelectorAll('.zoomable-listing-img')).map((el) => el.src);
-      window.openImageLightbox?.(allUrls, index);
-    });
-  });
+    hintPrev?.classList.toggle('show', Boolean(prevId));
+    hintNext?.classList.toggle('show', Boolean(nextId));
+  }
 
-  // ছবি স্লাইড করলে (swipe) নিচের ডট ইন্ডিকেটর আপডেট হবে
-  const imageStrip = document.getElementById('imageStrip');
-  const dots = document.querySelectorAll('#imageDots .dot');
-  if (imageStrip && dots.length > 0) {
-    imageStrip.addEventListener('scroll', () => {
-      const index = Math.round(imageStrip.scrollLeft / imageStrip.clientWidth);
-      dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
+  async function loadListing(id, direction) {
+    if (!id) return;
+    const listingCard = document.getElementById('listingCard');
+    if (!listingCard) return;
+
+    const entry = await fetchListingDoc(id);
+    if (!entry) return; // fetch ব্যর্থ হলে চুপচাপ কিছু করবে না, সোয়াইপ ফেইল-সেফ
+
+    // আউট-অ্যানিমেশন
+    listingCard.classList.remove('swipe-in-left', 'swipe-in-right');
+    listingCard.classList.add(direction === 'next' ? 'swipe-out-left' : 'swipe-out-right');
+
+    await new Promise((resolve) => setTimeout(resolve, 160));
+
+    const temp = document.createElement('div');
+    temp.innerHTML = entry.cardHTML;
+    const newCard = temp.firstElementChild;
+
+    listingCard.replaceWith(newCard);
+    newCard.classList.remove('swipe-out-left', 'swipe-out-right');
+    newCard.classList.add(direction === 'next' ? 'swipe-in-left' : 'swipe-in-right');
+
+    document.title = entry.title;
+    currentListingId = id;
+
+    const path = `/listing/${id}`;
+    if (window.location.pathname !== path) {
+      history.pushState({ listingId: id }, '', path);
+    }
+
+    initListingCardBindings();
+    attachSwipeHandlers();
+    updateSwipeUI();
+    preloadNeighbors();
+  }
+
+  // টাচ জেসচার ধরা — বাম দিকে সোয়াইপ করলে পরের, ডান দিকে সোয়াইপ করলে আগের
+  function attachSwipeHandlers() {
+    const listingCard = document.getElementById('listingCard');
+    if (!listingCard) return;
+
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+
+    listingCard.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      tracking = true;
+    }, { passive: true });
+
+    listingCard.addEventListener('touchend', (e) => {
+      if (!tracking) return;
+      tracking = false;
+      const endX = e.changedTouches[0].clientX;
+      const endY = e.changedTouches[0].clientY;
+      const deltaX = endX - startX;
+      const deltaY = endY - startY;
+
+      // হরাইজন্টাল সোয়াইপ কনফার্ম করা — অনেকটা আড়াআড়ি নড়লে, উলম্ব স্ক্রলের
+      // সাথে যেন গুলিয়ে না যায় সেজন্য ন্যূনতম দূরত্ব + অনুপাত চেক
+      if (Math.abs(deltaX) < 55 || Math.abs(deltaX) < Math.abs(deltaY) * 1.3) return;
+
+      const { prevId, nextId } = getNeighborIds();
+      if (deltaX < 0 && nextId) {
+        loadListing(nextId, 'next');
+      } else if (deltaX > 0 && prevId) {
+        loadListing(prevId, 'prev');
+      }
     }, { passive: true });
   }
 
-  // ============================================================
-  // লাইক + রিপোর্ট (অভিযোগ) — সব ক্যাটাগরির জন্য জেনেরিক
-  // ============================================================
-  const listingIdEl = document.getElementById('listingIdData');
-  const listingId = listingIdEl ? JSON.parse(listingIdEl.textContent) : null;
+  window.addEventListener('popstate', () => {
+    const match = window.location.pathname.match(/\/listing\/([^/]+)/);
+    if (match && match[1] && match[1] !== currentListingId) {
+      loadListing(match[1], swipeQueue.indexOf(match[1]) > swipeQueue.indexOf(currentListingId) ? 'next' : 'prev');
+    }
+  });
 
-  if (listingId) {
-    const report = initReportModal({
-      reasons: [
-        { value: 'unavailable', label: 'আর পাওয়া যাচ্ছে না / বিক্রি-ভাড়া হয়ে গেছে' },
-        { value: 'behavior', label: 'আচরণ খারাপ' },
-        { value: 'wrong_info', label: 'ভুল তথ্য' },
-        { value: 'other', label: 'অন্যান্য' },
-      ],
+  // ============================================================
+  // শেয়ার, ছবি লাইটবক্স, লাইক/রিপোর্ট — প্রতিটা সোয়াইপের পরও নতুন
+  // কার্ডের এলিমেন্টে নতুন করে বাইন্ড করতে হয় (innerHTML সোয়াপ হলে
+  // পুরনো ইভেন্ট লিসেনার হারিয়ে যায়), তাই এটা একটা রিইউজেবল ফাংশন
+  // ============================================================
+  function initListingCardBindings() {
+    function showListingShareToast() {
+      const toast = document.getElementById('listingShareToast');
+      if (!toast) return;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    document.querySelectorAll('.share-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const path = btn.dataset.shareUrl;
+        const title = btn.dataset.shareTitle;
+        const fullUrl = `${window.location.origin}${path}`;
+
+        if (navigator.share) {
+          try {
+            await navigator.share({ title, url: fullUrl });
+          } catch (err) {
+            // ইউজার শেয়ার শীট ক্যানসেল করলে কিছু করার দরকার নেই
+          }
+        } else {
+          try {
+            await navigator.clipboard.writeText(fullUrl);
+            showListingShareToast();
+          } catch (err) {
+            console.error('কপি করা যায়নি:', err);
+          }
+        }
+      });
     });
+
+    document.querySelectorAll('.zoomable-listing-img').forEach((imgEl, index) => {
+      imgEl.addEventListener('click', () => {
+        const allUrls = Array.from(document.querySelectorAll('.zoomable-listing-img')).map((el) => el.src);
+        window.openImageLightbox?.(allUrls, index);
+      });
+    });
+
+    const imageStrip = document.getElementById('imageStrip');
+    const dots = document.querySelectorAll('#imageDots .dot');
+    if (imageStrip && dots.length > 0) {
+      imageStrip.addEventListener('scroll', () => {
+        const index = Math.round(imageStrip.scrollLeft / imageStrip.clientWidth);
+        dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
+      }, { passive: true });
+    }
+
+    // top-row/back-link টেক্সট নতুন কার্ডের ক্যাটাগরি অনুযায়ী মিলিয়ে নেওয়া
+    // (এই সিস্টেমে সবসময় একই ক্যাটাগরির ভেতরেই সোয়াইপ হয়, তাই বদলাবে না,
+    // কিন্তু ভবিষ্যতে ক্রস-ক্যাটাগরি সোয়াইপ যোগ হলে এখানেই বসবে)
+
+    const listingId = currentListingId;
+    if (!listingId) return;
 
     const likeCountView = document.getElementById('likeCountView');
     const likeCountViewNum = document.getElementById('likeCountViewNum');
@@ -735,12 +974,37 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     });
 
     flagBtn?.addEventListener('click', () => {
-      report.open('listing', listingId);
+      report?.open('listing', listingId);
     });
 
     renderEngagement();
-    window.addEventListener('smartfeni:auth-changed', () => {
-      renderEngagement();
+  }
+
+  window.addEventListener('smartfeni:auth-changed', () => {
+    initListingCardBindings();
+  });
+
+  // ============================================================
+  // শুরুর সেটআপ
+  // ============================================================
+  const initialCardEl = document.getElementById('listingCard');
+  if (initialCardEl) {
+    currentListingId = JSON.parse(document.getElementById('listingIdData')?.textContent || 'null');
+    currentCategory = initialCardEl.dataset.category || null;
+    swipeQueue = loadSwipeQueue();
+
+    report = initReportModal({
+      reasons: [
+        { value: 'unavailable', label: 'আর পাওয়া যাচ্ছে না / বিক্রি-ভাড়া হয়ে গেছে' },
+        { value: 'behavior', label: 'আচরণ খারাপ' },
+        { value: 'wrong_info', label: 'ভুল তথ্য' },
+        { value: 'other', label: 'অন্যান্য' },
+      ],
     });
+
+    initListingCardBindings();
+    attachSwipeHandlers();
+    updateSwipeUI();
+    preloadNeighbors();
   }
 </script>
