@@ -4,6 +4,12 @@
 // (যেমন: রাইডার confirm করছে না, বা ডেলিভারি নিয়ে সমস্যা আছে)।
 // status -> disputed, admin panel এ ফ্ল্যাগ হয়ে যায়, resolve-dispute.js
 // দিয়ে এডমিন পরে ফাইনাল ডিসিশন দিবে।
+//
+// আপডেট (এই সেশন): reason এখন সত্যিই সেভ হয় — delivery_requests এ
+// dispute_reason, disputed_by, disputed_at কলাম যোগ হয়েছে (migration)।
+// আগে এই তথ্য শুধু status=disputed করে দিত, কারণ কোথাও সেভ হতো না —
+// এডমিন প্যানেলে দেখানোর মতো কিছু ছিল না। এখন এডমিন ডিসপিউট
+// রিজলভ করার আগে reason + কে রিপোর্ট করেছে (customer/rider) দেখতে পারবে।
 // ============================================================
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
@@ -77,10 +83,18 @@ export async function POST({ request }) {
       });
     }
 
+    // রিপোর্টকারী কে (customer/rider) সেটাও reason এর সাথে prefix করে রাখা হচ্ছে,
+    // যাতে এডমিন সহজে বুঝতে পারে কার অভিযোগ
+    const reporterLabel = isCustomer ? 'কাস্টমার' : 'রাইডার';
+    const fullReason = `[${reporterLabel} রিপোর্ট করেছে] ${reason}`;
+
     const { data: updated, error: updateError } = await adminClient
       .from('delivery_requests')
       .update({
         status: 'disputed',
+        dispute_reason: fullReason,
+        disputed_by: user.id,
+        disputed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq('id', requestId)
@@ -93,10 +107,6 @@ export async function POST({ request }) {
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
-
-    // TODO: reason টা কোথায় সেভ হবে তা নিয়ে ভাবা দরকার — এখন delivery_requests এ
-    // কোনো "dispute_reason" কলাম নেই। চাইলে একটা কলাম যোগ করে দিব, নাহলে
-    // admin_notification_log এর মতো আলাদা লগ টেবিলে রাখতে পারি।
 
     // TODO: এডমিনকে নোটিফিকেশন — "নতুন ডিসপিউট রিপোর্ট হয়েছে"
 
