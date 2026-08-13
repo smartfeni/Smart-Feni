@@ -1,0 +1,134 @@
+<!-- path: src/components/ui/FeaturedPhotos.astro -->
+---
+// ============================================================
+// কম্পোনেন্ট: ফিচার্ড ফটো স্লাইডশো
+// featured_photos টেবিল থেকে ক্রমানুসারে ছবি এনে প্রতি ৫ সেকেন্ডে
+// crossfade করে বদলায়। কোনো ছবি না থাকলে fallback static ছবি দেখায়।
+// বাগফিক্স: আগে define:vars + dynamic import ব্যবহার হচ্ছিল যা Astro/Vite
+// bundle করে না, ফলে import silently fail করছিল — এখন static import
+//
+// পারফরম্যান্স ফিক্স (Aug 2026): এই ছবিটাই হোমপেজের LCP (Largest
+// Contentful Paint) এলিমেন্ট — সার্চ বারের ঠিক নিচেই প্রথম দেখা যায়।
+// আগে loading="lazy" থাকায় ব্রাউজার ইচ্ছাকৃত দেরি করছিল, যা PageSpeed
+// রিপোর্টে LCP 6.9s দেখাচ্ছিল। তাই এখন eager + fetchpriority="high"।
+// ============================================================
+
+const fallbackSrc = '/featured/featured-photo.jpg';
+---
+
+<section class="featured-photo-section">
+  <div class="container">
+    <div class="photo-card">
+      <img
+        class="photo-layer photo-base"
+        src={fallbackSrc}
+        alt="স্মার্ট ফেনী কমিউনিটি ফটো"
+        loading="eager"
+        fetchpriority="high"
+        decoding="sync"
+      />
+      <img class="photo-layer photo-slide" data-slide-a alt="" loading="eager" />
+      <img class="photo-layer photo-slide" data-slide-b alt="" loading="eager" />
+    </div>
+  </div>
+</section>
+
+<style>
+  .featured-photo-section {
+    padding: 24px 0 40px;
+    background: #fff;
+  }
+
+  .photo-card {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 24px;
+    overflow: hidden;
+    background: #F4F7FC;
+  }
+
+  .photo-layer {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .photo-slide {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+
+  .photo-slide.visible {
+    opacity: 1;
+  }
+
+  @media (max-width: 480px) {
+    .photo-card {
+      border-radius: 16px;
+    }
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const SLIDE_INTERVAL_MS = 5000;
+
+  async function initSlideshow() {
+    const BUCKET = 'listing-images';
+    const layerA = document.querySelector('[data-slide-a]');
+    const layerB = document.querySelector('[data-slide-b]');
+    if (!layerA || !layerB) return;
+
+    const { data: photos, error } = await supabase
+      .from('featured_photos')
+      .select('storage_path')
+      .order('sort_order', { ascending: true });
+
+    if (error || !photos || photos.length === 0) return; // fallback ছবিই থাকবে
+
+    const urls = photos.map((p) => supabase.storage.from(BUCKET).getPublicUrl(p.storage_path).data.publicUrl);
+
+    let currentIndex = 0;
+    let activeLayer = layerA;
+    let inactiveLayer = layerB;
+
+    function preload(url) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+        img.src = url;
+      });
+    }
+
+    // প্রথম ছবি সরাসরি দেখানো
+    await preload(urls[0]);
+    activeLayer.src = urls[0];
+    activeLayer.classList.add('visible');
+
+    if (urls.length <= 1) return; // একটাই ছবি হলে স্লাইডশো লাগবে না
+
+    async function showNext() {
+      currentIndex = (currentIndex + 1) % urls.length;
+      const nextUrl = urls[currentIndex];
+
+      await preload(nextUrl);
+      inactiveLayer.src = nextUrl;
+      inactiveLayer.classList.add('visible');
+      activeLayer.classList.remove('visible');
+
+      const temp = activeLayer;
+      activeLayer = inactiveLayer;
+      inactiveLayer = temp;
+    }
+
+    setInterval(showNext, SLIDE_INTERVAL_MS);
+  }
+
+  initSlideshow();
+</script>
