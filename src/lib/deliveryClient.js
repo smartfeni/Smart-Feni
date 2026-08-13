@@ -88,6 +88,10 @@ export function riderRespond({ requestId, action, offerPrice }) {
   return callDeliveryApi('rider-respond', { requestId, action, offerPrice });
 }
 
+export function withdrawOffer({ requestId }) {
+  return callDeliveryApi('withdraw-offer', { requestId });
+}
+
 export function confirmDelivery({ requestId }) {
   return callDeliveryApi('confirm-delivery', { requestId });
 }
