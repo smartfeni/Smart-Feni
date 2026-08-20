@@ -5,14 +5,12 @@
 // রান হয় GitHub Actions cron দিয়ে (দেখুন .github/workflows/scrape-cnglagbe.yml)
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 //
-// উপজেলা ম্যাচ পেলে -> সরাসরি লাইভ (status: active)
-// উপজেলা ম্যাচ না পেলে (ফেনীর বাইরের এলাকা হতে পারে) -> upazila খালি,
-// status: pending রেখে সেভ হয়, ডিলিট হয় না — এডমিন পরে ম্যানুয়ালি
-// রিভিউ করে upazila বসিয়ে approve করতে পারবে
-//
-// আপডেট: scraper_blocklist চেক করে — এডমিন যেসব ফোন নম্বর ইচ্ছাকৃতভাবে
-// ডিলিট করেছে, সেগুলো upsert করার আগে বাদ দেওয়া হয় (পরের দিন আবার
-// ফিরে আসা আটকাতে)
+// আপডেট: টেক্সট-পজিশন অনুমানের (আগের লাইন=নাম, পরের লাইন=এলাকা) বদলে
+// এখন প্রতিটা tel: লিংক থেকে DOM-এ উপরে উঠে "যতক্ষণ না ঠিক একটামাত্র
+// ফোন নম্বর থাকে" এমন সবচেয়ে ছোট কন্টেইনার খুঁজে বের করে, তার ভেতরের
+// টেক্সট থেকে নাম/এলাকা বের করে। এটা প্রতিটা কার্ডকে স্বাধীনভাবে পার্স
+// করে, তাই সাইটে কোথাও এক্সট্রা লাইন যোগ/বাদ হলেও পুরো লিস্টের বাকি
+// এন্ট্রিগুলো শিফট হয়ে এলোমেলো হয়ে যাওয়ার (আগের বাগ) ঝুঁকি নাই।
 // ============================================================
 
 import { chromium } from 'playwright';
@@ -37,8 +35,6 @@ const VEHICLE_TYPES = [
   { filterText: 'অ্যাম্বুলেন্স', type: 'ambulance' },
 ];
 
-// নির্দিষ্ট ৫টা উপজেলার নাম আগে চেক হয়, "ফেনী সদর" সবার শেষে ফলব্যাক
-// (কারণ শুধু "ফেনী" শব্দটা প্রায় সব এন্ট্রিতেই জেলার নাম হিসেবে থাকে)
 const UPAZILA_ALIASES_ORDERED = [
   ['ছাগলনাইয়া', ['ছাগলনাইয়া']],
   ['দাগনভূঞা', ['দাগনভূঞা', 'দাগনভুঞা', 'দাগনভুয়া']],
@@ -60,29 +56,48 @@ function matchUpazila(areaText) {
   return null;
 }
 
-function parseDriversFromText(rawText) {
-  const lines = rawText
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+// ============================================================
+// DOM-বেইজড এক্সট্রাকশন — প্রতিটা tel: লিংক থেকে উপরে উঠে সবচেয়ে ছোট
+// কন্টেইনার বের করে যেখানে ঠিক একটামাত্র ফোন নম্বর আছে (মানে ওইটাই
+// সেই কার্ডের সীমানা), তারপর সেই কন্টেইনারের ভেতরের টেক্সট থেকে
+// নাম (ফোনের আগের প্রথম লাইন) ও এলাকা (ফোনের পরের বাকি লাইনগুলো) বের করে
+// ============================================================
+async function extractCardsFromDom(page) {
+  return await page.evaluate(() => {
+    const phoneRegex = /01[3-9]\d{8}/;
+    const globalPhoneRegex = /01[3-9]\d{8}/g;
+    const anchors = Array.from(document.querySelectorAll('a[href^="tel:"]'));
+    const results = [];
 
-  const drivers = [];
+    for (const anchor of anchors) {
+      let container = anchor.parentElement;
+      let bestContainer = container;
 
-  for (let i = 0; i < lines.length; i++) {
-    const phoneMatch = lines[i].match(PHONE_REGEX);
-    if (!phoneMatch) continue;
+      while (container && container !== document.body) {
+        const matches = container.innerText.match(globalPhoneRegex) || [];
+        if (matches.length > 1) break; // একাধিক ফোন মানে এটা একাধিক কার্ড ধরে ফেলেছে, তাই আগেরটাই ঠিক
+        bestContainer = container;
+        container = container.parentElement;
+      }
 
-    const phone = phoneMatch[0];
-    const name = lines[i - 1] || null;
-    const nextLine = lines[i + 1] || '';
-    const area = PHONE_REGEX.test(nextLine) ? '' : nextLine;
+      const text = bestContainer.innerText || '';
+      const lines = text
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
 
-    if (!name || PHONE_REGEX.test(name)) continue;
+      const phoneIdx = lines.findIndex((l) => phoneRegex.test(l));
+      if (phoneIdx === -1) continue;
 
-    drivers.push({ name, phone, area });
-  }
+      const phoneMatch = lines[phoneIdx].match(phoneRegex)[0];
+      const name = phoneIdx > 0 ? lines[phoneIdx - 1] : (lines[0] || '');
+      const area = lines.slice(phoneIdx + 1).join(', ');
 
-  return drivers;
+      results.push({ name, phone: phoneMatch, area });
+    }
+
+    return results;
+  });
 }
 
 async function scrollToLoadAll(page, maxRounds = 300) {
@@ -124,8 +139,7 @@ async function scrapeVehicleType(page, vehicleType) {
   await selectVehicleFilter(page, vehicleType.filterText);
   await scrollToLoadAll(page);
 
-  const bodyText = await page.evaluate(() => document.body.innerText);
-  const rawDrivers = parseDriversFromText(bodyText);
+  const rawDrivers = await extractCardsFromDom(page);
 
   console.log(`[${vehicleType.type}] raw entries found: ${rawDrivers.length}`);
   return rawDrivers;
@@ -151,7 +165,6 @@ function buildListingRow(driver, vehicleType) {
   };
 }
 
-// এডমিন যেসব ফোন নম্বর ব্লক করেছে (ডিলিট করেছে) সেগুলো ফেচ করা
 async function fetchBlockedPhones() {
   const { data, error } = await supabase
     .from('scraper_blocklist')
