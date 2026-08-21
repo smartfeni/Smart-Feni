@@ -5,12 +5,11 @@
 // রান হয় GitHub Actions cron দিয়ে (দেখুন .github/workflows/scrape-cnglagbe.yml)
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 //
-// আপডেট: টেক্সট-পজিশন অনুমানের (আগের লাইন=নাম, পরের লাইন=এলাকা) বদলে
-// এখন প্রতিটা tel: লিংক থেকে DOM-এ উপরে উঠে "যতক্ষণ না ঠিক একটামাত্র
-// ফোন নম্বর থাকে" এমন সবচেয়ে ছোট কন্টেইনার খুঁজে বের করে, তার ভেতরের
-// টেক্সট থেকে নাম/এলাকা বের করে। এটা প্রতিটা কার্ডকে স্বাধীনভাবে পার্স
-// করে, তাই সাইটে কোথাও এক্সট্রা লাইন যোগ/বাদ হলেও পুরো লিস্টের বাকি
-// এন্ট্রিগুলো শিফট হয়ে এলোমেলো হয়ে যাওয়ার (আগের বাগ) ঝুঁকি নাই।
+// আপডেট: DOM-বেইজড এক্সট্রাকশন (আগের বাগ ফিক্স) + নতুন সুরক্ষা —
+// ডেটাবেজে যে ফোন নম্বরের এন্ট্রি আগে থেকেই status='active' বা
+// 'rejected' (মানে একবার "সিদ্ধান্ত হয়ে গেছে", তা যেভাবেই হোক —
+// ম্যানুয়াল approve বা প্রথম স্ক্র্যাপে auto-match), সেটা upsert
+// থেকে সম্পূর্ণ বাদ যায়। শুধু pending/নতুন এন্ট্রিই upsert হয়।
 // ============================================================
 
 import { chromium } from 'playwright';
@@ -56,12 +55,6 @@ function matchUpazila(areaText) {
   return null;
 }
 
-// ============================================================
-// DOM-বেইজড এক্সট্রাকশন — প্রতিটা tel: লিংক থেকে উপরে উঠে সবচেয়ে ছোট
-// কন্টেইনার বের করে যেখানে ঠিক একটামাত্র ফোন নম্বর আছে (মানে ওইটাই
-// সেই কার্ডের সীমানা), তারপর সেই কন্টেইনারের ভেতরের টেক্সট থেকে
-// নাম (ফোনের আগের প্রথম লাইন) ও এলাকা (ফোনের পরের বাকি লাইনগুলো) বের করে
-// ============================================================
 async function extractCardsFromDom(page) {
   return await page.evaluate(() => {
     const phoneRegex = /01[3-9]\d{8}/;
@@ -75,7 +68,7 @@ async function extractCardsFromDom(page) {
 
       while (container && container !== document.body) {
         const matches = container.innerText.match(globalPhoneRegex) || [];
-        if (matches.length > 1) break; // একাধিক ফোন মানে এটা একাধিক কার্ড ধরে ফেলেছে, তাই আগেরটাই ঠিক
+        if (matches.length > 1) break;
         bestContainer = container;
         container = container.parentElement;
       }
@@ -179,6 +172,27 @@ async function fetchBlockedPhones() {
   return new Set((data || []).map((row) => row.phone));
 }
 
+// ডেটাবেজে ইতিমধ্যে যেসব ফোন নম্বরের এন্ট্রি "active" বা "rejected"
+// (একবার সিদ্ধান্ত হয়ে গেছে, ম্যানুয়ালি হোক বা auto-match হয়ে) —
+// সেগুলোর ম্যাপ (phone -> status) রিটার্ন করে
+async function fetchLockedPhones(phones) {
+  if (phones.length === 0) return new Set();
+
+  const { data, error } = await supabase
+    .from('listings')
+    .select('contact_phone, status')
+    .eq('source', SOURCE_NAME)
+    .in('contact_phone', phones)
+    .in('status', ['active', 'rejected']);
+
+  if (error) {
+    console.error('লকড ফোন নম্বর চেক করতে ব্যর্থ (তাই কিছুই বাদ যাবে না):', error.message);
+    return new Set();
+  }
+
+  return new Set((data || []).map((row) => row.contact_phone));
+}
+
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({
@@ -210,16 +224,21 @@ async function main() {
   });
 
   const blockedPhones = await fetchBlockedPhones();
-  const finalRows = uniqueRows.filter((row) => !blockedPhones.has(row.contact_phone));
-  const blockedSkippedCount = uniqueRows.length - finalRows.length;
+  const afterBlocklist = uniqueRows.filter((row) => !blockedPhones.has(row.contact_phone));
+  const blockedSkippedCount = uniqueRows.length - afterBlocklist.length;
+
+  const lockedPhones = await fetchLockedPhones(afterBlocklist.map((r) => r.contact_phone));
+  const finalRows = afterBlocklist.filter((row) => !lockedPhones.has(row.contact_phone));
+  const lockedSkippedCount = afterBlocklist.length - finalRows.length;
 
   const outOfFeniCount = finalRows.filter((r) => !r.upazila).length;
   console.log(`ব্লকলিস্টে থাকায় স্কিপ হয়েছে: ${blockedSkippedCount} টি`);
+  console.log(`আগে থেকেই active/rejected থাকায় স্কিপ হয়েছে: ${lockedSkippedCount} টি`);
   console.log(`ফেনীর বাইরের এলাকা (pending, upazila খালি): ${outOfFeniCount} টি`);
   console.log(`মোট আপসার্ট হবে: ${finalRows.length} টি এন্ট্রি`);
 
   if (finalRows.length === 0) {
-    console.log('কোনো এন্ট্রি পাওয়া যায়নি — সাইটের স্ট্রাকচার বদলেছে কিনা চেক করা দরকার হতে পারে।');
+    console.log('কোনো নতুন/পেন্ডিং এন্ট্রি নাই upsert করার মতো।');
     return;
   }
 
