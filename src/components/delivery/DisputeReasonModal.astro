@@ -1,0 +1,337 @@
+---
+// ============================================================
+// কম্পোনেন্ট: ডিসপিউট রিপোর্ট মোডাল (রিইউজেবল)
+// ব্যবহার হবে: my-orders.astro (কাস্টমার সাইড) ও delivery-hero.astro
+// (রাইডার সাইড) — দুই জায়গাতেই একই কম্পোনেন্ট ইম্পোর্ট করে বসানো হবে।
+//
+// পুরনো prompt()-ভিত্তিক ডিসপিউট রিপোর্টিং এর বদলে এই মোডাল —
+// quick-select কারণ + "অন্যান্য" সিলেক্ট করলে বিস্তারিত টেক্সট।
+//
+// ব্যবহারবিধি (কলিং পেজ থেকে):
+//   <DisputeReasonModal />  ← পেজের যেকোনো জায়গায় একবার বসালেই হবে
+//   window.openDisputeModal({ requestId: req.id, onSuccess: refreshOrders });
+//
+// raise-dispute.js API শুধু status 'confirmed' বা 'delivered' অবস্থায়
+// কাজ করে — তাই এই মোডাল শুধু ওই দুই স্ট্যাটাসের কার্ডেই বসানো উচিত।
+// ============================================================
+
+const reasonOptions = [
+  { value: 'contact', label: 'যোগাযোগ করা যাচ্ছে না' },
+  { value: 'delay', label: 'নির্ধারিত সময়ে আসছে না / দেরি হচ্ছে' },
+  { value: 'wrong_info', label: 'ঠিকানা বা তথ্য ভুল ছিল' },
+  { value: 'payment', label: 'পেমেন্ট নিয়ে সমস্যা' },
+  { value: 'other', label: 'অন্যান্য' },
+];
+---
+
+<div class="dr-overlay" id="drOverlay">
+  <div class="dr-modal">
+    <button class="dr-close" id="drClose" type="button" aria-label="বন্ধ করুন">
+      <i class="fas fa-xmark"></i>
+    </button>
+
+    <div class="dr-header">
+      <div class="dr-header-icon"><i class="fas fa-triangle-exclamation"></i></div>
+      <h3>সমস্যা রিপোর্ট করুন</h3>
+      <p>কী সমস্যা হয়েছে বেছে নিন, এডমিন পর্যালোচনা করে ব্যবস্থা নিবেন</p>
+    </div>
+
+    <p class="dr-message" id="drMessage"></p>
+
+    <div class="dr-reason-list" id="drReasonList">
+      {reasonOptions.map((opt) => (
+        <label class="dr-reason-option">
+          <input type="radio" name="drReason" value={opt.value} />
+          <span>{opt.label}</span>
+        </label>
+      ))}
+    </div>
+
+    <div class="dr-detail-wrap" id="drDetailWrap" style="display:none;">
+      <textarea id="drDetailText" rows="3" placeholder="বিস্তারিত লিখুন..."></textarea>
+    </div>
+
+    <button class="dr-submit" id="drSubmit" type="button">
+      <i class="fas fa-paper-plane"></i> রিপোর্ট পাঠান
+    </button>
+  </div>
+</div>
+
+<script>
+  import { raiseDispute } from '../../lib/deliveryClient.js';
+
+  const overlay = document.getElementById('drOverlay');
+  const closeBtn = document.getElementById('drClose');
+  const submitBtn = document.getElementById('drSubmit');
+  const messageEl = document.getElementById('drMessage');
+  const reasonList = document.getElementById('drReasonList');
+  const detailWrap = document.getElementById('drDetailWrap');
+  const detailText = document.getElementById('drDetailText');
+
+  let activeRequestId = null;
+  let activeOnSuccess = null;
+
+  function resetModal() {
+    reasonList.querySelectorAll('input[name="drReason"]').forEach((el) => (el.checked = false));
+    detailWrap.style.display = 'none';
+    detailText.value = '';
+    messageEl.className = 'dr-message';
+    messageEl.textContent = '';
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিপোর্ট পাঠান';
+  }
+
+  function closeModal() {
+    overlay.classList.remove('active');
+    document.body.style.overflow = '';
+    activeRequestId = null;
+    activeOnSuccess = null;
+  }
+
+  window.openDisputeModal = function ({ requestId, onSuccess }) {
+    if (!requestId) return;
+    activeRequestId = requestId;
+    activeOnSuccess = onSuccess || null;
+    resetModal();
+    overlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  };
+
+  overlay?.addEventListener('click', (e) => {
+    if (e.target === overlay) closeModal();
+  });
+  closeBtn?.addEventListener('click', closeModal);
+
+  reasonList?.addEventListener('change', (e) => {
+    const selected = reasonList.querySelector('input[name="drReason"]:checked');
+    detailWrap.style.display = selected?.value === 'other' ? 'block' : 'none';
+  });
+
+  submitBtn?.addEventListener('click', async () => {
+    if (!activeRequestId) return;
+
+    const selected = reasonList.querySelector('input[name="drReason"]:checked');
+    if (!selected) {
+      messageEl.className = 'dr-message show-error';
+      messageEl.textContent = 'একটা কারণ বেছে নিন';
+      return;
+    }
+
+    const selectedOption = selected.value;
+    let reasonText = reasonList.querySelector(`label:has(input[value="${selectedOption}"]) span`)?.textContent || '';
+
+    if (selectedOption === 'other') {
+      const detail = detailText.value.trim();
+      if (!detail) {
+        messageEl.className = 'dr-message show-error';
+        messageEl.textContent = 'বিস্তারিত লিখুন';
+        return;
+      }
+      reasonText = detail;
+    } else if (detailText.value.trim()) {
+      reasonText += ` — ${detailText.value.trim()}`;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> পাঠানো হচ্ছে...';
+    messageEl.className = 'dr-message';
+    messageEl.textContent = '';
+
+    const { error } = await raiseDispute({ requestId: activeRequestId, reason: reasonText });
+
+    if (error) {
+      messageEl.className = 'dr-message show-error';
+      messageEl.textContent = error;
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিপোর্ট পাঠান';
+      return;
+    }
+
+    const successCallback = activeOnSuccess;
+    closeModal();
+    successCallback?.();
+  });
+</script>
+
+<style>
+  .dr-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 1000;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .dr-overlay.active {
+    display: flex;
+  }
+
+  .dr-modal {
+    background: #fff;
+    width: 100%;
+    max-width: 460px;
+    border-radius: 24px 24px 0 0;
+    padding: 28px 22px 24px;
+    position: relative;
+    max-height: 88vh;
+    overflow-y: auto;
+    animation: dr-slide-up 0.25s ease;
+  }
+
+  @media (min-width: 560px) {
+    .dr-overlay {
+      align-items: center;
+    }
+    .dr-modal {
+      border-radius: 24px;
+    }
+  }
+
+  @keyframes dr-slide-up {
+    from { transform: translateY(24px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .dr-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: #F4F7FC;
+    color: #5A6E85;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+
+  .dr-header {
+    text-align: center;
+    margin-bottom: 18px;
+  }
+
+  .dr-header-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: #FFF0EA;
+    color: #D14343;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    margin: 0 auto 12px;
+  }
+
+  .dr-header h3 {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #1B2A4A;
+    margin-bottom: 4px;
+  }
+
+  .dr-header p {
+    font-size: 0.82rem;
+    color: #5A6E85;
+    line-height: 1.4;
+  }
+
+  .dr-message {
+    display: none;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  .dr-message.show-error {
+    display: block;
+    background: #FFF0EA;
+    color: #D14343;
+  }
+
+  .dr-reason-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .dr-reason-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 14px;
+    border-radius: 14px;
+    border: 1.5px solid #E5EAF0;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .dr-reason-option:has(input:checked) {
+    border-color: #FF6B35;
+    background: #FFF6F2;
+  }
+
+  .dr-reason-option input {
+    width: 17px;
+    height: 17px;
+    accent-color: #FF6B35;
+    flex-shrink: 0;
+  }
+
+  .dr-reason-option span {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #1B2A4A;
+  }
+
+  .dr-detail-wrap {
+    margin-bottom: 16px;
+  }
+
+  .dr-detail-wrap textarea {
+    width: 100%;
+    border: 1.5px solid #E5EAF0;
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: 0.88rem;
+    font-family: inherit;
+    color: #1B2A4A;
+    resize: vertical;
+  }
+
+  .dr-detail-wrap textarea:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+
+  .dr-submit {
+    width: 100%;
+    background: #FF6B35;
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    padding: 15px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .dr-submit:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+</style>
