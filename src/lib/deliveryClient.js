@@ -78,7 +78,59 @@ export function submitReview({ requestId, rating, comment }) {
   return callDeliveryApi('submit-review', { requestId, rating, comment });
 }
 
-// ============ রাইডার সাইড ============
+// ============ কাস্টমার সাইড — Smart Hero / Ride Hero "সেরা মূল্য" মডেল ============
+// (নতুন মডেল — Delivery Hero ও Ride Hero দুই ক্যাটাগরিতেই শেয়ার্ড)
+
+export function createServiceRequest({
+  category,
+  upazila,
+  pickupAddress,
+  pickupLat,
+  pickupLng,
+  pickupInstructions,
+  dropAddress,
+  dropLat,
+  dropLng,
+  dropInstructions,
+  description,
+  vehicleType,
+  seatCount,
+  askingPrice,
+}) {
+  return callDeliveryApi('create-request', {
+    category,
+    upazila,
+    pickupAddress,
+    pickupLat,
+    pickupLng,
+    pickupInstructions,
+    dropAddress,
+    dropLat,
+    dropLng,
+    dropInstructions,
+    description,
+    vehicleType,
+    seatCount,
+    askingPrice,
+  });
+}
+
+// কাস্টমার নিজের asking price শুধু বাড়াতে পারবে (API-সাইডে ভ্যালিডেট হবে)
+export function updateAskingPrice({ requestId, newPrice }) {
+  return callDeliveryApi('update-asking-price', { requestId, newPrice });
+}
+
+// বর্তমান সেরা মূল্য (customer asking price বনাম সর্বনিম্ন active hero অফার — যেটা কম)
+export function getBestPrice({ requestId }) {
+  return callDeliveryApi('get-best-price', { requestId });
+}
+
+// কাস্টমার বর্তমান সেরা মূল্যে নিশ্চিত করলে (অ্যাটমিক, ফার্স্ট-ক্লিক-উইন্স)
+export function acceptBestPrice({ requestId }) {
+  return callDeliveryApi('accept-best-price', { requestId });
+}
+
+// ============ রাইডার/হিরো সাইড ============
 
 export function registerRider({ vehicleType, photoUrl, idCardPhotoUrl }) {
   return callDeliveryApi('rider-register', { vehicleType, photoUrl, idCardPhotoUrl });
@@ -94,6 +146,26 @@ export function withdrawOffer({ requestId }) {
 
 export function confirmDelivery({ requestId }) {
   return callDeliveryApi('confirm-delivery', { requestId });
+}
+
+// ============ হিরো সাইড — Smart Hero / Ride Hero "সেরা মূল্য" মডেল ============
+// (নতুন মডেল — হিরো শুধু কাস্টমারের বর্তমান দামে Accept করতে পারবে,
+// বা বর্তমান সেরা মূল্যের চেয়ে কমপক্ষে ৳১ কম নতুন অফার দিতে পারবে)
+
+// রেজিস্ট্রেশনের ২টা ক্যাটাগরি চেকবক্স (ডেলিভারি/রাইড) + vehicle type একসাথে সেভ
+export function registerHero({ vehicleType, offersDelivery, offersRide, photoUrl, idCardPhotoUrl }) {
+  return callDeliveryApi('rider-register', {
+    vehicleType,
+    offersDelivery,
+    offersRide,
+    photoUrl,
+    idCardPhotoUrl,
+  });
+}
+
+// নতুন প্রতিযোগিতামূলক অফার (বর্তমান সেরা মূল্যের চেয়ে ৳১ কম হতে হবে — API ভ্যালিডেট করবে)
+export function submitHeroOffer({ requestId, offerPrice }) {
+  return callDeliveryApi('submit-offer', { requestId, offerPrice });
 }
 
 // ============ শেয়ার্ড (দুই পক্ষই ব্যবহার করতে পারে) ============
