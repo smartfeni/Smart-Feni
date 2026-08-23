@@ -1,0 +1,532 @@
+---
+// ============================================================
+// কম্পোনেন্ট: LocationPicker (রিইউজেবল, Smart Hero / Ride Hero)
+// দুই মোড: ম্যাপে দেখান (Leaflet+OSM+Nominatim, ড্র্যাগেবল পিন)
+//         | শুধু ঠিকানা লিখুন (lat/lng ছাড়া টেক্সট)
+// + সবসময় আলাদা "অতিরিক্ত নির্দেশনা" ফিল্ড
+//
+// একই পেজে pickup ও drop দুইটার জন্য দুইবার বসানো যাবে —
+// প্রতিটা instance-এর id আলাদা হতে হবে।
+//
+// ব্যবহার:
+//   <LocationPicker id="pickup" label="পিকআপ লোকেশন" allowAutoLocate={true} />
+//   <LocationPicker id="drop" label="ড্রপ-অফ লোকেশন" allowAutoLocate={false} />
+//
+// পেরেন্ট ফর্ম থেকে ভ্যালু পড়া (সাবমিটের সময়):
+//   document.querySelector('[data-lp-id="pickup"] .lp-out-mode').value
+//   document.querySelector('[data-lp-id="pickup"] .lp-out-address').value
+//   ... .lp-out-lat / .lp-out-lng / .lp-out-instructions
+// ============================================================
+
+interface Props {
+  id: string;
+  label: string;
+  allowAutoLocate?: boolean;
+  placeholder?: string;
+}
+
+const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নবী হোটেল, ফেনী সদর' } = Astro.props;
+---
+
+<div class="lp-wrap" data-lp-id={id} data-auto-locate={allowAutoLocate ? '1' : '0'}>
+  <label class="lp-label">{label}</label>
+
+  <div class="lp-mode-toggle">
+    <button type="button" class="lp-mode-btn active" data-mode="map">
+      <i class="fas fa-map-location-dot"></i> ম্যাপে দেখান
+    </button>
+    <button type="button" class="lp-mode-btn" data-mode="text">
+      <i class="fas fa-pen"></i> শুধু ঠিকানা লিখুন
+    </button>
+  </div>
+
+  <div class="lp-map-mode">
+    <div class="lp-search-wrap">
+      <i class="fas fa-magnifying-glass lp-search-icon"></i>
+      <input type="text" class="lp-search-input" placeholder="জায়গা খুঁজুন (যেমন: মহিপাল)" autocomplete="off" />
+      <div class="lp-search-results"></div>
+    </div>
+
+    {allowAutoLocate && (
+      <button type="button" class="lp-locate-btn">
+        <i class="fas fa-location-crosshairs"></i> বর্তমান লোকেশন ব্যবহার করুন
+      </button>
+    )}
+
+    <div class="lp-map"></div>
+
+    <p class="lp-address-preview">
+      <i class="fas fa-map-pin"></i>
+      <span class="lp-address-text">ম্যাপে পিন বসান বা সার্চ করুন</span>
+    </p>
+  </div>
+
+  <div class="lp-text-mode">
+    <input type="text" class="lp-text-input" placeholder={placeholder} />
+  </div>
+
+  <div class="lp-instructions-wrap">
+    <label>অতিরিক্ত নির্দেশনা <span>(ঐচ্ছিক)</span></label>
+    <input type="text" class="lp-instructions-input" placeholder="যেমন: ৩ তলায় বাম পাশের ফ্ল্যাট" />
+  </div>
+
+  <input type="hidden" class="lp-out-mode" value="map" />
+  <input type="hidden" class="lp-out-address" value="" />
+  <input type="hidden" class="lp-out-lat" value="" />
+  <input type="hidden" class="lp-out-lng" value="" />
+  <input type="hidden" class="lp-out-instructions" value="" />
+</div>
+
+<script>
+  const FENI_CENTER = [23.0159, 91.3976];
+  let leafletLoadPromise: Promise<void> | null = null;
+
+  function loadLeaflet(): Promise<void> {
+    if ((window as any).L) return Promise.resolve();
+    if (leafletLoadPromise) return leafletLoadPromise;
+
+    leafletLoadPromise = new Promise((resolve, reject) => {
+      const cssLink = document.createElement('link');
+      cssLink.rel = 'stylesheet';
+      cssLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+      document.head.appendChild(cssLink);
+
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Leaflet লোড ব্যর্থ'));
+      document.head.appendChild(script);
+    });
+
+    return leafletLoadPromise;
+  }
+
+  async function reverseGeocode(lat: number, lng: number): Promise<string> {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=17&addressdetails=0`
+      );
+      const data = await res.json();
+      return data.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    } catch {
+      return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
+  }
+
+  async function searchPlaces(query: string) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+          query
+        )}&countrycodes=bd&limit=5&addressdetails=0`
+      );
+      return await res.json();
+    } catch {
+      return [];
+    }
+  }
+
+  function initPicker(wrap: HTMLElement) {
+    const L = (window as any).L;
+    const mapModeBtn = wrap.querySelector('[data-mode="map"]') as HTMLButtonElement;
+    const textModeBtn = wrap.querySelector('[data-mode="text"]') as HTMLButtonElement;
+    const mapModeEl = wrap.querySelector('.lp-map-mode') as HTMLElement;
+    const textModeEl = wrap.querySelector('.lp-text-mode') as HTMLElement;
+    const mapEl = wrap.querySelector('.lp-map') as HTMLElement;
+    const searchInput = wrap.querySelector('.lp-search-input') as HTMLInputElement;
+    const searchResults = wrap.querySelector('.lp-search-results') as HTMLElement;
+    const locateBtn = wrap.querySelector('.lp-locate-btn') as HTMLButtonElement | null;
+    const addressPreview = wrap.querySelector('.lp-address-text') as HTMLElement;
+    const textInput = wrap.querySelector('.lp-text-input') as HTMLInputElement;
+    const instructionsInput = wrap.querySelector('.lp-instructions-input') as HTMLInputElement;
+
+    const outMode = wrap.querySelector('.lp-out-mode') as HTMLInputElement;
+    const outAddress = wrap.querySelector('.lp-out-address') as HTMLInputElement;
+    const outLat = wrap.querySelector('.lp-out-lat') as HTMLInputElement;
+    const outLng = wrap.querySelector('.lp-out-lng') as HTMLInputElement;
+    const outInstructions = wrap.querySelector('.lp-out-instructions') as HTMLInputElement;
+
+    const allowAutoLocate = wrap.dataset.autoLocate === '1';
+
+    const map = L.map(mapEl, { zoomControl: true }).setView(FENI_CENTER, 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+
+    let marker: any = null;
+    let mapAddress = '';
+
+    async function setMarker(lat: number, lng: number, panTo = true) {
+      if (marker) {
+        marker.setLatLng([lat, lng]);
+      } else {
+        marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+        marker.on('dragend', () => {
+          const pos = marker.getLatLng();
+          handleNewPosition(pos.lat, pos.lng, false);
+        });
+      }
+      if (panTo) map.setView([lat, lng], 16);
+
+      outLat.value = String(lat);
+      outLng.value = String(lng);
+      addressPreview.textContent = 'ঠিকানা খোঁজা হচ্ছে...';
+
+      const address = await reverseGeocode(lat, lng);
+      mapAddress = address;
+      outAddress.value = address;
+      addressPreview.textContent = address;
+    }
+
+    function handleNewPosition(lat: number, lng: number, panTo = true) {
+      setMarker(lat, lng, panTo);
+    }
+
+    map.on('click', (e: any) => {
+      handleNewPosition(e.latlng.lat, e.latlng.lng, false);
+    });
+
+    // ============ মোড টগল ============
+    mapModeBtn.addEventListener('click', () => {
+      mapModeBtn.classList.add('active');
+      textModeBtn.classList.remove('active');
+      mapModeEl.style.display = 'block';
+      textModeEl.style.display = 'none';
+      outMode.value = 'map';
+      outAddress.value = mapAddress;
+      if (marker) {
+        const pos = marker.getLatLng();
+        outLat.value = String(pos.lat);
+        outLng.value = String(pos.lng);
+      }
+      setTimeout(() => map.invalidateSize(), 50);
+    });
+
+    textModeBtn.addEventListener('click', () => {
+      textModeBtn.classList.add('active');
+      mapModeBtn.classList.remove('active');
+      textModeEl.style.display = 'block';
+      mapModeEl.style.display = 'none';
+      outMode.value = 'text';
+      outLat.value = '';
+      outLng.value = '';
+      outAddress.value = textInput.value.trim();
+    });
+
+    textInput.addEventListener('input', () => {
+      outAddress.value = textInput.value.trim();
+    });
+
+    instructionsInput.addEventListener('input', () => {
+      outInstructions.value = instructionsInput.value.trim();
+    });
+
+    // ============ সার্চ ============
+    let searchTimer: ReturnType<typeof setTimeout>;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const q = searchInput.value.trim();
+      if (q.length < 3) {
+        searchResults.innerHTML = '';
+        searchResults.classList.remove('active');
+        return;
+      }
+      searchTimer = setTimeout(async () => {
+        const results = await searchPlaces(q + ', Feni, Bangladesh');
+        if (!results.length) {
+          searchResults.innerHTML = '<div class="lp-search-empty">কিছু পাওয়া যায়নি</div>';
+          searchResults.classList.add('active');
+          return;
+        }
+        searchResults.innerHTML = results
+          .map(
+            (r: any, i: number) =>
+              `<div class="lp-search-item" data-idx="${i}"><i class="fas fa-location-dot"></i> ${r.display_name}</div>`
+          )
+          .join('');
+        searchResults.classList.add('active');
+
+        searchResults.querySelectorAll('.lp-search-item').forEach((el) => {
+          el.addEventListener('click', () => {
+            const idx = Number((el as HTMLElement).dataset.idx);
+            const r = results[idx];
+            handleNewPosition(parseFloat(r.lat), parseFloat(r.lon), true);
+            searchResults.classList.remove('active');
+            searchInput.value = '';
+          });
+        });
+      }, 400);
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!wrap.contains(e.target as Node)) return;
+      if (!(e.target as HTMLElement).closest('.lp-search-wrap')) {
+        searchResults.classList.remove('active');
+      }
+    });
+
+    // ============ অটো-লোকেট (শুধু pickup-এ) ============
+    if (allowAutoLocate && locateBtn) {
+      const tryAutoLocate = () => {
+        if (!navigator.geolocation) return;
+        locateBtn.disabled = true;
+        locateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> লোকেশন খোঁজা হচ্ছে...';
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            handleNewPosition(pos.coords.latitude, pos.coords.longitude, true);
+            locateBtn.disabled = false;
+            locateBtn.innerHTML = '<i class="fas fa-location-crosshairs"></i> বর্তমান লোকেশন ব্যবহার করুন';
+          },
+          () => {
+            locateBtn.disabled = false;
+            locateBtn.innerHTML = '<i class="fas fa-location-crosshairs"></i> বর্তমান লোকেশন ব্যবহার করুন';
+          },
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      };
+      locateBtn.addEventListener('click', tryAutoLocate);
+      // পেজ লোড হওয়ার সাথে সাথে একবার অটো-ট্রাই
+      tryAutoLocate();
+    }
+  }
+
+  async function initAllPickers() {
+    const wraps = document.querySelectorAll<HTMLElement>('.lp-wrap');
+    if (!wraps.length) return;
+    await loadLeaflet();
+    wraps.forEach((wrap) => {
+      if (wrap.dataset.lpInitialized === '1') return;
+      wrap.dataset.lpInitialized = '1';
+      initPicker(wrap);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAllPickers);
+  } else {
+    initAllPickers();
+  }
+</script>
+
+<style>
+  .lp-wrap {
+    margin-bottom: 18px;
+  }
+
+  .lp-label {
+    display: block;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 8px;
+  }
+
+  .lp-mode-toggle {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .lp-mode-btn {
+    flex: 1;
+    padding: 9px 10px;
+    border-radius: 12px;
+    border: 1.5px solid #E5EAF0;
+    background: #fff;
+    color: #5A6E85;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .lp-mode-btn.active {
+    border-color: #FF6B35;
+    background: #FFF6F2;
+    color: #FF6B35;
+  }
+
+  .lp-search-wrap {
+    position: relative;
+    margin-bottom: 10px;
+  }
+
+  .lp-search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #99A9BE;
+    font-size: 0.85rem;
+  }
+
+  .lp-search-input {
+    width: 100%;
+    padding: 11px 14px 11px 36px;
+    border-radius: 12px;
+    border: 1.5px solid #E5EAF0;
+    font-size: 0.86rem;
+    color: #1B2A4A;
+  }
+
+  .lp-search-input:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+
+  .lp-search-results {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1px solid #E5EAF0;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(27, 42, 74, 0.12);
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 20;
+  }
+
+  .lp-search-results.active {
+    display: block;
+  }
+
+  .lp-locate-btn {
+    width: 100%;
+    padding: 11px;
+    border-radius: 12px;
+    border: 1.5px dashed #FF6B35;
+    background: #FFF6F2;
+    color: #FF6B35;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .lp-locate-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+
+  .lp-map {
+    width: 100%;
+    height: 220px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1.5px solid #E5EAF0;
+  }
+
+  .lp-address-preview {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #5A6E85;
+    background: #F4F7FC;
+    padding: 10px 12px;
+    border-radius: 12px;
+    margin-top: 10px;
+    line-height: 1.4;
+  }
+
+  .lp-address-preview i {
+    color: #FF6B35;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+
+  .lp-text-mode {
+    display: none;
+  }
+
+  .lp-text-input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1.5px solid #E5EAF0;
+    font-size: 0.86rem;
+    color: #1B2A4A;
+  }
+
+  .lp-text-input:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+
+  .lp-instructions-wrap {
+    margin-top: 12px;
+  }
+
+  .lp-instructions-wrap label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #5A6E85;
+    margin-bottom: 6px;
+  }
+
+  .lp-instructions-wrap label span {
+    font-weight: 400;
+    color: #99A9BE;
+  }
+
+  .lp-instructions-input {
+    width: 100%;
+    padding: 11px 14px;
+    border-radius: 12px;
+    border: 1.5px solid #E5EAF0;
+    font-size: 0.84rem;
+    color: #1B2A4A;
+  }
+
+  .lp-instructions-input:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+</style>
+
+<style is:global>
+  /* সার্চ রেজাল্ট আইটেম — JS দিয়ে innerHTML হিসেবে বসে, তাই global প্রয়োজন */
+  .lp-search-item {
+    padding: 11px 14px;
+    font-size: 0.82rem;
+    color: #1B2A4A;
+    cursor: pointer;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    border-bottom: 1px solid #F0F3F8;
+  }
+
+  .lp-search-item:last-child {
+    border-bottom: none;
+  }
+
+  .lp-search-item i {
+    color: #FF6B35;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+
+  .lp-search-item:hover {
+    background: #FFF6F2;
+  }
+
+  .lp-search-empty {
+    padding: 14px;
+    text-align: center;
+    font-size: 0.8rem;
+    color: #99A9BE;
+  }
+</style>
