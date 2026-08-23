@@ -1,17 +1,16 @@
 // ============================================================
-// API এন্ডপয়েন্ট: রাইডার নিজের অফার/কাউন্টার তুলে নিবে
+// API এন্ডপয়েন্ট: হিরো নিজের সক্রিয় অফার তুলে নিবে
 // (/api/delivery/withdraw-offer)
-// শুধু status IN ('pending','negotiating') থাকা নিজের থ্রেড
-// withdraw করা যাবে — একবার accept হয়ে গেলে (confirmed) আর
-// withdraw করা যাবে না, তখন raise-dispute ফ্লো দিয়ে হ্যান্ডল হবে।
-// থ্রেড status -> 'rejected' এ চলে যায়, যাতে কাস্টমার সেই থ্রেড
-// আর দেখতে না পায় (my-orders.astro এর filter এ শুধু
-// pending/negotiating দেখানো হয়)।
+// শুধু status='active' এবং created_at ১ মিনিটের মধ্যে হলেই
+// withdraw করা যাবে (ভুল এন্ট্রি সাথে সাথে ঠিক করার জন্য) —
+// ১ মিনিট পার হয়ে গেলে আর withdraw করা যাবে না।
 // ============================================================
 
 import { getAuthedUser } from '../../../lib/deliverySupabase.js';
 
 export const prerender = false;
+
+const WITHDRAW_WINDOW_MS = 60 * 1000;
 
 export async function POST({ request }) {
   try {
@@ -32,10 +31,9 @@ export async function POST({ request }) {
       );
     }
 
-    // নিজের থ্রেড খুঁজে বের করা — RLS নিজেই নিশ্চিত করবে এটা এই রাইডারের নিজের অফার কিনা
     const { data: offer, error: offerFetchError } = await client
       .from('delivery_offers')
-      .select('id, status, rider_profile_id')
+      .select('id, status, rider_profile_id, created_at')
       .eq('request_id', requestId)
       .eq('rider_profile_id', user.id)
       .maybeSingle();
@@ -47,18 +45,26 @@ export async function POST({ request }) {
       );
     }
 
-    if (!['pending', 'negotiating'].includes(offer.status)) {
+    if (offer.status !== 'active') {
       return new Response(
-        JSON.stringify({ error: 'এই অফার আর withdraw করা যাবে না (হয়তো ইতিমধ্যে accept/reject হয়ে গেছে)' }),
+        JSON.stringify({ error: 'এই অফার আর withdraw করা যাবে না (হয়তো ইতিমধ্যে accept/close হয়ে গেছে)' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const ageMs = Date.now() - new Date(offer.created_at).getTime();
+    if (ageMs > WITHDRAW_WINDOW_MS) {
+      return new Response(
+        JSON.stringify({ error: 'অফার দেওয়ার ১ মিনিট পার হয়ে গেছে, আর withdraw করা যাবে না' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
     const { data: updated, error: updateError } = await client
       .from('delivery_offers')
-      .update({ status: 'rejected', updated_at: new Date().toISOString() })
+      .update({ status: 'withdrawn', updated_at: new Date().toISOString() })
       .eq('id', offer.id)
-      .in('status', ['pending', 'negotiating'])
+      .eq('status', 'active')
       .select()
       .single();
 
