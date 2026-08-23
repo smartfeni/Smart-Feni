@@ -9,6 +9,8 @@
 const upazilaList = [
   'ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী',
 ];
+
+import LocationPicker from './LocationPicker.astro';
 ---
 
 <section class="dh-section">
@@ -27,9 +29,11 @@ const upazilaList = [
           </select>
         </div>
 
-        <div class="dh-field">
-          <label>এলাকার বিবরণ</label>
-          <input type="text" id="dhAreaDetail" placeholder="যেমন: শহীদ মিনার রোড, বাসা ১২" required />
+        <div class="dh-location-card">
+          <LocationPicker id="pickup" label="কোথা থেকে আনতে হবে (পিকআপ)" allowAutoLocate={false} placeholder="যেমন: নবী হোটেল, ফেনী সদর" />
+        </div>
+        <div class="dh-location-card">
+          <LocationPicker id="drop" label="ডেলিভারি ঠিকানা" allowAutoLocate={true} placeholder="যেমন: শহীদ মিনার রোড, বাসা ১২" />
         </div>
 
         <div class="dh-field">
@@ -43,12 +47,13 @@ const upazilaList = [
             <button type="button" class="dh-vehicle-btn active" data-vehicle="any">যেকোনো</button>
             <button type="button" class="dh-vehicle-btn" data-vehicle="bike">বাইক</button>
             <button type="button" class="dh-vehicle-btn" data-vehicle="cycle">সাইকেল</button>
+            <button type="button" class="dh-vehicle-btn" data-vehicle="cng">সিএনজি</button>
           </div>
           <input type="hidden" id="dhVehicleType" value="any" />
         </div>
 
         <div class="dh-field">
-          <label>আপনার দাম (৳)</label>
+          <label>আপনার প্রস্তাবিত মূল্য (৳)</label>
           <input type="number" id="dhPrice" placeholder="যেমন: ১৫০" min="1" required />
         </div>
 
@@ -149,9 +154,20 @@ const upazilaList = [
     min-height: 56px;
   }
 
+  .dh-location-card {
+    background: rgba(255, 255, 255, 0.94);
+    border-radius: 16px;
+    padding: 14px 14px 4px;
+    margin-bottom: 14px;
+  }
+
+  .dh-location-card :global(.lp-wrap) {
+    margin-bottom: 0;
+  }
+
   .dh-vehicle-row {
     display: flex;
-    gap: 8px;
+    gap: 6px;
   }
 
   .dh-vehicle-btn {
@@ -159,9 +175,9 @@ const upazilaList = [
     border: none;
     background: rgba(255, 255, 255, 0.2);
     color: #fff;
-    padding: 10px 6px;
+    padding: 10px 4px;
     border-radius: 12px;
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     font-weight: 700;
     cursor: pointer;
   }
@@ -252,7 +268,7 @@ const upazilaList = [
 
 <script>
   import { supabase } from '../../lib/supabase.js';
-  import { createDeliveryRequest } from '../../lib/deliveryClient.js';
+  import { createServiceRequest } from '../../lib/deliveryClient.js';
 
   const form = document.getElementById('dhForm');
   const successEl = document.getElementById('dhSuccess');
@@ -283,12 +299,46 @@ const upazilaList = [
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> পাঠানো হচ্ছে...';
 
     const upazila = document.getElementById('dhUpazila').value;
-    const areaDetail = document.getElementById('dhAreaDetail').value.trim();
     const description = document.getElementById('dhDescription').value.trim();
     const vehicleType = vehicleInput.value;
-    const initialPrice = document.getElementById('dhPrice').value;
+    const askingPrice = document.getElementById('dhPrice').value;
 
-    const { error } = await createDeliveryRequest({ upazila, areaDetail, description, vehicleType, initialPrice });
+    const pickupWrap = document.querySelector('[data-lp-id="pickup"]');
+    const dropWrap = document.querySelector('[data-lp-id="drop"]');
+
+    const pickupAddress = pickupWrap.querySelector('.lp-out-address').value;
+    const pickupLat = pickupWrap.querySelector('.lp-out-lat').value;
+    const pickupLng = pickupWrap.querySelector('.lp-out-lng').value;
+    const pickupInstructions = pickupWrap.querySelector('.lp-out-instructions').value;
+
+    const dropAddress = dropWrap.querySelector('.lp-out-address').value;
+    const dropLat = dropWrap.querySelector('.lp-out-lat').value;
+    const dropLng = dropWrap.querySelector('.lp-out-lng').value;
+    const dropInstructions = dropWrap.querySelector('.lp-out-instructions').value;
+
+    if (!pickupAddress || !dropAddress) {
+      errorEl.textContent = 'পিকআপ ও ডেলিভারি ঠিকানা দুটোই দিতে হবে';
+      errorEl.style.display = 'block';
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান';
+      return;
+    }
+
+    const { error } = await createServiceRequest({
+      category: 'delivery',
+      upazila,
+      pickupAddress,
+      pickupLat: pickupLat || null,
+      pickupLng: pickupLng || null,
+      pickupInstructions,
+      dropAddress,
+      dropLat: dropLat || null,
+      dropLng: dropLng || null,
+      dropInstructions,
+      description,
+      vehicleType,
+      askingPrice,
+    });
 
     submitBtn.disabled = false;
     submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান';
