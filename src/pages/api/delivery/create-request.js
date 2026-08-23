@@ -13,7 +13,8 @@ import { getAuthedUser } from '../../../lib/deliverySupabase.js';
 
 export const prerender = false;
 
-const VALID_VEHICLE_TYPES = ['bike', 'cycle', 'any'];
+const VALID_VEHICLE_TYPES = ['bike', 'cycle', 'cng', 'any'];
+const VALID_CATEGORIES = ['delivery', 'ride'];
 const EXPIRY_HOURS = 1;
 
 export async function POST({ request }) {
@@ -26,16 +27,33 @@ export async function POST({ request }) {
       });
     }
 
-    const { upazila, areaDetail, description, vehicleType, initialPrice } = await request.json();
+    const {
+      category,
+      upazila,
+      pickupAddress,
+      pickupLat,
+      pickupLng,
+      pickupInstructions,
+      dropAddress,
+      dropLat,
+      dropLng,
+      dropInstructions,
+      description,
+      vehicleType,
+      seatCount,
+      askingPrice,
+    } = await request.json();
 
-    if (!upazila || !areaDetail || !description || !initialPrice) {
+    const finalCategory = VALID_CATEGORIES.includes(category) ? category : 'delivery';
+
+    if (!upazila || !pickupAddress || !dropAddress || !description || !askingPrice) {
       return new Response(
-        JSON.stringify({ error: 'লোকেশন, ডিটেইল, এলাকার বিবরণ ও দাম আবশ্যক' }),
+        JSON.stringify({ error: 'উপজেলা, পিকআপ/ড্রপ ঠিকানা, বিবরণ ও দাম আবশ্যক' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    const price = Number(initialPrice);
+    const price = Number(askingPrice);
     if (!Number.isFinite(price) || price <= 0) {
       return new Response(
         JSON.stringify({ error: 'সঠিক দাম দাও (০ এর বেশি সংখ্যা)' }),
@@ -44,18 +62,39 @@ export async function POST({ request }) {
     }
 
     const finalVehicleType = VALID_VEHICLE_TYPES.includes(vehicleType) ? vehicleType : 'any';
+
+    if (finalCategory === 'ride' && finalVehicleType === 'cycle') {
+      return new Response(
+        JSON.stringify({ error: 'রাইড রিকোয়েস্টে সাইকেল সিলেক্ট করা যাবে না' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const expiresAt = new Date(Date.now() + EXPIRY_HOURS * 60 * 60 * 1000).toISOString();
 
     const { data, error: insertError } = await client
       .from('delivery_requests')
       .insert({
         customer_profile_id: user.id,
+        category: finalCategory,
         upazila,
-        area_detail: areaDetail,
+        // পুরনো কলাম — ব্যাকওয়ার্ড কম্প্যাটিবিলিটি (এখনো রিডিজাইন না হওয়া UI এর জন্য)
+        area_detail: dropAddress,
+        pickup_address: pickupAddress,
+        pickup_lat: pickupLat || null,
+        pickup_lng: pickupLng || null,
+        pickup_instructions: pickupInstructions || null,
+        drop_address: dropAddress,
+        drop_lat: dropLat || null,
+        drop_lng: dropLng || null,
+        drop_instructions: dropInstructions || null,
         description,
         vehicle_type: finalVehicleType,
+        seat_count: finalCategory === 'ride' ? seatCount || null : null,
+        // পুরনো ও নতুন — দুই মডেলের জন্যই দাম পূরণ থাকবে
         initial_price: price,
         current_price: price,
+        customer_asking_price: price,
         status: 'open',
         expires_at: expiresAt,
       })
