@@ -12,7 +12,7 @@ import { getAuthedUser } from '../../../lib/deliverySupabase.js';
 
 export const prerender = false;
 
-const VALID_VEHICLE_TYPES = ['bike', 'cycle'];
+const VALID_VEHICLE_TYPES = ['bike', 'cycle', 'cng'];
 
 export async function POST({ request }) {
   try {
@@ -24,11 +24,28 @@ export async function POST({ request }) {
       });
     }
 
-    const { vehicleType, photoUrl, idCardPhotoUrl } = await request.json();
+    const { vehicleType, offersDelivery, offersRide, photoUrl, idCardPhotoUrl } = await request.json();
 
     if (!vehicleType || !VALID_VEHICLE_TYPES.includes(vehicleType)) {
       return new Response(
-        JSON.stringify({ error: 'গাড়ির ধরন সিলেক্ট করো (বাইক/সাইকেল)' }),
+        JSON.stringify({ error: 'গাড়ির ধরন সিলেক্ট করো (বাইক/সাইকেল/সিএনজি)' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const finalOffersDelivery = Boolean(offersDelivery);
+    const finalOffersRide = Boolean(offersRide);
+
+    if (!finalOffersDelivery && !finalOffersRide) {
+      return new Response(
+        JSON.stringify({ error: 'অন্তত একটা সার্ভিস (ডেলিভারি বা রাইড) সিলেক্ট করতে হবে' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (finalOffersRide && vehicleType === 'cycle') {
+      return new Response(
+        JSON.stringify({ error: 'সাইকেল দিয়ে রাইড হিরো হওয়া যায় না' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -65,6 +82,8 @@ export async function POST({ request }) {
       .insert({
         profile_id: user.id,
         vehicle_type: vehicleType,
+        offers_delivery: finalOffersDelivery,
+        offers_ride: finalOffersRide,
         photo_url: photoUrl,
         id_card_photo_url: idCardPhotoUrl,
         verification_status: 'pending',
