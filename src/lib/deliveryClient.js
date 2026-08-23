@@ -125,7 +125,12 @@ export function getBestPrice({ requestId }) {
   return callDeliveryApi('get-best-price', { requestId });
 }
 
-// কাস্টমার বর্তমান সেরা মূল্যে নিশ্চিত করলে (অ্যাটমিক, ফার্স্ট-ক্লিক-উইন্স)
+// কাস্টমার বর্তমান সর্বনিম্ন হিরো অফার নিশ্চিত করলে (অ্যাটমিক)
+export function confirmBestPrice({ requestId }) {
+  return callDeliveryApi('confirm-best-price', { requestId });
+}
+
+// হিরো কাস্টমারের asking price-এ সরাসরি accept করলে (অ্যাটমিক, ফার্স্ট-ক্লিক-উইন্স)
 export function acceptBestPrice({ requestId }) {
   return callDeliveryApi('accept-best-price', { requestId });
 }
