@@ -749,7 +749,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
   <script>
     import { supabase } from '../lib/supabase.js';
     import { toWhatsAppNumber } from '../lib/whatsapp.js';
-    import { riderRespond, confirmDelivery, expireRequests, withdrawOffer } from '../lib/deliveryClient.js';
+    import { confirmDelivery, expireRequests, withdrawOffer, submitHeroOffer, acceptBestPrice } from '../lib/deliveryClient.js';
 
     const authGate = document.getElementById('authGate');
     const notRiderGate = document.getElementById('notRiderGate');
@@ -802,7 +802,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
     async function loadRiderSection({ silent = false } = {}) {
       const { data: riderRow } = await supabase
         .from('delivery_riders')
-        .select('*')
+        .select('*, profiles!delivery_riders_profile_id_fkey(upazila)')
         .eq('profile_id', currentUserId)
         .maybeSingle();
 
@@ -844,7 +844,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
       riderStatRating.textContent = riderRow.avg_rating ? `${riderRow.avg_rating} ★` : '—';
 
       await loadActiveDeliveries(riderRow.id);
-      await loadOpenRequests(riderRow.vehicle_type);
+      await loadOpenRequests(riderRow);
     }
 
     // ===== অনলাইন/অফলাইন টগল =====
@@ -934,20 +934,42 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
     }
 
     // ===== ওপেন রিকোয়েস্ট / বারগেইন =====
-    async function loadOpenRequests(vehicleType) {
-      const { data: openRequests } = await supabase
+    async function loadOpenRequests(riderRow) {
+      const heroUpazila = riderRow.profiles?.upazila;
+
+      let query = supabase
         .from('delivery_requests')
-        .select('id, description, upazila, area_detail, current_price, vehicle_type')
+        .select('id, description, upazila, area_detail, pickup_address, drop_address, customer_asking_price, vehicle_type, seat_count')
         .eq('status', 'open')
-        .or(`vehicle_type.eq.${vehicleType},vehicle_type.eq.any`)
+        .eq('category', 'delivery')
+        .or(`vehicle_type.eq.${riderRow.vehicle_type},vehicle_type.eq.any`)
         .order('created_at', { ascending: false });
+
+      if (heroUpazila) {
+        query = query.eq('upazila', heroUpazila);
+      }
+
+      const { data: openRequests } = await query;
 
       const { data: myOffers } = await supabase
         .from('delivery_offers')
-        .select('request_id, offer_price, status')
-        .eq('rider_profile_id', currentUserId);
+        .select('request_id, offer_price, status, created_at')
+        .eq('rider_profile_id', currentUserId)
+        .eq('status', 'active');
+
+      const { data: allActiveOffers } = await supabase
+        .from('delivery_offers')
+        .select('request_id, offer_price')
+        .eq('status', 'active');
 
       const myOfferMap = new Map((myOffers || []).map((o) => [o.request_id, o]));
+      const bestOfferMap = new Map();
+      (allActiveOffers || []).forEach((o) => {
+        const current = bestOfferMap.get(o.request_id);
+        if (current === undefined || o.offer_price < current) {
+          bestOfferMap.set(o.request_id, o.offer_price);
+        }
+      });
 
       riderOpenRequestsList.innerHTML = '';
 
@@ -959,35 +981,43 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 
       openRequests.forEach((req) => {
         const myOffer = myOfferMap.get(req.id);
+        const lowestHeroOffer = bestOfferMap.get(req.id);
+        const bestPrice =
+          lowestHeroOffer !== undefined
+            ? Math.min(Number(req.customer_asking_price), lowestHeroOffer)
+            : Number(req.customer_asking_price);
+
         const card = document.createElement('div');
         card.className = 'dh-req-card';
 
-        const vehicleIcon = req.vehicle_type === 'bike' ? 'fa-motorcycle' : req.vehicle_type === 'cycle' ? 'fa-bicycle' : 'fa-shuffle';
-        const vehicleLabel = req.vehicle_type === 'bike' ? 'বাইক' : req.vehicle_type === 'cycle' ? 'সাইকেল' : 'যেকোনো';
+        const vehicleIcon = req.vehicle_type === 'bike' ? 'fa-motorcycle' : req.vehicle_type === 'cycle' ? 'fa-bicycle' : req.vehicle_type === 'cng' ? 'fa-taxi' : 'fa-shuffle';
+        const vehicleLabel = req.vehicle_type === 'bike' ? 'বাইক' : req.vehicle_type === 'cycle' ? 'সাইকেল' : req.vehicle_type === 'cng' ? 'সিএনজি' : 'যেকোনো';
+
+        const withdrawEligible = myOffer && Date.now() - new Date(myOffer.created_at).getTime() < 60000;
 
         card.innerHTML = `
           <div class="dh-req-top">
             <div class="dh-req-price-wrap">
-              <span class="dh-req-price-label">প্রস্তাবিত দাম</span>
-              <span class="dh-req-price">৳${req.current_price}</span>
+              <span class="dh-req-price-label">বর্তমান সেরা মূল্য</span>
+              <span class="dh-req-price">৳${bestPrice}</span>
             </div>
             <span class="dh-req-vehicle-badge"><i class="fas ${vehicleIcon}"></i> ${vehicleLabel}</span>
           </div>
           <p class="dh-req-desc">${req.description || ''}</p>
-          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.upazila || ''} — ${req.area_detail || ''}</p>
-          ${myOffer && myOffer.status === 'negotiating' ? `
+          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.pickup_address || req.area_detail || ''} → ${req.drop_address || ''}</p>
+          ${myOffer ? `
             <div class="dh-req-my-offer-row">
-              <span class="dh-req-my-offer"><i class="fas fa-clock"></i> আপনার প্রস্তাব: ৳${myOffer.offer_price} (অপেক্ষমাণ)</span>
-              <button type="button" class="btn-dh-withdraw" data-action="withdraw">অফার তুলে নিন</button>
+              <span class="dh-req-my-offer"><i class="fas fa-tag"></i> আপনার প্রস্তাব: ৳${myOffer.offer_price}</span>
+              ${withdrawEligible ? `<button type="button" class="btn-dh-withdraw" data-action="withdraw">অফার তুলে নিন</button>` : ''}
             </div>
           ` : ''}
           <div class="dh-req-actions">
-            <button class="btn-dh-accept" data-action="accept"><i class="fas fa-check"></i> গ্রহণ করুন</button>
-            <button class="btn-dh-counter" data-action="show-counter"><i class="fas fa-comment-dollar"></i> দাম প্রস্তাব</button>
+            <button class="btn-dh-accept" data-action="accept"><i class="fas fa-check"></i> এই দামে গ্রহণ করুন</button>
+            <button class="btn-dh-counter" data-action="show-counter"><i class="fas fa-comment-dollar"></i> নতুন প্রস্তাব</button>
           </div>
           <div class="dh-counter-row">
             <div class="dh-counter-row-inner">
-              <input type="number" placeholder="আপনার দাম লিখুন" min="1" />
+              <input type="number" placeholder="৳${bestPrice - 1} বা কম" min="1" max="${bestPrice - 1}" />
               <button type="button" data-action="submit-counter"><i class="fas fa-paper-plane"></i></button>
             </div>
           </div>
@@ -999,10 +1029,11 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
         card.querySelector('[data-action="accept"]')?.addEventListener('click', async (e) => {
           const btn = e.currentTarget;
           btn.disabled = true;
-          const { error } = await riderRespond({ requestId: req.id, action: 'accept' });
+          const { error } = await acceptBestPrice({ requestId: req.id });
           if (error) {
             alert(error);
             btn.disabled = false;
+            loadOpenRequests(riderRow);
             return;
           }
           loadRiderSection();
@@ -1016,7 +1047,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
         });
 
         card.querySelector('[data-action="withdraw"]')?.addEventListener('click', async (e) => {
-          if (!confirm('এই অফারটি তুলে নিতে চাও? পরে আবার নতুন করে দাম প্রস্তাব করতে পারবে।')) return;
+          if (!confirm('এই অফারটি তুলে নিতে চাও?')) return;
           const btn = e.currentTarget;
           btn.disabled = true;
           const { error } = await withdrawOffer({ requestId: req.id });
@@ -1025,22 +1056,22 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
             btn.disabled = false;
             return;
           }
-          loadOpenRequests(vehicleType);
+          loadOpenRequests(riderRow);
         });
 
         card.querySelector('[data-action="submit-counter"]')?.addEventListener('click', async () => {
           const input = card.querySelector('.dh-counter-row input');
           const price = Number(input.value);
-          if (!price || price <= 0) {
-            alert('সঠিক দাম দিন');
+          if (!price || price <= 0 || price > bestPrice - 1) {
+            alert(`সেরা মূল্যের চেয়ে কমপক্ষে ৳১ কম দিতে হবে (৳${bestPrice - 1} বা কম)`);
             return;
           }
-          const { error } = await riderRespond({ requestId: req.id, action: 'counter', offerPrice: price });
+          const { error } = await submitHeroOffer({ requestId: req.id, offerPrice: price });
           if (error) {
             alert(error);
             return;
           }
-          loadOpenRequests(vehicleType);
+          loadOpenRequests(riderRow);
         });
 
         riderOpenRequestsList.appendChild(card);
