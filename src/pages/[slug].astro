@@ -1,72 +1,144 @@
 ---
+// ============================================================
+// পেজ: root-level catch-all (/[slug])
+// আগে শুধু clubs টেবিলে slug লুকআপ করত। এখন shops টেবিলেও চেক
+// করে (club না পেলে) — কারণ club আর shop দুটোই এখন top-level
+// slug URL শেয়ার করে (smartfeni.com/slug)।
+// static ফাইল (about, contact, my-shop ইত্যাদি) সবসময় এই
+// dynamic route এর আগে prioritize হয় — তাই conflict হবে না।
+// ============================================================
+
+export const prerender = false;
+
 import BaseLayout from '../components/layout/BaseLayout.astro';
-import { categories } from '../data/services.js';
+import ClubProfile from '../components/club/ClubProfile.astro';
+import ShopProfile from '../components/shop/ShopProfile.astro';
+import { supabase } from '../lib/supabase.js';
 
-export async function getStaticPaths() {
-  // getStaticPaths() নিজের আলাদা isolated scope-এ চলে — ফাংশনের বাইরের
-  // কোনো ভ্যারিয়েবল (import ছাড়া) অ্যাক্সেস করতে পারে না। তাই
-  // customPageSlugs এখানে ফাংশনের ভেতরেই ডিফাইন করা হলো।
-  //
-  // ফিক্স: 'repair' যোগ করা হলো — repair.astro কাস্টম ফাইল থাকায়
-  // এটা বাদ না দিলে রুট কনফ্লিক্ট হচ্ছিল, ফলে লাইভ সাইটে পুরনো
-  // জেনেরিক পেজ দেখাচ্ছিল।
-  //
-  // নতুন: 'laundry' ও 'event' যোগ করা হলো — দুটোরই কাস্টম পেজ
-  // (laundry.astro, event.astro) বানানো হয়েছে।
-  // নতুন: 'ride' যোগ করা হলো — ride.astro কাস্টম পেজ (Ride Hero)
-  // বানানো হয়েছে, বাদ না দিলে জেনেরিক টেমপ্লেটের সাথে কনফ্লিক্ট হবে।
-  const customPageSlugs = [
-    'housing',
-    'job',
-    'blood',
-    'recycle',
-    'car-rental',
-    'courier',
-    'ride',
-    'health',
-    'home-food',
-    'online-shop',
-    'lost-found',
-    'tuition',
-    'repair',
-    'sports',
-    'legal',
-    'laundry',
-    'event',
-  ];
+const { slug } = Astro.params;
 
-  return categories
-    .filter((cat) => !customPageSlugs.includes(cat.slug))
-    .map((cat) => ({
-      params: { slug: cat.slug },
-      props: { category: cat },
-    }));
+const { data: club, error: clubError } = await supabase
+  .from('clubs')
+  .select('*')
+  .eq('slug', slug)
+  .eq('is_active', true)
+  .maybeSingle();
+
+if (clubError) {
+  console.error('club fetch error:', clubError.message);
 }
 
-const { category } = Astro.props;
+let members = [];
+let posts = [];
+
+if (club) {
+  const [{ data: memberData }, { data: postData }] = await Promise.all([
+    supabase
+      .from('club_members')
+      .select('*')
+      .eq('club_id', club.id)
+      .order('position_order', { ascending: true }),
+    supabase
+      .from('club_posts')
+      .select('*')
+      .eq('club_id', club.id)
+      .order('created_at', { ascending: false }),
+  ]);
+  members = memberData || [];
+  posts = postData || [];
+}
+
+// club না পাওয়া গেলে shops টেবিলে চেক
+let shop = null;
+let shopProducts = [];
+
+if (!club) {
+  const { data: shopData, error: shopError } = await supabase
+    .from('shops')
+    .select('*')
+    .eq('slug', slug)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (shopError) {
+    console.error('shop fetch error:', shopError.message);
+  }
+
+  shop = shopData || null;
+
+  if (shop) {
+    const { data: productData } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('category', 'online-shop')
+      .eq('user_id', shop.owner_id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false });
+
+    shopProducts = productData || [];
+  }
+}
+
+const notFound = !club && !shop;
+
+const pageTitle = club
+  ? `${club.name} | স্মার্ট ফেনী`
+  : shop
+  ? `${shop.name} | স্মার্ট ফেনী`
+  : 'পেজ পাওয়া যায়নি | স্মার্ট ফেনী';
+
+const pageDescription = club
+  ? club.tagline || club.description || `${club.name} — ফেনীর একটি ক্লাব`
+  : shop
+  ? shop.tagline || shop.description || `${shop.name} — ফেনীর একটি অনলাইন শপ`
+  : undefined;
+
+const ogImage = club ? club.cover_image || club.logo_image : shop ? shop.cover_image || shop.logo_image : undefined;
+const canonicalPath = club ? `/${club.slug}` : shop ? `/${shop.slug}` : undefined;
 ---
 
-<BaseLayout title={`${category.name} | স্মার্ট ফেনী`}>
-  <div class="container" style="padding-top: 60px; min-height: 70vh;">
-    <h1 style="font-size: 2.8rem; margin-bottom: 20px;">
-      <i class={`fas ${category.icon}`} style="color: #FF6B35;"></i> {category.name}
-    </h1>
-    <p style="font-size: 1.2rem; color: #4A5B6E; max-width: 700px; margin-bottom: 40px;">
-      {category.desc} — এই পেজটি ডাইনামিকভাবে তৈরি হয়েছে। আপনি এখানে প্রতিটি ক্যাটাগরির জন্য আলাদা কন্টেন্ট যোগ করতে পারেন।
-    </p>
-    
-    <div style="background: #fff; padding: 40px; border-radius: 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.04);">
-      <h3>📌 {category.name} - সেবাসমূহ</h3>
-      <p style="color: #5A6E85; margin-top: 12px;">এই ক্যাটাগরির আওতায় যেকোনো সেবা লিস্টিং, ফিল্টার, বা ডিটেইলস পেজ আপনি এখানে ডিজাইন করতে পারেন।</p>
-      <div style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
-        <span style="background: #F4F7FC; padding: 8px 20px; border-radius: 40px;">সেবা #১</span>
-        <span style="background: #F4F7FC; padding: 8px 20px; border-radius: 40px;">সেবা #২</span>
-        <span style="background: #F4F7FC; padding: 8px 20px; border-radius: 40px;">সেবা #৩</span>
+<BaseLayout
+  title={pageTitle}
+  description={pageDescription}
+  ogImage={ogImage}
+  canonicalPath={canonicalPath}
+>
+  {club ? (
+    <ClubProfile club={club} members={members} posts={posts} />
+  ) : shop ? (
+    <ShopProfile shop={shop} products={shopProducts} />
+  ) : (
+    <section class="not-found">
+      <div class="container">
+        <i class="fas fa-face-frown"></i>
+        <p>এই পেজটি খুঁজে পাওয়া যায়নি</p>
+        <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> হোমপেজে ফিরে যান</a>
       </div>
-    </div>
-
-    <div style="margin-top: 50px;">
-      <a href="/" class="btn-outline"><i class="fas fa-arrow-left"></i> ল্যান্ডিং পেজে ফিরে যান</a>
-    </div>
-  </div>
+    </section>
+  )}
 </BaseLayout>
+
+<style>
+  .not-found {
+    padding: 120px 0;
+    text-align: center;
+    color: #B0BCCB;
+  }
+  .not-found i {
+    font-size: 3rem;
+    margin-bottom: 16px;
+  }
+  .not-found p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 16px;
+  }
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #FF6B35;
+    text-decoration: none;
+    font-weight: 700;
+  }
+</style>
