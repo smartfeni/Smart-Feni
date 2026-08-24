@@ -52,20 +52,6 @@ export async function expireRequests() {
 
 // ============ কাস্টমার সাইড ============
 
-export function createDeliveryRequest({ upazila, areaDetail, description, vehicleType, initialPrice }) {
-  return callDeliveryApi('create-request', {
-    upazila,
-    areaDetail,
-    description,
-    vehicleType,
-    initialPrice,
-  });
-}
-
-export function customerRespond({ requestId, riderProfileId, action, offerPrice }) {
-  return callDeliveryApi('customer-respond', { requestId, riderProfileId, action, offerPrice });
-}
-
 export function cancelRequest({ requestId }) {
   return callDeliveryApi('cancel-request', { requestId });
 }
@@ -136,14 +122,6 @@ export function acceptBestPrice({ requestId }) {
 }
 
 // ============ রাইডার/হিরো সাইড ============
-
-export function registerRider({ vehicleType, photoUrl, idCardPhotoUrl }) {
-  return callDeliveryApi('rider-register', { vehicleType, photoUrl, idCardPhotoUrl });
-}
-
-export function riderRespond({ requestId, action, offerPrice }) {
-  return callDeliveryApi('rider-respond', { requestId, action, offerPrice });
-}
 
 export function withdrawOffer({ requestId }) {
   return callDeliveryApi('withdraw-offer', { requestId });
