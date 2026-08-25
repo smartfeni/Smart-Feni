@@ -1,0 +1,1139 @@
+---
+// ============================================================
+// পেজ: /ride-hero — রাইড হিরো (হিরো) ড্যাশবোর্ড (delivery-hero.astro থেকে অ্যাডাপ্ট করা)
+//
+// আপডেট (এই সেশন):
+//   - expireRequests() silent কল + প্রতি ১৫ সেকেন্ডে auto-refresh
+//   - "চলমান রাইড" কার্ডে কাস্টমারের নাম+কল+হোয়াটসঅ্যাপ
+//     দেখা যাবে (mutual reveal — শুধু confirmed/delivered অবস্থায়,
+//     ঠিক কাস্টমার সাইডে রাইডারের তথ্য দেখানোর মতোই)
+// ============================================================
+
+import BaseLayout from '../components/layout/BaseLayout.astro';
+import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro';
+---
+
+<BaseLayout title="রাইড হিরো | স্মার্ট ফেনী">
+  <section class="dh-section">
+    <div class="container dh-container">
+      <a href="/profile/edit" class="back-link"><i class="fas fa-arrow-left"></i> প্রোফাইলে ফিরুন</a>
+
+      <DisputeReasonModal />
+
+      <div id="authGate" class="auth-gate" style="display:none;">
+        <i class="fas fa-lock"></i>
+        <p>এই পেজ দেখতে হলে আগে লগইন করুন</p>
+      </div>
+
+      <div id="notRiderGate" class="auth-gate" style="display:none;">
+        <i class="fas fa-motorcycle"></i>
+        <p>আপনি এখনো রাইড হিরো হিসেবে রেজিস্টার্ড না</p>
+        <span class="not-rider-hint">➕পোস্ট → সার্ভিস দিন → রাইড হিরো থেকে আবেদন করুন</span>
+      </div>
+
+      <div id="dhContent" style="display:none;">
+
+        <!-- pending/rejected স্ট্যাটাস কার্ড -->
+        <div class="dh-card dh-status-card" id="riderPendingCard" style="display:none;">
+          <div class="dh-status-icon pending"><i class="fas fa-clock"></i></div>
+          <h3>আবেদন পর্যালোচনাধীন</h3>
+          <p>এডমিন আপনার ছবি ও আইডি কার্ড যাচাই করছেন, ২৪-৪৮ ঘণ্টার মধ্যে জানানো হবে</p>
+        </div>
+
+        <div class="dh-card dh-status-card" id="riderRejectedCard" style="display:none;">
+          <div class="dh-status-icon rejected"><i class="fas fa-xmark"></i></div>
+          <h3>আবেদন বাতিল হয়েছে</h3>
+          <p id="riderRejectedReason">যাচাই করতে সমস্যা হয়েছে</p>
+          <p class="dh-status-contact">আবার আবেদন করতে কাস্টমার কেয়ারে যোগাযোগ করুন: <a href="tel:+8801816355833">০১৮১৬৩৫৫৮৩৩</a></p>
+        </div>
+
+        <!-- approved হলে: full ড্যাশবোর্ড -->
+        <div id="riderCard" style="display:none;">
+
+          <!-- স্ট্যাটাস + অনলাইন/অফলাইন টগল -->
+          <div class="dh-card dh-toggle-card">
+            <p class="edit-message" id="riderMessage"></p>
+            <div class="dh-status-row">
+              <div>
+                <p class="dh-status-label">আপনার স্ট্যাটাস</p>
+                <p class="dh-status-text" id="riderStatusText">
+                  <i class="fas fa-circle"></i> <span>লোড হচ্ছে...</span>
+                </p>
+              </div>
+              <label class="dh-toggle-switch">
+                <input type="checkbox" id="riderOnlineToggle" />
+                <span class="dh-toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- স্ট্যাটস -->
+          <div class="dh-stats-grid">
+            <div class="dh-stat-box">
+              <span class="dh-stat-icon"><i class="fas fa-flag-checkered"></i></span>
+              <span class="dh-stat-value" id="riderStatCompleted">0</span>
+              <span class="dh-stat-label">সম্পন্ন রাইড</span>
+            </div>
+            <div class="dh-stat-box">
+              <span class="dh-stat-icon"><i class="fas fa-sack-dollar"></i></span>
+              <span class="dh-stat-value" id="riderStatEarned">৳0</span>
+              <span class="dh-stat-label">মোট আয়</span>
+            </div>
+            <div class="dh-stat-box">
+              <span class="dh-stat-icon"><i class="fas fa-star"></i></span>
+              <span class="dh-stat-value" id="riderStatRating">—</span>
+              <span class="dh-stat-label">রেটিং</span>
+            </div>
+          </div>
+
+          <!-- চলমান রাইড -->
+          <div id="riderActiveDeliverySection" style="display:none;">
+            <h3 class="dh-section-heading"><i class="fas fa-route"></i> চলমান রাইড</h3>
+            <div id="riderActiveDeliveryList"></div>
+          </div>
+
+          <!-- ওপেন রিকোয়েস্ট / বারগেইন -->
+          <h3 class="dh-section-heading"><i class="fas fa-bolt"></i> ওপেন রিকোয়েস্ট</h3>
+          <div id="riderOpenRequestsList"></div>
+          <div class="dh-empty-note" id="riderOpenRequestsEmpty" style="display:none;">
+            <i class="fas fa-inbox"></i>
+            <span>এই মুহূর্তে কোনো ওপেন রিকোয়েস্ট নেই</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <style is:global>
+    .dh-section {
+      padding: 40px 0 70px;
+      background: #F8FAFC;
+      min-height: 60vh;
+    }
+
+    .dh-container {
+      max-width: 520px;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 24px;
+    }
+
+    .back-link:hover {
+      color: #2E4470;
+    }
+
+    .auth-gate {
+      background: #fff;
+      border-radius: 20px;
+      padding: 50px 24px;
+      text-align: center;
+      border: 1px dashed #E5EAF0;
+    }
+
+    .auth-gate i {
+      font-size: 2rem;
+      color: #D7E0EC;
+      margin-bottom: 12px;
+    }
+
+    .auth-gate p {
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 6px;
+    }
+
+    .not-rider-hint {
+      font-size: 0.8rem;
+      color: #9AA8BC;
+    }
+
+    .edit-message {
+      display: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin-bottom: 14px;
+      text-align: center;
+    }
+
+    .edit-message.show-error {
+      display: block;
+      background: #EAF0FA;
+      color: #D14343;
+    }
+
+    .edit-message.show-success {
+      display: block;
+      background: #EAFBF0;
+      color: #1B7A3C;
+    }
+
+    .dh-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 24px 22px;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+    }
+
+    /* ===== স্ট্যাটাস কার্ড (pending/rejected) ===== */
+    .dh-status-card {
+      text-align: center;
+    }
+
+    .dh-status-icon {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      margin: 0 auto 14px;
+    }
+
+    .dh-status-icon.pending {
+      background: #FFF4E0;
+      color: #B8860B;
+    }
+
+    .dh-status-icon.rejected {
+      background: #EAF0FA;
+      color: #D14343;
+    }
+
+    .dh-status-card h3 {
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      margin-bottom: 8px;
+    }
+
+    .dh-status-card p {
+      font-size: 0.85rem;
+      color: #5A6E85;
+      line-height: 1.5;
+      margin-bottom: 4px;
+    }
+
+    .dh-status-contact {
+      margin-top: 10px;
+      font-size: 0.8rem;
+    }
+
+    .dh-status-contact a {
+      color: #2E4470;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    /* ===== অনলাইন/অফলাইন টগল ===== */
+    .dh-toggle-card {
+      padding-bottom: 18px;
+    }
+
+    .dh-status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .dh-status-label {
+      font-size: 0.78rem;
+      color: #8FA0BC;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .dh-status-text {
+      font-size: 0.92rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dh-status-text i {
+      font-size: 0.6rem;
+    }
+
+    .dh-status-text.online {
+      color: #16A34A;
+    }
+
+    .dh-status-text.offline {
+      color: #94A3B8;
+    }
+
+    .dh-toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 52px;
+      height: 28px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .dh-toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .dh-toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #D7E0EC;
+      border-radius: 40px;
+      transition: 0.25s;
+    }
+
+    .dh-toggle-slider::before {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 22px;
+      height: 22px;
+      background: #fff;
+      border-radius: 50%;
+      transition: 0.25s;
+    }
+
+    .dh-toggle-switch input:checked + .dh-toggle-slider {
+      background: #4ADE80;
+    }
+
+    .dh-toggle-switch input:checked + .dh-toggle-slider::before {
+      transform: translateX(24px);
+    }
+
+    /* ===== স্ট্যাটস গ্রিড ===== */
+    .dh-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .dh-stat-box {
+      background: #fff;
+      border-radius: 16px;
+      padding: 16px 8px;
+      text-align: center;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+    }
+
+    .dh-stat-icon {
+      display: block;
+      color: #2E4470;
+      font-size: 1rem;
+      margin-bottom: 6px;
+    }
+
+    .dh-stat-value {
+      display: block;
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      margin-bottom: 2px;
+    }
+
+    .dh-stat-label {
+      font-size: 0.64rem;
+      color: #9AA8BC;
+      font-weight: 600;
+    }
+
+    .dh-section-heading {
+      font-size: 0.9rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 22px 4px 12px;
+    }
+
+    .dh-section-heading i {
+      color: #2E4470;
+      font-size: 0.8rem;
+    }
+
+    .dh-empty-note {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      text-align: center;
+      color: #B0BCCB;
+      font-size: 0.82rem;
+      background: #fff;
+      border-radius: 16px;
+      padding: 30px 20px;
+    }
+
+    .dh-empty-note i {
+      font-size: 1.5rem;
+      color: #D7E0EC;
+    }
+
+    /* ============================================================
+       ওপেন রিকোয়েস্ট / বারগেইন কার্ড
+       ============================================================ */
+    .dh-req-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+      border: 1px solid #F0F3F8;
+    }
+
+    .dh-req-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 10px;
+      gap: 10px;
+    }
+
+    .dh-req-price-wrap {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .dh-req-price-label {
+      font-size: 0.64rem;
+      color: #9AA8BC;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 1px;
+    }
+
+    .dh-req-price {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #2E4470;
+      line-height: 1.1;
+    }
+
+    .dh-req-vehicle-badge {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 5px 11px;
+      border-radius: 20px;
+      background: #EAF0FA;
+      color: #2E4470;
+      margin-top: 2px;
+    }
+
+    .dh-req-desc {
+      font-size: 0.84rem;
+      color: #1B2A4A;
+      font-weight: 500;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+
+    .dh-req-area {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.75rem;
+      color: #8FA0BC;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .dh-req-area i {
+      color: #2E4470;
+    }
+
+    .dh-req-seats {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.74rem;
+      color: #8FA0BC;
+      font-weight: 600;
+      margin: -6px 0 12px;
+    }
+
+    .dh-req-seats i {
+      color: #2E4470;
+    }
+
+    .dh-req-my-offer {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #1B7A3C;
+      background: #EAFBF0;
+      padding: 6px 12px;
+      border-radius: 20px;
+      margin-bottom: 12px;
+    }
+
+    .dh-req-my-offer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .btn-dh-withdraw {
+      background: none;
+      border: none;
+      color: #D14343;
+      font-size: 0.72rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: underline;
+      font-family: inherit;
+      padding: 4px 0;
+      flex-shrink: 0;
+    }
+
+    .btn-dh-withdraw:hover {
+      color: #9c2d2d;
+    }
+
+    .dh-req-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dh-req-actions button {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: none;
+      padding: 11px;
+      border-radius: 12px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+
+    .btn-dh-accept {
+      background: #16A34A;
+      color: #fff;
+    }
+
+    .btn-dh-accept:hover {
+      background: #128a3e;
+    }
+
+    .btn-dh-counter {
+      background: #F8FAFC;
+      color: #1B2A4A;
+      border: 1.5px solid #EEF3F9 !important;
+    }
+
+    .btn-dh-counter:hover {
+      border-color: #2E4470 !important;
+      color: #2E4470;
+    }
+
+    .btn-dh-counter.active {
+      background: #EAF0FA;
+      border-color: #C3D3E8 !important;
+      color: #2E4470;
+    }
+
+    /* কাউন্টার-অফার ইনপুট — smooth expand */
+    .dh-counter-row {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.25s ease;
+    }
+
+    .dh-counter-row.active {
+      grid-template-rows: 1fr;
+      margin-top: 10px;
+    }
+
+    .dh-counter-row-inner {
+      overflow: hidden;
+      display: flex;
+      gap: 8px;
+    }
+
+    .dh-counter-row input {
+      flex: 1;
+      border: 1.5px solid #E5EAF0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 0.86rem;
+      font-family: inherit;
+      outline: none;
+      background: #FBFCFE;
+      transition: border-color 0.2s ease;
+    }
+
+    .dh-counter-row input:focus {
+      border-color: #2E4470;
+      background: #fff;
+    }
+
+    .dh-counter-row button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #2E4470;
+      color: #fff;
+      border: none;
+      padding: 0 18px;
+      border-radius: 12px;
+      font-size: 0.86rem;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .dh-counter-row button:hover {
+      background: #e85a2a;
+    }
+
+    /* ===== চলমান রাইড কার্ড ===== */
+    .dh-active-card {
+      background: #EAFBF0;
+      border: 1px solid #C8ECD5;
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .dh-active-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #1B7A3C;
+      margin-bottom: 8px;
+    }
+
+    .dh-active-status i {
+      font-size: 0.55rem;
+    }
+
+    .dh-active-price {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      margin: 4px 0 10px;
+    }
+
+    .dh-customer-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+
+    .dh-customer-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #EAF2FF;
+      color: #2563EB;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      flex-shrink: 0;
+    }
+
+    .dh-customer-name {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .dh-customer-contact-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .dh-customer-contact-row a {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 9px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .dh-call-btn {
+      background: #EAF2FF;
+      color: #2563EB;
+    }
+
+    .dh-call-btn:hover {
+      background: #2563EB;
+      color: #fff;
+    }
+
+    .dh-wa-btn {
+      background: #E9F9EF;
+      color: #1EA952;
+    }
+
+    .dh-wa-btn:hover {
+      background: #1EA952;
+      color: #fff;
+    }
+
+    .btn-confirm-delivery {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #1B7A3C;
+      color: #fff;
+      border: none;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+
+    .btn-confirm-delivery:hover {
+      background: #145c2d;
+    }
+
+    .dispute-link {
+      display: block;
+      text-align: center;
+      font-size: 0.74rem;
+      color: #D14343;
+      margin-top: 8px;
+      cursor: pointer;
+      text-decoration: underline;
+      background: none;
+      border: none;
+      font-family: inherit;
+      width: 100%;
+    }
+
+    @media (max-width: 480px) {
+      .dh-card {
+        padding: 20px 16px;
+        border-radius: 16px;
+      }
+    }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+    import { toWhatsAppNumber } from '../lib/whatsapp.js';
+    import { confirmDelivery, expireRequests, withdrawOffer, submitHeroOffer, acceptBestPrice } from '../lib/deliveryClient.js';
+
+    const authGate = document.getElementById('authGate');
+    const notRiderGate = document.getElementById('notRiderGate');
+    const dhContent = document.getElementById('dhContent');
+
+    const riderPendingCard = document.getElementById('riderPendingCard');
+    const riderRejectedCard = document.getElementById('riderRejectedCard');
+    const riderRejectedReason = document.getElementById('riderRejectedReason');
+    const riderCard = document.getElementById('riderCard');
+    const riderMessage = document.getElementById('riderMessage');
+    const riderStatusText = document.getElementById('riderStatusText');
+    const riderOnlineToggle = document.getElementById('riderOnlineToggle');
+    const riderStatCompleted = document.getElementById('riderStatCompleted');
+    const riderStatEarned = document.getElementById('riderStatEarned');
+    const riderStatRating = document.getElementById('riderStatRating');
+    const riderActiveDeliverySection = document.getElementById('riderActiveDeliverySection');
+    const riderActiveDeliveryList = document.getElementById('riderActiveDeliveryList');
+    const riderOpenRequestsList = document.getElementById('riderOpenRequestsList');
+    const riderOpenRequestsEmpty = document.getElementById('riderOpenRequestsEmpty');
+
+    let currentUserId = null;
+    let currentRiderRow = null;
+    let refreshTimer = null;
+
+    function showMsg(el, text, type = 'error') {
+      if (!el) return;
+      el.textContent = text;
+      el.className = `edit-message ${type === 'error' ? 'show-error' : 'show-success'}`;
+    }
+
+    function clearMsg(el) {
+      if (!el) return;
+      el.textContent = '';
+      el.className = 'edit-message';
+    }
+
+    function renderStatus(el, isOnline) {
+      el.className = `dh-status-text ${isOnline ? 'online' : 'offline'}`;
+      el.innerHTML = isOnline
+        ? '<i class="fas fa-circle"></i> <span>অনলাইন — কাস্টমাররা আপনাকে দেখতে পাচ্ছেন</span>'
+        : '<i class="fas fa-circle"></i> <span>অফলাইন — কাস্টমাররা আপনাকে দেখছেন না</span>';
+    }
+
+    function hideAllRiderCards() {
+      riderPendingCard.style.display = 'none';
+      riderRejectedCard.style.display = 'none';
+      riderCard.style.display = 'none';
+    }
+
+    async function loadRiderSection({ silent = false } = {}) {
+      const { data: riderRow } = await supabase
+        .from('delivery_riders')
+        .select('*, profiles!delivery_riders_profile_id_fkey(upazila)')
+        .eq('profile_id', currentUserId)
+        .maybeSingle();
+
+      if (!riderRow) {
+        if (!silent) {
+          dhContent.style.display = 'none';
+          notRiderGate.style.display = 'block';
+        }
+        return;
+      }
+
+      if (!riderRow.offers_ride) {
+        if (!silent) {
+          dhContent.style.display = 'none';
+          notRiderGate.style.display = 'block';
+          const notRiderMsg = notRiderGate.querySelector('p');
+          if (notRiderMsg) notRiderMsg.textContent = 'আপনি রাইড হিরো ক্যাটাগরিতে রেজিস্টার্ড না — প্রোফাইল এডিট থেকে "রাইড" যোগ করুন';
+        }
+        return;
+      }
+
+      if (!silent) {
+        dhContent.style.display = 'block';
+        notRiderGate.style.display = 'none';
+        hideAllRiderCards();
+      }
+
+      currentRiderRow = riderRow;
+
+      if (riderRow.verification_status === 'pending') {
+        if (!silent) riderPendingCard.style.display = 'block';
+        return;
+      }
+
+      if (riderRow.verification_status === 'rejected') {
+        if (!silent) {
+          riderRejectedReason.textContent = riderRow.rejection_reason || 'যাচাই করতে সমস্যা হয়েছে';
+          riderRejectedCard.style.display = 'block';
+        }
+        return;
+      }
+
+      // approved
+      if (!silent) riderCard.style.display = 'block';
+      riderOnlineToggle.checked = riderRow.is_active;
+      renderStatus(riderStatusText, riderRow.is_active);
+      riderStatCompleted.textContent = riderRow.total_completed || 0;
+      riderStatEarned.textContent = `৳${riderRow.total_earned || 0}`;
+      riderStatRating.textContent = riderRow.avg_rating ? `${riderRow.avg_rating} ★` : '—';
+
+      await loadActiveDeliveries(riderRow.id);
+      await loadOpenRequests(riderRow);
+    }
+
+    // ===== অনলাইন/অফলাইন টগল =====
+    riderOnlineToggle?.addEventListener('change', async () => {
+      const isActive = riderOnlineToggle.checked;
+      renderStatus(riderStatusText, isActive);
+      clearMsg(riderMessage);
+
+      const { error } = await supabase
+        .from('delivery_riders')
+        .update({ is_active: isActive })
+        .eq('id', currentRiderRow.id);
+
+      if (error) {
+        showMsg(riderMessage, 'স্ট্যাটাস আপডেট ব্যর্থ: ' + error.message);
+        riderOnlineToggle.checked = !isActive;
+        renderStatus(riderStatusText, !isActive);
+        return;
+      }
+
+      currentRiderRow.is_active = isActive;
+    });
+
+    // ===== চলমান রাইড (কাস্টমারের তথ্য সহ) =====
+    async function loadActiveDeliveries(riderId) {
+      const { data: activeRequests } = await supabase
+        .from('delivery_requests')
+        .select('id, description, upazila, area_detail, pickup_address, drop_address, final_price, status, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .eq('accepted_rider_id', riderId)
+        .in('status', ['confirmed', 'delivered'])
+        .order('created_at', { ascending: false });
+
+      riderActiveDeliveryList.innerHTML = '';
+
+      if (!activeRequests || activeRequests.length === 0) {
+        riderActiveDeliverySection.style.display = 'none';
+        return;
+      }
+
+      riderActiveDeliverySection.style.display = 'block';
+
+      activeRequests.forEach((req) => {
+        const card = document.createElement('div');
+        card.className = 'dh-active-card';
+
+        const statusLabel = req.status === 'confirmed' ? 'কনফার্মড — রাইড চলছে' : 'কাস্টমার যাত্রা সম্পন্ন মার্ক করেছে';
+        const customer = req.profiles;
+        const customerName = customer?.full_name || 'কাস্টমার';
+        const customerPhone = customer?.phone;
+
+        card.innerHTML = `
+          <p class="dh-active-status"><i class="fas fa-circle"></i> ${statusLabel}</p>
+          <p class="dh-req-desc">${req.description || ''}</p>
+          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.pickup_address || req.area_detail || ''} → ${req.drop_address || ''}</p>
+          <p class="dh-active-price">৳${req.final_price || 0}</p>
+          <div class="dh-customer-info">
+            <span class="dh-customer-avatar"><i class="fas fa-user"></i></span>
+            <span class="dh-customer-name">${customerName}</span>
+          </div>
+          ${customerPhone ? `
+            <div class="dh-customer-contact-row">
+              <a href="tel:${customerPhone}" class="dh-call-btn"><i class="fas fa-phone"></i> কল করুন</a>
+              <a href="https://wa.me/${toWhatsAppNumber(customerPhone)}" target="_blank" rel="noopener" class="dh-wa-btn"><i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ</a>
+            </div>
+          ` : ''}
+          ${req.status === 'delivered' ? `<button class="btn-confirm-delivery" data-request-id="${req.id}"><i class="fas fa-check"></i> রাইড সম্পন্ন করুন</button>` : ''}
+          <button class="dispute-link" data-request-id="${req.id}">সমস্যা হয়েছে? রিপোর্ট করুন</button>
+        `;
+
+        card.querySelector('.dispute-link')?.addEventListener('click', () => {
+          window.openDisputeModal({ requestId: req.id, onSuccess: loadRiderSection });
+        });
+
+        card.querySelector('.btn-confirm-delivery')?.addEventListener('click', async (e) => {
+          e.target.disabled = true;
+          const { error } = await confirmDelivery({ requestId: req.id });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            return;
+          }
+          loadRiderSection();
+        });
+
+        riderActiveDeliveryList.appendChild(card);
+      });
+    }
+
+    // ===== ওপেন রিকোয়েস্ট / বারগেইন =====
+    async function loadOpenRequests(riderRow) {
+      const heroUpazila = riderRow.profiles?.upazila;
+
+      let query = supabase
+        .from('delivery_requests')
+        .select('id, description, upazila, area_detail, pickup_address, drop_address, customer_asking_price, vehicle_type, seat_count')
+        .eq('status', 'open')
+        .eq('category', 'ride')
+        .or(`vehicle_type.eq.${riderRow.vehicle_type},vehicle_type.eq.any`)
+        .order('created_at', { ascending: false });
+
+      if (heroUpazila) {
+        query = query.eq('upazila', heroUpazila);
+      }
+
+      const { data: openRequests } = await query;
+
+      if (!openRequests || openRequests.length === 0) {
+        riderOpenRequestsList.innerHTML = '';
+        riderOpenRequestsEmpty.style.display = 'flex';
+        return;
+      }
+      riderOpenRequestsEmpty.style.display = 'none';
+
+      const openRequestIds = openRequests.map((r) => r.id);
+
+      const { data: myOffers } = await supabase
+        .from('delivery_offers')
+        .select('request_id, offer_price, status, created_at')
+        .eq('rider_profile_id', currentUserId)
+        .eq('status', 'active')
+        .in('request_id', openRequestIds);
+
+      const { data: allActiveOffers } = await supabase
+        .from('delivery_offers')
+        .select('request_id, offer_price')
+        .eq('status', 'active')
+        .in('request_id', openRequestIds);
+
+      const myOfferMap = new Map((myOffers || []).map((o) => [o.request_id, o]));
+      const bestOfferMap = new Map();
+      (allActiveOffers || []).forEach((o) => {
+        const current = bestOfferMap.get(o.request_id);
+        if (current === undefined || o.offer_price < current) {
+          bestOfferMap.set(o.request_id, o.offer_price);
+        }
+      });
+
+      riderOpenRequestsList.innerHTML = '';
+
+      openRequests.forEach((req) => {
+        const myOffer = myOfferMap.get(req.id);
+        const lowestHeroOffer = bestOfferMap.get(req.id);
+        const bestPrice =
+          lowestHeroOffer !== undefined
+            ? Math.min(Number(req.customer_asking_price), lowestHeroOffer)
+            : Number(req.customer_asking_price);
+
+        const card = document.createElement('div');
+        card.className = 'dh-req-card';
+
+        const vehicleIcon = req.vehicle_type === 'bike' ? 'fa-motorcycle' : req.vehicle_type === 'cycle' ? 'fa-bicycle' : req.vehicle_type === 'cng' ? 'fa-taxi' : 'fa-shuffle';
+        const vehicleLabel = req.vehicle_type === 'bike' ? 'বাইক' : req.vehicle_type === 'cycle' ? 'সাইকেল' : req.vehicle_type === 'cng' ? 'সিএনজি' : 'যেকোনো';
+
+        const withdrawEligible = myOffer && Date.now() - new Date(myOffer.created_at).getTime() < 60000;
+
+        card.innerHTML = `
+          <div class="dh-req-top">
+            <div class="dh-req-price-wrap">
+              <span class="dh-req-price-label">বর্তমান সেরা মূল্য</span>
+              <span class="dh-req-price">৳${bestPrice}</span>
+            </div>
+            <span class="dh-req-vehicle-badge"><i class="fas ${vehicleIcon}"></i> ${vehicleLabel}</span>
+          </div>
+          ${req.seat_count ? `<p class="dh-req-seats"><i class="fas fa-user-group"></i> ${req.seat_count} জন যাত্রী</p>` : ''}
+          <p class="dh-req-desc">${req.description || ''}</p>
+          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.pickup_address || req.area_detail || ''} → ${req.drop_address || ''}</p>
+          ${myOffer ? `
+            <div class="dh-req-my-offer-row">
+              <span class="dh-req-my-offer"><i class="fas fa-tag"></i> আপনার প্রস্তাব: ৳${myOffer.offer_price}</span>
+              ${withdrawEligible ? `<button type="button" class="btn-dh-withdraw" data-action="withdraw">অফার তুলে নিন</button>` : ''}
+            </div>
+          ` : ''}
+          <div class="dh-req-actions">
+            <button class="btn-dh-accept" data-action="accept"><i class="fas fa-check"></i> এই দামে গ্রহণ করুন</button>
+            <button class="btn-dh-counter" data-action="show-counter"><i class="fas fa-comment-dollar"></i> নতুন প্রস্তাব</button>
+          </div>
+          <div class="dh-counter-row">
+            <div class="dh-counter-row-inner">
+              <input type="number" placeholder="৳${bestPrice - 1} বা কম" min="1" max="${bestPrice - 1}" />
+              <button type="button" data-action="submit-counter"><i class="fas fa-paper-plane"></i></button>
+            </div>
+          </div>
+        `;
+
+        const counterRow = card.querySelector('.dh-counter-row');
+        const counterBtn = card.querySelector('[data-action="show-counter"]');
+
+        card.querySelector('[data-action="accept"]')?.addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          const { error } = await acceptBestPrice({ requestId: req.id });
+          if (error) {
+            alert(error);
+            btn.disabled = false;
+            loadOpenRequests(riderRow);
+            return;
+          }
+          loadRiderSection();
+        });
+
+        counterBtn?.addEventListener('click', () => {
+          const isOpening = !counterRow.classList.contains('active');
+          counterRow.classList.toggle('active');
+          counterBtn.classList.toggle('active');
+          if (isOpening) card.querySelector('input')?.focus();
+        });
+
+        card.querySelector('[data-action="withdraw"]')?.addEventListener('click', async (e) => {
+          if (!confirm('এই অফারটি তুলে নিতে চাও?')) return;
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          const { error } = await withdrawOffer({ requestId: req.id });
+          if (error) {
+            alert(error);
+            btn.disabled = false;
+            return;
+          }
+          loadOpenRequests(riderRow);
+        });
+
+        card.querySelector('[data-action="submit-counter"]')?.addEventListener('click', async () => {
+          const input = card.querySelector('.dh-counter-row input');
+          const price = Number(input.value);
+          if (!price || price <= 0 || price > bestPrice - 1) {
+            alert(`সেরা মূল্যের চেয়ে কমপক্ষে ৳১ কম দিতে হবে (৳${bestPrice - 1} বা কম)`);
+            return;
+          }
+          const { error } = await submitHeroOffer({ requestId: req.id, offerPrice: price });
+          if (error) {
+            alert(error);
+            return;
+          }
+          loadOpenRequests(riderRow);
+        });
+
+        riderOpenRequestsList.appendChild(card);
+      });
+    }
+
+    // ===== পেজ লোড হলে সেশন চেক =====
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        authGate.style.display = 'block';
+        return;
+      }
+
+      currentUserId = session.user.id;
+
+      await expireRequests();
+      await loadRiderSection();
+
+      // প্রতি ১৫ সেকেন্ডে silent auto-refresh (শুধু approved রাইডারের ক্ষেত্রে কার্যকর হবে)
+      refreshTimer = setInterval(async () => {
+        if (currentRiderRow?.verification_status === 'approved') {
+          await loadRiderSection({ silent: true });
+        }
+      }, 15000);
+    }
+
+    window.addEventListener('beforeunload', () => {
+      if (refreshTimer) clearInterval(refreshTimer);
+    });
+
+    init();
+  </script>
+</BaseLayout>
