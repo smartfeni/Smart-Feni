@@ -117,6 +117,7 @@ export async function POST({ request }) {
           rider_profile_id: user.id,
           offer_price: price,
           status: 'active',
+          last_actor: 'rider', // legacy NOT NULL কলাম, নতুন মডেলে অব্যবহৃত কিন্তু DB constraint এর জন্য দরকার
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'request_id,rider_profile_id' }
