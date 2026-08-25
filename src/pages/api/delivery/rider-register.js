@@ -13,6 +13,7 @@ import { getAuthedUser } from '../../../lib/deliverySupabase.js';
 export const prerender = false;
 
 const VALID_VEHICLE_TYPES = ['bike', 'cycle', 'cng'];
+const VALID_UPAZILAS = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 
 export async function POST({ request }) {
   try {
@@ -24,11 +25,18 @@ export async function POST({ request }) {
       });
     }
 
-    const { vehicleType, offersDelivery, offersRide, photoUrl, idCardPhotoUrl } = await request.json();
+    const { vehicleType, offersDelivery, offersRide, upazila, photoUrl, idCardPhotoUrl } = await request.json();
 
     if (!vehicleType || !VALID_VEHICLE_TYPES.includes(vehicleType)) {
       return new Response(
         JSON.stringify({ error: 'গাড়ির ধরন সিলেক্ট করো (বাইক/সাইকেল/সিএনজি)' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (!upazila || !VALID_UPAZILAS.includes(upazila)) {
+      return new Response(
+        JSON.stringify({ error: 'কোন উপজেলায় সার্ভিস দিবে সেটা সিলেক্ট করো' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -82,6 +90,7 @@ export async function POST({ request }) {
       .insert({
         profile_id: user.id,
         vehicle_type: vehicleType,
+        upazila,
         offers_delivery: finalOffersDelivery,
         offers_ride: finalOffersRide,
         photo_url: photoUrl,
