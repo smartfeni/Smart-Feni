@@ -136,11 +136,12 @@ export function confirmDelivery({ requestId }) {
 // বা বর্তমান সেরা মূল্যের চেয়ে কমপক্ষে ৳১ কম নতুন অফার দিতে পারবে)
 
 // রেজিস্ট্রেশনের ২টা ক্যাটাগরি চেকবক্স (ডেলিভারি/রাইড) + vehicle type একসাথে সেভ
-export function registerHero({ vehicleType, offersDelivery, offersRide, photoUrl, idCardPhotoUrl }) {
+export function registerHero({ vehicleType, offersDelivery, offersRide, upazila, photoUrl, idCardPhotoUrl }) {
   return callDeliveryApi('rider-register', {
     vehicleType,
     offersDelivery,
     offersRide,
+    upazila,
     photoUrl,
     idCardPhotoUrl,
   });
