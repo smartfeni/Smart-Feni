@@ -872,7 +872,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
     async function loadActiveDeliveries(riderId) {
       const { data: activeRequests } = await supabase
         .from('delivery_requests')
-        .select('id, description, upazila, area_detail, final_price, status, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .select('id, description, upazila, area_detail, pickup_address, drop_address, final_price, status, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
         .eq('accepted_rider_id', riderId)
         .in('status', ['confirmed', 'delivered'])
         .order('created_at', { ascending: false });
@@ -898,7 +898,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
         card.innerHTML = `
           <p class="dh-active-status"><i class="fas fa-circle"></i> ${statusLabel}</p>
           <p class="dh-req-desc">${req.description || ''}</p>
-          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.upazila || ''} — ${req.area_detail || ''}</p>
+          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.pickup_address || req.area_detail || ''} → ${req.drop_address || ''}</p>
           <p class="dh-active-price">৳${req.final_price || 0}</p>
           <div class="dh-customer-info">
             <span class="dh-customer-avatar"><i class="fas fa-user"></i></span>
@@ -951,16 +951,27 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 
       const { data: openRequests } = await query;
 
+      if (!openRequests || openRequests.length === 0) {
+        riderOpenRequestsList.innerHTML = '';
+        riderOpenRequestsEmpty.style.display = 'flex';
+        return;
+      }
+      riderOpenRequestsEmpty.style.display = 'none';
+
+      const openRequestIds = openRequests.map((r) => r.id);
+
       const { data: myOffers } = await supabase
         .from('delivery_offers')
         .select('request_id, offer_price, status, created_at')
         .eq('rider_profile_id', currentUserId)
-        .eq('status', 'active');
+        .eq('status', 'active')
+        .in('request_id', openRequestIds);
 
       const { data: allActiveOffers } = await supabase
         .from('delivery_offers')
         .select('request_id, offer_price')
-        .eq('status', 'active');
+        .eq('status', 'active')
+        .in('request_id', openRequestIds);
 
       const myOfferMap = new Map((myOffers || []).map((o) => [o.request_id, o]));
       const bestOfferMap = new Map();
@@ -972,12 +983,6 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
       });
 
       riderOpenRequestsList.innerHTML = '';
-
-      if (!openRequests || openRequests.length === 0) {
-        riderOpenRequestsEmpty.style.display = 'flex';
-        return;
-      }
-      riderOpenRequestsEmpty.style.display = 'none';
 
       openRequests.forEach((req) => {
         const myOffer = myOfferMap.get(req.id);
