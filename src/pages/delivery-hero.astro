@@ -479,6 +479,36 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
       margin-bottom: 12px;
     }
 
+    .dh-distance-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #F4F7FC;
+      border-radius: 10px;
+      padding: 7px 10px;
+      margin-bottom: 6px;
+      font-size: 0.72rem;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .dh-distance-row i {
+      color: #FF6B35;
+      margin-right: 4px;
+    }
+
+    .dh-maps-btn {
+      background: #EAF2FF;
+      color: #2563EB;
+      border: none;
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.74rem;
+      flex-shrink: 0;
+    }
+
     .dh-req-my-offer-row {
       display: flex;
       align-items: center;
@@ -772,6 +802,40 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 
     let currentUserId = null;
     let currentRiderRow = null;
+    let heroLiveLocation = null; // { lat, lng } — পেজ লোড হলে GPS দিয়ে সেট হবে
+
+    // দুইটা কোঅর্ডিনেটের মধ্যে সরলরৈখিক দূরত্ব (কিমি) — Haversine ফর্মুলা
+    function haversineKm(lat1, lng1, lat2, lng2) {
+      const R = 6371;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLng = ((lng2 - lng1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function formatKm(km) {
+      return km < 1 ? `${Math.round(km * 1000)} মিটার` : `${km.toFixed(1)} কিমি`;
+    }
+
+    function googleMapsDirectionsUrl(destLat, destLng) {
+      const origin = heroLiveLocation ? `${heroLiveLocation.lat},${heroLiveLocation.lng}` : '';
+      return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destLat},${destLng}&travelmode=driving`;
+    }
+
+    function tryGetHeroLocation() {
+      if (!navigator.geolocation) return;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          heroLiveLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        },
+        () => {
+          heroLiveLocation = null;
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    }
     let refreshTimer = null;
 
     function showMsg(el, text, type = 'error') {
@@ -802,7 +866,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
     async function loadRiderSection({ silent = false } = {}) {
       const { data: riderRow } = await supabase
         .from('delivery_riders')
-        .select('*, profiles!delivery_riders_profile_id_fkey(upazila)')
+        .select('*')
         .eq('profile_id', currentUserId)
         .maybeSingle();
 
@@ -935,11 +999,11 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 
     // ===== ওপেন রিকোয়েস্ট / বারগেইন =====
     async function loadOpenRequests(riderRow) {
-      const heroUpazila = riderRow.profiles?.upazila;
+      const heroUpazila = riderRow.upazila;
 
       let query = supabase
         .from('delivery_requests')
-        .select('id, description, upazila, area_detail, pickup_address, drop_address, customer_asking_price, vehicle_type, seat_count')
+        .select('id, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, drop_address, drop_lat, drop_lng, customer_asking_price, vehicle_type, seat_count')
         .eq('status', 'open')
         .eq('category', 'delivery')
         .or(`vehicle_type.eq.${riderRow.vehicle_type},vehicle_type.eq.any`)
@@ -1000,6 +1064,39 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 
         const withdrawEligible = myOffer && Date.now() - new Date(myOffer.created_at).getTime() < 60000;
 
+        const hasPickupCoords = req.pickup_lat && req.pickup_lng;
+        const hasDropCoords = req.drop_lat && req.drop_lng;
+        let distanceRowsHtml = '';
+
+        if (hasPickupCoords) {
+          if (heroLiveLocation) {
+            const d1 = haversineKm(heroLiveLocation.lat, heroLiveLocation.lng, req.pickup_lat, req.pickup_lng);
+            distanceRowsHtml += `
+              <div class="dh-distance-row">
+                <span><i class="fas fa-route"></i> আপনার থেকে পিকআপ: ${formatKm(d1)}</span>
+                <button type="button" class="dh-maps-btn" data-lat="${req.pickup_lat}" data-lng="${req.pickup_lng}"><i class="fas fa-diamond-turn-right"></i></button>
+              </div>
+            `;
+          }
+          if (hasDropCoords) {
+            const d2 = haversineKm(req.pickup_lat, req.pickup_lng, req.drop_lat, req.drop_lng);
+            distanceRowsHtml += `
+              <div class="dh-distance-row">
+                <span><i class="fas fa-route"></i> পিকআপ থেকে ড্রপ: ${formatKm(d2)}</span>
+                <button type="button" class="dh-maps-btn" data-lat="${req.drop_lat}" data-lng="${req.drop_lng}"><i class="fas fa-diamond-turn-right"></i></button>
+              </div>
+            `;
+          }
+        } else if (hasDropCoords && heroLiveLocation) {
+          const d3 = haversineKm(heroLiveLocation.lat, heroLiveLocation.lng, req.drop_lat, req.drop_lng);
+          distanceRowsHtml += `
+            <div class="dh-distance-row">
+              <span><i class="fas fa-route"></i> আপনার থেকে গন্তব্য: ${formatKm(d3)}</span>
+              <button type="button" class="dh-maps-btn" data-lat="${req.drop_lat}" data-lng="${req.drop_lng}"><i class="fas fa-diamond-turn-right"></i></button>
+            </div>
+          `;
+        }
+
         card.innerHTML = `
           <div class="dh-req-top">
             <div class="dh-req-price-wrap">
@@ -1010,6 +1107,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
           </div>
           <p class="dh-req-desc">${req.description || ''}</p>
           <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.pickup_address || req.area_detail || ''} → ${req.drop_address || ''}</p>
+          ${distanceRowsHtml}
           ${myOffer ? `
             <div class="dh-req-my-offer-row">
               <span class="dh-req-my-offer"><i class="fas fa-tag"></i> আপনার প্রস্তাব: ৳${myOffer.offer_price}</span>
@@ -1030,6 +1128,14 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 
         const counterRow = card.querySelector('.dh-counter-row');
         const counterBtn = card.querySelector('[data-action="show-counter"]');
+
+        card.querySelectorAll('.dh-maps-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const lat = btn.dataset.lat;
+            const lng = btn.dataset.lng;
+            window.open(googleMapsDirectionsUrl(lat, lng), '_blank', 'noopener');
+          });
+        });
 
         card.querySelector('[data-action="accept"]')?.addEventListener('click', async (e) => {
           const btn = e.currentTarget;
@@ -1093,6 +1199,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
       }
 
       currentUserId = session.user.id;
+      tryGetHeroLocation();
 
       await expireRequests();
       await loadRiderSection();
