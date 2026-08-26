@@ -464,6 +464,32 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       color: #5A6E85;
     }
 
+    .dr-force-delete-panel {
+      display: none;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed #F3C4C4;
+    }
+
+    .dr-force-delete-panel.active {
+      display: block;
+    }
+
+    .dr-force-warning {
+      font-size: 0.76rem;
+      color: #8A1F1F;
+      background: #FDEBEB;
+      padding: 10px 12px;
+      border-radius: 10px;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+
+    .dr-btn-force-delete {
+      background: #8A1F1F;
+      color: #fff;
+    }
+
     .dr-rejected-reason {
       font-size: 0.8rem;
       color: #5A6E85;
@@ -645,10 +671,17 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
               </div>
             </div>
             <div class="dr-delete-panel">
-              <p><i class="fas fa-triangle-exclamation"></i> এটা স্থায়ীভাবে ডিলিট হবে, ইতিহাস থাকলে (ডেলিভারি/রিভিউ) ব্যর্থ হবে</p>
+              <p><i class="fas fa-triangle-exclamation"></i> এটা স্থায়ীভাবে ডিলিট হবে (রিকভার করা যাবে না)</p>
               <div class="dr-delete-panel-actions">
                 <button class="dr-btn-cancel-delete" data-action="cancel-delete">বাতিল</button>
                 <button class="dr-btn-confirm-delete" data-action="confirm-delete">স্থায়ীভাবে ডিলিট করুন</button>
+              </div>
+              <div class="dr-force-delete-panel">
+                <p class="dr-force-warning"><i class="fas fa-triangle-exclamation"></i> এই রাইডারের ডেলিভারি/অফার ইতিহাস আছে। জোরপূর্বক ডিলিট করলে সংশ্লিষ্ট রেফারেন্স স্থায়ীভাবে মুছে যাবে (রিকভার করা যাবে না)।</p>
+                <div class="dr-delete-panel-actions">
+                  <button class="dr-btn-cancel-delete" data-action="cancel-force-delete">বাতিল</button>
+                  <button class="dr-btn-force-delete" data-action="confirm-force-delete">জোরপূর্বক ডিলিট করুন</button>
+                </div>
               </div>
             </div>
           `;
@@ -660,10 +693,17 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
               <button class="dr-btn-delete" data-action="show-delete"><i class="fas fa-trash"></i> ডিলিট করুন</button>
             </div>
             <div class="dr-delete-panel">
-              <p><i class="fas fa-triangle-exclamation"></i> এটা স্থায়ীভাবে ডিলিট হবে, ইতিহাস থাকলে (ডেলিভারি/রিভিউ) ব্যর্থ হবে</p>
+              <p><i class="fas fa-triangle-exclamation"></i> এটা স্থায়ীভাবে ডিলিট হবে (রিকভার করা যাবে না)</p>
               <div class="dr-delete-panel-actions">
                 <button class="dr-btn-cancel-delete" data-action="cancel-delete">বাতিল</button>
                 <button class="dr-btn-confirm-delete" data-action="confirm-delete">স্থায়ীভাবে ডিলিট করুন</button>
+              </div>
+              <div class="dr-force-delete-panel">
+                <p class="dr-force-warning"><i class="fas fa-triangle-exclamation"></i> এই রাইডারের ডেলিভারি/অফার ইতিহাস আছে। জোরপূর্বক ডিলিট করলে সংশ্লিষ্ট রেফারেন্স স্থায়ীভাবে মুছে যাবে (রিকভার করা যাবে না)।</p>
+                <div class="dr-delete-panel-actions">
+                  <button class="dr-btn-cancel-delete" data-action="cancel-force-delete">বাতিল</button>
+                  <button class="dr-btn-force-delete" data-action="confirm-force-delete">জোরপূর্বক ডিলিট করুন</button>
+                </div>
               </div>
             </div>
           `;
@@ -746,18 +786,40 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
         // delete flow (approved ও rejected কার্ডে)
         const deletePanel = card.querySelector('.dr-delete-panel');
+        const forceDeletePanel = card.querySelector('.dr-force-delete-panel');
         card.querySelector('[data-action="show-delete"]')?.addEventListener('click', () => {
           deletePanel?.classList.add('active');
         });
         card.querySelector('[data-action="cancel-delete"]')?.addEventListener('click', () => {
           deletePanel?.classList.remove('active');
+          forceDeletePanel?.classList.remove('active');
         });
         card.querySelector('[data-action="confirm-delete"]')?.addEventListener('click', async (e) => {
           e.target.disabled = true;
-          const { error } = await deleteRider({ riderId: rider.id });
+          const { error, code } = await deleteRider({ riderId: rider.id });
+          if (error) {
+            e.target.disabled = false;
+            if (code === 'has_history') {
+              forceDeletePanel?.classList.add('active');
+              return;
+            }
+            alert(error);
+            return;
+          }
+          loadRiders();
+        });
+
+        card.querySelector('[data-action="cancel-force-delete"]')?.addEventListener('click', () => {
+          forceDeletePanel?.classList.remove('active');
+        });
+        card.querySelector('[data-action="confirm-force-delete"]')?.addEventListener('click', async (e) => {
+          e.target.disabled = true;
+          e.target.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ডিলিট হচ্ছে...';
+          const { error } = await deleteRider({ riderId: rider.id, force: true });
           if (error) {
             alert(error);
             e.target.disabled = false;
+            e.target.innerHTML = 'জোরপূর্বক ডিলিট করুন';
             return;
           }
           loadRiders();
