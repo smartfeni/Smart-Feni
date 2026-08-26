@@ -88,7 +88,8 @@ export async function POST({ request }) {
       );
     }
 
-    // বর্তমান সেরা মূল্য বের করা
+    // বর্তমান সর্বনিম্ন রাইডার অফার বের করা (কাস্টমারের asking price
+    // এর সাথে এর কোনো সম্পর্ক নাই — শুধু অন্য হিরোদের অফারের মধ্যে তুলনা)
     const { data: activeOffers } = await client
       .from('delivery_offers')
       .select('offer_price')
@@ -99,11 +100,12 @@ export async function POST({ request }) {
       (min, o) => (o.offer_price < min ? o.offer_price : min),
       Infinity
     );
-    const currentBest = Math.min(Number(reqRow.customer_asking_price), lowestOffer);
 
-    if (price > currentBest - 1) {
+    // এখনো কোনো হিরো অফার না দিলে থ্রেশহোল্ড নাই — প্রথম অফার যেকোনো
+    // পজিটিভ দাম হতে পারে
+    if (lowestOffer !== Infinity && price > lowestOffer - 1) {
       return new Response(
-        JSON.stringify({ error: `বর্তমান সেরা মূল্যের (৳${currentBest}) চেয়ে কমপক্ষে ৳১ কম দিতে হবে` }),
+        JSON.stringify({ error: `বর্তমান সর্বনিম্ন রাইডার অফারের (৳${lowestOffer}) চেয়ে কমপক্ষে ৳১ কম দিতে হবে` }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
