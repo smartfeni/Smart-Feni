@@ -1,10 +1,16 @@
 // ============================================================
 // API এন্ডপয়েন্ট: এডমিন রাইডার সম্পূর্ণ ডিলিট করবে
 // (/api/delivery/admin/delete-rider)
-// শুধু admin panel থেকে কল হবে। Hard delete — foreign key constraint
-// থাকলে (delivery_offers/delivery_requests/delivery_reviews এ এই
-// রাইডারের রেফারেন্স থাকলে) ডিলিট ব্যর্থ হবে, তখন এডমিনকে বলা হবে
-// রিজেক্ট/ইনঅ্যাকটিভ করতে (soft) বরং।
+// শুধু admin panel থেকে কল হবে।
+//
+// সাধারণ ডিলিট (force না থাকলে): foreign key constraint থাকলে
+// (delivery_requests.accepted_rider_id এই রাইডারকে পয়েন্ট করলে)
+// ডিলিট ব্যর্থ হবে, code:'has_history' সহ এরর ফেরত দিবে।
+//
+// force:true দিলে — আগে সব delivery_requests.accepted_rider_id
+// এই রাইডারের জন্য null করে দেওয়া হয় (রিকোয়েস্ট/অর্ডার হিস্ট্রি
+// নিজে মুছবে না, শুধু রাইডার-লিংক সরবে), তারপর রাইডার ডিলিট হয়
+// (delivery_offers ON DELETE CASCADE বলে আলাদা করে মুছতে হয় না)।
 // ============================================================
 
 import { requireAdmin, getAdminClient } from '../../../../lib/deliverySupabase.js';
@@ -21,7 +27,7 @@ export async function POST({ request }) {
       });
     }
 
-    const { riderId } = await request.json();
+    const { riderId, force } = await request.json();
 
     if (!riderId) {
       return new Response(
@@ -38,6 +44,24 @@ export async function POST({ request }) {
       });
     }
 
+    if (force) {
+      // জোরপূর্বক ডিলিট: এই রাইডার accepted_rider_id হিসেবে যেসব
+      // delivery_requests-এ আছে, সেগুলার রেফারেন্স null করে দেওয়া হবে
+      // (রিকোয়েস্ট/অর্ডার হিস্ট্রি নিজেই মুছবে না, শুধু রাইডার-লিংক সরবে)।
+      // delivery_offers এমনিতেই ON DELETE CASCADE, আলাদা করে মুছতে হবে না।
+      const { error: unlinkError } = await adminClient
+        .from('delivery_requests')
+        .update({ accepted_rider_id: null })
+        .eq('accepted_rider_id', riderId);
+
+      if (unlinkError) {
+        return new Response(
+          JSON.stringify({ error: 'জোরপূর্বক ডিলিটের আগে রেফারেন্স সরাতে ব্যর্থ: ' + unlinkError.message }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
     const { error: deleteError } = await adminClient
       .from('delivery_riders')
       .delete()
@@ -45,10 +69,16 @@ export async function POST({ request }) {
 
     if (deleteError) {
       // foreign key violation কোড: 23503
-      const message = deleteError.code === '23503'
-        ? 'এই রাইডারের ডেলিভারি/অফার/রিভিউ ইতিহাস আছে বলে সম্পূর্ণ ডিলিট করা যাচ্ছে না — এর বদলে "রিজেক্ট/ইনঅ্যাকটিভ করুন" ব্যবহার করুন'
-        : 'ডিলিট ব্যর্থ: ' + deleteError.message;
-      return new Response(JSON.stringify({ error: message }), {
+      if (deleteError.code === '23503') {
+        return new Response(
+          JSON.stringify({
+            error: 'এই রাইডারের ডেলিভারি/অফার/রিভিউ ইতিহাস আছে বলে সম্পূর্ণ ডিলিট করা যাচ্ছে না — চাইলে জোরপূর্বক ডিলিট করতে পারো (হিস্ট্রির রেফারেন্স মুছে যাবে)',
+            code: 'has_history',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response(JSON.stringify({ error: 'ডিলিট ব্যর্থ: ' + deleteError.message }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
