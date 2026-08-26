@@ -30,7 +30,7 @@ async function callDeliveryApi(endpoint, body) {
     const data = await res.json();
 
     if (!res.ok) {
-      return { error: data.error || 'অপ্রত্যাশিত ত্রুটি ঘটেছে' };
+      return { error: data.error || 'অপ্রত্যাশিত ত্রুটি ঘটেছে', code: data.code };
     }
 
     return { data };
@@ -172,6 +172,6 @@ export function resolveDispute({ requestId, resolution }) {
   return callDeliveryApi('admin/resolve-dispute', { requestId, resolution });
 }
 
-export function deleteRider({ riderId }) {
-  return callDeliveryApi('admin/delete-rider', { riderId });
+export function deleteRider({ riderId, force }) {
+  return callDeliveryApi('admin/delete-rider', { riderId, force });
 }
