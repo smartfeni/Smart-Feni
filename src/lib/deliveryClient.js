@@ -131,6 +131,11 @@ export function confirmDelivery({ requestId }) {
   return callDeliveryApi('confirm-delivery', { requestId });
 }
 
+// রাইড হিরো পিকআপ সম্পন্ন মার্ক করলে (শুধু Ride Hero ব্যবহার করবে)
+export function markPickupDone({ requestId }) {
+  return callDeliveryApi('mark-pickup-done', { requestId });
+}
+
 // ============ হিরো সাইড — Smart Hero / Ride Hero "সেরা মূল্য" মডেল ============
 // (নতুন মডেল — হিরো শুধু কাস্টমারের বর্তমান দামে Accept করতে পারবে,
 // বা বর্তমান সেরা মূল্যের চেয়ে কমপক্ষে ৳১ কম নতুন অফার দিতে পারবে)
