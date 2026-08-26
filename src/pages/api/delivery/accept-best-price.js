@@ -68,24 +68,16 @@ export async function POST({ request }) {
       );
     }
 
-    // বর্তমান সেরা মূল্য বের করা
-    const { data: activeOffers } = await client
-      .from('delivery_offers')
-      .select('offer_price')
-      .eq('request_id', requestId)
-      .eq('status', 'active');
-
-    const lowestOffer = (activeOffers || []).reduce(
-      (min, o) => (o.offer_price < min ? o.offer_price : min),
-      Infinity
-    );
-    const currentBest = Math.min(Number(reqRow.customer_asking_price), lowestOffer);
+    // এটা কাস্টমারের নিজের asking price-এ সরাসরি রাজি হওয়া — অন্য
+    // হিরোরা কত অফার করছে তার সাথে এর কোনো সম্পর্ক নাই, তাই সবসময়
+    // customer_asking_price-ই ব্যবহার হবে (MIN() না)
+    const finalPrice = Number(reqRow.customer_asking_price);
 
     const { data: accepted, error: rpcError } = await client.rpc('accept_service_request', {
       p_request_id: requestId,
       p_hero_profile_id: user.id,
       p_hero_id: heroRow.id,
-      p_price: currentBest,
+      p_price: finalPrice,
     });
 
     if (rpcError) {
@@ -103,7 +95,7 @@ export async function POST({ request }) {
     }
 
     return new Response(
-      JSON.stringify({ success: true, price: currentBest }),
+      JSON.stringify({ success: true, price: finalPrice }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
