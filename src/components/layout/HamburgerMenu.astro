@@ -360,17 +360,56 @@
     riderItem.style.display = riderRow?.offers_delivery ? 'flex' : 'none';
     rideRiderItem.style.display = riderRow?.offers_ride ? 'flex' : 'none';
 
-    // Telegram নোটিফিকেশন — লিংক করা থাকলে লেবেল বদলে যাবে
+    // Telegram নোটিফিকেশন — লিংক করা থাকলে লেবেল বদলে যাবে, disconnect অপশন দেখাবে
+    telegramItem.dataset.connected = profile.telegram_chat_id ? '1' : '0';
     telegramItem.href = `https://t.me/Smart_hero_bot?start=${session.user.id}`;
+    telegramItem.target = '_blank';
     if (profile.telegram_chat_id) {
-      telegramLabel.textContent = 'Telegram নোটিফিকেশন ✓ চালু আছে';
+      telegramLabel.textContent = 'Telegram নোটিফিকেশন ✓ চালু আছে (বন্ধ করতে ট্যাপ করুন)';
+    } else {
+      telegramLabel.textContent = 'Telegram নোটিফিকেশন চালু করুন';
     }
   }
 
   function openMenu() {
     overlay?.classList.add('open');
     document.body.style.overflow = 'hidden';
-    loadProfileAndRoles();
+    telegramItem.addEventListener('click', async (e) => {
+    if (telegramItem.dataset.connected !== '1') return; // কানেক্টেড না থাকলে স্বাভাবিক লিংক (bot এ যাবে)
+
+    e.preventDefault();
+    if (!confirm('Telegram নোটিফিকেশন বন্ধ করতে চাও?')) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    telegramLabel.textContent = 'বন্ধ করা হচ্ছে...';
+
+    try {
+      const res = await fetch('/api/telegram/disconnect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || 'ব্যর্থ হয়েছে');
+        telegramLabel.textContent = 'Telegram নোটিফিকেশন ✓ চালু আছে (বন্ধ করতে ট্যাপ করুন)';
+        return;
+      }
+
+      telegramItem.dataset.connected = '0';
+      telegramLabel.textContent = 'Telegram নোটিফিকেশন চালু করুন';
+    } catch (err) {
+      alert('নেটওয়ার্ক সমস্যা: ' + err.message);
+      telegramLabel.textContent = 'Telegram নোটিফিকেশন ✓ চালু আছে (বন্ধ করতে ট্যাপ করুন)';
+    }
+  });
+
+  loadProfileAndRoles();
   }
 
   function closeMenu() {
