@@ -8,7 +8,7 @@
 export const prerender = false;
 
 export async function GET({ request }) {
-  const token = import.meta.env.TELEGRAM_HERO_BOT_TOKEN;
+  const token = process.env.TELEGRAM_HERO_BOT_TOKEN;
 
   if (!token) {
     return new Response(
