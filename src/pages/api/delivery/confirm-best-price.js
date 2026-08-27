@@ -7,6 +7,7 @@
 // ============================================================
 
 import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { sendTelegramMessage, sendTelegramBroadcast } from '../../../lib/telegramNotify.js';
 
 export const prerender = false;
 
@@ -47,6 +48,39 @@ export async function POST({ request }) {
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    // জেতা হিরোকে জানানো + যারা হেরেছে তাদেরও জানানো
+    const { data: reqRow } = await client
+      .from('delivery_requests')
+      .select('final_price, accepted_rider_id, delivery_riders!delivery_requests_accepted_rider_id_fkey(profile_id, profiles!delivery_riders_profile_id_fkey(telegram_chat_id))')
+      .eq('id', requestId)
+      .maybeSingle();
+
+    const winnerProfileId = reqRow?.delivery_riders?.profile_id;
+    const winnerChatId = reqRow?.delivery_riders?.profiles?.telegram_chat_id;
+
+    if (winnerChatId) {
+      await sendTelegramMessage(
+        winnerChatId,
+        `🎉 কাস্টমার আপনার প্রস্তাব নিশ্চিত করেছে! মূল্য: ৳${reqRow.final_price}\n\nঅ্যাপে গিয়ে বিস্তারিত দেখুন।`
+      );
+    }
+
+    const { data: losingOffers } = await client
+      .from('delivery_offers')
+      .select('profiles!delivery_offers_rider_profile_id_fkey(telegram_chat_id)')
+      .eq('request_id', requestId)
+      .eq('status', 'closed_by_other')
+      .neq('rider_profile_id', winnerProfileId || '');
+
+    const losingChatIds = (losingOffers || [])
+      .map((o) => o.profiles?.telegram_chat_id)
+      .filter(Boolean);
+
+    await sendTelegramBroadcast(
+      losingChatIds,
+      `দুঃখিত, কাস্টমার আরেকজন হিরোর প্রস্তাব নিশ্চিত করেছে। পরের বার আরেকটু কম দাম দিয়ে চেষ্টা করুন!`
+    );
 
     return new Response(
       JSON.stringify({ success: true }),
