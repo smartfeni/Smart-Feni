@@ -6,7 +6,7 @@
 // জন্য আলাদা বট, existing shop-orders বট থেকে স্বতন্ত্র।
 // ============================================================
 
-const BOT_TOKEN = import.meta.env.TELEGRAM_HERO_BOT_TOKEN;
+const BOT_TOKEN = process.env.TELEGRAM_HERO_BOT_TOKEN;
 
 export async function sendTelegramMessage(chatId, text) {
   if (!BOT_TOKEN) {
