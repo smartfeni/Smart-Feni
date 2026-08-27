@@ -5,6 +5,7 @@
 // ============================================================
 
 import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { sendTelegramBroadcast } from '../../../lib/telegramNotify.js';
 
 export const prerender = false;
 
@@ -93,6 +94,24 @@ export async function POST({ request }) {
         { status: 409, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    // যেসব হিরো অফার দিয়েছিল কিন্তু এই হিরোর সরাসরি accept-এ হেরে
+    // গেছে, তাদের জানানো (নিজেকে বাদ দিয়ে)
+    const { data: losingOffers } = await client
+      .from('delivery_offers')
+      .select('profiles!delivery_offers_rider_profile_id_fkey(telegram_chat_id)')
+      .eq('request_id', requestId)
+      .eq('status', 'closed_by_other')
+      .neq('rider_profile_id', user.id);
+
+    const losingChatIds = (losingOffers || [])
+      .map((o) => o.profiles?.telegram_chat_id)
+      .filter(Boolean);
+
+    await sendTelegramBroadcast(
+      losingChatIds,
+      `দুঃখিত, একটা রিকোয়েস্ট আরেকজন হিরো নিয়ে নিয়েছে। পরের বার দ্রুত অফার দিন!`
+    );
 
     return new Response(
       JSON.stringify({ success: true, price: finalPrice }),
