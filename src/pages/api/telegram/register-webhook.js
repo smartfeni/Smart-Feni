@@ -3,11 +3,17 @@
 // (/api/telegram/register-webhook) — deploy হওয়ার পর ব্রাউজারে এই
 // URL ভিজিট করলেই Telegram-কে বলে দিবে কোথায় আপডেট পাঠাতে হবে।
 // পরে আবার লাগবে না, শুধু bot token বদলালে বা প্রথমবার সেটআপে।
+//
+// ফিক্স: request.url থেকে origin বের করলে Vercel-এ মাঝে মাঝে
+// ভুলভাবে "https://localhost" আসছিল (host header সমস্যা), তাই
+// origin ডাইনামিক না করে সরাসরি প্রোডাকশন ডোমেইন hardcode করা হলো।
 // ============================================================
 
 export const prerender = false;
 
-export async function GET({ request }) {
+const SITE_URL = 'https://smartfeni.com';
+
+export async function GET() {
   const token = process.env.TELEGRAM_HERO_BOT_TOKEN;
 
   if (!token) {
@@ -17,8 +23,7 @@ export async function GET({ request }) {
     );
   }
 
-  const siteUrl = new URL(request.url).origin;
-  const webhookUrl = `${siteUrl}/api/telegram/webhook`;
+  const webhookUrl = `${SITE_URL}/api/telegram/webhook`;
 
   try {
     const res = await fetch(
