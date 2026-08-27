@@ -10,6 +10,7 @@
 // ============================================================
 
 import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { sendTelegramBroadcast } from '../../../lib/telegramNotify.js';
 
 export const prerender = false;
 
@@ -45,6 +46,41 @@ export async function POST({ request }) {
     } = await request.json();
 
     const finalCategory = VALID_CATEGORIES.includes(category) ? category : 'delivery';
+
+    // ===== কুলডাউন চেক: বারবার ক্যান্সেল করা কাস্টমার =====
+    // গত ৭ দিনে ৩ বা তার বেশি রিকোয়েস্ট বাতিল করলে, শেষ বাতিলের
+    // ২৪ ঘণ্টা পর্যন্ত নতুন রিকোয়েস্ট করা যাবে না
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { count: cancelCount } = await client
+      .from('delivery_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_profile_id', user.id)
+      .eq('status', 'cancelled')
+      .gte('updated_at', sevenDaysAgo);
+
+    if ((cancelCount || 0) >= 3) {
+      const { data: lastCancelled } = await client
+        .from('delivery_requests')
+        .select('updated_at')
+        .eq('customer_profile_id', user.id)
+        .eq('status', 'cancelled')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastCancelled) {
+        const cooldownUntil = new Date(lastCancelled.updated_at).getTime() + 24 * 60 * 60 * 1000;
+        if (Date.now() < cooldownUntil) {
+          const hoursLeft = Math.ceil((cooldownUntil - Date.now()) / (60 * 60 * 1000));
+          return new Response(
+            JSON.stringify({
+              error: `বারবার রিকোয়েস্ট বাতিল করার কারণে সাময়িকভাবে নতুন রিকোয়েস্ট করা বন্ধ আছে — আর ${hoursLeft} ঘণ্টা পর আবার চেষ্টা করো`,
+            }),
+            { status: 429, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+      }
+    }
 
     if (!upazila || !pickupAddress || !dropAddress || !description || !askingPrice) {
       return new Response(
@@ -108,7 +144,30 @@ export async function POST({ request }) {
       );
     }
 
-    // TODO: এখানে Telegram bot এর ১ম নোটিফিকেশন ট্রিগার হবে
+    // ম্যাচিং হিরোদের (category + upazila + vehicle অনুযায়ী) Telegram
+    // নোটিফিকেশন — যাদের telegram_chat_id লিংক করা আছে তাদেরই যাবে,
+    // অনলাইন/অফলাইন টগল নির্বিশেষে (আগের সিদ্ধান্ত অনুযায়ী)
+    let heroQuery = client
+      .from('delivery_riders')
+      .select('profiles!delivery_riders_profile_id_fkey(telegram_chat_id)')
+      .eq('verification_status', 'approved')
+      .eq(finalCategory === 'ride' ? 'offers_ride' : 'offers_delivery', true)
+      .eq('upazila', upazila);
+
+    if (finalVehicleType !== 'any') {
+      heroQuery = heroQuery.eq('vehicle_type', finalVehicleType);
+    }
+
+    const { data: matchingHeroes } = await heroQuery;
+    const chatIds = (matchingHeroes || [])
+      .map((h) => h.profiles?.telegram_chat_id)
+      .filter(Boolean);
+
+    const categoryLabel = finalCategory === 'ride' ? 'রাইড' : 'ডেলিভারি';
+    await sendTelegramBroadcast(
+      chatIds,
+      `🔔 নতুন ${categoryLabel} রিকোয়েস্ট!\n📍 ${upazila}\n💰 প্রস্তাবিত মূল্য: ৳${price}\n\nঅ্যাপে গিয়ে অফার দিন।`
+    );
 
     return new Response(
       JSON.stringify({ success: true, request: data }),
