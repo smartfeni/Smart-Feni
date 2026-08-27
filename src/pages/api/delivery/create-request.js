@@ -47,40 +47,9 @@ export async function POST({ request }) {
 
     const finalCategory = VALID_CATEGORIES.includes(category) ? category : 'delivery';
 
-    // ===== কুলডাউন চেক: বারবার ক্যান্সেল করা কাস্টমার =====
-    // গত ৭ দিনে ৩ বা তার বেশি রিকোয়েস্ট বাতিল করলে, শেষ বাতিলের
-    // ২৪ ঘণ্টা পর্যন্ত নতুন রিকোয়েস্ট করা যাবে না
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { count: cancelCount } = await client
-      .from('delivery_requests')
-      .select('id', { count: 'exact', head: true })
-      .eq('customer_profile_id', user.id)
-      .eq('status', 'cancelled')
-      .gte('updated_at', sevenDaysAgo);
-
-    if ((cancelCount || 0) >= 3) {
-      const { data: lastCancelled } = await client
-        .from('delivery_requests')
-        .select('updated_at')
-        .eq('customer_profile_id', user.id)
-        .eq('status', 'cancelled')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (lastCancelled) {
-        const cooldownUntil = new Date(lastCancelled.updated_at).getTime() + 24 * 60 * 60 * 1000;
-        if (Date.now() < cooldownUntil) {
-          const hoursLeft = Math.ceil((cooldownUntil - Date.now()) / (60 * 60 * 1000));
-          return new Response(
-            JSON.stringify({
-              error: `বারবার রিকোয়েস্ট বাতিল করার কারণে সাময়িকভাবে নতুন রিকোয়েস্ট করা বন্ধ আছে — আর ${hoursLeft} ঘণ্টা পর আবার চেষ্টা করো`,
-            }),
-            { status: 429, headers: { 'Content-Type': 'application/json' } }
-          );
-        }
-      }
-    }
+    // ===== কুলডাউন (আপাতত বন্ধ) =====
+    // বারবার ক্যান্সেল করা কাস্টমারদের জন্য সাময়িক ব্লক লজিক ছিল এখানে,
+    // ইউজারের অনুরোধে আপাতত অফ করা হলো। দরকার হলে আবার চালু করা যাবে।
 
     if (!upazila || !pickupAddress || !dropAddress || !description || !askingPrice) {
       return new Response(
