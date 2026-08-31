@@ -5,11 +5,18 @@
 // রান হয় GitHub Actions cron দিয়ে (দেখুন .github/workflows/scrape-cnglagbe.yml)
 // এনভায়রনমেন্ট ভ্যারিয়েবল লাগবে: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 //
-// আপডেট: DOM-বেইজড এক্সট্রাকশন (আগের বাগ ফিক্স) + নতুন সুরক্ষা —
-// ডেটাবেজে যে ফোন নম্বরের এন্ট্রি আগে থেকেই status='active' বা
-// 'rejected' (মানে একবার "সিদ্ধান্ত হয়ে গেছে", তা যেভাবেই হোক —
-// ম্যানুয়াল approve বা প্রথম স্ক্র্যাপে auto-match), সেটা upsert
-// থেকে সম্পূর্ণ বাদ যায়। শুধু pending/নতুন এন্ট্রিই upsert হয়।
+// আপডেট:
+// - DOM-বেইজড এক্সট্রাকশন (tel: লিংক থেকে কার্ড বাউন্ডারি বের করে,
+//   flat-text পজিশন অনুমানের বদলে) — সাইটের লেআউট শিফট হলেও একটা
+//   কার্ডের সমস্যা অন্য কার্ডে ছড়ায় না
+// - status='active'/'rejected' থাকা এন্ট্রি (ম্যানুয়াল হোক বা
+//   auto-match হয়ে) সম্পূর্ণ স্কিপ হয় — একবার সিদ্ধান্ত হয়ে গেলে
+//   স্ক্র্যাপার আর কখনো টাচ করে না
+// - upsert হয় Postgres ফাংশন upsert_cnglagbe_listings() দিয়ে, কারণ
+//   listings টেবিলের unique index টা শুধু source='cnglagbe' এর জন্য
+//   partial (অন্য সোর্সে ডুপ্লিকেট ফোন সাপোর্টের জন্য ইচ্ছাকৃত) —
+//   Supabase JS ক্লায়েন্টের .upsert() partial index বুঝতে পারে না,
+//   তাই raw SQL ফাংশন দিয়ে সঠিক ON CONFLICT ... WHERE ক্লজ ব্যবহার করা হয়
 // ============================================================
 
 import { chromium } from 'playwright';
@@ -34,6 +41,7 @@ const VEHICLE_TYPES = [
   { filterText: 'অ্যাম্বুলেন্স', type: 'ambulance' },
 ];
 
+// নির্দিষ্ট ৫টা উপজেলার নাম আগে চেক হয়, "ফেনী সদর" সবার শেষে ফলব্যাক
 const UPAZILA_ALIASES_ORDERED = [
   ['ছাগলনাইয়া', ['ছাগলনাইয়া']],
   ['দাগনভূঞা', ['দাগনভূঞা', 'দাগনভুঞা', 'দাগনভুয়া']],
@@ -52,9 +60,14 @@ function matchUpazila(areaText) {
       return upazila;
     }
   }
-  return null;
+  return null; // ফেনী জেলার বাইরের এলাকা হতে পারে
 }
 
+// ============================================================
+// DOM-বেইজড এক্সট্রাকশন — প্রতিটা tel: লিংক থেকে উপরে উঠে সবচেয়ে ছোট
+// কন্টেইনার বের করে যেখানে ঠিক একটামাত্র ফোন নম্বর আছে (কার্ড বাউন্ডারি),
+// তারপর সেই কন্টেইনারের ভেতরের টেক্সট থেকে নাম/এলাকা বের করে
+// ============================================================
 async function extractCardsFromDom(page) {
   return await page.evaluate(() => {
     const phoneRegex = /01[3-9]\d{8}/;
@@ -174,7 +187,7 @@ async function fetchBlockedPhones() {
 
 // ডেটাবেজে ইতিমধ্যে যেসব ফোন নম্বরের এন্ট্রি "active" বা "rejected"
 // (একবার সিদ্ধান্ত হয়ে গেছে, ম্যানুয়ালি হোক বা auto-match হয়ে) —
-// সেগুলোর ম্যাপ (phone -> status) রিটার্ন করে
+// সেগুলোর সেট রিটার্ন করে
 async function fetchLockedPhones(phones) {
   if (phones.length === 0) return new Set();
 
@@ -242,9 +255,7 @@ async function main() {
     return;
   }
 
-  const { error } = await supabase
-    .from('listings')
-    .upsert(finalRows, { onConflict: 'source,contact_phone' });
+  const { error } = await supabase.rpc('upsert_cnglagbe_listings', { rows: finalRows });
 
   if (error) {
     console.error('Supabase upsert ব্যর্থ:', error.message);
