@@ -1,9 +1,12 @@
 // ============================================================
 // ফাইল: public/sw.js
 // ফাংশন: Service Worker — PWA/TWA প্রয়োজনীয়তা পূরণ করে +
-//         এখন Push Notification হ্যান্ডলিং যোগ করা হলো
-// আপডেট: push event listener + notificationclick listener
-//         যোগ করা হলো (Phase 4 — Push Notification infra)
+//         Push Notification হ্যান্ডলিং
+// আপডেট: push event এ 4-tier priority সিস্টেম (urgent/high/
+//         normal/low) — প্রতিটার আলাদা vibration pattern ও
+//         requireInteraction বিহেভিয়ার। Blood Request/Response
+//         urgent priority কিন্তু requireInteraction=false
+//         (voluntary action, জোর করে থাকবে না)।
 // ============================================================
 
 const CACHE_NAME = "smartfeni-v1";
@@ -38,7 +41,20 @@ self.addEventListener("fetch", (event) => {
 // PUSH NOTIFICATION HANDLING
 // ============================================================
 
-// সার্ভার থেকে push মেসেজ এলে এই ইভেন্ট ট্রিগার হয়
+// প্রতিটা ক্যাটাগরির জন্য priority বিহেভিয়ার ম্যাপিং
+// (সার্ভার থেকে category না পাঠালেও ডিফল্ট normal ধরে নেওয়া হবে)
+const NOTIFICATION_BEHAVIOR = {
+  blood_request:   { vibrate: [300, 100, 300, 100, 300], requireInteraction: false },
+  blood_response:  { vibrate: [300, 100, 300, 100, 300], requireInteraction: false },
+  rider_offer:     { vibrate: [250, 100, 250],            requireInteraction: true  },
+  shop_order:      { vibrate: [250, 100, 250],            requireInteraction: true  },
+  delivery_hero:   { vibrate: [200, 100, 200],             requireInteraction: false },
+  listing_status:  { vibrate: [100],                        requireInteraction: false },
+  message:         { vibrate: [100],                        requireInteraction: false },
+  promo:           { vibrate: [50],                          requireInteraction: false },
+  system:          { vibrate: [100],                        requireInteraction: false },
+};
+
 self.addEventListener("push", (event) => {
   if (!event.data) return;
 
@@ -50,6 +66,9 @@ self.addEventListener("push", (event) => {
     payload = { title: "স্মার্ট ফেনী", body: event.data.text() };
   }
 
+  const category = payload.category || "system";
+  const behavior = NOTIFICATION_BEHAVIOR[category] || NOTIFICATION_BEHAVIOR.system;
+
   const title = payload.title || "স্মার্ট ফেনী";
   const options = {
     body: payload.body || "",
@@ -60,10 +79,10 @@ self.addEventListener("push", (event) => {
       action_url: payload.action_url || "/",
       notification_id: payload.notification_id || null,
     },
-    tag: payload.category || "general", // একই ক্যাটাগরির নোটিফিকেশন স্ট্যাক হবে
+    tag: category, // একই ক্যাটাগরির নোটিফিকেশন স্ট্যাক হবে
     renotify: true,
-    requireInteraction: payload.high_priority === true, // blood_request এর মতো জরুরি নোটিফিকেশনে ইউজার বন্ধ না করা পর্যন্ত থাকবে
-    vibrate: payload.high_priority === true ? [200, 100, 200, 100, 200] : [100],
+    requireInteraction: behavior.requireInteraction,
+    vibrate: behavior.vibrate,
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
