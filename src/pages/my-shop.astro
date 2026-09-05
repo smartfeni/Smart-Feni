@@ -7,13 +7,17 @@
 //   ProfileEditTab — শপের প্রোফাইল
 //   ProductsTab — প্রোডাক্ট Add/Edit/Delete
 //   OrdersTab — অর্ডার হিস্ট্রি ও স্ট্যাটাস ট্র্যাকিং
-//   ModeratorsTab — মডারেটর ম্যানেজমেন্ট (নতুন, এই সেশনে যোগ)
-// profiles.shop_id দিয়ে shops টেবিলের সাথে লিংক
+//   ModeratorsTab — মডারেটর ম্যানেজমেন্ট
+// profiles.shop_id দিয়ে shops টেবিলের সাথে লিংক (ওউনারের ক্ষেত্রে)
 //
-// ⚠️ নোট: এখনো শুধু শপ ওউনার (is_shop_owner+shop_id) এই পেজে ঢুকতে
-// পারে — মডারেটর হিসেবে যোগ হওয়া কেউ এখনো এই পেজে অ্যাক্সেস পাবে
-// না। এটা পরের ধাপে ঠিক করতে হবে (moderators টেবিল চেক করে অ্যাক্সেস
-// দেওয়া + পারমিশন অনুযায়ী UI show/hide)।
+// ✅ ফিক্স করা হলো: এখন শপ ওউনার (is_shop_owner+shop_id) ছাড়াও
+// moderators টেবিলে entity_type='shop' + profile_id=user হিসেবে
+// যোগ করা মডারেটররাও এই পেজে ঢুকতে পারবে। মডারেটর হলে:
+//   - "মডারেটর" ট্যাব হাইড থাকবে (শুধু ওউনার মডারেটর ম্যানেজ করতে পারবে,
+//     RLS policy owner_manage_moderators অনুযায়ী)
+//   - can_edit_listings / can_delete_listings false হলে body তে
+//     mod-no-edit-listings / mod-no-delete ক্লাস বসবে (ProductsTab.astro
+//     এর CSS আগে থেকেই এই ক্লাসগুলো হ্যান্ডেল করার জন্য রেডি আছে)
 // ============================================================
 
 export const prerender = false;
@@ -44,7 +48,7 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
           <button class="myshop-tab active" data-tab="profile"><i class="fas fa-id-card"></i> প্রোফাইল</button>
           <button class="myshop-tab" data-tab="products"><i class="fas fa-box"></i> প্রোডাক্ট</button>
           <button class="myshop-tab" data-tab="orders"><i class="fas fa-receipt"></i> অর্ডার</button>
-          <button class="myshop-tab" data-tab="moderators"><i class="fas fa-users-gear"></i> মডারেটর</button>
+          <button class="myshop-tab" data-tab="moderators" id="moderatorsTabBtn"><i class="fas fa-users-gear"></i> মডারেটর</button>
         </div>
 
         <div class="myshop-panel" data-panel="profile">
@@ -327,6 +331,7 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
     const loadingState = document.getElementById('loadingState');
     const guardedContent = document.getElementById('guardedContent');
     const tabsBar = document.getElementById('myshopTabs');
+    const moderatorsTabBtn = document.getElementById('moderatorsTabBtn');
 
     async function init() {
       const { data: { session } } = await supabase.auth.getSession();
@@ -341,7 +346,32 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
         .eq('id', session.user.id)
         .single();
 
-      if (!profile?.is_shop_owner || !profile?.shop_id) {
+      let shopId = null;
+      let isOwner = false;
+      let modPerms = null; // owner হলে null থাকবে (সব পারমিশন আছে ধরে নেওয়া হবে)
+
+      if (profile?.is_shop_owner && profile?.shop_id) {
+        // ============ কেস ১: শপ ওউনার ============
+        shopId = profile.shop_id;
+        isOwner = true;
+      } else {
+        // ============ কেস ২: মডারেটর কিনা চেক ============
+        const { data: modRow } = await supabase
+          .from('moderators')
+          .select('entity_id, can_edit_listings, can_delete_listings, can_manage_orders, can_edit_settings')
+          .eq('entity_type', 'shop')
+          .eq('profile_id', session.user.id)
+          .maybeSingle();
+
+        if (modRow?.entity_id) {
+          shopId = modRow.entity_id;
+          isOwner = false;
+          modPerms = modRow;
+        }
+      }
+
+      if (!shopId) {
+        // না ওউনার, না মডারেটর — এই পেজে ঢোকার অনুমতি নেই
         window.location.href = '/';
         return;
       }
@@ -349,7 +379,7 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
       const { data: shop } = await supabase
         .from('shops')
         .select('*')
-        .eq('id', profile.shop_id)
+        .eq('id', shopId)
         .single();
 
       if (!shop) {
@@ -359,10 +389,33 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
 
       document.getElementById('shopHeaderName').textContent = shop.name;
 
+      // ============ মডারেটর হলে UI পারমিশন অনুযায়ী রেস্ট্রিক্ট করা ============
+      if (!isOwner) {
+        // মডারেটর ট্যাব শুধু আসল ওউনারের জন্য — RLS policy
+        // owner_manage_moderators অনুযায়ী মডারেটর ম্যানেজ করার
+        // অনুমতি শুধু ওউনারের আছে
+        moderatorsTabBtn?.remove();
+
+        if (!modPerms?.can_edit_listings) {
+          document.body.classList.add('mod-no-edit-listings');
+        }
+        if (!modPerms?.can_delete_listings) {
+          document.body.classList.add('mod-no-delete');
+        }
+        if (!modPerms?.can_manage_orders) {
+          document.body.classList.add('mod-no-orders');
+        }
+        if (!modPerms?.can_edit_settings) {
+          document.body.classList.add('mod-no-settings');
+        }
+      }
+
       loadingState.style.display = 'none';
       guardedContent.style.display = 'block';
 
-      window.dispatchEvent(new CustomEvent('smartfeni:shop-ready', { detail: { shopId: shop.id, shop } }));
+      window.dispatchEvent(new CustomEvent('smartfeni:shop-ready', {
+        detail: { shopId: shop.id, shop, isOwner, permissions: modPerms },
+      }));
     }
 
     tabsBar?.addEventListener('click', (e) => {
