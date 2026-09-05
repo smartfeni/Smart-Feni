@@ -548,6 +548,27 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
       color: #2E4470;
     }
 
+    .dh-req-instruction {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 0.76rem;
+      color: #2E4470;
+      font-weight: 600;
+      line-height: 1.4;
+      background: #EAF0FA;
+      border: 1px solid #D3DEF0;
+      border-radius: 10px;
+      padding: 7px 10px;
+      margin-bottom: 8px;
+    }
+
+    .dh-req-instruction i {
+      color: #2E4470;
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+
     .dh-req-seats {
       display: flex;
       align-items: center;
@@ -803,6 +824,25 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
       margin-bottom: 10px;
     }
 
+    .dh-stage-instruction {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 0.74rem;
+      color: #1B2A4A;
+      font-weight: 600;
+      line-height: 1.4;
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 8px;
+      padding: 6px 9px;
+      margin-bottom: 10px;
+    }
+
+    .dh-stage-instruction i {
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+
     .dh-stage-actions {
       display: flex;
       gap: 8px;
@@ -991,6 +1031,18 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 
     function formatKm(km) {
       return km < 1 ? `${Math.round(km * 1000)} মিটার` : `${km.toFixed(1)} কিমি`;
+    }
+
+    // পিকআপ/ড্রপ "অতিরিক্ত নির্দেশনা" থাকলে হাইলাইট করে দেখানোর জন্য
+    function buildInstructionsHtml(pickupInstructions, dropInstructions) {
+      let html = '';
+      if (pickupInstructions) {
+        html += `<p class="dh-req-instruction"><i class="fas fa-circle-info"></i> পিকআপ: ${pickupInstructions}</p>`;
+      }
+      if (dropInstructions) {
+        html += `<p class="dh-req-instruction"><i class="fas fa-circle-info"></i> গন্তব্য: ${dropInstructions}</p>`;
+      }
+      return html;
     }
 
     function googleMapsDirectionsUrl(destLat, destLng) {
@@ -1188,7 +1240,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
     async function loadActiveDeliveries(riderId) {
       const { data: activeRequests } = await supabase
         .from('delivery_requests')
-        .select('id, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, drop_address, drop_lat, drop_lng, pickup_done_at, final_price, status, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .select('id, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
         .eq('accepted_rider_id', riderId)
         .in('status', ['confirmed', 'delivered'])
         .order('created_at', { ascending: false });
@@ -1220,6 +1272,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
           const targetLat = isPickupDone ? req.drop_lat : req.pickup_lat;
           const targetLng = isPickupDone ? req.drop_lng : req.pickup_lng;
           const targetAddress = isPickupDone ? (req.drop_address || '') : (req.pickup_address || req.area_detail || '');
+          const targetInstruction = isPickupDone ? req.drop_instructions : req.pickup_instructions;
           const targetLabel = isPickupDone ? 'ড্রপ-অফ লোকেশন' : 'পিকআপ লোকেশন';
           let distanceText = '';
           if (heroLiveLocation && targetLat && targetLng) {
@@ -1231,6 +1284,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
             <div class="dh-stage-box ${isPickupDone ? 'stage-dropoff' : 'stage-pickup'}">
               <span class="dh-stage-label"><i class="fas ${isPickupDone ? 'fa-flag-checkered' : 'fa-location-dot'}"></i> ${targetLabel}${distanceText}</span>
               <p class="dh-stage-address">${targetAddress}</p>
+              ${targetInstruction ? `<p class="dh-stage-instruction"><i class="fas fa-circle-info"></i> ${targetInstruction}</p>` : ''}
               <div class="dh-stage-actions">
                 ${targetLat && targetLng ? `<button type="button" class="dh-maps-btn" data-lat="${targetLat}" data-lng="${targetLng}"><i class="fas fa-diamond-turn-right"></i></button>` : ''}
                 ${!isPickupDone ? `<button type="button" class="btn-mark-pickup" data-request-id="${req.id}">পিকআপ সম্পন্ন হয়েছে</button>` : ''}
@@ -1303,7 +1357,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 
       let query = supabase
         .from('delivery_requests')
-        .select('id, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, drop_address, drop_lat, drop_lng, customer_asking_price, vehicle_type, seat_count')
+        .select('id, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, customer_asking_price, vehicle_type, seat_count')
         .eq('status', 'open')
         .eq('category', 'ride')
         .or(`vehicle_type.eq.${riderRow.vehicle_type},vehicle_type.eq.any`)
@@ -1406,6 +1460,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
           ${req.seat_count ? `<p class="dh-req-seats"><i class="fas fa-user-group"></i> ${req.seat_count} জন যাত্রী</p>` : ''}
           <p class="dh-req-desc">${req.description || ''}</p>
           <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.pickup_address || req.area_detail || ''} → ${req.drop_address || ''}</p>
+          ${buildInstructionsHtml(req.pickup_instructions, req.drop_instructions)}
           ${distanceRowsHtml}
           <div class="dh-hero-best-row">
             <span><i class="fas fa-trophy"></i> সর্বনিম্ন হিরো অফার</span>
