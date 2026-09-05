@@ -1,0 +1,302 @@
+<!-- path: src/pages/services/blood/request.astro -->
+---
+// ============================================================
+// পেজ: রক্তের রিকোয়েস্ট পোস্ট করা (/services/blood/request)
+// ফাংশন: ইউজার নাম/ফোন/ব্লাড গ্রুপ/উপজেলা/বিস্তারিত দিয়ে ফর্ম
+// সাবমিট করবে — blood_requests এ ইনসার্ট হবে, যেটা DB ট্রিগার
+// (notify_matching_donors) স্বয়ংক্রিয়ভাবে ম্যাচিং ডোনারদের কাছে
+// push পাঠাবে।
+//
+// RLS policy অনুযায়ী লগইন আবশ্যক (insert_own_blood_request:
+// auth.uid() is not null) — তাই লগইন করা না থাকলে সরাসরি ফর্মে
+// আসতে দিয়ে ক্লায়েন্ট-সাইডে চেক করা হচ্ছে, না থাকলে লগইন প্রম্পট।
+//
+// প্রোফাইল থেকে নাম/ফোন অটো-প্রিফিল করা হচ্ছে (ম্যানুয়াল টাইপ কমাতে)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../../components/layout/BaseLayout.astro';
+
+const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
+---
+
+<BaseLayout title="রক্তের রিকোয়েস্ট | স্মার্ট ফেনী">
+  <section class="page-header">
+    <div class="container">
+      <h1>🩸 রক্তের <span class="accent">জরুরি প্রয়োজন</span>?</h1>
+      <p>নিচের ফর্মটি পূরণ করুন — আপনার উপজেলা ও ব্লাড গ্রুপের সব রেজিস্টার্ড ডোনারের কাছে সাথে সাথে নোটিফিকেশন চলে যাবে।</p>
+    </div>
+  </section>
+
+  <section class="form-section">
+    <div class="container">
+      <div id="loginRequiredNotice" class="login-notice" style="display:none;">
+        <i class="fas fa-lock"></i>
+        <p>রিকোয়েস্ট পোস্ট করতে আগে লগইন করুন</p>
+        <a href="/" class="btn-primary-sm">হোমপেজে ফিরে যান</a>
+      </div>
+
+      <form id="bloodRequestForm" class="request-form">
+        <label>
+          আপনার নাম *
+          <input type="text" id="requesterName" required />
+        </label>
+
+        <label>
+          ফোন নম্বর *
+          <input type="tel" id="requesterPhone" required placeholder="01XXXXXXXXX" />
+        </label>
+
+        <label>
+          ব্লাড গ্রুপ *
+          <select id="bloodGroup" required>
+            <option value="" disabled selected>গ্রুপ সিলেক্ট করুন</option>
+            {bloodGroups.map((g) => <option value={g}>{g}</option>)}
+          </select>
+        </label>
+
+        <label>
+          উপজেলা *
+          <select id="upazila" required>
+            <option value="" disabled selected>উপজেলা সিলেক্ট করুন</option>
+            {upazilas.map((u) => <option value={u}>{u}</option>)}
+          </select>
+        </label>
+
+        <label>
+          বিস্তারিত (হাসপাতাল, কত ব্যাগ লাগবে ইত্যাদি)
+          <textarea id="details" rows="4" placeholder="যেমন: ফেনী জেনারেল হাসপাতাল, ২ ব্যাগ প্রয়োজন, আজকের মধ্যে"></textarea>
+        </label>
+
+        <p class="form-feedback" id="formFeedback"></p>
+
+        <button type="submit" id="submitBtn" class="btn-submit">
+          <i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান
+        </button>
+      </form>
+    </div>
+  </section>
+</BaseLayout>
+
+<script>
+  import { supabase } from '../../../lib/supabase.js';
+
+  async function init() {
+    const { data: { session } } = await supabase.auth.getSession();
+    const form = document.getElementById('bloodRequestForm');
+    const notice = document.getElementById('loginRequiredNotice');
+
+    if (!session) {
+      form.style.display = 'none';
+      notice.style.display = 'block';
+      return;
+    }
+
+    // প্রোফাইল থেকে নাম/ফোন প্রিফিল
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name, phone')
+      .eq('id', session.user.id)
+      .single();
+
+    if (profile) {
+      const nameInput = document.getElementById('requesterName');
+      const phoneInput = document.getElementById('requesterPhone');
+      if (nameInput && profile.full_name) nameInput.value = profile.full_name;
+      if (phoneInput && profile.phone) phoneInput.value = profile.phone;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const submitBtn = document.getElementById('submitBtn');
+      const feedback = document.getElementById('formFeedback');
+
+      const requesterName = document.getElementById('requesterName').value.trim();
+      const requesterPhone = document.getElementById('requesterPhone').value.trim();
+      const bloodGroup = document.getElementById('bloodGroup').value;
+      const upazila = document.getElementById('upazila').value;
+      const details = document.getElementById('details').value.trim();
+
+      if (!requesterName || !requesterPhone || !bloodGroup || !upazila) {
+        feedback.className = 'form-feedback error';
+        feedback.textContent = 'সব আবশ্যক ফিল্ড পূরণ করুন';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'পাঠানো হচ্ছে...';
+
+      const { data, error } = await supabase
+        .from('blood_requests')
+        .insert({
+          requester_user_id: session.user.id,
+          requester_name: requesterName,
+          requester_phone: requesterPhone,
+          blood_group: bloodGroup,
+          upazila,
+          details: details || null,
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        feedback.className = 'form-feedback error';
+        feedback.textContent = 'কিছু ভুল হয়েছে, আবার চেষ্টা করুন';
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান';
+        return;
+      }
+
+      feedback.className = 'form-feedback success';
+      feedback.textContent = 'রিকোয়েস্ট পোস্ট হয়েছে ✅ ডোনারদের নোটিফিকেশন পাঠানো হচ্ছে...';
+
+      setTimeout(() => {
+        window.location.href = `/services/blood/request/${data.id}`;
+      }, 1200);
+    });
+  }
+
+  init();
+</script>
+
+<style>
+  .page-header {
+    padding: 44px 0 20px;
+    background: #fff;
+    text-align: center;
+  }
+
+  .page-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 8px;
+  }
+
+  .page-header .accent {
+    color: #D14343;
+  }
+
+  .page-header p {
+    color: #5A6E85;
+    font-size: 1rem;
+    max-width: 520px;
+    margin: 0 auto;
+  }
+
+  .form-section {
+    padding: 24px 0 60px;
+    background: #F8FAFC;
+  }
+
+  .request-form {
+    max-width: 520px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 20px;
+    padding: 28px 24px;
+    border: 1px solid #EEF3F9;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .request-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1B2A4A;
+  }
+
+  .request-form input,
+  .request-form select,
+  .request-form textarea {
+    border: 1.5px solid #EEF3F9;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    color: #1B2A4A;
+  }
+
+  .request-form input:focus,
+  .request-form select:focus,
+  .request-form textarea:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+
+  .btn-submit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #D14343;
+    color: #fff;
+    border: none;
+    padding: 14px;
+    border-radius: 40px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+
+  .btn-submit:disabled {
+    background: #D7E0EC;
+    cursor: not-allowed;
+  }
+
+  .form-feedback {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0;
+    display: none;
+  }
+
+  .form-feedback.error {
+    display: block;
+    color: #D14343;
+  }
+
+  .form-feedback.success {
+    display: block;
+    color: #1E9E5A;
+  }
+
+  .login-notice {
+    max-width: 420px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 20px;
+    padding: 40px 24px;
+    text-align: center;
+    border: 1px dashed #E5EAF0;
+  }
+
+  .login-notice i {
+    font-size: 1.8rem;
+    color: #D7E0EC;
+    margin-bottom: 12px;
+  }
+
+  .login-notice p {
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 16px;
+  }
+
+  .btn-primary-sm {
+    display: inline-block;
+    background: #FF6B35;
+    color: #fff;
+    text-decoration: none;
+    padding: 10px 24px;
+    border-radius: 40px;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+</style>
