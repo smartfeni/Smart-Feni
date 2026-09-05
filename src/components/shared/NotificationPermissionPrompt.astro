@@ -1,0 +1,234 @@
+<!-- path: src/components/shared/NotificationPermissionPrompt.astro -->
+---
+// ============================================================
+// শেয়ারড কম্পোনেন্ট: Push Notification "Soft-ask" প্রম্পট (Phase 4)
+// ফাংশন: ব্রাউজারের নেটিভ পারমিশন পপ-আপ দেখানোর *আগে* একটা
+// বন্ধুত্বপূর্ণ মোডাল দেখায় — কারণ সরাসরি নেটিভ পপ-আপে "Block"
+// চাপলে ইউজার সহজে আর re-enable করতে পারে না, তাই আগে থেকেই
+// প্রসঙ্গ বুঝিয়ে জিজ্ঞেস করা ভালো।
+//
+// দেখানোর শর্ত (client-side script এ চেক হয়):
+//  - ইউজার লগইন করা আছে
+//  - ব্রাউজার push সাপোর্ট করে
+//  - Notification.permission === 'default' (আগে কখনো জিজ্ঞেস করা হয়নি)
+//  - গত ৭ দিনে "পরে করব" চাপা হয়নি (localStorage cooldown)
+//
+// BaseLayout.astro এ গ্লোবালি মাউন্ট করা হবে (NotificationDrawer
+// এর মতো), যেকোনো পেজে লগইন থাকলে অটো-দেখাবে।
+// ============================================================
+---
+
+<div class="np-overlay" id="npOverlay">
+  <div class="np-modal">
+    <div class="np-icon"><i class="fas fa-bell"></i></div>
+    <h3>নোটিফিকেশন অন করবেন?</h3>
+    <p>নতুন ডেলিভারি অফার, ব্লাড রিকোয়েস্ট, ও গুরুত্বপূর্ণ আপডেট মিস করবেন না — এমনকি অ্যাপ বন্ধ থাকলেও।</p>
+
+    <p class="np-feedback" id="npFeedback"></p>
+
+    <div class="np-actions">
+      <button class="np-btn-skip" id="npSkipBtn" type="button">পরে করব</button>
+      <button class="np-btn-allow" id="npAllowBtn" type="button">হ্যাঁ, অন করি</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .np-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 2100;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .np-overlay.open {
+    display: flex;
+  }
+
+  @media (min-width: 640px) {
+    .np-overlay {
+      align-items: center;
+      padding: 20px;
+    }
+  }
+
+  .np-modal {
+    position: relative;
+    background: #fff;
+    width: 100%;
+    max-width: 420px;
+    border-radius: 24px 24px 0 0;
+    overflow: hidden;
+    box-shadow: 0 -8px 40px rgba(15, 23, 42, 0.2);
+    padding: 30px 26px 26px;
+    text-align: center;
+  }
+
+  @media (min-width: 640px) {
+    .np-modal {
+      border-radius: 24px;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
+    }
+  }
+
+  .np-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: #FFF0EA;
+    color: #FF6B35;
+    font-size: 1.5rem;
+    margin-bottom: 14px;
+  }
+
+  .np-modal h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin: 0 0 8px;
+  }
+
+  .np-modal p {
+    font-size: 0.88rem;
+    color: #5A6E85;
+    margin: 0 0 6px;
+    line-height: 1.6;
+  }
+
+  .np-feedback {
+    font-size: 0.82rem;
+    font-weight: 600;
+    margin: 8px 0 0;
+    display: none;
+  }
+
+  .np-feedback.error {
+    display: block;
+    color: #D14343;
+  }
+
+  .np-feedback.success {
+    display: block;
+    color: #1E9E5A;
+  }
+
+  .np-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+  }
+
+  .np-btn-skip {
+    flex: 1;
+    background: #F8FAFC;
+    border: 1.5px solid #EEF3F9;
+    color: #5A6E85;
+    padding: 13px;
+    border-radius: 40px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  .np-btn-allow {
+    flex: 1.4;
+    background: #FF6B35;
+    border: none;
+    color: #fff;
+    padding: 13px;
+    border-radius: 40px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  .np-btn-allow:hover {
+    background: #e85a2a;
+  }
+
+  .np-btn-allow:disabled {
+    background: #D7E0EC;
+    cursor: not-allowed;
+  }
+</style>
+
+<script>
+  import { subscribeToPush, getPushPermissionState, isPushSupported } from '../../lib/push.js';
+  import { supabase } from '../../lib/supabase.js';
+
+  const COOLDOWN_KEY = 'smartfeni_push_prompt_dismissed_at';
+  const COOLDOWN_DAYS = 7;
+
+  function shouldShowPrompt() {
+    if (!isPushSupported()) return false;
+    if (getPushPermissionState() !== 'default') return false;
+
+    const dismissedAt = localStorage.getItem(COOLDOWN_KEY);
+    if (dismissedAt) {
+      const daysSince = (Date.now() - Number(dismissedAt)) / (1000 * 60 * 60 * 24);
+      if (daysSince < COOLDOWN_DAYS) return false;
+    }
+    return true;
+  }
+
+  async function initPrompt() {
+    const overlay = document.getElementById('npOverlay');
+    const skipBtn = document.getElementById('npSkipBtn');
+    const allowBtn = document.getElementById('npAllowBtn');
+    const feedback = document.getElementById('npFeedback');
+    if (!overlay || !skipBtn || !allowBtn || !feedback) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return; // লগইন করা না থাকলে প্রম্পট দেখানো হবে না
+
+    if (!shouldShowPrompt()) return;
+
+    // একটু দেরি করে দেখানো — পেজ লোড হওয়ার সাথে সাথেই না, যাতে বিরক্তিকর না লাগে
+    setTimeout(() => {
+      overlay.classList.add('open');
+    }, 2500);
+
+    skipBtn.addEventListener('click', () => {
+      localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
+      overlay.classList.remove('open');
+    });
+
+    allowBtn.addEventListener('click', async () => {
+      allowBtn.disabled = true;
+      allowBtn.textContent = 'একটু অপেক্ষা করুন...';
+      feedback.className = 'np-feedback';
+      feedback.textContent = '';
+
+      const result = await subscribeToPush();
+
+      if (result.success) {
+        feedback.className = 'np-feedback success';
+        feedback.textContent = 'নোটিফিকেশন চালু হয়েছে ✅';
+        setTimeout(() => overlay.classList.remove('open'), 1200);
+      } else {
+        feedback.className = 'np-feedback error';
+        feedback.textContent = result.error || 'কিছু ভুল হয়েছে, আবার চেষ্টা করুন';
+        allowBtn.disabled = false;
+        allowBtn.textContent = 'হ্যাঁ, অন করি';
+        // permission denied হলে আর বিরক্ত না করে cooldown সেট করে দেওয়া
+        if (result.permission === 'denied') {
+          localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
+        }
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPrompt);
+  } else {
+    initPrompt();
+  }
+</script>
