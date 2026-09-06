@@ -4,16 +4,24 @@
 // পেজ: অ্যাডমিন — ক্যাটাগরি ম্যানেজমেন্ট (/admin/categories)
 //
 // দুইটা ফিচার:
-// ১. হোমপেজ সেকশন অর্ডার — Featured Photos vs Popular Category
-//    (CategoryGrid) কোনটা উপরে থাকবে, site_settings টেবিলের
-//    'homepage_section_order' key দিয়ে নিয়ন্ত্রিত ('photos_first' |
-//    'category_first')
+// ১. হোমপেজ সেকশন অর্ডার — Featured Photos, Popular Category, ও
+//    General Category — এই ৩টা ব্লকের মধ্যে Photos কোথায় বসবে তা
+//    ৩টা অপশনে বেছে নেওয়া যায় (site_settings টেবিলের
+//    'homepage_section_order' key: 'photos_first' | 'photos_middle' |
+//    'photos_last')। Popular সবসময় General-এর আগে থাকে (fix) —
+//    শুধু Photos-এর পজিশন বদলায়।
 // ২. ক্যাটাগরি সিরিয়াল — services.js এর popularSlugs (courier, ride,
 //    online-shop) ও বাকি সব ক্যাটাগরি, দুইটা আলাদা গ্রুপ হিসেবে
 //    up/down বাটনে সিরিয়াল বদলানো যাবে (category_settings টেবিলের
 //    sort_order কলাম, শপ ম্যানেজমেন্টের একই প্যাটার্নে)।
 //    গ্রুপ অ্যাসাইনমেন্ট (কোনটা Popular, কোনটা General) কোডেই ফিক্সড
 //    থাকছে — শুধু প্রতিটা গ্রুপের ভেতরের অর্ডার বদলানো যাবে।
+//
+// নোট (is:global): নিচের ক্যাটাগরি কার্ডগুলো (.cat-order-card ইত্যাদি)
+// JS দিয়ে innerHTML হিসেবে dynamically তৈরি হয়, তাই Astro-র স্কোপড
+// <style> এদের উপর প্রযোজ্য হয় না (স্কোপ অ্যাট্রিবিউট শুধু
+// টেমপ্লেটে সরাসরি লেখা এলিমেন্টে বসে)। তাই পুরো স্টাইল ব্লকটাই
+// is:global রাখা হয়েছে যাতে UI ঠিকমতো দেখায়।
 // ============================================================
 
 export const prerender = false;
@@ -42,19 +50,25 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         <!-- ===== হোমপেজ সেকশন অর্ডার ===== -->
         <div class="section-block">
           <h2 class="section-title"><i class="fas fa-layer-group"></i> হোমপেজ সেকশন অর্ডার</h2>
-          <div class="order-swap-box">
-            <div class="order-swap-row" id="orderRowFirst">
-              <i class="fas fa-grip-lines"></i>
-              <span id="orderLabelFirst">লোড হচ্ছে...</span>
-              <span class="order-position-badge">১ম</span>
-            </div>
-            <div class="order-swap-row" id="orderRowSecond">
-              <i class="fas fa-grip-lines"></i>
-              <span id="orderLabelSecond">লোড হচ্ছে...</span>
-              <span class="order-position-badge">২য়</span>
-            </div>
-            <button type="button" class="order-swap-btn" id="swapOrderBtn">
-              <i class="fas fa-arrow-right-arrow-left"></i> অর্ডার সোয়াপ করুন
+          <p class="section-hint">Popular ক্যাটাগরি সবসময় আগে, General সবসময় পরে — শুধু Featured Photos-এর পজিশন বেছে নিন</p>
+
+          <div class="order-preview-box" id="orderPreviewBox"></div>
+
+          <div class="order-option-list">
+            <button type="button" class="order-option-btn" data-value="photos_first">
+              <i class="fas fa-images"></i>
+              <span>ফটো সবার উপরে</span>
+              <small>Photos → Popular → General</small>
+            </button>
+            <button type="button" class="order-option-btn" data-value="photos_middle">
+              <i class="fas fa-images"></i>
+              <span>ফটো মাঝখানে</span>
+              <small>Popular → Photos → General</small>
+            </button>
+            <button type="button" class="order-option-btn" data-value="photos_last">
+              <i class="fas fa-images"></i>
+              <span>ফটো সবার নিচে</span>
+              <small>Popular → General → Photos</small>
             </button>
           </div>
         </div>
@@ -77,7 +91,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     </div>
   </div>
 
-  <style>
+  <style is:global>
     .admin-page {
       min-height: 60vh;
       padding: 32px 0 80px;
@@ -161,60 +175,104 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       font-size: 0.78rem;
       color: #8FA0BC;
       margin-bottom: 14px;
+      line-height: 1.5;
     }
 
-    .order-swap-box {
-      background: #fff;
-      border-radius: 16px;
-      padding: 16px 18px;
-      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    .order-preview-box {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #F4F7FC;
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 14px;
     }
 
-    .order-swap-row {
+    .order-preview-row {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 12px 14px;
-      background: #F4F7FC;
-      border-radius: 12px;
-      font-size: 0.88rem;
+      background: #fff;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 0.84rem;
       font-weight: 700;
       color: #1B2A4A;
-      margin-bottom: 10px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
     }
 
-    .order-swap-row i {
-      color: #99A9BE;
-    }
-
-    .order-position-badge {
-      margin-left: auto;
+    .order-preview-row .order-preview-num {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
       background: #FFF0EA;
       color: #FF6B35;
-      font-size: 0.72rem;
-      font-weight: 700;
-      padding: 3px 10px;
-      border-radius: 20px;
-    }
-
-    .order-swap-btn {
-      width: 100%;
-      margin-top: 4px;
-      background: #1B2A4A;
-      color: #fff;
-      border: none;
-      padding: 12px;
-      border-radius: 12px;
-      font-size: 0.85rem;
-      font-weight: 700;
-      cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
+      font-size: 0.72rem;
+      flex-shrink: 0;
     }
 
-    .order-swap-btn:disabled {
+    .order-option-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .order-option-btn {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      text-align: left;
+      background: #fff;
+      border: 1.5px solid #E5EAF0;
+      border-radius: 14px;
+      padding: 12px 14px;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    .order-option-btn i {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: #F4F7FC;
+      color: #99A9BE;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 0.95rem;
+    }
+
+    .order-option-btn span {
+      display: block;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .order-option-btn small {
+      display: block;
+      font-size: 0.72rem;
+      color: #8FA0BC;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    .order-option-btn.active {
+      border-color: #FF6B35;
+      background: #FFF6F2;
+    }
+
+    .order-option-btn.active i {
+      background: #FF6B35;
+      color: #fff;
+    }
+
+    .order-option-btn:disabled {
       opacity: 0.6;
       cursor: not-allowed;
     }
@@ -298,17 +356,22 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     const popularContainer = document.getElementById('popularContainer');
     const generalContainer = document.getElementById('generalContainer');
+    const orderPreviewBox = document.getElementById('orderPreviewBox');
+    const orderOptionBtns = document.querySelectorAll('.order-option-btn');
 
-    const orderRowFirst = document.getElementById('orderRowFirst');
-    const orderRowSecond = document.getElementById('orderRowSecond');
-    const orderLabelFirst = document.getElementById('orderLabelFirst');
-    const orderLabelSecond = document.getElementById('orderLabelSecond');
-    const swapOrderBtn = document.getElementById('swapOrderBtn');
-
-    const SECTION_LABELS = {
-      photos_first: ['ফিচার্ড ফটো গ্যালারি', 'জনপ্রিয় ক্যাটাগরি (Category Grid)'],
-      category_first: ['জনপ্রিয় ক্যাটাগরি (Category Grid)', 'ফিচার্ড ফটো গ্যালারি'],
+    const ORDER_SEQUENCES = {
+      photos_first: ['ফিচার্ড ফটো গ্যালারি', 'জনপ্রিয় ক্যাটাগরি', 'সাধারণ ক্যাটাগরি'],
+      photos_middle: ['জনপ্রিয় ক্যাটাগরি', 'ফিচার্ড ফটো গ্যালারি', 'সাধারণ ক্যাটাগরি'],
+      photos_last: ['জনপ্রিয় ক্যাটাগরি', 'সাধারণ ক্যাটাগরি', 'ফিচার্ড ফটো গ্যালারি'],
     };
+
+    // পুরনো ২-অপশন ভ্যালু ('category_first') থাকলে নতুন ৩-অপশন
+    // সিস্টেমে ম্যাপ করা হচ্ছে যাতে আগের সেটিং নষ্ট না হয়
+    function normalizeOrderValue(value) {
+      if (value === 'category_first') return 'photos_last';
+      if (ORDER_SEQUENCES[value]) return value;
+      return 'photos_first';
+    }
 
     let currentSectionOrder = 'photos_first';
 
@@ -320,36 +383,45 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         .eq('key', 'homepage_section_order')
         .maybeSingle();
 
-      currentSectionOrder = data?.value === 'category_first' ? 'category_first' : 'photos_first';
+      currentSectionOrder = normalizeOrderValue(data?.value);
       renderSectionOrder();
     }
 
     function renderSectionOrder() {
-      const [first, second] = SECTION_LABELS[currentSectionOrder];
-      orderLabelFirst.textContent = first;
-      orderLabelSecond.textContent = second;
+      const seq = ORDER_SEQUENCES[currentSectionOrder];
+      orderPreviewBox.innerHTML = seq
+        .map(
+          (label, i) =>
+            `<div class="order-preview-row"><span class="order-preview-num">${i + 1}</span> ${label}</div>`
+        )
+        .join('');
+
+      orderOptionBtns.forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.value === currentSectionOrder);
+      });
     }
 
-    swapOrderBtn.addEventListener('click', async () => {
-      swapOrderBtn.disabled = true;
-      swapOrderBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> সেভ হচ্ছে...';
+    orderOptionBtns.forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const newOrder = btn.dataset.value;
+        if (newOrder === currentSectionOrder) return;
 
-      const newOrder = currentSectionOrder === 'photos_first' ? 'category_first' : 'photos_first';
+        orderOptionBtns.forEach((b) => (b.disabled = true));
 
-      const { error } = await supabase
-        .from('site_settings')
-        .update({ value: newOrder, updated_at: new Date().toISOString() })
-        .eq('key', 'homepage_section_order');
+        const { error } = await supabase
+          .from('site_settings')
+          .update({ value: newOrder, updated_at: new Date().toISOString() })
+          .eq('key', 'homepage_section_order');
 
-      if (error) {
-        alert('সোয়াপ ব্যর্থ: ' + error.message);
-      } else {
-        currentSectionOrder = newOrder;
-        renderSectionOrder();
-      }
+        if (error) {
+          alert('আপডেট ব্যর্থ: ' + error.message);
+        } else {
+          currentSectionOrder = newOrder;
+          renderSectionOrder();
+        }
 
-      swapOrderBtn.disabled = false;
-      swapOrderBtn.innerHTML = '<i class="fas fa-arrow-right-arrow-left"></i> অর্ডার সোয়াপ করুন';
+        orderOptionBtns.forEach((b) => (b.disabled = false));
+      });
     });
 
     // ============ ক্যাটাগরি সিরিয়াল ============
