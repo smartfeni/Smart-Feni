@@ -7,6 +7,13 @@
 // এখন club এর প্যাটার্নে আলাদা shops টেবিলে row তৈরি হয়, আর slug
 // (top-level URL, যেমন smartfeni.com/shop-slug) নেওয়া হয়।
 // এই key কখনো ব্রাউজারে পাঠানো হয় না — শুধু এই সার্ভার ফাইলেই থাকে।
+//
+// আপডেট ২ (shop_order ফিক্স): আগে shops row তৈরির সময় shop_order
+// বসানো হতো না, তাই DB ডিফল্ট 0 নিয়েই থাকত — সব শপের shop_order
+// সমান হয়ে যাওয়ায় Admin প্যানেলের up/down পজিশন বাটন কাজ করত না।
+// এখন insert এর আগে বর্তমান সর্বোচ্চ shop_order বের করে তার +10
+// বসানো হচ্ছে, ফলে নতুন শপ সবসময় লিস্টের শেষে যোগ হবে এবং distinct
+// shop_order পাবে।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -98,6 +105,19 @@ export async function POST({ request }) {
     const digitsOnly = phone.replace(/\D/g, '');
     const email = `${digitsOnly}@smartfeni.local`;
 
+    // ============================================================
+    // নতুন শপের jন্য পরবর্তী shop_order বের করা — বর্তমান সর্বোচ্চ
+    // shop_order এর +10 (ফাঁকা টেবিল হলে 10 থেকে শুরু)
+    // ============================================================
+    const { data: maxOrderRow } = await supabaseAdmin
+      .from('shops')
+      .select('shop_order')
+      .order('shop_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextShopOrder = (maxOrderRow?.shop_order || 0) + 10;
+
     // ধাপ ১: Auth ইউজার তৈরি
     const { data: userData, error: createError } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -126,6 +146,7 @@ export async function POST({ request }) {
         phone,
         is_active: true,
         is_verified: false,
+        shop_order: nextShopOrder,
       })
       .select()
       .single();
