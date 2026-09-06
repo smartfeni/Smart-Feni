@@ -2,24 +2,15 @@
 ---
 // ============================================================
 // পেজ: ব্লাড গ্রুপ সিলেক্টর (ল্যান্ডিং)
-// আগে এই পেজেই সব ডোনার একসাথে লোড হতো — ডোনার সংখ্যা বাড়ায়
-// লোড টাইম বেড়ে যাচ্ছিল। এখন এই পেজ শুধু ৮টা ব্লাড গ্রুপ টাইল
-// দেখায় (প্রতিটায় কতজন ডোনার আছে তার কাউন্ট), আসল ডোনার লিস্ট
-// লোড হয় /services/blood/[group].astro তে, গ্রুপ সিলেক্ট করার পর।
+// (আগের সব কমেন্ট/হিস্ট্রি অপরিবর্তিত — কাউন্ট কোয়েরি, CTA হাইড)
 //
-// কাউন্ট কোয়েরি হালকা রাখা হয়েছে — pull করা হচ্ছে শুধু
-// blood_group কলাম (পুরো ডোনার অবজেক্ট না), ক্লায়েন্ট-সাইডে গোনা হয়।
-//
-// সোর্স: profiles (is_blood_donor=true, donor_disabled=false) +
-//        manual_blood_donors (status='active', স্ক্রিনশট বাল্ক-আপলোড
-//        ও ক্লাব-এন্ট্রি দুটোই এখানে, club_name_raw দিয়ে আলাদা করা যায়)
-// SSR পেজ — prerender = false আবশ্যক।
-//
-// আপডেট (নতুন — গ্যাপ ক্লিনআপ + লাইভ কাউন্ট ডেসক্রিপশন): header
-// প্যাডিং টাইট করা হলো, ডেসক্রিপশনে totalDonors লাইভ কাউন্ট বসানো
-// হলো। এছাড়া ইউজার আগে থেকেই রেজিস্টার্ড ব্লাড ডোনার হলে
-// "রেজিস্ট্রেশন করুন" CTA (উভয় ভার্সন) ক্লায়েন্ট-সাইডে হাইড হয়ে
-// যাবে — data-donor-cta অ্যাট্রিবিউট দিয়ে টার্গেট করা।
+// আপডেট (Blood Request ফিচার, ২-ট্যাব মোডাল): "ব্লাড রিকোয়েস্ট"
+// বাটন যোগ হলো — ক্লিক করলে ২-ট্যাব মোডাল খুলবে:
+//   ট্যাব ১ "নতুন রিকোয়েস্ট" — ফর্ম, সাবমিট করলে blood_requests এ
+//     insert হয়, DB ট্রিগার অটো ম্যাচিং ডোনারদের push পাঠায়
+//   ট্যাব ২ "বর্তমান রিকোয়েস্ট" — ইউজারের নিজের active/fulfilled
+//     রিকোয়েস্ট(গুলো) + প্রতিটার আগ্রহী ডোনারদের লাইভ লিস্ট +
+//     "ব্লাড ম্যানেজ হয়ে গেছে" বাটন
 // ============================================================
 
 export const prerender = false;
@@ -27,7 +18,6 @@ export const prerender = false;
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import { supabase } from '../../lib/supabase.js';
 
-// গ্রুপ → URL-safe স্লাগ ম্যাপিং ('+' ক্যারেক্টার URL এ সমস্যা করে)
 const bloodGroupSlugs = [
   { group: 'A+', slug: 'a-positive' },
   { group: 'A-', slug: 'a-negative' },
@@ -38,6 +28,8 @@ const bloodGroupSlugs = [
   { group: 'O+', slug: 'o-positive' },
   { group: 'O-', slug: 'o-negative' },
 ];
+
+const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 
 const [{ data: profileGroups }, { data: manualGroups }] = await Promise.all([
   supabase
@@ -51,7 +43,6 @@ const [{ data: profileGroups }, { data: manualGroups }] = await Promise.all([
     .eq('status', 'active'),
 ]);
 
-// প্রতি গ্রুপের কাউন্ট বসানো হচ্ছে
 const countMap = {};
 [...(profileGroups || []), ...(manualGroups || [])].forEach((row) => {
   if (!row.blood_group) return;
@@ -72,12 +63,17 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
       <h1>ফেনীর <span class="accent">রক্তদাতা</span> খুঁজুন</h1>
       <p>
         ফেনীর সবচেয়ে বড় অনলাইন ব্লাড ডিরেক্টরি —
- <strong>{totalDonors} জন</strong> রক্তদাতার মধ্য থেকে খুঁজে নিন আপনার প্রয়োজনীয় রক্তদাতা
+        <strong>{totalDonors} জন</strong> রক্তদাতার মধ্য থেকে খুঁজে নিন আপনার প্রয়োজনীয় রক্তদাতা
       </p>
 
-      <a href="/profile/edit" class="btn-register" data-donor-cta>
-        <i class="fas fa-droplet"></i> রক্তদাতা হিসেবে রেজিস্ট্রেশন করুন
-      </a>
+      <div class="header-actions">
+        <a href="/profile/edit" class="btn-register" data-donor-cta>
+          <i class="fas fa-droplet"></i> রক্তদাতা হিসেবে রেজিস্ট্রেশন করুন
+        </a>
+        <button type="button" id="openBloodRequestBtn" class="btn-request">
+          <i class="fas fa-triangle-exclamation"></i> ব্লাড রিকোয়েস্ট
+        </button>
+      </div>
     </div>
   </section>
 
@@ -109,14 +105,87 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
       )}
     </div>
   </section>
+
+  <!-- ==========================================================
+       Blood Request মোডাল — ২ ট্যাব
+  =========================================================== -->
+  <div class="br-overlay" id="brOverlay">
+    <div class="br-modal">
+      <button type="button" class="br-close" id="brCloseBtn" aria-label="বন্ধ করুন">
+        <i class="fas fa-xmark"></i>
+      </button>
+
+      <h3>🩸 ব্লাড রিকোয়েস্ট</h3>
+
+      <div class="br-tabs">
+        <button type="button" class="br-tab active" data-tab="new">নতুন রিকোয়েস্ট</button>
+        <button type="button" class="br-tab" data-tab="current">বর্তমান রিকোয়েস্ট</button>
+      </div>
+
+      <!-- ===== ট্যাব ১: নতুন রিকোয়েস্ট ===== -->
+      <div class="br-tab-panel active" id="tabNew">
+        <p class="br-sub">ফর্মটি পূরণ করুন — আপনার গ্রুপ ও উপজেলার সব রেজিস্টার্ড ডোনারের কাছে সাথে সাথে নোটিফিকেশন যাবে।</p>
+
+        <div id="brLoginNotice" class="br-login-notice" style="display:none;">
+          <p>রিকোয়েস্ট পোস্ট করতে আগে লগইন করুন</p>
+        </div>
+
+        <form id="bloodRequestForm" class="br-form">
+          <label>
+            আপনার নাম *
+            <input type="text" id="requesterName" required />
+          </label>
+
+          <label>
+            ফোন নম্বর *
+            <input type="tel" id="requesterPhone" required placeholder="01XXXXXXXXX" />
+          </label>
+
+          <div class="br-form-row">
+            <label>
+              ব্লাড গ্রুপ *
+              <select id="bloodGroup" required>
+                <option value="" disabled selected>সিলেক্ট করুন</option>
+                {bloodGroupSlugs.map((g) => <option value={g.group}>{g.group}</option>)}
+              </select>
+            </label>
+
+            <label>
+              উপজেলা *
+              <select id="upazila" required>
+                <option value="" disabled selected>সিলেক্ট করুন</option>
+                {upazilas.map((u) => <option value={u}>{u}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <label>
+            বিস্তারিত (হাসপাতাল, কত ব্যাগ লাগবে ইত্যাদি)
+            <textarea id="details" rows="3" placeholder="যেমন: ফেনী জেনারেল হাসপাতাল, ২ ব্যাগ, আজকের মধ্যে"></textarea>
+          </label>
+
+          <p class="br-feedback" id="brFeedback"></p>
+
+          <button type="submit" id="brSubmitBtn" class="btn-submit-request">
+            <i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান
+          </button>
+        </form>
+      </div>
+
+      <!-- ===== ট্যাব ২: বর্তমান রিকোয়েস্ট ===== -->
+      <div class="br-tab-panel" id="tabCurrent">
+        <div id="currentRequestsLoading" class="br-loading">লোড হচ্ছে...</div>
+        <div id="currentRequestsEmpty" class="br-empty" style="display:none;">
+          <i class="fas fa-inbox"></i>
+          <p>আপনার কোনো রিকোয়েস্ট নেই</p>
+        </div>
+        <div id="currentRequestsList" class="br-requests-list"></div>
+      </div>
+    </div>
+  </div>
 </BaseLayout>
 
 <script>
-  // ============================================================
-  // নতুন — ডোনার হিসেবে already রেজিস্টার্ড থাকলে "রেজিস্ট্রেশন করুন"
-  // CTA বাটন (উভয় ভার্সন — হিরোর মূল বাটন + খালি-স্টেটের আউটলাইন
-  // বাটন) হাইড হয়ে যাবে, যেহেতু আর দরকার নাই।
-  // ============================================================
   import { supabase } from '../../lib/supabase.js';
 
   async function hideCtaIfAlreadyDonor() {
@@ -135,8 +204,236 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
       });
     }
   }
-
   hideCtaIfAlreadyDonor();
+
+  // ============================================================
+  // মোডাল খোলা/বন্ধ + ট্যাব সুইচিং
+  // ============================================================
+  const overlay = document.getElementById('brOverlay');
+  const openBtn = document.getElementById('openBloodRequestBtn');
+  const closeBtn = document.getElementById('brCloseBtn');
+  const loginNotice = document.getElementById('brLoginNotice');
+  const form = document.getElementById('bloodRequestForm') as HTMLFormElement;
+
+  const tabButtons = document.querySelectorAll('.br-tab');
+  const tabPanels = {
+    new: document.getElementById('tabNew'),
+    current: document.getElementById('tabCurrent'),
+  };
+
+  tabButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.getAttribute('data-tab');
+      tabButtons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      Object.entries(tabPanels).forEach(([key, panel]) => {
+        panel?.classList.toggle('active', key === target);
+      });
+      if (target === 'current') loadCurrentRequests();
+    });
+  });
+
+  async function openModal() {
+    overlay?.classList.add('open');
+
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
+      form.style.display = 'none';
+      loginNotice.style.display = 'block';
+      return;
+    }
+
+    form.style.display = 'flex';
+    loginNotice.style.display = 'none';
+
+    const nameInput = document.getElementById('requesterName') as HTMLInputElement;
+    if (nameInput && !nameInput.value) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name, phone')
+        .eq('id', session.user.id)
+        .single();
+
+      if (profile) {
+        const phoneInput = document.getElementById('requesterPhone') as HTMLInputElement;
+        if (profile.full_name) nameInput.value = profile.full_name;
+        if (phoneInput && profile.phone) phoneInput.value = profile.phone;
+      }
+    }
+  }
+
+  function closeModal() {
+    overlay?.classList.remove('open');
+  }
+
+  openBtn?.addEventListener('click', openModal);
+  closeBtn?.addEventListener('click', closeModal);
+  overlay?.addEventListener('click', (e) => {
+    if (e.target === overlay) closeModal();
+  });
+
+  // ============================================================
+  // ট্যাব ১: নতুন রিকোয়েস্ট সাবমিট
+  // ============================================================
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const submitBtn = document.getElementById('brSubmitBtn') as HTMLButtonElement;
+    const feedback = document.getElementById('brFeedback');
+
+    const requesterName = (document.getElementById('requesterName') as HTMLInputElement).value.trim();
+    const requesterPhone = (document.getElementById('requesterPhone') as HTMLInputElement).value.trim();
+    const bloodGroup = (document.getElementById('bloodGroup') as HTMLSelectElement).value;
+    const upazila = (document.getElementById('upazila') as HTMLSelectElement).value;
+    const details = (document.getElementById('details') as HTMLTextAreaElement).value.trim();
+
+    if (!requesterName || !requesterPhone || !bloodGroup || !upazila) {
+      feedback.className = 'br-feedback error';
+      feedback.textContent = 'সব আবশ্যক ফিল্ড পূরণ করুন';
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'পাঠানো হচ্ছে...';
+
+    const { error } = await supabase.from('blood_requests').insert({
+      requester_user_id: session.user.id,
+      requester_name: requesterName,
+      requester_phone: requesterPhone,
+      blood_group: bloodGroup,
+      upazila,
+      details: details || null,
+    });
+
+    if (error) {
+      feedback.className = 'br-feedback error';
+      feedback.textContent = 'কিছু ভুল হয়েছে, আবার চেষ্টা করুন';
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান';
+      return;
+    }
+
+    feedback.className = 'br-feedback success';
+    feedback.textContent = 'রিকোয়েস্ট পোস্ট হয়েছে ✅ ডোনারদের নোটিফিকেশন পাঠানো হচ্ছে...';
+
+    setTimeout(() => {
+      form.reset();
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান';
+      feedback.textContent = '';
+      feedback.className = 'br-feedback';
+      (document.querySelector('.br-tab[data-tab="current"]') as HTMLElement)?.click();
+    }, 1500);
+  });
+
+  // ============================================================
+  // ট্যাব ২: বর্তমান রিকোয়েস্ট লোড করা + রেন্ডার
+  // ============================================================
+  function formatTimeAgo(dateStr) {
+    const diffMs = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'এইমাত্র';
+    if (mins < 60) return `${mins} মিনিট আগে`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} ঘণ্টা আগে`;
+    return `${Math.floor(hrs / 24)} দিন আগে`;
+  }
+
+  async function loadCurrentRequests() {
+    const loading = document.getElementById('currentRequestsLoading');
+    const empty = document.getElementById('currentRequestsEmpty');
+    const list = document.getElementById('currentRequestsList');
+
+    loading.style.display = 'block';
+    empty.style.display = 'none';
+    list.innerHTML = '';
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      loading.style.display = 'none';
+      empty.style.display = 'block';
+      return;
+    }
+
+    const { data: requests } = await supabase
+      .from('blood_requests')
+      .select('id, blood_group, upazila, details, status, created_at')
+      .eq('requester_user_id', session.user.id)
+      .order('created_at', { ascending: false });
+
+    loading.style.display = 'none';
+
+    if (!requests || requests.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    for (const req of requests) {
+      const { data: responses } = await supabase
+        .from('blood_request_responses')
+        .select('donor_name, donor_phone, created_at')
+        .eq('blood_request_id', req.id)
+        .order('created_at', { ascending: false });
+
+      const card = document.createElement('div');
+      card.className = 'req-card';
+
+      const statusLabel =
+        req.status === 'fulfilled' ? '✅ ম্যানেজ হয়ে গেছে' :
+        req.status === 'expired' ? '⏱️ মেয়াদ শেষ' :
+        req.status === 'cancelled' ? '❌ বাতিল' : '🩸 চলমান';
+
+      const responseListHtml = (responses && responses.length > 0)
+        ? responses.map((r) => `
+            <div class="donor-row">
+              <span class="donor-name">${r.donor_name}</span>
+              <a href="tel:${r.donor_phone}" class="donor-phone">${r.donor_phone}</a>
+            </div>
+          `).join('')
+        : `<p class="no-responses">এখনো কেউ আগ্রহ দেখায়নি</p>`;
+
+      card.innerHTML = `
+        <div class="req-card-header">
+          <span class="req-group">${req.blood_group}</span>
+          <span class="req-status status-${req.status}">${statusLabel}</span>
+        </div>
+        <p class="req-meta">${req.upazila} · ${formatTimeAgo(req.created_at)}</p>
+        ${req.details ? `<p class="req-details">${req.details}</p>` : ''}
+        <div class="donor-list">
+          <p class="donor-list-title">আগ্রহী ডোনার (${responses?.length || 0})</p>
+          ${responseListHtml}
+        </div>
+        ${req.status === 'active' ? `<button class="btn-fulfill" data-request-id="${req.id}"><i class="fas fa-check"></i> ব্লাড ম্যানেজ হয়ে গেছে</button>` : ''}
+      `;
+
+      list.appendChild(card);
+    }
+
+    list.querySelectorAll('.btn-fulfill').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const requestId = btn.getAttribute('data-request-id');
+        (btn as HTMLButtonElement).disabled = true;
+        btn.textContent = 'আপডেট হচ্ছে...';
+
+        const { data, error } = await supabase.rpc('mark_blood_request_fulfilled', {
+          p_blood_request_id: requestId,
+        });
+
+        if (error || !data?.success) {
+          alert('আপডেট করতে সমস্যা হয়েছে, আবার চেষ্টা করুন');
+          (btn as HTMLButtonElement).disabled = false;
+          btn.innerHTML = '<i class="fas fa-check"></i> ব্লাড ম্যানেজ হয়ে গেছে';
+          return;
+        }
+
+        loadCurrentRequests();
+      });
+    });
+  }
 </script>
 
 <style>
@@ -163,6 +460,13 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
     margin: 0 auto 20px;
   }
 
+  .header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+  }
+
   .btn-register {
     display: inline-flex;
     align-items: center;
@@ -179,6 +483,27 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
 
   .btn-register:hover {
     background: #e85a28;
+    transform: translateY(-2px);
+  }
+
+  .btn-request {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    color: #D14343;
+    border: 1.5px solid #D14343;
+    padding: 14px 28px;
+    border-radius: 40px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .btn-request:hover {
+    background: #D14343;
+    color: #fff;
     transform: translateY(-2px);
   }
 
@@ -285,6 +610,330 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
     color: #fff;
   }
 
+  .br-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 2200;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .br-overlay.open {
+    display: flex;
+  }
+
+  @media (min-width: 640px) {
+    .br-overlay {
+      align-items: center;
+      padding: 20px;
+    }
+  }
+
+  .br-modal {
+    position: relative;
+    background: #fff;
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    border-radius: 24px 24px 0 0;
+    padding: 30px 24px 26px;
+  }
+
+  @media (min-width: 640px) {
+    .br-modal {
+      border-radius: 24px;
+    }
+  }
+
+  .br-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: #F8FAFC;
+    border: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: #5A6E85;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+
+  .br-modal h3 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin: 0 0 16px;
+  }
+
+  .br-tabs {
+    display: flex;
+    gap: 8px;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 4px;
+    margin-bottom: 18px;
+  }
+
+  .br-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 10px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #5A6E85;
+    cursor: pointer;
+  }
+
+  .br-tab.active {
+    background: #fff;
+    color: #D14343;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  .br-tab-panel {
+    display: none;
+  }
+
+  .br-tab-panel.active {
+    display: block;
+  }
+
+  .br-sub {
+    font-size: 0.85rem;
+    color: #5A6E85;
+    margin: 0 0 18px;
+    line-height: 1.6;
+  }
+
+  .br-login-notice {
+    text-align: center;
+    padding: 30px 10px;
+    background: #F8FAFC;
+    border-radius: 16px;
+    font-weight: 600;
+    color: #1B2A4A;
+  }
+
+  .br-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .br-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .br-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1B2A4A;
+  }
+
+  .br-form input,
+  .br-form select,
+  .br-form textarea {
+    border: 1.5px solid #EEF3F9;
+    border-radius: 12px;
+    padding: 11px 13px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    color: #1B2A4A;
+  }
+
+  .br-form input:focus,
+  .br-form select:focus,
+  .br-form textarea:focus {
+    outline: none;
+    border-color: #D14343;
+  }
+
+  .btn-submit-request {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #D14343;
+    color: #fff;
+    border: none;
+    padding: 14px;
+    border-radius: 40px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    margin-top: 4px;
+  }
+
+  .btn-submit-request:disabled {
+    background: #D7E0EC;
+    cursor: not-allowed;
+  }
+
+  .br-feedback {
+    font-size: 0.82rem;
+    font-weight: 600;
+    margin: 0;
+    display: none;
+  }
+
+  .br-feedback.error {
+    display: block;
+    color: #D14343;
+  }
+
+  .br-feedback.success {
+    display: block;
+    color: #1E9E5A;
+  }
+
+  .br-loading,
+  .br-empty {
+    text-align: center;
+    padding: 40px 10px;
+    color: #8FA0BC;
+    font-size: 0.9rem;
+  }
+
+  .br-empty i {
+    font-size: 1.6rem;
+    display: block;
+    margin-bottom: 10px;
+    color: #D7E0EC;
+  }
+
+  .br-requests-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .req-card {
+    border: 1px solid #EEF3F9;
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .req-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+
+  .req-group {
+    font-weight: 800;
+    color: #D14343;
+    font-size: 1.1rem;
+  }
+
+  .req-status {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: #FFF0EA;
+    color: #D14343;
+  }
+
+  .req-status.status-fulfilled {
+    background: #E7F8EE;
+    color: #1E9E5A;
+  }
+
+  .req-status.status-expired,
+  .req-status.status-cancelled {
+    background: #F1F4F8;
+    color: #8FA0BC;
+  }
+
+  .req-meta {
+    font-size: 0.8rem;
+    color: #8FA0BC;
+    margin: 0 0 6px;
+  }
+
+  .req-details {
+    font-size: 0.85rem;
+    color: #5A6E85;
+    margin: 0 0 10px;
+  }
+
+  .donor-list {
+    background: #F8FAFC;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+
+  .donor-list-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin: 0 0 6px;
+  }
+
+  .donor-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 0.85rem;
+    border-top: 1px solid #EEF3F9;
+  }
+
+  .donor-row:first-of-type {
+    border-top: none;
+  }
+
+  .donor-name {
+    color: #1B2A4A;
+    font-weight: 600;
+  }
+
+  .donor-phone {
+    color: #FF6B35;
+    text-decoration: none;
+    font-weight: 700;
+  }
+
+  .no-responses {
+    font-size: 0.8rem;
+    color: #8FA0BC;
+    margin: 0;
+  }
+
+  .btn-fulfill {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #1E9E5A;
+    color: #fff;
+    border: none;
+    padding: 11px;
+    border-radius: 40px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .btn-fulfill:disabled {
+    background: #D7E0EC;
+    cursor: not-allowed;
+  }
+
   @media (max-width: 768px) {
     .page-header h1 {
       font-size: 1.7rem;
@@ -299,6 +948,10 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
       width: 54px;
       height: 54px;
       font-size: 1.1rem;
+    }
+
+    .br-form-row {
+      grid-template-columns: 1fr;
     }
   }
 </style>
