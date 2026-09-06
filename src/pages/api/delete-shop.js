@@ -4,9 +4,20 @@
 // শুধু admin/moderator কল করতে পারবে। cascade ডিলিট করে:
 //   ১. শপ ওউনারের সব 'online-shop' ক্যাটাগরির listings
 //   ২. এই শপের সব moderators রো
-//   ৩. shops টেবিলের রো
-//   ৪. আগের ওউনারের profiles রিসেট (is_shop_owner=false, shop_id=null)
+//   ৩. এই শপের সব orders (order_items নিজে থেকেই CASCADE-এ মুছে যায়)
+//   ৪. এই শপের সব product_events (অ্যানালিটিক্স/ক্লিক-ট্র্যাকিং ডেটা)
+//   ৫. আগের ওউনারের profiles রিসেট (is_shop_owner=false, shop_id=null)
+//   ৬. shops টেবিলের রো
 // অ্যাকাউন্ট (auth user) ডিলিট হয় না — শুধু শপ-সংক্রান্ত ডেটা।
+//
+// আপডেট (FK ফিক্স): profiles.shop_id কলামে shops.id এর ওপর ফরেন-কি
+// আছে (ON DELETE NO ACTION) — তাই shops রো ডিলিট করার আগে
+// profiles.shop_id অবশ্যই null করতে হবে, নাহলে
+// "violates foreign key constraint profiles_shop_id_fkey" এরর দেয়।
+// আগে এই ধাপ shops ডিলিটের পরে ছিল, যেটা সবসময় ফেইল করত। এখন
+// profile রিসেট শপ ডিলিটের আগে করা হচ্ছে। একই কারণে orders ও
+// product_events টেবিলেও shop_id ফরেন-কি আছে — এই দুটোও শপ ডিলিটের
+// আগে ক্লিন করে দেওয়া হচ্ছে।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -94,7 +105,29 @@ export async function POST({ request }) {
       .eq('entity_type', 'shop')
       .eq('entity_id', shopId);
 
-    // ৩. shops রো ডিলিট
+    // ৩. এই শপের সব অর্ডার ডিলিট (order_items নিজে থেকেই CASCADE-এ মুছে যায়)
+    await supabaseAdmin
+      .from('orders')
+      .delete()
+      .eq('shop_id', shopId);
+
+    // ৪. এই শপের সব product_events (অ্যানালিটিক্স ডেটা) ডিলিট
+    await supabaseAdmin
+      .from('product_events')
+      .delete()
+      .eq('shop_id', shopId);
+
+    // ৫. ওউনারের প্রোফাইল রিসেট — shops রো ডিলিটের আগেই করতে হবে,
+    // কারণ profiles.shop_id ফরেন-কি shops.id কে রেফারেন্স করে
+    // (অ্যাকাউন্ট ডিলিট হয় না, শুধু ফ্ল্যাগ রিসেট)
+    if (shop.owner_id) {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ is_shop_owner: false, shop_id: null })
+        .eq('id', shop.owner_id);
+    }
+
+    // ৬. shops রো ডিলিট
     const { error: deleteShopError } = await supabaseAdmin
       .from('shops')
       .delete()
@@ -105,14 +138,6 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'শপ ডিলিট ব্যর্থ: ' + deleteShopError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
-    }
-
-    // ৪. ওউনারের প্রোফাইল রিসেট (অ্যাকাউন্ট ডিলিট হয় না, শুধু ফ্ল্যাগ রিসেট)
-    if (shop.owner_id) {
-      await supabaseAdmin
-        .from('profiles')
-        .update({ is_shop_owner: false, shop_id: null })
-        .eq('id', shop.owner_id);
     }
 
     return new Response(
