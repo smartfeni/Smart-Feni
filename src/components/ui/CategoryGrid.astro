@@ -4,6 +4,11 @@
 // আপডেট: category_images টেবিল থেকে সব ক্যাটাগরির ছবি একবারে (bulk)
 //         fetch করে প্রতিটা কার্ডে imageUrl পাস করা হচ্ছে
 //         hidden: true থাকা ক্যাটাগরি grid থেকে বাদ দেওয়া হচ্ছে
+// আপডেট (ম্যানুয়াল সিরিয়াল): category_settings টেবিলের sort_order
+//         অনুযায়ী popular ও general — দুইটা গ্রুপই আলাদাভাবে সাজানো
+//         হচ্ছে (অ্যাডমিন প্যানেল /admin/categories থেকে নিয়ন্ত্রিত)।
+//         কোনো ক্যাটাগরির sort_order না থাকলে services.js এর মূল
+//         ক্রম অনুযায়ী fallback হবে।
 // ============================================================
 
 import { categories } from '../../data/services.js';
@@ -13,11 +18,32 @@ import { supabase } from '../../lib/supabase.js';
 
 const popularSlugs = ['courier', 'ride', 'online-shop'];
 
-const popularCategories = popularSlugs
-  .map(slug => categories.find(c => c.slug === slug))
-  .filter(cat => cat && !cat.hidden);
+const sortMap: Record<string, number> = {};
+try {
+  const { data: sortData, error: sortError } = await supabase
+    .from('category_settings')
+    .select('category_id, sort_order');
+  if (!sortError && sortData) {
+    sortData.forEach((row) => {
+      sortMap[row.category_id] = row.sort_order;
+    });
+  }
+} catch (e) {
+  // sort_order fetch ব্যর্থ হলে নিচের fallback (মূল অ্যারে-ইনডেক্স) ব্যবহার হবে
+}
 
-const otherCategories = categories.filter(c => !popularSlugs.includes(c.slug) && !c.hidden);
+const categoriesWithOrder = categories.map((cat, idx) => ({
+  ...cat,
+  __sortOrder: sortMap[cat.id] ?? idx * 10,
+}));
+
+const popularCategories = categoriesWithOrder
+  .filter(cat => popularSlugs.includes(cat.slug) && !cat.hidden)
+  .sort((a, b) => a.__sortOrder - b.__sortOrder);
+
+const otherCategories = categoriesWithOrder
+  .filter(c => !popularSlugs.includes(c.slug) && !c.hidden)
+  .sort((a, b) => a.__sortOrder - b.__sortOrder);
 
 const BUCKET = 'listing-images';
 const categoryImageMap: Record<string, string> = {};
