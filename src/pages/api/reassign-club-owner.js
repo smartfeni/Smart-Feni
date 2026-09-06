@@ -10,11 +10,18 @@
 // ১. caller-এর token যাচাই → profiles.role admin/moderator কিনা চেক
 // ২. clubs row fetch (আগের owner_id বের করা)
 // ৩. নতুন owner-কে ফোন নম্বর দিয়ে profiles এ খোঁজা
-// ৪. নতুন owner যদি আগে থেকেই অন্য ক্লাবের মালিক হয়, তাহলে আটকানো
-//    (এক অ্যাকাউন্ট = এক ক্লাব — কনফ্লিক্ট এড়াতে)
+// ৪. নতুন owner যদি আগে থেকেই সত্যিকারের অন্য ক্লাবের মালিক হয়,
+//    তাহলে আটকানো (এক অ্যাকাউন্ট = এক ক্লাব — কনফ্লিক্ট এড়াতে)
 // ৫. clubs.owner_id নতুন user_id তে বদলানো
 // ৬. পুরনো ওউনারের profiles রিসেট (is_club_owner=false, club_id=null)
 // ৭. নতুন ওউনারের profiles সেট (is_club_owner=true, club_id=clubId)
+//
+// আপডেট (ফিক্স): ধাপ ৪-এ আগে শুধু club_id চেক করা হতো, is_club_owner
+// চেক করা হতো না। কিছু প্রোফাইলে is_club_owner=false থাকা সত্ত্বেও
+// club_id-তে পুরনো/স্টেল ডেটা থেকে যাওয়ায় (আগে reassign-club-owner.js
+// না থাকায় ম্যানুয়াল/অসম্পূর্ণ কোনো প্রসেসে) ভুলভাবে "অন্য ক্লাবের
+// মালিক" বলে ব্লক করে দিচ্ছিল। এখন থেকে is_club_owner === true এবং
+// club_id !== clubId — দুটো শর্তই সত্যি হলে তবেই ব্লক করবে।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -91,7 +98,7 @@ export async function POST({ request }) {
     const digitsOnly = newOwnerPhone.replace(/\D/g, '');
     const { data: newOwnerProfile, error: newOwnerError } = await supabaseAdmin
       .from('profiles')
-      .select('id, club_id, phone')
+      .select('id, is_club_owner, club_id, phone')
       .eq('phone', digitsOnly)
       .maybeSingle();
 
@@ -102,8 +109,10 @@ export async function POST({ request }) {
       );
     }
 
-    // নতুন ওউনার যদি আগে থেকেই অন্য কোনো ক্লাবের মালিক হয়, আটকানো
-    if (newOwnerProfile.club_id && newOwnerProfile.club_id !== clubId) {
+    // নতুন ওউনার যদি আগে থেকেই সত্যিকারের অন্য কোনো ক্লাবের মালিক হয়,
+    // আটকানো (is_club_owner=true হতে হবে, শুধু club_id সেট থাকলেই না —
+    // কারণ স্টেল/পুরনো club_id ডেটা থাকতে পারে যেটা আসলে সক্রিয় ওনারশিপ না)
+    if (newOwnerProfile.is_club_owner && newOwnerProfile.club_id && newOwnerProfile.club_id !== clubId) {
       return new Response(
         JSON.stringify({ error: 'এই অ্যাকাউন্ট ইতিমধ্যে অন্য একটা ক্লাবের মালিক — একটা অ্যাকাউন্ট দিয়ে একটাই ক্লাব চালানো যায়' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
