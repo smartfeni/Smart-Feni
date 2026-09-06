@@ -6,6 +6,13 @@
 // Slug shop_name থেকে auto-generate হয় (clubs+shops দুটোতেই
 // uniqueness চেক করে, কনফ্লিক্ট হলে -2, -3 ইত্যাদি সাফিক্স যোগ হয়)।
 // Service role key শুধু এই সার্ভার ফাইলেই থাকে, ব্রাউজারে যায় না।
+//
+// আপডেট (shop_order ফিক্স): আগে shops row তৈরির সময় shop_order
+// বসানো হতো না, তাই DB ডিফল্ট 0 নিয়েই থাকত — সব শপের shop_order
+// সমান হয়ে যাওয়ায় Admin প্যানেলের up/down পজিশন বাটন কাজ করত না।
+// এখন insert এর আগে বর্তমান সর্বোচ্চ shop_order বের করে তার +10
+// বসানো হচ্ছে, ফলে Approve করা শপও সবসময় লিস্টের শেষে distinct
+// order নিয়ে যোগ হবে (create-shop.js এর মতোই)।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -121,6 +128,19 @@ export async function POST({ request }) {
       suffix++;
     }
 
+    // ============================================================
+    // নতুন শপের জন্য পরবর্তী shop_order বের করা — বর্তমান সর্বোচ্চ
+    // shop_order এর +10 (ফাঁকা টেবিল হলে 10 থেকে শুরু)
+    // ============================================================
+    const { data: maxOrderRow } = await supabaseAdmin
+      .from('shops')
+      .select('shop_order')
+      .order('shop_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextShopOrder = (maxOrderRow?.shop_order || 0) + 10;
+
     // shops row তৈরি (existing user_id এর উপর, নতুন account না বানিয়ে)
     const { data: shopData, error: shopError } = await supabaseAdmin
       .from('shops')
@@ -131,6 +151,7 @@ export async function POST({ request }) {
         phone: req.phone,
         is_active: true,
         is_verified: false,
+        shop_order: nextShopOrder,
       })
       .select()
       .single();
