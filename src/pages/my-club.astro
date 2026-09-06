@@ -1,5 +1,24 @@
 <!-- path: src/pages/my-club.astro -->
 ---
+// ============================================================
+// পেজ: আমার ক্লাব (/my-club) — ট্যাব-ভিত্তিক ড্যাশবোর্ড
+//
+// ✅ ফিক্স করা হলো (my-shop.astro এর একই প্যাটার্নে): এখন ক্লাব
+// ওউনার (is_club_owner+club_id) ছাড়াও moderators টেবিলে
+// entity_type='club' + profile_id=user হিসেবে যোগ করা মডারেটররাও
+// এই পেজে ঢুকতে পারবে। মডারেটর হলে:
+//   - "মডারেটর" ট্যাব হাইড থাকবে (শুধু ওউনার মডারেটর ম্যানেজ করতে
+//     পারবে, RLS policy owner_manage_moderators অনুযায়ী)
+//   - can_edit_listings=false হলে body তে mod-no-edit-listings ক্লাস
+//     (পোস্ট এডিট বাটন হাইড)
+//   - can_delete_listings=false হলে body তে mod-no-delete ক্লাস
+//     (পোস্ট ডিলিট বাটন হাইড)
+//   - can_manage_orders=false হলে body তে mod-no-orders ক্লাস
+//     (সদস্য/জয়েন-রিকোয়েস্ট ম্যানেজ অ্যাকশন হাইড)
+//   - can_edit_settings=false হলে body তে mod-no-settings ক্লাস
+//     (ক্লাব প্রোফাইল ফর্ম lock)
+// ============================================================
+
 export const prerender = false;
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
@@ -36,7 +55,7 @@ import ImageLightbox from '../components/ImageLightbox.astro';
           <button class="myclub-tab" data-tab="posts"><i class="fas fa-newspaper"></i> পোস্ট</button>
           <button class="myclub-tab" data-tab="notifications"><i class="fas fa-bell"></i> নোটিফিকেশন <span class="tab-badge" id="notifBadge" style="display:none;"></span></button>
           <button class="myclub-tab" data-tab="joins"><i class="fas fa-user-plus"></i> জয়েন রিকোয়েস্ট <span class="tab-badge" id="joinBadge" style="display:none;"></span></button>
-          <button class="myclub-tab" data-tab="moderators"><i class="fas fa-users-gear"></i> মডারেটর</button>
+          <button class="myclub-tab" data-tab="moderators" id="moderatorsTabBtn"><i class="fas fa-users-gear"></i> মডারেটর</button>
         </div>
 
         <div class="myclub-panel" data-panel="profile">
@@ -401,6 +420,16 @@ import ImageLightbox from '../components/ImageLightbox.astro';
       color: #FF6B35;
       font-size: 1.4rem;
     }
+
+    /* ============================================================
+       পারমিশন-ভিত্তিক hide — my-club.astro এর init() ফাংশন body তে
+       নিচের ক্লাসগুলো বসায় (মডারেটরের সংশ্লিষ্ট পারমিশন না থাকলে):
+       mod-no-edit-listings, mod-no-delete, mod-no-orders,
+       mod-no-settings। প্রতিটা ট্যাব কম্পোনেন্ট (PostsTab,
+       MembersCommitteeTab, JoinRequestsInbox, ProfileEditTab) নিজের
+       নির্দিষ্ট বাটন/এলিমেন্টে এই ক্লাসগুলো ব্যবহার করে হাইড করবে —
+       সেই CSS পরের ধাপে যার যার কম্পোনেন্ট ফাইলে যোগ হবে।
+       ============================================================ */
   </style>
 
   <script>
@@ -409,6 +438,7 @@ import ImageLightbox from '../components/ImageLightbox.astro';
     const loadingState = document.getElementById('loadingState');
     const guardedContent = document.getElementById('guardedContent');
     const tabsBar = document.getElementById('myclubTabs');
+    const moderatorsTabBtn = document.getElementById('moderatorsTabBtn');
 
     async function init() {
       const { data: { session } } = await supabase.auth.getSession();
@@ -423,7 +453,32 @@ import ImageLightbox from '../components/ImageLightbox.astro';
         .eq('id', session.user.id)
         .single();
 
-      if (!profile?.is_club_owner || !profile?.club_id) {
+      let clubId = null;
+      let isOwner = false;
+      let modPerms = null; // owner হলে null থাকবে (সব পারমিশন আছে ধরে নেওয়া হবে)
+
+      if (profile?.is_club_owner && profile?.club_id) {
+        // ============ কেস ১: ক্লাব ওউনার ============
+        clubId = profile.club_id;
+        isOwner = true;
+      } else {
+        // ============ কেস ২: মডারেটর কিনা চেক ============
+        const { data: modRow } = await supabase
+          .from('moderators')
+          .select('entity_id, can_edit_listings, can_delete_listings, can_manage_orders, can_edit_settings')
+          .eq('entity_type', 'club')
+          .eq('profile_id', session.user.id)
+          .maybeSingle();
+
+        if (modRow?.entity_id) {
+          clubId = modRow.entity_id;
+          isOwner = false;
+          modPerms = modRow;
+        }
+      }
+
+      if (!clubId) {
+        // না ওউনার, না মডারেটর — এই পেজে ঢোকার অনুমতি নেই
         window.location.href = '/';
         return;
       }
@@ -431,7 +486,7 @@ import ImageLightbox from '../components/ImageLightbox.astro';
       const { data: club } = await supabase
         .from('clubs')
         .select('*')
-        .eq('id', profile.club_id)
+        .eq('id', clubId)
         .single();
 
       if (!club) {
@@ -441,10 +496,33 @@ import ImageLightbox from '../components/ImageLightbox.astro';
 
       document.querySelector('#clubHeaderName span').textContent = club.name;
 
+      // ============ মডারেটর হলে UI পারমিশন অনুযায়ী রেস্ট্রিক্ট করা ============
+      if (!isOwner) {
+        // মডারেটর ট্যাব শুধু আসল ওউনারের জন্য — RLS policy
+        // owner_manage_moderators অনুযায়ী মডারেটর ম্যানেজ করার
+        // অনুমতি শুধু ওউনারের আছে
+        moderatorsTabBtn?.remove();
+
+        if (!modPerms?.can_edit_listings) {
+          document.body.classList.add('mod-no-edit-listings');
+        }
+        if (!modPerms?.can_delete_listings) {
+          document.body.classList.add('mod-no-delete');
+        }
+        if (!modPerms?.can_manage_orders) {
+          document.body.classList.add('mod-no-orders');
+        }
+        if (!modPerms?.can_edit_settings) {
+          document.body.classList.add('mod-no-settings');
+        }
+      }
+
       loadingState.style.display = 'none';
       guardedContent.style.display = 'block';
 
-      window.dispatchEvent(new CustomEvent('smartfeni:club-ready', { detail: { clubId: club.id, club } }));
+      window.dispatchEvent(new CustomEvent('smartfeni:club-ready', {
+        detail: { clubId: club.id, club, isOwner, permissions: modPerms },
+      }));
     }
 
     tabsBar?.addEventListener('click', (e) => {
