@@ -368,7 +368,7 @@
     return null;
   }
 
-  async function renderNotifications(items, bloodStatusMap) {
+  async function renderNotifications(items, bloodStatusMap, respondedSet) {
     notifList.innerHTML = '';
 
     if (!items || items.length === 0) {
@@ -380,7 +380,10 @@
     items.forEach((n) => {
       const isBloodRequest = n.category === 'blood_request' && n.related_entity_id;
       const bloodStatus = isBloodRequest ? (bloodStatusMap.get(n.related_entity_id) || 'active') : null;
-      const bloodDoneLabel = bloodStatus ? bloodStatusLabel(bloodStatus) : null;
+      const alreadyResponded = isBloodRequest && respondedSet.has(n.related_entity_id);
+      const bloodDoneLabel = isBloodRequest
+        ? (bloodStatusLabel(bloodStatus) || (alreadyResponded ? '✅ আপনি আগ্রহ জানিয়েছেন' : null))
+        : null;
 
       const el = document.createElement('button');
       el.type = 'button';
@@ -498,7 +501,7 @@
     if (!session) {
       currentUserId = null;
       latestNotifications = [];
-      renderNotifications([], new Map());
+      renderNotifications([], new Map(), new Set());
       updateBadgeCount();
       return;
     }
@@ -522,6 +525,7 @@
       .map((n) => n.related_entity_id);
 
     const bloodStatusMap = new Map();
+    const respondedSet = new Set();
     if (bloodRequestIds.length > 0) {
       const { data: statusRows } = await supabase
         .from('blood_requests')
@@ -529,9 +533,19 @@
         .in('id', bloodRequestIds);
 
       (statusRows || []).forEach((r) => bloodStatusMap.set(r.id, r.status));
+
+      // এই ডোনার (currentUserId) নিজে যেসব রিকোয়েস্টে আগেই "আগ্রহী" চেপেছে
+      // সেগুলোর তালিকা — যাতে বাটন আবার না দেখায়
+      const { data: responseRows } = await supabase
+        .from('blood_request_responses')
+        .select('blood_request_id')
+        .eq('donor_user_id', currentUserId)
+        .in('blood_request_id', bloodRequestIds);
+
+      (responseRows || []).forEach((r) => respondedSet.add(r.blood_request_id));
     }
 
-    renderNotifications(latestNotifications, bloodStatusMap);
+    renderNotifications(latestNotifications, bloodStatusMap, respondedSet);
     updateBadgeCount();
   }
 
