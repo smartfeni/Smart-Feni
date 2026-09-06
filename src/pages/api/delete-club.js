@@ -5,13 +5,24 @@
 //
 // flow:
 // ১. caller-এর token যাচাই → profiles.role === 'admin' কিনা চেক
-// ২. clubs টেবিলের row ডিলিট (club_members, club_posts,
+// ২. এই ক্লাবের সব moderators রো ডিলিট (entity_type='club')
+// ৩. ওউনারের profiles রিসেট (is_club_owner=false, club_id=null) —
+//    clubs রো ডিলিটের আগেই, কারণ profiles.club_id ফরেন-কি clubs.id
+//    কে রেফারেন্স করে (ON DELETE NO ACTION)
+// ৪. clubs টেবিলের row ডিলিট (club_members, club_posts,
 //    club_notifications, club_join_requests এর FK-তে ON DELETE
-//    CASCADE আছে, তাই এগুলো নিজে থেকেই মুছে যাবে)
-// ৩. profiles টেবিলে is_club_owner=false, club_id=null রিসেট
-// ৪. auth.admin.deleteUser() — ক্লাব ওনারের লগইন অ্যাকাউন্টও মুছে
-//    যাবে (চাইলে এই ধাপ স্কিপ করে শুধু ক্লাব ডেটা মোছা যেত, কিন্তু
-//    একাউন্ট রেখে দিলে ভুতুড়ে/অকেজো লগইন থেকে যায়)
+//    CASCADE আছে, তাই এগুলো নিজে থেকেই মুছে যাবে; manual_blood_donors
+//    এর club_id SET NULL হয়ে যাবে)
+//
+// আপডেট (FK ফিক্স + বিহেভিয়ার পরিবর্তন): আগে এই ফাইলে ধাপ উল্টো
+// ছিল — আগে clubs রো ডিলিট, পরে ওউনারের auth অ্যাকাউন্ট
+// (auth.admin.deleteUser) সম্পূর্ণ ডিলিট করে দেওয়া হতো। এতে দুইটা
+// সমস্যা ছিল: (ক) profiles.club_id ফরেন-কি এর কারণে clubs ডিলিট
+// সবসময় ফেইল করত ("violates foreign key constraint" এরর), (খ)
+// ওউনারের লগইন অ্যাকাউন্ট পুরোপুরি মুছে যেত। এখন থেকে —
+// shop ডিলিটের মতোই — শুধু ক্লাব-সংক্রান্ত ডেটা মুছবে, ওউনারের
+// প্রোফাইল/অ্যাকাউন্ট শুধু রিসেট হবে (is_club_owner=false,
+// club_id=null), ডিলিট হবে না।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -84,8 +95,26 @@ export async function POST({ request }) {
       );
     }
 
-    // clubs row ডিলিট — cascade-এ club_members/club_posts/
-    // club_notifications/club_join_requests সব মুছে যাবে
+    // ১. এই ক্লাবের সব মডারেটর রো ডিলিট
+    await supabaseAdmin
+      .from('moderators')
+      .delete()
+      .eq('entity_type', 'club')
+      .eq('entity_id', clubId);
+
+    // ২. ওউনারের প্রোফাইল রিসেট — clubs রো ডিলিটের আগেই করতে হবে,
+    // কারণ profiles.club_id ফরেন-কি clubs.id কে রেফারেন্স করে
+    // (অ্যাকাউন্ট ডিলিট হয় না, শুধু ফ্ল্যাগ রিসেট)
+    if (club.owner_id) {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ is_club_owner: false, club_id: null })
+        .eq('id', club.owner_id);
+    }
+
+    // ৩. clubs row ডিলিট — cascade-এ club_members/club_posts/
+    // club_notifications/club_join_requests সব মুছে যাবে,
+    // manual_blood_donors.club_id SET NULL হয়ে যাবে
     const { error: deleteClubError } = await supabaseAdmin
       .from('clubs')
       .delete()
@@ -96,22 +125,6 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'ক্লাব ডিলিট ব্যর্থ: ' + deleteClubError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
-    }
-
-    // ওনারের auth অ্যাকাউন্ট ডিলিট (থাকলে)
-    if (club.owner_id) {
-      const { error: deleteUserError } = await supabaseAdmin.auth.admin.deleteUser(club.owner_id);
-      if (deleteUserError) {
-        // ক্লাব ডেটা মুছে গেছে, কিন্তু ওনার অ্যাকাউন্ট রয়ে গেছে —
-        // ওয়ার্নিং সহ success পাঠাচ্ছি যাতে এডমিন জানে
-        return new Response(
-          JSON.stringify({
-            success: true,
-            warning: 'ক্লাব ডিলিট হয়েছে, কিন্তু ওনারের লগইন অ্যাকাউন্ট ডিলিট ব্যর্থ: ' + deleteUserError.message,
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
     }
 
     return new Response(
