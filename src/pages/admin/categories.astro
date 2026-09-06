@@ -1,0 +1,427 @@
+<!-- path: src/pages/admin/categories.astro -->
+---
+// ============================================================
+// পেজ: অ্যাডমিন — ক্যাটাগরি ম্যানেজমেন্ট (/admin/categories)
+//
+// দুইটা ফিচার:
+// ১. হোমপেজ সেকশন অর্ডার — Featured Photos vs Popular Category
+//    (CategoryGrid) কোনটা উপরে থাকবে, site_settings টেবিলের
+//    'homepage_section_order' key দিয়ে নিয়ন্ত্রিত ('photos_first' |
+//    'category_first')
+// ২. ক্যাটাগরি সিরিয়াল — services.js এর popularSlugs (courier, ride,
+//    online-shop) ও বাকি সব ক্যাটাগরি, দুইটা আলাদা গ্রুপ হিসেবে
+//    up/down বাটনে সিরিয়াল বদলানো যাবে (category_settings টেবিলের
+//    sort_order কলাম, শপ ম্যানেজমেন্টের একই প্যাটার্নে)।
+//    গ্রুপ অ্যাসাইনমেন্ট (কোনটা Popular, কোনটা General) কোডেই ফিক্সড
+//    থাকছে — শুধু প্রতিটা গ্রুপের ভেতরের অর্ডার বদলানো যাবে।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="ক্যাটাগরি ম্যানেজমেন্ট | অ্যাডমিন">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>ক্যাটাগরি ম্যানেজমেন্ট</h1>
+          <p class="admin-subtitle">হোমপেজ সেকশন অর্ডার ও ক্যাটাগরি সিরিয়াল নিয়ন্ত্রণ</p>
+        </div>
+
+        <!-- ===== হোমপেজ সেকশন অর্ডার ===== -->
+        <div class="section-block">
+          <h2 class="section-title"><i class="fas fa-layer-group"></i> হোমপেজ সেকশন অর্ডার</h2>
+          <div class="order-swap-box">
+            <div class="order-swap-row" id="orderRowFirst">
+              <i class="fas fa-grip-lines"></i>
+              <span id="orderLabelFirst">লোড হচ্ছে...</span>
+              <span class="order-position-badge">১ম</span>
+            </div>
+            <div class="order-swap-row" id="orderRowSecond">
+              <i class="fas fa-grip-lines"></i>
+              <span id="orderLabelSecond">লোড হচ্ছে...</span>
+              <span class="order-position-badge">২য়</span>
+            </div>
+            <button type="button" class="order-swap-btn" id="swapOrderBtn">
+              <i class="fas fa-arrow-right-arrow-left"></i> অর্ডার সোয়াপ করুন
+            </button>
+          </div>
+        </div>
+
+        <!-- ===== জনপ্রিয় ক্যাটাগরি সিরিয়াল ===== -->
+        <div class="section-block">
+          <h2 class="section-title"><i class="fas fa-fire"></i> জনপ্রিয় ক্যাটাগরি সিরিয়াল</h2>
+          <p class="section-hint">হোমপেজে "জনপ্রিয়" ব্যাজের নিচে এই ৩টা যে ক্রমে দেখাবে</p>
+          <div id="popularContainer" class="category-order-container"></div>
+        </div>
+
+        <!-- ===== সাধারণ ক্যাটাগরি সিরিয়াল ===== -->
+        <div class="section-block">
+          <h2 class="section-title"><i class="fas fa-grip"></i> সাধারণ ক্যাটাগরি সিরিয়াল</h2>
+          <p class="section-hint">বাকি সব ক্যাটাগরির হোমপেজ ক্রম</p>
+          <div id="generalContainer" class="category-order-container"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 32px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 24px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .section-block {
+      margin-bottom: 28px;
+    }
+
+    .section-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-title i {
+      color: #FF6B35;
+    }
+
+    .section-hint {
+      font-size: 0.78rem;
+      color: #8FA0BC;
+      margin-bottom: 14px;
+    }
+
+    .order-swap-box {
+      background: #fff;
+      border-radius: 16px;
+      padding: 16px 18px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    .order-swap-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: #F4F7FC;
+      border-radius: 12px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 10px;
+    }
+
+    .order-swap-row i {
+      color: #99A9BE;
+    }
+
+    .order-position-badge {
+      margin-left: auto;
+      background: #FFF0EA;
+      color: #FF6B35;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    .order-swap-btn {
+      width: 100%;
+      margin-top: 4px;
+      background: #1B2A4A;
+      color: #fff;
+      border: none;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .order-swap-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .category-order-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .cat-order-card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 12px 14px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .cat-order-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    .cat-order-name {
+      flex: 1;
+      min-width: 0;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cat-order-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .cat-order-btn {
+      background: #F4F7FC;
+      color: #1B2A4A;
+      border: none;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .cat-order-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    .cat-order-loading {
+      text-align: center;
+      color: #8FA0BC;
+      padding: 24px 0;
+      font-size: 0.85rem;
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { categories } from '../../data/services.js';
+
+    const POPULAR_SLUGS = ['courier', 'ride', 'online-shop'];
+
+    const popularContainer = document.getElementById('popularContainer');
+    const generalContainer = document.getElementById('generalContainer');
+
+    const orderRowFirst = document.getElementById('orderRowFirst');
+    const orderRowSecond = document.getElementById('orderRowSecond');
+    const orderLabelFirst = document.getElementById('orderLabelFirst');
+    const orderLabelSecond = document.getElementById('orderLabelSecond');
+    const swapOrderBtn = document.getElementById('swapOrderBtn');
+
+    const SECTION_LABELS = {
+      photos_first: ['ফিচার্ড ফটো গ্যালারি', 'জনপ্রিয় ক্যাটাগরি (Category Grid)'],
+      category_first: ['জনপ্রিয় ক্যাটাগরি (Category Grid)', 'ফিচার্ড ফটো গ্যালারি'],
+    };
+
+    let currentSectionOrder = 'photos_first';
+
+    // ============ হোমপেজ সেকশন অর্ডার ============
+    async function loadSectionOrder() {
+      const { data } = await supabase
+        .from('site_settings')
+        .select('value')
+        .eq('key', 'homepage_section_order')
+        .maybeSingle();
+
+      currentSectionOrder = data?.value === 'category_first' ? 'category_first' : 'photos_first';
+      renderSectionOrder();
+    }
+
+    function renderSectionOrder() {
+      const [first, second] = SECTION_LABELS[currentSectionOrder];
+      orderLabelFirst.textContent = first;
+      orderLabelSecond.textContent = second;
+    }
+
+    swapOrderBtn.addEventListener('click', async () => {
+      swapOrderBtn.disabled = true;
+      swapOrderBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> সেভ হচ্ছে...';
+
+      const newOrder = currentSectionOrder === 'photos_first' ? 'category_first' : 'photos_first';
+
+      const { error } = await supabase
+        .from('site_settings')
+        .update({ value: newOrder, updated_at: new Date().toISOString() })
+        .eq('key', 'homepage_section_order');
+
+      if (error) {
+        alert('সোয়াপ ব্যর্থ: ' + error.message);
+      } else {
+        currentSectionOrder = newOrder;
+        renderSectionOrder();
+      }
+
+      swapOrderBtn.disabled = false;
+      swapOrderBtn.innerHTML = '<i class="fas fa-arrow-right-arrow-left"></i> অর্ডার সোয়াপ করুন';
+    });
+
+    // ============ ক্যাটাগরি সিরিয়াল ============
+    let sortMap = {}; // category_id -> sort_order
+    let popularList = [];
+    let generalList = [];
+
+    async function loadCategorySettings() {
+      const { data } = await supabase.from('category_settings').select('category_id, sort_order');
+      sortMap = {};
+      (data || []).forEach((row) => {
+        sortMap[row.category_id] = row.sort_order;
+      });
+
+      const withOrder = categories.map((cat, idx) => ({
+        ...cat,
+        sort_order: sortMap[cat.id] ?? idx * 10,
+      }));
+
+      popularList = withOrder
+        .filter((c) => POPULAR_SLUGS.includes(c.slug))
+        .sort((a, b) => a.sort_order - b.sort_order);
+
+      generalList = withOrder
+        .filter((c) => !POPULAR_SLUGS.includes(c.slug))
+        .sort((a, b) => a.sort_order - b.sort_order);
+
+      renderList(popularContainer, popularList);
+      renderList(generalContainer, generalList);
+    }
+
+    function renderList(container, list) {
+      container.innerHTML = '';
+      list.forEach((cat, idx) => {
+        const card = document.createElement('div');
+        card.className = 'cat-order-card';
+        card.innerHTML = `
+          <div class="cat-order-icon"><i class="fas ${cat.icon}"></i></div>
+          <span class="cat-order-name">${cat.name}${cat.hidden ? ' (হিডেন)' : ''}</span>
+          <div class="cat-order-actions">
+            <button type="button" class="cat-order-btn" data-dir="up" ${idx === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button>
+            <button type="button" class="cat-order-btn" data-dir="down" ${idx === list.length - 1 ? 'disabled' : ''}><i class="fas fa-arrow-down"></i></button>
+          </div>
+        `;
+        card.querySelectorAll('.cat-order-btn').forEach((btn) => {
+          btn.addEventListener('click', () => moveCategory(list, cat, btn.dataset.dir));
+        });
+        container.appendChild(card);
+      });
+    }
+
+    async function moveCategory(list, cat, direction) {
+      const idx = list.findIndex((c) => c.id === cat.id);
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= list.length) return;
+
+      const other = list[swapIdx];
+      const tempOrder = cat.sort_order;
+
+      await Promise.all([
+        supabase.from('category_settings').upsert({ category_id: cat.id, sort_order: other.sort_order }),
+        supabase.from('category_settings').upsert({ category_id: other.id, sort_order: tempOrder }),
+      ]);
+
+      loadCategorySettings();
+    }
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadSectionOrder();
+      loadCategorySettings();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
