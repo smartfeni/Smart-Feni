@@ -20,20 +20,26 @@ Astro.response.headers.set(
   'public, max-age=0, s-maxage=60, stale-while-revalidate=30'
 );
 
-// আপডেট (হোমপেজ সেকশন অর্ডার): site_settings টেবিলের
-// 'homepage_section_order' কী দিয়ে ঠিক হয় Featured Photos আগে না
-// Category Grid আগে দেখাবে — অ্যাডমিন প্যানেল /admin/categories
-// থেকে নিয়ন্ত্রিত। fetch ব্যর্থ হলে ডিফল্ট 'photos_first' (আগের
-// আচরণ) হিসেবে থাকবে, পেজ ভাঙবে না।
-let categoryFirst = false;
+// আপডেট (হোমপেজ সেকশন অর্ডার — ৩ অপশন): site_settings টেবিলের
+// 'homepage_section_order' কী দিয়ে ঠিক হয় Featured Photos কোথায়
+// বসবে — Popular ও General ক্যাটাগরি গ্রিডের উপরে, মাঝখানে, নাকি
+// নিচে। Popular সবসময় General-এর আগে থাকে (fix), শুধু Photos-এর
+// পজিশন বদলায়। অ্যাডমিন প্যানেল /admin/categories থেকে নিয়ন্ত্রিত।
+// fetch ব্যর্থ হলে ডিফল্ট 'photos_first' (আগের আচরণ) হিসেবে থাকবে।
+let sectionOrder = 'photos_first';
 try {
   const { data, error } = await supabase
     .from('site_settings')
     .select('value')
     .eq('key', 'homepage_section_order')
     .maybeSingle();
-  if (!error && data?.value === 'category_first') {
-    categoryFirst = true;
+  if (!error && data?.value) {
+    // পুরনো ২-অপশন ভ্যালু থাকলে নতুন সিস্টেমে ম্যাপ করা হচ্ছে
+    if (data.value === 'category_first') {
+      sectionOrder = 'photos_last';
+    } else if (['photos_first', 'photos_middle', 'photos_last'].includes(data.value)) {
+      sectionOrder = data.value;
+    }
   }
 } catch (e) {
   // fallback: photos_first
@@ -42,15 +48,25 @@ try {
 
 <BaseLayout title="স্মার্ট ফেনী - আপনার শহরের ডিজিটাল সেবা" showChatWidget={true}>
   <Hero />
-  {categoryFirst ? (
+  {sectionOrder === 'photos_first' && (
     <>
-      <CategoryGrid />
       <FeaturedPhotos />
+      <CategoryGrid part="popular" />
+      <CategoryGrid part="general" />
     </>
-  ) : (
+  )}
+  {sectionOrder === 'photos_middle' && (
     <>
+      <CategoryGrid part="popular" />
       <FeaturedPhotos />
-      <CategoryGrid />
+      <CategoryGrid part="general" />
+    </>
+  )}
+  {sectionOrder === 'photos_last' && (
+    <>
+      <CategoryGrid part="popular" />
+      <CategoryGrid part="general" />
+      <FeaturedPhotos />
     </>
   )}
 </BaseLayout>
