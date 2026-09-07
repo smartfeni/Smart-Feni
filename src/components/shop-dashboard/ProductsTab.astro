@@ -3,6 +3,23 @@
 // কম্পোনেন্ট: ProductsTab (shop-dashboard) — প্রোডাক্ট Add/Edit/Delete
 // আপডেট: শেয়ার বাটন সরানো হয়েছে (ড্যাশবোর্ডে দরকার নেই, শুধু
 // প্রোডাক্ট প্রিভিউ পেজে /product/{id} শেয়ার থাকবে)
+// আপডেট (বড়): এডিট মোডালে এখন সম্পূর্ণ ছবি ম্যানেজমেন্ট — বিদ্যমান
+// ছবি রিমুভ + নতুন ছবি যোগ (AddListingModal এর ইতিমধ্যে global CSS
+// class .listing-image-grid/.listing-image-box রিইউজ করা হয়েছে,
+// যেহেতু এই পেজেই <AddListingModal /> রেন্ডার হয় বলে সেই is:global
+// স্টাইল এমনিতেই লোড থাকে)। আগে টাইটেল/বিবরণ/দাম ছাড়া কিছুই এডিট
+// করা যেত না, ছবি বদলাতে হলে পুরো প্রোডাক্ট ডিলিট করে নতুন করে
+// বানাতে হতো।
+// আপডেট: প্রোডাক্ট "সোল্ড আউট" টগল যোগ হয়েছে (is_sold_out কলাম) —
+// বেস্ট সেলার টগলের মতোই প্যাটার্ন, প্রোডাক্ট শেষ হয়ে গেলে মার্ক
+// করা যাবে, আবার স্টকে আসলে সরানো যাবে।
+// বাগফিক্স: এই কম্পোনেন্টের এডিট মোডাল আগে .form-input/.form-label/
+// .form-msg/.primary-btn ক্লাস ব্যবহার করত কিন্তু নিজের <style> এ
+// ডিফাইন করত না — my-shop.astro (parent পেজ) এর স্কোপড স্টাইলের
+// উপর নির্ভর করছিল, যেটা Astro এর component-scoped CSS নিয়মে
+// আসলে কাজ করার কথা না (parent এর scoped স্টাইল child component এ
+// প্রযোজ্য হয় না)। এখন এই কম্পোনেন্টের নিজের is:global ব্লকেই এই
+// ক্লাসগুলা ডিফাইন করে দেওয়া হলো যাতে নিশ্চিতভাবে কাজ করে।
 // ============================================================
 
 import AddListingModal from '../ui/AddListingModal.astro';
@@ -39,9 +56,15 @@ import AddListingModal from '../ui/AddListingModal.astro';
 
     <label class="form-label">বিবরণ</label>
     <textarea class="form-input" id="editDescription" rows="3"></textarea>
+    <p class="form-hint">পণ্যের পরিমাণ অথবা পণ্য সম্পর্কে লিখুন</p>
 
     <label class="form-label">দাম</label>
     <input type="text" class="form-input" id="editPrice" />
+    <p class="form-hint">উদাহরণ: ১০০ টাকা, অথবা এককসহ যেমন ১৫০ টাকা (প্রতি কেজি)</p>
+
+    <label class="form-label">ছবি</label>
+    <input type="file" id="editImagesInput" accept="image/*" multiple hidden />
+    <div class="listing-image-grid" id="editImageGrid"></div>
 
     <button class="primary-btn" id="editSaveBtn" type="button">
       <i class="fas fa-check"></i> <span>সেভ করুন</span>
@@ -55,6 +78,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
   titleLabel="প্রোডাক্টের নাম"
   priceLabel="দাম"
   autoActive={true}
+  nounLabel="প্রোডাক্ট"
 />
 
 <style>
@@ -113,6 +137,90 @@ import AddListingModal from '../ui/AddListingModal.astro';
 </style>
 
 <style is:global>
+  /* এডিট মোডালের ফর্ম স্টাইল — এই কম্পোনেন্টের নিজের is:global ব্লকে
+     ডিফাইন করা হলো (আগে পাশাপাশি my-shop.astro এর উপর নির্ভর করত,
+     যেটা Astro স্কোপিং নিয়মে ঠিক ছিল না) */
+  .form-msg {
+    display: none;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  .form-msg.show-error {
+    display: block;
+    background: #FFF0EA;
+    color: #D14343;
+  }
+
+  .form-msg.show-success {
+    display: block;
+    background: #EAFBF0;
+    color: #1B7A3C;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #1B2A4A;
+    margin-bottom: 6px;
+    margin-top: 14px;
+  }
+
+  .form-label:first-of-type {
+    margin-top: 0;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1.5px solid #E5EAF0;
+    font-size: 0.9rem;
+    font-family: inherit;
+    color: #1B2A4A;
+    background: #FBFCFE;
+    resize: vertical;
+  }
+
+  .form-input:focus {
+    outline: none;
+    border-color: #FF6B35;
+    background: #fff;
+  }
+
+  .form-hint {
+    font-size: 0.74rem;
+    color: #9AA8BC;
+    margin-top: 5px;
+  }
+
+  .primary-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #FF6B35;
+    color: #fff;
+    border: none;
+    padding: 13px;
+    border-radius: 14px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    margin-top: 16px;
+  }
+
+  .primary-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+
   .products-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -206,6 +314,26 @@ import AddListingModal from '../ui/AddListingModal.astro';
     gap: 4px;
   }
 
+  .sold-out-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(15, 23, 42, 0.75);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .product-card.sold-out .product-photo-frame img,
+  .product-card.sold-out .product-icon-frame {
+    opacity: 0.5;
+  }
+
   .btn-star {
     background: #FFF7DB;
     color: #B8860B;
@@ -214,6 +342,16 @@ import AddListingModal from '../ui/AddListingModal.astro';
   .btn-star.active {
     background: #FFD700;
     color: #7A5C00;
+  }
+
+  .btn-soldout {
+    background: #F4F7FC;
+    color: #5A6E85;
+  }
+
+  .btn-soldout.active {
+    background: #1B2A4A;
+    color: #fff;
   }
 
   .product-actions {
@@ -267,6 +405,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
 
 <script>
   import { supabase } from '../../lib/supabase.js';
+  import { compressImages } from '../../lib/imageCompress.js';
 
   const productsContainer = document.getElementById('productsContainer');
   const emptyState = document.getElementById('emptyState');
@@ -302,7 +441,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
 
     products.forEach((p) => {
       const card = document.createElement('div');
-      card.className = 'product-card';
+      card.className = `product-card ${p.is_sold_out ? 'sold-out' : ''}`;
 
       const imageHtml = p.images && p.images.length > 0
         ? `<div class="product-photo-frame"><img src="${p.images[0]}" alt="${p.title || ''}" /></div>`
@@ -312,10 +451,15 @@ import AddListingModal from '../ui/AddListingModal.astro';
         ? `<span class="best-seller-badge"><i class="fas fa-star"></i> বেস্ট সেলার</span>`
         : '';
 
+      const soldOutBadge = p.is_sold_out
+        ? `<span class="sold-out-badge"><i class="fas fa-ban"></i> সোল্ড আউট</span>`
+        : '';
+
       card.innerHTML = `
         <div class="product-photo-wrap">
           ${imageHtml}
           ${bestSellerBadge}
+          ${soldOutBadge}
         </div>
         <div class="product-body">
           <p class="product-title">${p.title || ''}</p>
@@ -327,12 +471,16 @@ import AddListingModal from '../ui/AddListingModal.astro';
           <div class="product-actions">
             <button class="btn-star ${p.is_best_seller ? 'active' : ''}" style="flex:1;"><i class="fas fa-star"></i> ${p.is_best_seller ? 'বেস্ট সেলার' : 'বেস্ট সেলার করুন'}</button>
           </div>
+          <div class="product-actions">
+            <button class="btn-soldout ${p.is_sold_out ? 'active' : ''}" style="flex:1;"><i class="fas fa-ban"></i> ${p.is_sold_out ? 'সোল্ড আউট (সরান)' : 'সোল্ড আউট করুন'}</button>
+          </div>
         </div>
       `;
 
       card.querySelector('.btn-edit').addEventListener('click', () => openEdit(p));
       card.querySelector('.btn-delete').addEventListener('click', () => deleteProduct(p.id));
       card.querySelector('.btn-star').addEventListener('click', () => toggleBestSeller(p));
+      card.querySelector('.btn-soldout').addEventListener('click', () => toggleSoldOut(p));
 
       productsContainer.appendChild(card);
     });
@@ -345,6 +493,18 @@ import AddListingModal from '../ui/AddListingModal.astro';
 
     if (newValue) {
       await supabase.from('listings').update({ is_best_seller: true }).eq('id', product.id);
+    }
+
+    loadProducts();
+  }
+
+  async function toggleSoldOut(product) {
+    const newValue = !product.is_sold_out;
+
+    const { error } = await supabase.from('listings').update({ is_sold_out: newValue }).eq('id', product.id);
+    if (error) {
+      alert('আপডেট ব্যর্থ: ' + error.message);
+      return;
     }
 
     loadProducts();
@@ -368,13 +528,117 @@ import AddListingModal from '../ui/AddListingModal.astro';
   const editDescInput = document.getElementById('editDescription');
   const editPriceInput = document.getElementById('editPrice');
   const editSaveBtn = document.getElementById('editSaveBtn');
+  const editImagesInput = document.getElementById('editImagesInput');
+  const editImageGrid = document.getElementById('editImageGrid');
   let editingId = null;
+  let existingImageUrls = []; // ইতিমধ্যে আপলোড করা ছবি (URL) — রিমুভ করা যাবে
+  let newImageFiles = []; // নতুন যোগ করা ছবি (কম্প্রেসড File) — সেভে আপলোড হবে
+
+  function renderEditImageGrid() {
+    editImageGrid.innerHTML = '';
+
+    // বিদ্যমান ছবি (URL)
+    existingImageUrls.forEach((url, index) => {
+      const box = document.createElement('div');
+      box.className = 'listing-image-box thumb-box';
+
+      const img = document.createElement('img');
+      img.src = url;
+      box.appendChild(img);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'listing-image-remove-btn';
+      removeBtn.innerHTML = '<i class="fas fa-xmark"></i>';
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        existingImageUrls.splice(index, 1);
+        renderEditImageGrid();
+      });
+      box.appendChild(removeBtn);
+
+      editImageGrid.appendChild(box);
+    });
+
+    // নতুন যোগ করা ছবি (এখনো আপলোড হয়নি, লোকাল প্রিভিউ)
+    newImageFiles.forEach((file, index) => {
+      const box = document.createElement('div');
+      box.className = 'listing-image-box thumb-box';
+
+      const img = document.createElement('img');
+      const reader = new FileReader();
+      reader.onload = () => { img.src = reader.result; };
+      reader.readAsDataURL(file);
+      box.appendChild(img);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'listing-image-remove-btn';
+      removeBtn.innerHTML = '<i class="fas fa-xmark"></i>';
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        newImageFiles.splice(index, 1);
+        renderEditImageGrid();
+      });
+      box.appendChild(removeBtn);
+
+      editImageGrid.appendChild(box);
+    });
+
+    // সবসময় শেষে একটা ➕ বক্স
+    const addBox = document.createElement('div');
+    addBox.className = 'listing-image-box add-box';
+    addBox.innerHTML = '<i class="fas fa-plus"></i>';
+    addBox.addEventListener('click', () => editImagesInput.click());
+    editImageGrid.appendChild(addBox);
+  }
+
+  editImagesInput?.addEventListener('change', async () => {
+    const rawFiles = Array.from(editImagesInput.files || []);
+    editImagesInput.value = '';
+    if (rawFiles.length === 0) return;
+
+    const compressedFiles = await compressImages(rawFiles);
+    newImageFiles = newImageFiles.concat(compressedFiles);
+    renderEditImageGrid();
+  });
+
+  // এডিট মোডালের ছবি আপলোড — AddListingModal এর /api/upload-image
+  // রুটের একই প্যাটার্ন (service role key দিয়ে, RLS বাইপাস করে)
+  async function uploadEditImages(accessToken) {
+    const urls = [];
+    for (const file of newImageFiles) {
+      const fileExt = file.name.split('.').pop();
+      const filePath = `online-shop/${currentUserId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${fileExt}`;
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', filePath);
+
+      const res = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      });
+      const result = await res.json();
+
+      if (res.ok && result.url) {
+        urls.push(result.url);
+      } else {
+        console.error('ছবি আপলোড এরর:', result.error);
+      }
+    }
+    return urls;
+  }
 
   function openEdit(product) {
     editingId = product.id;
     editTitleInput.value = product.title || '';
     editDescInput.value = product.description || '';
     editPriceInput.value = product.price || '';
+    existingImageUrls = [...(product.images || [])];
+    newImageFiles = [];
+    renderEditImageGrid();
     editMessage.className = 'form-msg';
     editMessage.textContent = '';
     editOverlay.classList.add('open');
@@ -399,14 +663,30 @@ import AddListingModal from '../ui/AddListingModal.astro';
       return;
     }
 
+    editSaveBtn.disabled = true;
+    const textEl = editSaveBtn.querySelector('span');
+    const originalText = textEl.textContent;
+    textEl.textContent = 'সেভ হচ্ছে...';
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const newlyUploadedUrls = newImageFiles.length && session
+      ? await uploadEditImages(session.access_token)
+      : [];
+
+    const finalImages = existingImageUrls.concat(newlyUploadedUrls);
+
     const { error } = await supabase
       .from('listings')
       .update({
         title,
         description: editDescInput.value.trim(),
         price: editPriceInput.value.trim(),
+        images: finalImages,
       })
       .eq('id', editingId);
+
+    editSaveBtn.disabled = false;
+    textEl.textContent = originalText;
 
     if (error) {
       editMessage.textContent = 'সেভ ব্যর্থ: ' + error.message;
