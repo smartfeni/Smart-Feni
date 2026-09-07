@@ -269,6 +269,116 @@ const localBusinessSchema = {
         font-size: 1.8rem;
       }
     }
+
+    /* ============================================================
+       গ্লোবাল টোস্ট নোটিফিকেশন সিস্টেম
+       (window.showToast(message, type, duration) দিয়ে যেকোনো
+       পেজ/কম্পোনেন্ট/মোডাল থেকে কল করা যাবে)
+       ============================================================ */
+    .sf-toast-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 99999;
+      pointer-events: none;
+    }
+
+    .sf-toast {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: #FFFFFF;
+      color: #1B2A4A;
+      padding: 18px 28px;
+      border-radius: 18px;
+      box-shadow: 0 20px 50px rgba(27, 42, 74, 0.25);
+      font-weight: 600;
+      font-size: 0.98rem;
+      max-width: 90vw;
+      min-width: 260px;
+      opacity: 0;
+      transform: scale(0.85) translateY(10px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      pointer-events: auto;
+      border-left: 6px solid #FF6B35;
+    }
+
+    .sf-toast.sf-toast-show {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+
+    .sf-toast.sf-toast-success {
+      border-left-color: #2ECC71;
+    }
+
+    .sf-toast.sf-toast-error {
+      border-left-color: #E74C3C;
+    }
+
+    .sf-toast-icon {
+      flex-shrink: 0;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+      color: #fff;
+    }
+
+    .sf-toast-success .sf-toast-icon {
+      background: #2ECC71;
+    }
+
+    .sf-toast-error .sf-toast-icon {
+      background: #E74C3C;
+    }
+
+    .sf-toast-message {
+      line-height: 1.4;
+    }
+
+    @media (max-width: 480px) {
+      .sf-toast {
+        padding: 16px 20px;
+        font-size: 0.9rem;
+        min-width: 0;
+        width: calc(100vw - 48px);
+      }
+    }
+
+    /* ============================================================
+       গ্লোবাল Mandatory Field ভ্যালিডেশন স্টাইল
+       (window.SFValidateForm(form) হেল্পার ফাংশনের সাথে ব্যবহারের জন্য)
+       ============================================================ */
+    .required-mark {
+      color: #E74C3C;
+      margin-left: 3px;
+      font-weight: 700;
+    }
+
+    .field-error-msg {
+      display: none;
+      align-items: center;
+      gap: 5px;
+      color: #E74C3C;
+      font-size: 0.8rem;
+      font-weight: 500;
+      margin-top: 6px;
+    }
+
+    .field-error-msg.show {
+      display: flex;
+    }
+
+    .field-invalid {
+      border-color: #E74C3C !important;
+      background: #FFF5F5 !important;
+    }
   </style>
 </head>
 <body>
@@ -284,6 +394,8 @@ const localBusinessSchema = {
   <PostFlowDrawer />
   <NotificationPermissionPrompt />
   {showChatWidget && <ChatWidget />}
+
+  <div id="sf-toast-overlay" class="sf-toast-overlay"></div>
 
   <script>
     window.deferredInstallPrompt = null;
@@ -324,6 +436,117 @@ const localBusinessSchema = {
         upazila: upazila || null,
         ...(shopName ? { shop_name: shopName } : {}),
       });
+    });
+  </script>
+
+  <script>
+    // ============================================================
+    // গ্লোবাল টোস্ট নোটিফিকেশন
+    // ব্যবহার: window.showToast('মেসেজ', 'success' | 'error', 3000)
+    // ============================================================
+    window.showToast = function (message, type = 'success', duration = 3000) {
+      const overlay = document.getElementById('sf-toast-overlay');
+      if (!overlay) return;
+
+      // আগের টোস্ট থাকলে সরিয়ে নতুনটা দেখাবে
+      overlay.innerHTML = '';
+
+      const toast = document.createElement('div');
+      toast.className = `sf-toast sf-toast-${type === 'error' ? 'error' : 'success'}`;
+
+      const icon = document.createElement('div');
+      icon.className = 'sf-toast-icon';
+      icon.innerHTML =
+        type === 'error'
+          ? '<i class="fa-solid fa-xmark"></i>'
+          : '<i class="fa-solid fa-check"></i>';
+
+      const msg = document.createElement('div');
+      msg.className = 'sf-toast-message';
+      msg.textContent = message;
+
+      toast.appendChild(icon);
+      toast.appendChild(msg);
+      overlay.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.add('sf-toast-show');
+      });
+
+      clearTimeout(window.__sfToastTimer);
+      window.__sfToastTimer = setTimeout(() => {
+        toast.classList.remove('sf-toast-show');
+        setTimeout(() => {
+          if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 250);
+      }, duration);
+    };
+
+    // ============================================================
+    // গ্লোবাল Mandatory Field ভ্যালিডেশন হেল্পার
+    // ব্যবহার: const ok = window.SFValidateForm(formElement);
+    // if (!ok) return; // submit বন্ধ
+    //
+    // প্রতিটা required ইনপুট/সিলেক্ট/টেক্সটএরিয়ার সাথে সংশ্লিষ্ট
+    // error মেসেজ এলিমেন্ট খোঁজা হয় এভাবে:
+    //   1) form এর ভিতরে [data-error-for="ইনপুটের id"]
+    //   2) না পেলে, ইনপুটের প্যারেন্টের ভিতরে .field-error-msg
+    // ============================================================
+    window.SFValidateForm = function (form) {
+      if (!form) return true;
+
+      let isValid = true;
+      let firstInvalidEl = null;
+
+      const fields = form.querySelectorAll('[required]');
+
+      fields.forEach((field) => {
+        field.classList.remove('field-invalid');
+
+        const errorEl =
+          (field.id && form.querySelector(`[data-error-for="${field.id}"]`)) ||
+          field.parentElement?.querySelector('.field-error-msg');
+
+        if (errorEl) errorEl.classList.remove('show');
+
+        let empty = false;
+
+        if (field.type === 'checkbox') {
+          empty = !field.checked;
+        } else if (field.type === 'radio') {
+          const group = form.querySelectorAll(`input[type="radio"][name="${field.name}"]`);
+          empty = ![...group].some((r) => r.checked);
+        } else {
+          empty = !field.value || !String(field.value).trim();
+        }
+
+        if (empty) {
+          isValid = false;
+          field.classList.add('field-invalid');
+          if (errorEl) errorEl.classList.add('show');
+          if (!firstInvalidEl) firstInvalidEl = field;
+        }
+      });
+
+      if (!isValid && firstInvalidEl) {
+        firstInvalidEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => firstInvalidEl.focus(), 300);
+      }
+
+      return isValid;
+    };
+
+    // টাইপ করার সময় সংশ্লিষ্ট এরর অটোমেটিক মুছে যাবে (UX ইম্প্রুভমেন্ট)
+    document.addEventListener('input', (e) => {
+      const field = e.target;
+      if (!field.classList || !field.classList.contains('field-invalid')) return;
+
+      field.classList.remove('field-invalid');
+      const form = field.closest('form');
+      const errorEl =
+        (field.id && form?.querySelector(`[data-error-for="${field.id}"]`)) ||
+        field.parentElement?.querySelector('.field-error-msg');
+      if (errorEl) errorEl.classList.remove('show');
     });
   </script>
 </body>
