@@ -24,6 +24,7 @@ export function initReportModal({ reasons = [] }) {
   const overlay = document.getElementById('reportOverlay');
   const closeBtn = document.getElementById('reportClose');
   const reasonsWrap = document.getElementById('reportReasons');
+  const reasonErrorEl = document.getElementById('reportReasonError');
   const detailsInput = document.getElementById('reportDetailsInput');
   const feedbackEl = document.getElementById('reportFeedback');
   const submitBtn = document.getElementById('reportSubmitBtn');
@@ -51,6 +52,7 @@ export function initReportModal({ reasons = [] }) {
       reasonsWrap.querySelectorAll('.report-reason-option').forEach((b) => b.classList.remove('selected'));
       btn.classList.add('selected');
       selectedReason = btn.dataset.value;
+      hideReasonError();
       hideFeedback();
     });
   });
@@ -59,9 +61,18 @@ export function initReportModal({ reasons = [] }) {
     selectedReason = null;
     detailsInput.value = '';
     reasonsWrap.querySelectorAll('.report-reason-option').forEach((b) => b.classList.remove('selected'));
+    hideReasonError();
     hideFeedback();
     submitBtn.disabled = false;
     submitBtn.textContent = 'জমা দিন';
+  }
+
+  function showReasonError() {
+    reasonErrorEl?.classList.add('show');
+  }
+
+  function hideReasonError() {
+    reasonErrorEl?.classList.remove('show');
   }
 
   function showFeedback(message, type = 'error') {
@@ -94,10 +105,11 @@ export function initReportModal({ reasons = [] }) {
 
   submitBtn?.addEventListener('click', async () => {
     if (!selectedReason) {
-      showFeedback('একটা কারণ বেছে নিন');
+      showReasonError();
       return;
     }
 
+    hideReasonError();
     submitBtn.disabled = true;
     submitBtn.textContent = 'পাঠানো হচ্ছে...';
     hideFeedback();
@@ -110,8 +122,8 @@ export function initReportModal({ reasons = [] }) {
     );
 
     if (result.success) {
-      showFeedback('ধন্যবাদ, আপনার অভিযোগ জমা হয়েছে।', 'success');
-      setTimeout(close, 1500);
+      window.showToast('ধন্যবাদ, আপনার অভিযোগ জমা হয়েছে ✓', 'success');
+      setTimeout(close, 1200);
     } else if (result.error === 'already_reported') {
       showFeedback(
         `আপনি ইতিমধ্যে এই লিস্টিং এর বিরুদ্ধে অভিযোগ করেছেন। অন্য কোনো সমস্যা থাকলে হেল্পলাইনে যোগাযোগ করুন: ${HELPLINE_NUMBER}`,
