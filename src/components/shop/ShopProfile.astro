@@ -8,13 +8,21 @@
 // কান্ট্রি কোডসহ (88) বসানো হচ্ছে — আগে country code ছাড়া শুধু
 // লোকাল নম্বর বসানো হতো, যার কারণে প্রবাস থেকে ক্লিক করলে
 // WhatsApp নম্বরটি খুঁজে পেত না।
+// আপডেট (v6): সোল্ড আউট প্রোডাক্টে ব্যাজ দেখায় + কার্ট বাটন ডিজেবল
+// হয়ে "স্টক নেই" দেখায়, এবং গ্রিডে সবার নিচে সাজানো হয়।
+// আপডেট (v6): পুরনো ফ্লোটিং কার্ট বাটন সরানো হয়েছে — এখন Header.astro
+// তে গ্লোবাল কার্ট আইকন আছে (প্রোফাইল বাটনের পাশে, সব পেজে), তাই এই
+// পেজ-স্পেসিফিক ডুপ্লিকেট বাটনের আর দরকার নাই।
 // props: shop (shops টেবিলের row), products (listings অ্যারে)
 // ============================================================
 import { toWhatsAppNumber } from '../../lib/whatsapp.js';
 
 const { shop, products } = Astro.props;
 
-const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) - (a.is_best_seller ? 1 : 0));
+const sortedProducts = [...products].sort((a, b) => {
+  if (!!a.is_sold_out !== !!b.is_sold_out) return a.is_sold_out ? 1 : -1;
+  return (b.is_best_seller ? 1 : 0) - (a.is_best_seller ? 1 : 0);
+});
 ---
 
 <div class="shop-page">
@@ -91,7 +99,7 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
             {sortedProducts.map((item) => (
               <a
                 href={`/product/${item.id}`}
-                class={`product-card ${item.is_best_seller ? 'best-seller-card' : ''}`}
+                class={`product-card ${item.is_best_seller ? 'best-seller-card' : ''} ${item.is_sold_out ? 'sold-out-card' : ''}`}
                 data-listing-id={item.id}
                 data-shop-id={shop.id}
                 data-search={`${item.title || ''} ${item.description || ''}`.toLowerCase()}
@@ -107,14 +115,23 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
                   {item.is_best_seller && (
                     <span class="best-seller-overlay"><i class="fas fa-star"></i> বেস্ট সেলার</span>
                   )}
+                  {item.is_sold_out && (
+                    <span class="sold-out-overlay"><i class="fas fa-ban"></i> সোল্ড আউট</span>
+                  )}
                 </div>
 
                 <div class="product-card-body">
                   <h3 class="product-title">{item.title}</h3>
                   {item.price && <p class="product-price">৳{item.price}</p>}
-                  <button type="button" class="add-cart-btn" data-listing-id={item.id} data-shop-id={shop.id}>
-                    <i class="fas fa-cart-plus"></i> কার্টে যোগ করুন
-                  </button>
+                  {item.is_sold_out ? (
+                    <button type="button" class="add-cart-btn sold-out" disabled>
+                      <i class="fas fa-ban"></i> স্টক নেই
+                    </button>
+                  ) : (
+                    <button type="button" class="add-cart-btn" data-listing-id={item.id} data-shop-id={shop.id}>
+                      <i class="fas fa-cart-plus"></i> কার্টে যোগ করুন
+                    </button>
+                  )}
                 </div>
               </a>
             ))}
@@ -125,11 +142,6 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
       )}
     </div>
   </div>
-
-  <a href="/cart" class="floating-cart-btn" id="floatingCartBtn">
-    <i class="fas fa-cart-shopping"></i>
-    <span class="cart-count" id="cartCountBadge" style="display:none;">0</span>
-  </a>
 
   <script type="application/json" id="shopMetaData" set:html={JSON.stringify({ slug: shop.slug, name: shop.name })} />
 </div>
@@ -394,6 +406,11 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
     border: 1.5px solid #FFE9B8;
   }
 
+  .product-card.sold-out-card .product-photo,
+  .product-card.sold-out-card .product-icon {
+    opacity: 0.55;
+  }
+
   .product-card.hidden {
     display: none;
   }
@@ -417,6 +434,22 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
     align-items: center;
     gap: 4px;
     box-shadow: 0 3px 8px rgba(255, 184, 0, 0.35);
+  }
+
+  .sold-out-overlay {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    background: rgba(15, 23, 42, 0.78);
+    color: #fff;
+    font-size: 0.66rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
 
   .product-icon {
@@ -486,41 +519,11 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
     color: #1B7A3C;
   }
 
-  .floating-cart-btn {
-    position: fixed;
-    bottom: calc(78px + env(safe-area-inset-bottom));
-    right: 20px;
-    background: #1B2A4A;
-    color: #fff;
-    border: none;
-    width: 58px;
-    height: 58px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.3rem;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
-    cursor: pointer;
-    z-index: 500;
-    text-decoration: none;
-  }
-
-  .floating-cart-btn .cart-count {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    background: #FF6B35;
-    color: #fff;
-    font-size: 0.68rem;
-    font-weight: 700;
-    min-width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 4px;
+  .add-cart-btn.sold-out,
+  .add-cart-btn:disabled {
+    background: #EEF1F6;
+    color: #8FA0BC;
+    cursor: not-allowed;
   }
 
   .no-results {
@@ -540,7 +543,6 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
   const cards = document.querySelectorAll('.product-card');
   const searchInput = document.getElementById('productSearchInput');
   const noResults = document.getElementById('noResults');
-  const cartCountBadge = document.getElementById('cartCountBadge');
 
   let currentUserId = null;
 
@@ -563,10 +565,12 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
     }
   });
 
-  document.querySelectorAll('.add-cart-btn').forEach((btn) => {
+  document.querySelectorAll('.add-cart-btn:not(.sold-out)').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
+
+      if (btn.disabled) return;
 
       if (!currentUserId) {
         window.openAuthModal?.('login');
@@ -625,16 +629,14 @@ const sortedProducts = [...products].sort((a, b) => (b.is_best_seller ? 1 : 0) -
   });
 
   async function refreshCartCount() {
-    if (!currentUserId || !cartCountBadge) return;
+    if (!currentUserId) return;
     const { data } = await supabase.from('cart_items').select('quantity').eq('user_id', currentUserId);
     const total = (data || []).reduce((sum, row) => sum + row.quantity, 0);
 
-    if (total > 0) {
-      cartCountBadge.textContent = total;
-      cartCountBadge.style.display = 'flex';
-    } else {
-      cartCountBadge.style.display = 'none';
-    }
+    // হেডারের গ্লোবাল কার্ট আইকনকে সাথে সাথে আপডেট করার জন্য —
+    // এই পেজে আর নিজস্ব কার্ট ব্যাজ নাই, Header.astro-ই এখন একমাত্র
+    // কার্ট ইন্ডিকেটর
+    window.dispatchEvent(new CustomEvent('smartfeni:cart-updated', { detail: { total } }));
   }
 
   (async () => {
