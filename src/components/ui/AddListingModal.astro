@@ -14,6 +14,21 @@
 // ফিচারটা সরিয়ে ফেলা হয়েছে — ক্লাব, শপ, জেনারেল লিস্টিং সবই
 // স্বতন্ত্র, একজন ইউজার চাইলে সবগুলাতেই পোস্ট করতে পারবে, কোনো
 // একাউন্ট টাইপ অন্য কোনোটাকে ব্লক করবে না।
+// আপডেট (শপ প্রোডাক্ট স্পেসিফিক): category="online-shop" হলে —
+// (১) যোগাযোগ নাম্বার ফিল্ড হাইড + অবাধ্যতামূলক না (শপ প্রোডাক্ট
+// cart/checkout ফ্লোতে চলে, ফোন-কল বাটন সিস্টেম ব্যবহার হয় না),
+// (২) উপজেলা ফিল্ড হাইড — শপ ওউনারের নিজের প্রোফাইলের upazila
+// সাবমিটের সময় সার্ভার থেকে অটো fetch করে বসানো হয় (শপ ব্রাউজিং
+// upazila দিয়ে ফিল্টার হয় না, তাই প্রতি প্রোডাক্টে আলাদা জিজ্ঞেস
+// করাটা অপ্রয়োজনীয়), (৩) দাম ও বিবরণ ফিল্ডের নিচে হিন্ট টেক্সট
+// যোগ হয়েছে। নতুন: typeOptions এ একটাই অপশন থাকলে "সার্ভিসের ধরন"
+// ড্রপডাউন না দেখিয়ে হিডেন ইনপুট দিয়ে অটো-সিলেক্ট করে দেওয়া হয়
+// (জেনারেল রুল, ভবিষ্যতের যেকোনো single-option ক্যাটাগরির জন্যও
+// কাজ করবে)। নতুন: autoActive={true} হলে is_reviewed=true-ও সেট
+// হয় (এডমিন লিস্টিং পেজে অটো-এপ্রুভড প্রোডাক্ট "নতুন/আনরিভিউড"
+// হিসেবে ভুলভাবে দেখানো বন্ধ করতে)। নতুন: nounLabel prop দিয়ে
+// মোডালের টেক্সট কাস্টমাইজ করা যায় (ডিফল্ট "লিস্টিং", শপ প্রোডাক্টে
+// "প্রোডাক্ট" পাস করা হয়)।
 // আপডেট: ছবি আপলোড প্রিভিউ এখন Instagram/Urban Company স্টাইল ছোট
 // স্কয়ার ড্রপবক্স গ্রিড — প্রথমে শুধু ➕ বক্স, ছবি সিলেক্ট করলে পাশে
 // থাম্বনেইল + রিমুভ বাটন, পাশে সবসময় আরেকটা ➕ বক্স (আরও ছবি যোগ করতে)
@@ -31,6 +46,7 @@ export interface Props {
   priceLabel?: string;
   companyLabel?: string;
   autoActive?: boolean;
+  nounLabel?: string;
 }
 
 const {
@@ -40,28 +56,37 @@ const {
   priceLabel = 'দাম / রেট',
   companyLabel,
   autoActive = false,
+  nounLabel = 'লিস্টিং',
 } = Astro.props;
+
+const isShopProduct = category === 'online-shop';
 
 const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 ---
 
-<div class="listing-overlay" id="listingOverlay" data-category={category} data-company-label={companyLabel || ''} data-auto-active={autoActive ? '1' : ''}>
+<div class="listing-overlay" id="listingOverlay" data-category={category} data-company-label={companyLabel || ''} data-auto-active={autoActive ? '1' : ''} data-noun-label={nounLabel}>
   <div class="listing-modal">
     <button class="listing-close" id="listingClose" aria-label="বন্ধ করুন">
       <i class="fas fa-xmark"></i>
     </button>
 
-    <h2 class="listing-title"><i class="fas fa-plus-circle"></i> নতুন লিস্টিং যোগ করুন</h2>
+    <h2 class="listing-title"><i class="fas fa-plus-circle"></i> নতুন {nounLabel} যোগ করুন</h2>
     <p class="listing-subtitle">তথ্য পূরণ করুন, সবাই দেখতে পাবে</p>
 
     <p class="listing-message" id="listingMessage"></p>
 
-    <label class="listing-label">সার্ভিসের ধরন</label>
-    <select class="listing-input" id="listingType">
-      {typeOptions.map((t) => (
-        <option value={t.id}>{t.label}</option>
-      ))}
-    </select>
+    {typeOptions.length > 1 ? (
+      <>
+        <label class="listing-label">সার্ভিসের ধরন</label>
+        <select class="listing-input" id="listingType">
+          {typeOptions.map((t) => (
+            <option value={t.id}>{t.label}</option>
+          ))}
+        </select>
+      </>
+    ) : (
+      <input type="hidden" id="listingType" value={typeOptions[0]?.id || ''} />
+    )}
 
     <div class="listing-custom-type-wrap" id="listingCustomTypeWrap" style="display:none;">
       <label class="listing-label">নতুন ক্যাটাগরির নাম লিখুন</label>
@@ -80,26 +105,36 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
 
     <label class="listing-label">বিবরণ (ঐচ্ছিক)</label>
     <textarea class="listing-input" id="listingDescription" rows="3" placeholder=""></textarea>
+    {isShopProduct && <p class="listing-field-hint">পণ্যের পরিমাণ অথবা পণ্য সম্পর্কে লিখুন</p>}
 
     <label class="listing-label">{priceLabel}</label>
     <input type="text" class="listing-input" id="listingPrice" placeholder="" />
+    {isShopProduct && <p class="listing-field-hint">উদাহরণ: ১০০ টাকা, অথবা এককসহ যেমন ১৫০ টাকা (প্রতি কেজি)</p>}
 
-    <label class="listing-label">উপজেলা</label>
-    <select class="listing-input" id="listingUpazila">
-      {upazilas.map((u) => (
-        <option value={u}>{u}</option>
-      ))}
-    </select>
+    {!isShopProduct && (
+      <>
+        <label class="listing-label">উপজেলা</label>
+        <select class="listing-input" id="listingUpazila">
+          {upazilas.map((u) => (
+            <option value={u}>{u}</option>
+          ))}
+        </select>
+      </>
+    )}
 
-    <label class="listing-label">যোগাযোগ নাম্বার</label>
-    <input type="text" class="listing-input" id="listingPhone" placeholder="01xxxxxxxxx" />
+    {!isShopProduct && (
+      <>
+        <label class="listing-label">যোগাযোগ নাম্বার</label>
+        <input type="text" class="listing-input" id="listingPhone" placeholder="01xxxxxxxxx" />
+      </>
+    )}
 
     <label class="listing-label">ছবি (ঐচ্ছিক, একাধিক দেওয়া যাবে)</label>
     <input type="file" id="listingImages" accept="image/*" multiple hidden />
     <div class="listing-image-grid" id="listingImageGrid"></div>
 
     <button class="listing-submit" id="listingSubmit" type="button">
-      <i class="fas fa-check"></i> <span class="listing-submit-text">লিস্টিং পোস্ট করুন</span>
+      <i class="fas fa-check"></i> <span class="listing-submit-text">{nounLabel} পোস্ট করুন</span>
     </button>
   </div>
 </div>
@@ -204,6 +239,12 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     color: #1B2A4A;
     margin-bottom: 6px;
     margin-top: 14px;
+  }
+
+  .listing-field-hint {
+    font-size: 0.74rem;
+    color: #9AA8BC;
+    margin-top: 5px;
   }
 
   .listing-input {
@@ -340,6 +381,8 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
   const category = overlay?.dataset.category || '';
   const companyLabel = overlay?.dataset.companyLabel || '';
   const autoActive = overlay?.dataset.autoActive === '1';
+  const isShopProduct = category === 'online-shop';
+  const nounLabel = overlay?.dataset.nounLabel || 'লিস্টিং';
 
   // "অন্যান্য" সিলেক্ট করলে কাস্টম-টাইপ ইনপুট বক্স দেখানো/লুকানো
   function toggleCustomType() {
@@ -483,13 +526,12 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     const title = document.getElementById('listingTitle')?.value?.trim();
     let description = document.getElementById('listingDescription')?.value?.trim();
     const price = document.getElementById('listingPrice')?.value?.trim();
-    const upazila = document.getElementById('listingUpazila')?.value;
     const phone = document.getElementById('listingPhone')?.value?.trim();
     const companyInput = document.getElementById('listingCompany');
     const company = companyInput?.value?.trim();
 
-    if (!title || !phone) {
-      showMessage('টাইটেল ও যোগাযোগ নাম্বার আবশ্যক');
+    if (!title || (!isShopProduct && !phone)) {
+      showMessage(isShopProduct ? 'টাইটেল আবশ্যক' : 'টাইটেল ও যোগাযোগ নাম্বার আবশ্যক');
       return;
     }
 
@@ -518,6 +560,20 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     // অ্যাকাউন্টে সেভ হয়ে যেত, শপের লিস্টে দেখাত না (silent bug)।
     const targetUserId = overlay?.dataset.targetUserId || session.user.id;
 
+    // শপ প্রোডাক্টের জন্য উপজেলা আলাদা জিজ্ঞেস করা হয় না — শপ ওউনারের
+    // নিজের প্রোফাইলের upazila অটো বসিয়ে দেওয়া হচ্ছে
+    let upazila;
+    if (isShopProduct) {
+      const { data: ownerProfile } = await supabase
+        .from('profiles')
+        .select('upazila')
+        .eq('id', targetUserId)
+        .single();
+      upazila = ownerProfile?.upazila || null;
+    } else {
+      upazila = document.getElementById('listingUpazila')?.value;
+    }
+
     const imageUrls = selectedFiles.length ? await uploadImages(targetUserId, session.access_token) : [];
 
     const insertPayload = {
@@ -529,11 +585,12 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
       price,
       upazila,
       images: imageUrls,
-      contact_phone: phone,
+      contact_phone: phone || null,
     };
 
     if (autoActive) {
       insertPayload.status = 'active';
+      insertPayload.is_reviewed = true;
     }
 
     const { error } = await supabase.from('listings').insert(insertPayload);
@@ -546,7 +603,7 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
       return;
     }
 
-    showMessage('লিস্টিং সফলভাবে পোস্ট হয়েছে!', 'success');
+    showMessage(`${nounLabel} সফলভাবে পোস্ট হয়েছে!`, 'success');
     setTimeout(() => {
       closeListingModal();
       window.location.reload();
