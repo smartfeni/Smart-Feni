@@ -27,6 +27,18 @@
 // করা হয়েছে)। এখন client-side supabase.storage.upload() এর বদলে
 // সার্ভার-সাইড /api/upload-avatar রুট কল হয় (service role key
 // দিয়ে), যেটা এই ভেরিফিকেশন ধাপটাই বাইপাস করে দেয়।
+// আপডেট ৮ (ফোন/ইমেইল ডুয়াল লগইন): Supabase Auth-এ প্রকৃত ইমেইল
+// সবসময় ফোন থেকে বানানো ডামি ইমেইল (phone@smartfeni.local) —
+// recovery_email শুধু profiles টেবিলে টেক্সট হিসেবে থাকত, লগইন
+// আইডেন্টিফায়ার হিসেবে কাজ করত না। এখন লগইনে '@' থাকা identifier
+// দিলে প্রথমে profiles.recovery_email দিয়ে ফোন নাম্বার লুকআপ করা
+// হয় (profiles পাবলিকলি readable বলে সরাসরি ক্লায়েন্ট থেকেই সম্ভব,
+// আলাদা সার্ভার এন্ডপয়েন্ট লাগে না), তারপর সেই ফোন থেকে বানানো
+// ডামি ইমেইল দিয়ে signInWithPassword কল হয়। একাধিক অ্যাকাউন্টে
+// একই ইমেইল থাকলে (পুরনো ডুপ্লিকেট ডেটা) ambiguous এরর দেখিয়ে
+// ফোন দিয়ে লগইন করতে বলা হয়। সাইনআপ ও প্রোফাইল-এডিট দুই জায়গাতেই
+// নতুন ইমেইল সেভের আগে uniqueness চেক যোগ হয়েছে যাতে নতুন করে আর
+// ডুপ্লিকেট তৈরি না হয়।
 // ============================================================
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -126,6 +138,7 @@ const upazilas = [
         <i class="fas fa-envelope auth-input-icon"></i>
         <input type="email" class="auth-input" id="signupEmail" placeholder="পাসওয়ার্ড রিকভারির জন্য আবশ্যক" />
       </div>
+      <p class="auth-field-hint">ফোন নাম্বার অথবা এই ইমেইল — যেকোনো একটা দিয়ে পরে লগইন করা যাবে</p>
 
       <div class="auth-field-row">
         <div class="auth-field-col">
@@ -376,6 +389,12 @@ const upazilas = [
     border-color: #FF6B35;
     background: #fff;
     box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
+  }
+
+  .auth-field-hint {
+    font-size: 0.74rem;
+    color: #9AA8BC;
+    margin-top: 5px;
   }
 
   /* ===== ব্লাড গ্রুপ / উপজেলা রো ===== */
@@ -666,10 +685,6 @@ const upazilas = [
     return `${digitsOnly}@smartfeni.local`;
   }
 
-  function resolveEmail(identifier) {
-    return identifier.includes('@') ? identifier.trim() : phoneToEmail(identifier);
-  }
-
   function setLoading(button, isLoading, loadingText) {
     const textEl = button.querySelector('.auth-submit-text');
     if (isLoading) {
@@ -744,6 +759,20 @@ const upazilas = [
 
     setLoading(signupSubmit, true, 'অ্যাকাউন্ট তৈরি হচ্ছে...');
 
+    // ইমেইল দিয়েও পরবর্তীতে লগইন করা যাবে বলে অন্য কোনো একাউন্টে
+    // একই ইমেইল আগে থেকে যুক্ত আছে কিনা চেক করা হচ্ছে
+    const { data: existingEmailProfiles } = await supabase
+      .from('profiles')
+      .select('id')
+      .ilike('recovery_email', recoveryEmail)
+      .limit(1);
+
+    if (existingEmailProfiles && existingEmailProfiles.length > 0) {
+      showMessage('এই ইমেইল দিয়ে আগে থেকেই একটি একাউন্ট আছে');
+      setLoading(signupSubmit, false);
+      return;
+    }
+
     const { data, error } = await supabase.auth.signUp({
       email: phoneToEmail(phone),
       password,
@@ -798,8 +827,36 @@ const upazilas = [
 
     setLoading(loginSubmit, true, 'লগইন হচ্ছে...');
 
+    let loginEmail;
+
+    if (identifier.includes('@')) {
+      // ইমেইল দিয়ে লগইন — recovery_email দিয়ে আগে ফোন নাম্বার
+      // লুকআপ করে সেই ফোন থেকে বানানো Auth ইমেইল বের করা হচ্ছে
+      const { data: matches } = await supabase
+        .from('profiles')
+        .select('phone')
+        .ilike('recovery_email', identifier)
+        .limit(2);
+
+      if (!matches || matches.length === 0) {
+        showMessage('এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি');
+        setLoading(loginSubmit, false);
+        return;
+      }
+
+      if (matches.length > 1) {
+        showMessage('একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন');
+        setLoading(loginSubmit, false);
+        return;
+      }
+
+      loginEmail = phoneToEmail(matches[0].phone);
+    } else {
+      loginEmail = phoneToEmail(identifier);
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: resolveEmail(identifier),
+      email: loginEmail,
       password,
     });
 
