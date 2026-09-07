@@ -178,6 +178,7 @@ const upazilas = [
               <i class="fas fa-envelope edit-input-icon"></i>
               <input type="email" class="edit-input" id="editEmail" placeholder="পাসওয়ার্ড রিকভারির জন্য" />
             </div>
+            <p class="edit-field-hint">ফোন নাম্বার অথবা এই ইমেইল — যেকোনো একটা দিয়ে লগইন করা যাবে</p>
 
             <div class="edit-field-row">
               <div class="edit-field-col">
@@ -645,6 +646,12 @@ const upazilas = [
     color: #B0BCCB;
     font-size: 0.9rem;
     pointer-events: none;
+  }
+
+  .edit-field-hint {
+    font-size: 0.74rem;
+    color: #9AA8BC;
+    margin-top: 5px;
   }
 
   .edit-input {
@@ -1384,7 +1391,32 @@ const upazilas = [
       return;
     }
 
+    const newEmail = emailInput?.value?.trim() || null;
+
+    if (newEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      showMsg(profileMessage, 'সঠিক ইমেইল ঠিকানা দিন');
+      return;
+    }
+
     setLoading(saveProfileBtn, true, 'সেভ হচ্ছে...');
+
+    // ইমেইল বদলানো/নতুন যোগ করা হলে অন্য কোনো একাউন্টে একই ইমেইল
+    // আগে থেকে যুক্ত আছে কিনা চেক করা হচ্ছে (দুই একাউন্টে একই
+    // ইমেইল থাকলে ইমেইল দিয়ে লগইন করার সময় ঘেঁটে যাবে)
+    if (newEmail && newEmail.toLowerCase() !== (currentProfile?.recovery_email || '').toLowerCase()) {
+      const { data: existingEmailProfiles } = await supabase
+        .from('profiles')
+        .select('id')
+        .ilike('recovery_email', newEmail)
+        .neq('id', currentUserId)
+        .limit(1);
+
+      if (existingEmailProfiles && existingEmailProfiles.length > 0) {
+        setLoading(saveProfileBtn, false);
+        showMsg(profileMessage, 'এই ইমেইল অন্য একাউন্টে ব্যবহৃত হচ্ছে');
+        return;
+      }
+    }
 
     let avatarUrl = null;
     if (selectedPhotoFile && currentAccessToken) {
@@ -1393,7 +1425,7 @@ const upazilas = [
 
     const updates = {
       full_name: name,
-      recovery_email: emailInput?.value?.trim() || null,
+      recovery_email: newEmail,
       blood_group: bloodGroupSelect?.value || null,
       upazila: upazilaSelect?.value || null,
     };
