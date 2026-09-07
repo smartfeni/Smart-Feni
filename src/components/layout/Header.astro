@@ -21,6 +21,17 @@
 // স্ক্রল করলে হেডার উপরে স্লাইড করে লুকিয়ে যায় (translateY),
 // উপরের দিকে স্ক্রল করলে আবার ফিরে আসে। Bottom nav সবসময় ফিক্সড
 // থাকে বলে মূল নেভিগেশন সবসময় অ্যাক্সেসযোগ্য থাকে।
+// আপডেট (নতুন): গ্লোবাল কার্ট আইকন যোগ হলো (প্রোফাইল বাটনের পাশে) —
+// আগে কার্ট আইকন শুধু শপ প্রোফাইল/প্রোডাক্ট পেজে ফ্লোটিং বাটন হিসেবে
+// থাকত, অন্য কোনো ক্যাটাগরিতে (housing/job/repair ইত্যাদি) দেখা
+// যেত না বলে সাইটওয়াইড অ্যাক্সেস ছিল না। এখন হেডারে বসানো হলো যাতে
+// যেকোনো পেজ থেকে কার্টে যাওয়া যায়। কিন্তু কার্ট খালি থাকলে আইকনটাই
+// হাইড থাকে (housing/job এর মতো শপিং-অপ্রাসঙ্গিক ক্যাটাগরিতে খালি
+// কার্ট আইকন বেমানান লাগবে বলে) — কার্টে কিছু যোগ হলেই দেখা যাবে।
+// product/[id].astro ও ShopProfile.astro থেকে ডিসপ্যাচ করা
+// 'smartfeni:cart-updated' কাস্টম ইভেন্ট শুনে লাইভ আপডেট হয়, তাই
+// অ্যাড-টু-কার্টের সাথে সাথে হেডারেও কাউন্ট বদলে যায় (পেজ রিলোড
+// ছাড়াই)।
 // ============================================================
 
 import LocationSelector from '../ui/LocationSelector.astro';
@@ -40,6 +51,11 @@ import AuthModal from '../ui/AuthModal.astro';
     </a>
 
     <div class="navbar-right">
+      <a href="/cart" class="header-cart-btn" id="headerCartBtn" aria-label="কার্ট" style="display:none;">
+        <i class="fas fa-cart-shopping"></i>
+        <span class="header-cart-badge" id="headerCartBadge">0</span>
+      </a>
+
       <button class="profile-btn" id="profileBtn" aria-label="প্রোফাইল">
         <span class="profile-avatar" id="profileAvatar">
           <img id="profileAvatarImg" src="" alt="প্রোফাইল ছবি" />
@@ -132,6 +148,54 @@ import AuthModal from '../ui/AuthModal.astro';
     color: #1B2A4A;
     letter-spacing: 0.3px;
     white-space: nowrap;
+  }
+
+  /* ===== গ্লোবাল কার্ট আইকন ===== */
+  .header-cart-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #F4F7FC;
+    color: #1B2A4A;
+    font-size: 1.05rem;
+    text-decoration: none;
+    flex-shrink: 0;
+    transition: background 0.2s ease;
+  }
+
+  .header-cart-btn:hover {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .header-cart-badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    background: #FF6B35;
+    color: #fff;
+    font-size: 0.62rem;
+    font-weight: 700;
+    min-width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    border: 2px solid #fff;
+  }
+
+  @media (max-width: 480px) {
+    .header-cart-btn {
+      width: 34px;
+      height: 34px;
+      font-size: 0.92rem;
+    }
   }
 
   /* ===== প্রোফাইল আইকন (গোলাকার) ===== */
@@ -257,8 +321,38 @@ import AuthModal from '../ui/AuthModal.astro';
   const avatarWrap = document.getElementById('profileAvatar');
   const avatarImg = document.getElementById('profileAvatarImg');
   const label = document.getElementById('profileLabel');
+  const headerCartBtn = document.getElementById('headerCartBtn');
+  const headerCartBadge = document.getElementById('headerCartBadge');
 
   let isLoggedIn = false;
+  let currentUserId = null;
+
+  // ===== গ্লোবাল কার্ট আইকন =====
+  function updateCartUI(total) {
+    if (!headerCartBtn) return;
+    if (total > 0) {
+      headerCartBadge.textContent = total > 99 ? '৯৯+' : total;
+      headerCartBtn.style.display = 'flex';
+    } else {
+      headerCartBtn.style.display = 'none';
+    }
+  }
+
+  async function refreshHeaderCartFromDb() {
+    if (!currentUserId) {
+      updateCartUI(0);
+      return;
+    }
+    const { data } = await supabase.from('cart_items').select('quantity').eq('user_id', currentUserId);
+    const total = (data || []).reduce((sum, row) => sum + row.quantity, 0);
+    updateCartUI(total);
+  }
+
+  // product/[id].astro ও ShopProfile.astro থেকে অ্যাড-টু-কার্টের পর
+  // ডিসপ্যাচ করা ইভেন্ট শুনে সাথে সাথে ব্যাজ আপডেট (পেজ রিলোড ছাড়াই)
+  window.addEventListener('smartfeni:cart-updated', (e) => {
+    updateCartUI(e.detail?.total ?? 0);
+  });
 
   function showLoggedInState(name, avatarUrl) {
     isLoggedIn = true;
@@ -273,17 +367,21 @@ import AuthModal from '../ui/AuthModal.astro';
 
   function showLoggedOutState() {
     isLoggedIn = false;
+    currentUserId = null;
     avatarImg.src = '';
     avatarWrap?.classList.remove('has-photo');
     if (label) {
       label.textContent = 'প্রোফাইল';
     }
+    updateCartUI(0);
   }
 
   // পেজ লোড হলে আগে থেকে সেশন আছে কিনা চেক করা (রিফ্রেশেও লগইন থাকবে)
   async function restoreSession() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
+
+    currentUserId = session.user.id;
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -292,6 +390,7 @@ import AuthModal from '../ui/AuthModal.astro';
       .single();
 
     showLoggedInState(profile?.full_name, profile?.avatar_url);
+    refreshHeaderCartFromDb();
   }
 
   restoreSession();
@@ -307,9 +406,13 @@ import AuthModal from '../ui/AuthModal.astro';
     }
   });
 
-  window.addEventListener('smartfeni:auth-changed', (e) => {
+  window.addEventListener('smartfeni:auth-changed', async (e) => {
     const { name, avatarUrl } = e.detail || {};
     showLoggedInState(name, avatarUrl);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    currentUserId = session?.user?.id || null;
+    refreshHeaderCartFromDb();
   });
 
   window.addEventListener('smartfeni:logged-out', () => {
