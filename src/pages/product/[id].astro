@@ -14,11 +14,18 @@
 // আপডেট: WhatsApp লিংক এখন toWhatsAppNumber() হেল্পার দিয়ে
 // কান্ট্রি কোডসহ (88) বসানো হচ্ছে — প্রবাস থেকে ক্লিক করলে আগে
 // নম্বর খুঁজে পেত না, এখন ঠিকভাবে কাজ করবে।
+// আপডেট: ছবিতে ট্যাপ করলে এখন ImageLightbox (রিইউজেবল কম্পোনেন্ট,
+// আগে থেকেই ক্লাব পোস্টে ব্যবহৃত হতো) ওপেন হয় — জুম ইন/আউট,
+// একাধিক ছবি হলে সোয়াইপ/prev-next নেভিগেশন, ডাউনলোড বাটন সবই
+// বিল্ট-ইন। যে স্লাইড দেখাচ্ছিল ঠিক সেখান থেকেই লাইটবক্স শুরু হয়।
+// আপডেট: is_sold_out=true হলে ছবির উপর "সোল্ড আউট" ব্যাজ + কার্ট
+// বাটন ডিজেবল হয়ে "স্টক নেই" দেখাবে।
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
+import ImageLightbox from '../../components/ImageLightbox.astro';
 import { supabase } from '../../lib/supabase.js';
 import { toWhatsAppNumber } from '../../lib/whatsapp.js';
 
@@ -87,11 +94,15 @@ const ogImage = product?.images?.[0] || undefined;
             <span class="best-seller-overlay"><i class="fas fa-star"></i> বেস্ট সেলার</span>
           )}
 
+          {product.is_sold_out && (
+            <span class="sold-out-overlay"><i class="fas fa-ban"></i> সোল্ড আউট</span>
+          )}
+
           {product.images && product.images.length > 0 ? (
             <>
               <div class="slider-track" id="sliderTrack">
-                {product.images.map((img) => (
-                  <div class="slide">
+                {product.images.map((img, i) => (
+                  <div class="slide" data-index={i}>
                     <img src={img} alt={product.title} />
                   </div>
                 ))}
@@ -153,7 +164,11 @@ const ogImage = product?.images?.[0] || undefined;
         shopOwnerId: product.user_id,
         shopSlug: shop.slug,
         title: product.title,
+        images: product.images || [],
+        isSoldOut: !!product.is_sold_out,
       })} />
+
+      <ImageLightbox />
     </div>
   )}
 </BaseLayout>
@@ -307,6 +322,22 @@ const ogImage = product?.images?.[0] || undefined;
     box-shadow: 0 4px 10px rgba(255, 184, 0, 0.35);
   }
 
+  .sold-out-overlay {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 5;
+    background: rgba(15, 23, 42, 0.8);
+    color: #fff;
+    font-size: 0.74rem;
+    font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
   .slider-track {
     display: flex;
     overflow-x: auto;
@@ -323,6 +354,7 @@ const ogImage = product?.images?.[0] || undefined;
     scroll-snap-align: start;
     aspect-ratio: 4 / 3;
     background: #F4F7FC;
+    cursor: zoom-in;
   }
 
   .slide img {
@@ -522,6 +554,12 @@ const ogImage = product?.images?.[0] || undefined;
   .add-to-cart-big-btn.added {
     background: #1B7A3C;
   }
+
+  .add-to-cart-big-btn.sold-out {
+    background: #C7D0DD;
+    color: #5A6E85;
+    box-shadow: none;
+  }
 </style>
 
 <script>
@@ -536,8 +574,24 @@ const ogImage = product?.images?.[0] || undefined;
   const cartCountBadge = document.getElementById('cartCountBadge');
   const sliderTrack = document.getElementById('sliderTrack');
   const dots = document.querySelectorAll('.slider-dots .dot');
+  const slides = document.querySelectorAll('.slide');
 
   let currentUserId = null;
+
+  // ছবিতে ট্যাপ করলে জুমেবল ফুলস্ক্রিন লাইটবক্স (ImageLightbox.astro)
+  slides.forEach((slide) => {
+    slide.addEventListener('click', () => {
+      const startIndex = parseInt(slide.dataset.index || '0');
+      window.openImageLightbox?.(meta?.images || [], startIndex);
+    });
+  });
+
+  // প্রোডাক্ট সোল্ড আউট হলে কার্ট বাটন ডিজেবল করে "স্টক নেই" দেখানো
+  if (meta?.isSoldOut && addToCartBtn) {
+    addToCartBtn.disabled = true;
+    addToCartBtn.classList.add('sold-out');
+    addToCartBtnText.textContent = 'স্টক নেই';
+  }
 
   sliderTrack?.addEventListener('scroll', () => {
     const index = Math.round(sliderTrack.scrollLeft / sliderTrack.clientWidth);
@@ -574,6 +628,8 @@ const ogImage = product?.images?.[0] || undefined;
   }
 
   addToCartBtn?.addEventListener('click', async () => {
+    if (meta?.isSoldOut) return;
+
     if (!currentUserId) {
       window.openAuthModal?.('login');
       return;
@@ -625,6 +681,9 @@ const ogImage = product?.images?.[0] || undefined;
     } else {
       cartCountBadge.style.display = 'none';
     }
+
+    // হেডারের গ্লোবাল কার্ট আইকনকে সাথে সাথে আপডেট করার জন্য
+    window.dispatchEvent(new CustomEvent('smartfeni:cart-updated', { detail: { total } }));
   }
 
   (async () => {
