@@ -1,9 +1,26 @@
+<!-- path: src/pages/admin/notifications.astro -->
 ---
 // ============================================================
 // পেজ: অ্যাডমিন — কাস্টম নোটিফিকেশন পাঠানো (/admin/notifications)
 // user_notifications টেবিলে ইনসার্ট করে — নির্দিষ্ট ইউজার (ফোন
 // নাম্বার সার্চ করে) অথবা সবাইকে ব্রডকাস্ট। প্রতিটা পাঠানোর একটা
 // লগ admin_notification_log এ থাকে (কতজনকে, কী মেসেজ, কবে)।
+//
+// আপডেট (Phase 5 — Push সিস্টেম ইন্টিগ্রেশন):
+// - Category selector যোগ (সাধারণ মেসেজ / অফার-প্রমো) — এর আগে
+//   category সেট হতো না (ডিফল্ট 'system' বসে যেত), ফলে ইউজারের
+//   notification_preferences টগল respect হতো না। এখন সঠিক category
+//   সেট হওয়ায় ইউজার প্রোফাইল সেটিংস থেকে অফ করলে push স্কিপ হবে।
+// - sender_type: 'admin', sender_id: adminUser.id যোগ — কে পাঠালো
+//   এখন ট্র্যাক হবে।
+// - Broadcast এ ৫০০ জন করে ব্যাচে insert (আগে একবারে সব, বড়
+//   ইউজারবেসে Supabase connection limit এ সমস্যা হতে পারত)
+// - admin_notification_log এ category কলাম যোগ হয়েছে (migration)
+//
+// নোট: push পাঠানো dispatch_pending_push_notifications() cron
+// (প্রতি মিনিটে) নিজে থেকেই handle করে — এখানে আলাদা কিছু করা
+// লাগে না, শুধু সঠিক category সহ user_notifications এ insert
+// করলেই যথেষ্ট।
 // ============================================================
 
 export const prerender = false;
@@ -53,7 +70,19 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             </p>
           </div>
 
-          <label class="field-label">মেসেজ</label>
+          <!-- ক্যাটাগরি সিলেক্টর (নতুন) -->
+          <label class="field-label">নোটিফিকেশনের ধরন</label>
+          <div class="category-tabs">
+            <button class="category-tab active" data-category="message" type="button">
+              <i class="fas fa-comment"></i> সাধারণ মেসেজ
+            </button>
+            <button class="category-tab" data-category="promo" type="button">
+              <i class="fas fa-tags"></i> অফার-প্রমো
+            </button>
+          </div>
+          <p class="category-hint" id="categoryHint">ইউজার প্রোফাইল সেটিংসে "মেসেজ" নোটিফিকেশন অফ করলে এটা পাবে না</p>
+
+          <label class="field-label" style="margin-top: 14px;">মেসেজ</label>
           <textarea id="messageInput" rows="4" placeholder="মেসেজ লিখুন..."></textarea>
 
           <p class="send-feedback" id="sendFeedback"></p>
@@ -174,6 +203,40 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     .target-panel {
       margin-bottom: 16px;
+    }
+
+    /* ===== ক্যাটাগরি ট্যাব (নতুন) ===== */
+    .category-tabs {
+      display: flex;
+      gap: 8px;
+    }
+
+    .category-tab {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1.5px solid #E5EAF0;
+      background: #fff;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 0.82rem;
+      color: #5A6E85;
+      cursor: pointer;
+    }
+
+    .category-tab.active {
+      border-color: #FF6B35;
+      background: #FFF0EA;
+      color: #FF6B35;
+    }
+
+    .category-hint {
+      font-size: 0.74rem;
+      color: #9AA8BC;
+      margin-top: 6px;
     }
 
     .field-label {
@@ -339,6 +402,12 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       margin-bottom: 6px;
     }
 
+    .log-item-badges {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
     .log-item-badge {
       font-size: 0.68rem;
       font-weight: 700;
@@ -355,6 +424,16 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .log-item-badge.broadcast {
       background: #FFF0EA;
       color: #FF6B35;
+    }
+
+    .log-item-badge.category-message {
+      background: #F1F4F8;
+      color: #5A6E85;
+    }
+
+    .log-item-badge.category-promo {
+      background: #FDF0D5;
+      color: #B36B00;
     }
 
     .log-item-msg {
@@ -417,6 +496,27 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         singlePanel.style.display = currentTarget === 'single' ? 'block' : 'none';
         broadcastPanel.style.display = currentTarget === 'broadcast' ? 'block' : 'none';
         updateSendBtnState();
+      });
+    });
+
+    // ============================================================
+    // ক্যাটাগরি ট্যাব সুইচিং (নতুন)
+    // ============================================================
+    const categoryTabs = document.querySelectorAll('.category-tab');
+    const categoryHint = document.getElementById('categoryHint');
+    let currentCategory = 'message';
+
+    const categoryHints = {
+      message: 'ইউজার প্রোফাইল সেটিংসে "মেসেজ" নোটিফিকেশন অফ করলে এটা পাবে না',
+      promo: 'ইউজার প্রোফাইল সেটিংসে "অফার ও প্রমো" নোটিফিকেশন অফ করলে এটা পাবে না',
+    };
+
+    categoryTabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        categoryTabs.forEach((t) => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentCategory = tab.dataset.category;
+        categoryHint.textContent = categoryHints[currentCategory];
       });
     });
 
@@ -493,6 +593,19 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     }
 
     // ============================================================
+    // ব্যাচে insert করার হেল্পার (broadcast এর জন্য, ৫০০ জন করে)
+    // ============================================================
+    const BATCH_SIZE = 500;
+
+    async function insertInBatches(rows) {
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const batch = rows.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase.from('user_notifications').insert(batch);
+        if (error) throw error;
+      }
+    }
+
+    // ============================================================
     // পাঠানো
     // ============================================================
     sendBtn.addEventListener('click', async () => {
@@ -512,11 +625,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           const { error } = await supabase.from('user_notifications').insert({
             user_id: selectedUser.id,
             message,
+            category: currentCategory,
+            sender_type: 'admin',
+            sender_id: adminUser?.id || null,
           });
           if (error) throw error;
 
           await supabase.from('admin_notification_log').insert({
             message,
+            category: currentCategory,
             target_type: 'single',
             target_label: `${selectedUser.full_name || ''} (${selectedUser.phone || ''})`,
             recipient_count: 1,
@@ -528,14 +645,20 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             .select('id');
           if (profileError) throw profileError;
 
-          const rows = (allProfiles || []).map((p) => ({ user_id: p.id, message }));
+          const rows = (allProfiles || []).map((p) => ({
+            user_id: p.id,
+            message,
+            category: currentCategory,
+            sender_type: 'admin',
+            sender_id: adminUser?.id || null,
+          }));
           if (rows.length === 0) throw new Error('কোনো ইউজার পাওয়া যায়নি');
 
-          const { error: insertError } = await supabase.from('user_notifications').insert(rows);
-          if (insertError) throw insertError;
+          await insertInBatches(rows);
 
           await supabase.from('admin_notification_log').insert({
             message,
+            category: currentCategory,
             target_type: 'broadcast',
             target_label: 'সবাইকে',
             recipient_count: rows.length,
@@ -564,6 +687,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     const logContainer = document.getElementById('logContainer');
     const logEmptyState = document.getElementById('logEmptyState');
 
+    const categoryLabels = {
+      message: 'সাধারণ মেসেজ',
+      promo: 'অফার-প্রমো',
+    };
+
     async function loadLog() {
       const { data, error } = await supabase
         .from('admin_notification_log')
@@ -585,9 +713,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         item.className = 'log-item';
         item.innerHTML = `
           <div class="log-item-top">
-            <span class="log-item-badge ${log.target_type}">
-              ${log.target_type === 'broadcast' ? 'সবাইকে' : escapeHtml(log.target_label || 'নির্দিষ্ট ইউজার')}
-            </span>
+            <div class="log-item-badges">
+              <span class="log-item-badge ${log.target_type}">
+                ${log.target_type === 'broadcast' ? 'সবাইকে' : escapeHtml(log.target_label || 'নির্দিষ্ট ইউজার')}
+              </span>
+              <span class="log-item-badge category-${log.category || 'message'}">
+                ${categoryLabels[log.category] || 'সাধারণ মেসেজ'}
+              </span>
+            </div>
             <span style="font-size:0.72rem;color:#8FA0BC;">${log.recipient_count} জনকে</span>
           </div>
           <div class="log-item-msg">${escapeHtml(log.message)}</div>
