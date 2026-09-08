@@ -202,12 +202,20 @@ const postedAgo = item ? getRelativeTimeBn(item.created_at) : null;
 // car-rental এর জন্য টাইপ-ভিত্তিক ফলব্যাক ইমেজ (ছবি না থাকলে ব্যবহার হবে)
 const fallbackImage = item && config.typeDefaultImages ? (config.typeDefaultImages[item.type] || config.typeDefaultImages.other) : null;
 
+// car-rental এর description এর প্রথম কমা-অংশকে "এলাকা" ধরে নেওয়ার হেল্পার
+// (car-rental.astro এর getAreaName() এর সাথে সামঞ্জস্যপূর্ণ — শুধু এই
+// ক্যাটাগরিতেই description এ এভাবে এলাকা লেখা থাকার কনভেনশন আছে)
+function getAreaName(description) {
+  if (!description) return '';
+  return description.split(',')[0].trim();
+}
+
 // একই ক্যাটাগরির আরও লিস্টিং — "আরও {ক্যাটাগরি}" স্ক্রল সেকশনের জন্য প্রথম ১০টা
 let relatedListings = [];
 if (item) {
   const { data: relatedData, error: relatedError } = await supabase
     .from('listings')
-    .select('id, title, price, images, type')
+    .select('id, title, price, images, type, description, upazila')
     .eq('category', item.category)
     .eq('status', 'active')
     .eq('is_disabled', false)
@@ -335,6 +343,8 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
                 const rImg = r.images && r.images.length > 0
                   ? r.images[0]
                   : (config.typeDefaultImages ? (config.typeDefaultImages[r.type] || config.typeDefaultImages.other) : null);
+                const rAreaName = item.category === 'car-rental' ? getAreaName(r.description) : '';
+                const rLocation = rAreaName || r.upazila || '';
                 return (
                   <a href={`/listing/${r.id}`} class="related-listing-card">
                     <div class="related-listing-img-wrap">
@@ -345,6 +355,9 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
                       )}
                     </div>
                     <p class="related-listing-title">{r.title}</p>
+                    {rLocation && (
+                      <p class="related-listing-area"><i class="fas fa-location-dot"></i> {rLocation}</p>
+                    )}
                     {r.price && <p class="related-listing-price">{r.price}</p>}
                   </a>
                 );
@@ -854,6 +867,18 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     white-space: nowrap;
   }
 
+  .related-listing-area {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    color: #8FA0BC;
+    padding: 2px 10px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .related-listing-price {
     font-size: 0.82rem;
     font-weight: 700;
@@ -908,6 +933,13 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     return div.innerHTML;
   }
 
+  // car-rental এর description এর প্রথম কমা-অংশকে "এলাকা" ধরে নেওয়ার হেল্পার
+  // (সার্ভার-সাইড getAreaName() এর সাথে সামঞ্জস্যপূর্ণ)
+  function getAreaNameClient(description) {
+    if (!description) return '';
+    return description.split(',')[0].trim();
+  }
+
   function buildRelatedListingCardHTML(r) {
     const img = r.images && r.images.length > 0
       ? r.images[0]
@@ -917,11 +949,18 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
       ? `<img src="${escapeHtmlR(img)}" alt="${escapeHtmlR(r.title)}" class="related-listing-img" loading="lazy" />`
       : `<div class="related-listing-img-placeholder"><i class="fas ${relatedConfig?.icon || 'fa-tag'}"></i></div>`;
 
+    const areaName = relatedConfig?.category === 'car-rental' ? getAreaNameClient(r.description) : '';
+    const locationText = areaName || r.upazila || '';
+    const locationHtml = locationText
+      ? `<p class="related-listing-area"><i class="fas fa-location-dot"></i> ${escapeHtmlR(locationText)}</p>`
+      : '';
+
     const priceHtml = r.price ? `<p class="related-listing-price">${escapeHtmlR(r.price)}</p>` : '';
 
     return `<a href="/listing/${r.id}" class="related-listing-card">
       <div class="related-listing-img-wrap">${imgHtml}</div>
       <p class="related-listing-title">${escapeHtmlR(r.title)}</p>
+      ${locationHtml}
       ${priceHtml}
     </a>`;
   }
@@ -934,7 +973,7 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
 
     const { data, error } = await supabase
       .from('listings')
-      .select('id, title, price, images, type')
+      .select('id, title, price, images, type, description, upazila')
       .eq('category', relatedConfig.category)
       .eq('status', 'active')
       .eq('is_disabled', false)
@@ -966,7 +1005,7 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
 
     const { data, error } = await supabase
       .from('listings')
-      .select('id, title, price, images, type')
+      .select('id, title, price, images, type, description, upazila')
       .eq('category', relatedConfig.category)
       .eq('status', 'active')
       .eq('is_disabled', false)
