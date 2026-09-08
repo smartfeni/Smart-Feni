@@ -14,6 +14,13 @@
 // "ভেতরে ঢুকলে" ভিউ, তাই এখানে বসালে সব ক্যাটাগরি একসাথে কাভার হয়।
 // লগইন না থাকলে লাইক ভিউ-অনলি, ফ্ল্যাগ লুকানো। ৩+ রিপোর্টে
 // is_disabled হয়ে গেলে এই পেজে খোলা যাবে না (কোয়েরিতে ফিল্টার যোগ)।
+//
+// আপডেট ৩: কার্ডের নিচে "আরও {ক্যাটাগরি}" — একই ক্যাটাগরির অন্য
+// লিস্টিং দেখানোর হরাইজন্টাল স্ক্রল সেকশন যোগ হলো (ইনফিনিটি স্ক্রল,
+// শেষের কাছে গেলে পরের ১০টা লোড হয়)। সোয়াইপ-টু-নেক্সট সিস্টেমটা
+// সবসময় একই ক্যাটাগরির ভেতরেই কাজ করে (swipeQueue এক ক্যাটাগরির),
+// তাই সোয়াইপ করে নতুন লিস্টিং এ গেলে এই রো-টাও রিফ্রেশ হয় — নাহলে
+// পুরনো/এখনকার আইটেমটাই এই রো তে দেখাতে থাকতো।
 // ============================================================
 
 export const prerender = false;
@@ -195,6 +202,26 @@ const postedAgo = item ? getRelativeTimeBn(item.created_at) : null;
 // car-rental এর জন্য টাইপ-ভিত্তিক ফলব্যাক ইমেজ (ছবি না থাকলে ব্যবহার হবে)
 const fallbackImage = item && config.typeDefaultImages ? (config.typeDefaultImages[item.type] || config.typeDefaultImages.other) : null;
 
+// একই ক্যাটাগরির আরও লিস্টিং — "আরও {ক্যাটাগরি}" স্ক্রল সেকশনের জন্য প্রথম ১০টা
+let relatedListings = [];
+if (item) {
+  const { data: relatedData, error: relatedError } = await supabase
+    .from('listings')
+    .select('id, title, price, images, type')
+    .eq('category', item.category)
+    .eq('status', 'active')
+    .eq('is_disabled', false)
+    .neq('id', item.id)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (relatedError) {
+    console.error('related listings fetch error:', relatedError.message);
+  }
+
+  relatedListings = relatedData || [];
+}
+
 const pageTitle = item ? `${item.title} | ${config.pageLabel} | স্মার্ট ফেনী` : 'পেজ পাওয়া যায়নি | স্মার্ট ফেনী';
 const pageDescription = item
   ? item.description || `${config.pageLabel} — ${item.title}`
@@ -300,6 +327,35 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
           </div>
         </div>
 
+        {relatedListings.length > 0 && (
+          <div class="related-listings-section" id="relatedListingsSection">
+            <h3 class="related-listings-title">আরও {config.pageLabel}</h3>
+            <div class="related-listings-scroll" id="relatedListingsScroll">
+              {relatedListings.map((r) => {
+                const rImg = r.images && r.images.length > 0
+                  ? r.images[0]
+                  : (config.typeDefaultImages ? (config.typeDefaultImages[r.type] || config.typeDefaultImages.other) : null);
+                return (
+                  <a href={`/listing/${r.id}`} class="related-listing-card">
+                    <div class="related-listing-img-wrap">
+                      {rImg ? (
+                        <img src={rImg} alt={r.title} class="related-listing-img" loading="lazy" />
+                      ) : (
+                        <div class="related-listing-img-placeholder"><i class={`fas ${config.icon}`}></i></div>
+                      )}
+                    </div>
+                    <p class="related-listing-title">{r.title}</p>
+                    {r.price && <p class="related-listing-price">{r.price}</p>}
+                  </a>
+                );
+              })}
+            </div>
+            <div class="related-listings-spinner" id="relatedListingsSpinner" style="display:none;">
+              <i class="fas fa-spinner fa-spin"></i>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   ) : (
@@ -319,6 +375,16 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
 
   {item && (
     <script type="application/json" id="listingIdData" set:html={JSON.stringify(item.id)} />
+  )}
+
+  {item && (
+    <script type="application/json" id="relatedConfigData" set:html={JSON.stringify({
+      category: item.category,
+      icon: config.icon,
+      typeDefaultImages: config.typeDefaultImages || null,
+      initialCount: relatedListings.length,
+      hasMore: relatedListings.length === 10,
+    })} />
   )}
 </BaseLayout>
 
@@ -712,7 +778,99 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
   }
 </style>
 
+<style is:global>
+  /* ============================================================
+     "আরও {ক্যাটাগরি}" — একই ক্যাটাগরির অন্য লিস্টিং, হরাইজন্টাল
+     স্ক্রল সেকশন। এই ক্লাসগুলো is:global — কারণ ইনফিনিটি-স্ক্রলে
+     নতুন কার্ড client-side script দিয়ে insertAdjacentHTML এ বসানো
+     হয় (Astro এর স্কোপড CSS runtime-injected এলিমেন্টে অ্যাপ্লাই
+     হয় না, তাই global রাখা বাধ্যতামূলক)।
+     ============================================================ */
+  .related-listings-section {
+    max-width: 620px;
+    margin: 20px auto 0;
+  }
+
+  .related-listings-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 12px;
+    padding: 0 2px;
+  }
+
+  .related-listings-scroll {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .related-listings-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .related-listing-card {
+    flex: 0 0 132px;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+    text-decoration: none;
+    overflow: hidden;
+  }
+
+  .related-listing-img-wrap {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: #F4F7FC;
+  }
+
+  .related-listing-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    display: block;
+  }
+
+  .related-listing-img-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #FF6B35;
+    font-size: 1.4rem;
+  }
+
+  .related-listing-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #1B2A4A;
+    padding: 8px 10px 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .related-listing-price {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #FF6B35;
+    padding: 0 10px 10px;
+  }
+
+  .related-listings-spinner {
+    text-align: center;
+    padding-top: 10px;
+    color: #FF6B35;
+    font-size: 1rem;
+  }
+</style>
+
 <script>
+  import { supabase } from '../../lib/supabase.js';
   import { fetchLikeData, toggleLike, isLoggedIn } from '../../lib/contentEngagement.js';
   import { initReportModal } from '../../lib/reportModal.js';
 
@@ -733,6 +891,112 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
   let swipeQueue = [];
   const htmlCache = new Map(); // id -> { doc, cardHTML, title }
   let report = null; // একবারই তৈরি হবে, সোয়াইপে বারবার না (নাহলে ইভেন্ট লিসেনার স্ট্যাক হয়ে যাবে)
+
+  // ============================================================
+  // "আরও {ক্যাটাগরি}" রিলেটেড লিস্টিং — ইনফিনিটি স্ক্রল স্টেট
+  // ============================================================
+  const relatedListingsScroll = document.getElementById('relatedListingsScroll');
+  const relatedListingsSpinner = document.getElementById('relatedListingsSpinner');
+  let relatedConfig = null;
+  let relatedOffset = 0;
+  let relatedHasMore = false;
+  let isLoadingMoreRelated = false;
+
+  function escapeHtmlR(str) {
+    const div = document.createElement('div');
+    div.textContent = String(str ?? '');
+    return div.innerHTML;
+  }
+
+  function buildRelatedListingCardHTML(r) {
+    const img = r.images && r.images.length > 0
+      ? r.images[0]
+      : (relatedConfig?.typeDefaultImages ? (relatedConfig.typeDefaultImages[r.type] || relatedConfig.typeDefaultImages.other) : null);
+
+    const imgHtml = img
+      ? `<img src="${escapeHtmlR(img)}" alt="${escapeHtmlR(r.title)}" class="related-listing-img" loading="lazy" />`
+      : `<div class="related-listing-img-placeholder"><i class="fas ${relatedConfig?.icon || 'fa-tag'}"></i></div>`;
+
+    const priceHtml = r.price ? `<p class="related-listing-price">${escapeHtmlR(r.price)}</p>` : '';
+
+    return `<a href="/listing/${r.id}" class="related-listing-card">
+      <div class="related-listing-img-wrap">${imgHtml}</div>
+      <p class="related-listing-title">${escapeHtmlR(r.title)}</p>
+      ${priceHtml}
+    </a>`;
+  }
+
+  // সোয়াইপ করে নতুন লিস্টিং এ গেলে (বা প্রথমবার লোড হলে) এই রো-টা
+  // পুরোপুরি রিফ্রেশ হয় — নতুন excludeId (currentListingId) বাদ
+  // দিয়ে প্রথম ১০টা আবার আনা হয়, অফসেট রিসেট হয়।
+  async function refreshRelatedListings(excludeId) {
+    if (!relatedConfig || !relatedListingsScroll) return;
+
+    const { data, error } = await supabase
+      .from('listings')
+      .select('id, title, price, images, type')
+      .eq('category', relatedConfig.category)
+      .eq('status', 'active')
+      .eq('is_disabled', false)
+      .neq('id', excludeId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (error) {
+      console.error('related listings refresh error:', error.message);
+      return;
+    }
+
+    relatedListingsScroll.innerHTML = '';
+    (data || []).forEach((r) => {
+      relatedListingsScroll.insertAdjacentHTML('beforeend', buildRelatedListingCardHTML(r));
+    });
+
+    relatedOffset = (data || []).length;
+    relatedHasMore = (data || []).length === 10;
+
+    const section = document.getElementById('relatedListingsSection');
+    if (section) section.style.display = (data && data.length > 0) ? '' : 'none';
+  }
+
+  async function loadMoreRelatedListings() {
+    if (isLoadingMoreRelated || !relatedHasMore || !relatedConfig) return;
+    isLoadingMoreRelated = true;
+    if (relatedListingsSpinner) relatedListingsSpinner.style.display = 'block';
+
+    const { data, error } = await supabase
+      .from('listings')
+      .select('id, title, price, images, type')
+      .eq('category', relatedConfig.category)
+      .eq('status', 'active')
+      .eq('is_disabled', false)
+      .neq('id', currentListingId)
+      .order('created_at', { ascending: false })
+      .range(relatedOffset, relatedOffset + 9);
+
+    if (relatedListingsSpinner) relatedListingsSpinner.style.display = 'none';
+    isLoadingMoreRelated = false;
+
+    if (error) {
+      console.error('related listings load-more error:', error.message);
+      return;
+    }
+
+    (data || []).forEach((r) => {
+      relatedListingsScroll?.insertAdjacentHTML('beforeend', buildRelatedListingCardHTML(r));
+    });
+
+    relatedOffset += (data || []).length;
+    relatedHasMore = (data || []).length === 10;
+  }
+
+  relatedListingsScroll?.addEventListener('scroll', () => {
+    if (isLoadingMoreRelated || !relatedHasMore) return;
+    const { scrollLeft, scrollWidth, clientWidth } = relatedListingsScroll;
+    if (scrollWidth - (scrollLeft + clientWidth) < 200) {
+      loadMoreRelatedListings();
+    }
+  });
 
   function loadSwipeQueue() {
     try {
@@ -828,6 +1092,7 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     attachSwipeHandlers();
     updateSwipeUI();
     preloadNeighbors();
+    refreshRelatedListings(id);
   }
 
   // টাচ জেসচার ধরা — বাম দিকে সোয়াইপ করলে পরের, ডান দিকে সোয়াইপ করলে আগের
@@ -992,6 +1257,13 @@ const canonicalPath = item ? `/listing/${item.id}` : undefined;
     currentListingId = JSON.parse(document.getElementById('listingIdData')?.textContent || 'null');
     currentCategory = initialCardEl.dataset.category || null;
     swipeQueue = loadSwipeQueue();
+
+    const relatedConfigEl = document.getElementById('relatedConfigData');
+    if (relatedConfigEl) {
+      relatedConfig = JSON.parse(relatedConfigEl.textContent);
+      relatedOffset = relatedConfig.initialCount || 0;
+      relatedHasMore = !!relatedConfig.hasMore;
+    }
 
     report = initReportModal({
       reasons: [
