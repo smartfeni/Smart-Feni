@@ -20,6 +20,9 @@
 // বিল্ট-ইন। যে স্লাইড দেখাচ্ছিল ঠিক সেখান থেকেই লাইটবক্স শুরু হয়।
 // আপডেট: is_sold_out=true হলে ছবির উপর "সোল্ড আউট" ব্যাজ + কার্ট
 // বাটন ডিজেবল হয়ে "স্টক নেই" দেখাবে।
+// আপডেট: প্রোডাক্ট ইনফোর নিচে "এই শপের আরও প্রোডাক্ট" — হরাইজন্টাল
+// স্ক্রল সেকশন যোগ হলো (একই user_id, category='online-shop',
+// status='active', বর্তমান প্রোডাক্ট বাদে, সর্বোচ্চ ১০টা, নতুন আগে)।
 // ============================================================
 
 export const prerender = false;
@@ -43,6 +46,8 @@ if (productError) {
 }
 
 let shop = null;
+let relatedProducts = [];
+
 if (product) {
   const { data: shopData } = await supabase
     .from('shops')
@@ -50,6 +55,22 @@ if (product) {
     .eq('owner_id', product.user_id)
     .maybeSingle();
   shop = shopData || null;
+
+  const { data: relatedData, error: relatedError } = await supabase
+    .from('listings')
+    .select('id, title, price, images, is_sold_out')
+    .eq('category', 'online-shop')
+    .eq('user_id', product.user_id)
+    .eq('status', 'active')
+    .neq('id', product.id)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (relatedError) {
+    console.error('related products fetch error:', relatedError.message);
+  }
+
+  relatedProducts = relatedData || [];
 }
 
 const notFound = !product || !shop;
@@ -143,6 +164,31 @@ const ogImage = product?.images?.[0] || undefined;
           </div>
         )}
 
+        {relatedProducts.length > 0 && (
+          <div class="related-section">
+            <h3 class="related-section-title">এই শপের আরও প্রোডাক্ট</h3>
+            <div class="related-scroll" id="relatedScroll">
+              {relatedProducts.map((p) => (
+                <a href={`/product/${p.id}`} class="related-card">
+                  <div class="related-img-wrap">
+                    {p.is_sold_out && <span class="related-sold-badge">সোল্ড আউট</span>}
+                    {p.images && p.images.length > 0 ? (
+                      <img src={p.images[0]} alt={p.title} class="related-img" loading="lazy" />
+                    ) : (
+                      <div class="related-img-placeholder"><i class="fas fa-box"></i></div>
+                    )}
+                  </div>
+                  <p class="related-title">{p.title}</p>
+                  {p.price && <p class="related-price">৳{p.price}</p>}
+                </a>
+              ))}
+            </div>
+            <div class="related-loading-spinner" id="relatedLoadingSpinner" style="display:none;">
+              <i class="fas fa-spinner fa-spin"></i>
+            </div>
+          </div>
+        )}
+
         <div id="addToCartSpacer"></div>
       </div>
 
@@ -166,6 +212,8 @@ const ogImage = product?.images?.[0] || undefined;
         title: product.title,
         images: product.images || [],
         isSoldOut: !!product.is_sold_out,
+        relatedOffset: relatedProducts.length,
+        relatedHasMore: relatedProducts.length === 10,
       })} />
 
       <ImageLightbox />
@@ -468,6 +516,102 @@ const ogImage = product?.images?.[0] || undefined;
     color: #fff;
   }
 
+  /* ===== এই শপের আরও প্রোডাক্ট — হরাইজন্টাল স্ক্রল ===== */
+  .related-section {
+    margin-bottom: 20px;
+  }
+
+  .related-section-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 12px;
+    padding: 0 2px;
+  }
+
+  .related-scroll {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .related-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .related-card {
+    flex: 0 0 132px;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+    text-decoration: none;
+    overflow: hidden;
+  }
+
+  .related-img-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: #F4F7FC;
+  }
+
+  .related-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    display: block;
+  }
+
+  .related-img-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #FF6B35;
+    font-size: 1.4rem;
+  }
+
+  .related-sold-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    background: rgba(15, 23, 42, 0.8);
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 20px;
+  }
+
+  .related-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #1B2A4A;
+    padding: 8px 10px 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .related-price {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #FF6B35;
+    padding: 0 10px 10px;
+  }
+
+  .related-loading-spinner {
+    text-align: center;
+    padding-top: 10px;
+    color: #FF6B35;
+    font-size: 1rem;
+  }
+
   #addToCartSpacer {
     height: 160px;
   }
@@ -575,8 +719,77 @@ const ogImage = product?.images?.[0] || undefined;
   const sliderTrack = document.getElementById('sliderTrack');
   const dots = document.querySelectorAll('.slider-dots .dot');
   const slides = document.querySelectorAll('.slide');
+  const relatedScroll = document.getElementById('relatedScroll');
+  const relatedLoadingSpinner = document.getElementById('relatedLoadingSpinner');
 
   let currentUserId = null;
+  let relatedOffset = meta?.relatedOffset || 0;
+  let relatedHasMore = meta?.relatedHasMore || false;
+  let isLoadingMoreRelated = false;
+
+  // ============================================================
+  // "এই শপের আরও প্রোডাক্ট" — ইনফিনিটি স্ক্রল। ডানদিকের শেষের
+  // ~২০০px এর মধ্যে স্ক্রল করলে পরের ১০টা প্রোডাক্ট লোড হয়ে
+  // scroll row এ যোগ হয়ে যাবে (একই ফিল্টার, offset বাড়িয়ে)।
+  // ============================================================
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = String(str ?? '');
+    return div.innerHTML;
+  }
+
+  function buildRelatedCardHTML(p) {
+    const imgHtml = p.images && p.images.length > 0
+      ? `<img src="${escapeHtml(p.images[0])}" alt="${escapeHtml(p.title)}" class="related-img" loading="lazy" />`
+      : `<div class="related-img-placeholder"><i class="fas fa-box"></i></div>`;
+    const soldBadge = p.is_sold_out ? `<span class="related-sold-badge">সোল্ড আউট</span>` : '';
+    const priceHtml = p.price ? `<p class="related-price">৳${escapeHtml(p.price)}</p>` : '';
+
+    return `<a href="/product/${p.id}" class="related-card">
+      <div class="related-img-wrap">${soldBadge}${imgHtml}</div>
+      <p class="related-title">${escapeHtml(p.title)}</p>
+      ${priceHtml}
+    </a>`;
+  }
+
+  async function loadMoreRelated() {
+    if (isLoadingMoreRelated || !relatedHasMore || !meta) return;
+    isLoadingMoreRelated = true;
+    if (relatedLoadingSpinner) relatedLoadingSpinner.style.display = 'block';
+
+    const { data, error } = await supabase
+      .from('listings')
+      .select('id, title, price, images, is_sold_out')
+      .eq('category', 'online-shop')
+      .eq('user_id', meta.shopOwnerId)
+      .eq('status', 'active')
+      .neq('id', meta.productId)
+      .order('created_at', { ascending: false })
+      .range(relatedOffset, relatedOffset + 9);
+
+    if (relatedLoadingSpinner) relatedLoadingSpinner.style.display = 'none';
+    isLoadingMoreRelated = false;
+
+    if (error) {
+      console.error('related products load-more error:', error.message);
+      return;
+    }
+
+    (data || []).forEach((p) => {
+      relatedScroll?.insertAdjacentHTML('beforeend', buildRelatedCardHTML(p));
+    });
+
+    relatedOffset += (data || []).length;
+    relatedHasMore = (data || []).length === 10;
+  }
+
+  relatedScroll?.addEventListener('scroll', () => {
+    if (isLoadingMoreRelated || !relatedHasMore) return;
+    const { scrollLeft, scrollWidth, clientWidth } = relatedScroll;
+    if (scrollWidth - (scrollLeft + clientWidth) < 200) {
+      loadMoreRelated();
+    }
+  });
 
   // ছবিতে ট্যাপ করলে জুমেবল ফুলস্ক্রিন লাইটবক্স (ImageLightbox.astro)
   slides.forEach((slide) => {
