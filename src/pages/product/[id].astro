@@ -11,18 +11,22 @@
 // কার্ট মাল্টি-শপ — একাধিক শপের প্রোডাক্ট একই কার্টে থাকতে পারবে,
 // checkout এ প্রতি শপের জন্য আলাদা order তৈরি হয়।
 //
-// আপডেট: WhatsApp লিংক এখন toWhatsAppNumber() হেল্পার দিয়ে
-// কান্ট্রি কোডসহ (88) বসানো হচ্ছে — প্রবাস থেকে ক্লিক করলে আগে
-// নম্বর খুঁজে পেত না, এখন ঠিকভাবে কাজ করবে।
 // আপডেট: ছবিতে ট্যাপ করলে এখন ImageLightbox (রিইউজেবল কম্পোনেন্ট,
 // আগে থেকেই ক্লাব পোস্টে ব্যবহৃত হতো) ওপেন হয় — জুম ইন/আউট,
 // একাধিক ছবি হলে সোয়াইপ/prev-next নেভিগেশন, ডাউনলোড বাটন সবই
 // বিল্ট-ইন। যে স্লাইড দেখাচ্ছিল ঠিক সেখান থেকেই লাইটবক্স শুরু হয়।
-// আপডেট: is_sold_out=true হলে ছবির উপর "সোল্ড আউট" ব্যাজ + কার্ট
-// বাটন ডিজেবল হয়ে "স্টক নেই" দেখাবে।
+// আপডেট: is_sold_out=true হলে ছবির উপর "সোল্ড আউট" ব্যাজ + কার্ট/
+// এখনই কিনুন বাটন দুটোই ডিজেবল হয়ে যাবে।
 // আপডেট: প্রোডাক্ট ইনফোর নিচে "এই শপের আরও প্রোডাক্ট" — হরাইজন্টাল
 // স্ক্রল সেকশন যোগ হলো (একই user_id, category='online-shop',
 // status='active', বর্তমান প্রোডাক্ট বাদে, সর্বোচ্চ ১০টা, নতুন আগে)।
+// আপডেট (UI পুনর্বিন্যাস): কল/হোয়াটসঅ্যাপ কন্টাক্ট পিল ও নিচের
+// ফিক্সড ফুটার (মিনি-কার্ট আইকন + বড় "কার্টে যোগ করুন" বার) দুটোই
+// রিমুভ করে তার বদলে প্রোডাক্ট ইনফো কার্ডের নিচে ইনলাইনে দুইটা বাটন
+// বসানো হলো: "কার্টে যোগ করুন" + "এখনই কিনুন"। "এখনই কিনুন" ক্লিক
+// করলে কার্ট স্পর্শ না করেই সরাসরি /checkout?buyNow={productId} এ
+// যায় — checkout.astro সেখানে শুধু এই একটা প্রোডাক্টের অর্ডার সামারি
+// দেখায়, ইউজারের আসল কার্ট অপরিবর্তিত থাকে।
 // ============================================================
 
 export const prerender = false;
@@ -30,7 +34,6 @@ export const prerender = false;
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import ImageLightbox from '../../components/ImageLightbox.astro';
 import { supabase } from '../../lib/supabase.js';
-import { toWhatsAppNumber } from '../../lib/whatsapp.js';
 
 const { id } = Astro.params;
 
@@ -153,16 +156,14 @@ const ogImage = product?.images?.[0] || undefined;
           )}
         </div>
 
-        {shop.phone && (
-          <div class="quick-contact-row">
-            <a href={`tel:${shop.phone}`} class="contact-pill call-pill">
-              <i class="fas fa-phone"></i> কল করুন
-            </a>
-            <a href={`https://wa.me/${toWhatsAppNumber(shop.phone)}`} target="_blank" rel="noopener" class="contact-pill wa-pill">
-              <i class="fab fa-whatsapp"></i> হোয়াটসঅ্যাপ
-            </a>
-          </div>
-        )}
+        <div class="product-action-row">
+          <button class="action-pill cart-pill" id="addToCartBtn" type="button">
+            <i class="fas fa-cart-plus"></i> <span id="addToCartBtnText">কার্টে যোগ করুন</span>
+          </button>
+          <button class="action-pill buy-pill" id="buyNowBtn" type="button">
+            <i class="fas fa-bolt"></i> এখনই কিনুন
+          </button>
+        </div>
 
         {relatedProducts.length > 0 && (
           <div class="related-section">
@@ -189,19 +190,6 @@ const ogImage = product?.images?.[0] || undefined;
           </div>
         )}
 
-        <div id="addToCartSpacer"></div>
-      </div>
-
-      <div class="preview-footer">
-        <div class="container preview-footer-inner">
-          <a href="/cart" class="mini-cart-btn" id="miniCartBtn" aria-label="কার্ট দেখুন">
-            <i class="fas fa-cart-shopping"></i>
-            <span class="cart-count" id="cartCountBadge" style="display:none;">0</span>
-          </a>
-          <button class="add-to-cart-big-btn" id="addToCartBtn" type="button">
-            <i class="fas fa-cart-plus"></i> <span id="addToCartBtnText">কার্টে যোগ করুন</span>
-          </button>
-        </div>
       </div>
 
       <script type="application/json" id="productMeta" set:html={JSON.stringify({
@@ -476,44 +464,64 @@ const ogImage = product?.images?.[0] || undefined;
     line-height: 1.7;
   }
 
-  .quick-contact-row {
+  .product-action-row {
     display: flex;
     gap: 10px;
     margin-bottom: 20px;
   }
 
-  .contact-pill {
+  .action-pill {
     flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 11px;
+    padding: 13px;
     border-radius: 14px;
+    border: none;
     text-decoration: none;
     font-weight: 700;
     font-size: 0.85rem;
+    cursor: pointer;
     transition: all 0.15s ease;
   }
 
-  .call-pill {
+  .cart-pill {
     background: #EAF2FF;
     color: #2563EB;
   }
 
-  .call-pill:hover {
+  .cart-pill:hover {
     background: #2563EB;
     color: #fff;
   }
 
-  .wa-pill {
-    background: #E9F9EF;
-    color: #1EA952;
+  .cart-pill.added {
+    background: #1B7A3C;
+    color: #fff;
   }
 
-  .wa-pill:hover {
-    background: #1EA952;
+  .cart-pill:disabled,
+  .buy-pill:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .buy-pill {
+    background: #FF6B35;
     color: #fff;
+    box-shadow: 0 10px 22px rgba(255, 107, 53, 0.28);
+  }
+
+  .buy-pill:hover {
+    background: #e85a28;
+  }
+
+  .cart-pill.sold-out,
+  .buy-pill.sold-out {
+    background: #C7D0DD;
+    color: #5A6E85;
+    box-shadow: none;
   }
 
   /* ===== এই শপের আরও প্রোডাক্ট — হরাইজন্টাল স্ক্রল ===== */
@@ -611,99 +619,6 @@ const ogImage = product?.images?.[0] || undefined;
     color: #FF6B35;
     font-size: 1rem;
   }
-
-  #addToCartSpacer {
-    height: 160px;
-  }
-
-  .preview-footer {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: calc(70px + env(safe-area-inset-bottom));
-    background: #fff;
-    box-shadow: 0 -6px 24px rgba(15, 23, 42, 0.08);
-    padding: 12px 0;
-    z-index: 40;
-    border-top: 1px solid #F0F3F8;
-  }
-
-  .preview-footer-inner {
-    max-width: 560px;
-    margin: 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .mini-cart-btn {
-    position: relative;
-    width: 48px;
-    height: 48px;
-    border-radius: 14px;
-    background: #F4F7FC;
-    color: #1B2A4A;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    text-decoration: none;
-    font-size: 1.05rem;
-  }
-
-  .mini-cart-btn .cart-count {
-    position: absolute;
-    top: -5px;
-    right: -5px;
-    background: #FF6B35;
-    color: #fff;
-    font-size: 0.65rem;
-    font-weight: 700;
-    min-width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 3px;
-  }
-
-  .add-to-cart-big-btn {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    background: #FF6B35;
-    color: #fff;
-    border: none;
-    padding: 15px;
-    border-radius: 40px;
-    font-weight: 700;
-    font-size: 0.94rem;
-    cursor: pointer;
-    box-shadow: 0 10px 22px rgba(255, 107, 53, 0.32);
-    transition: all 0.2s ease;
-  }
-
-  .add-to-cart-big-btn:hover {
-    background: #e85a28;
-  }
-
-  .add-to-cart-big-btn:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-  }
-
-  .add-to-cart-big-btn.added {
-    background: #1B7A3C;
-  }
-
-  .add-to-cart-big-btn.sold-out {
-    background: #C7D0DD;
-    color: #5A6E85;
-    box-shadow: none;
-  }
 </style>
 
 <script>
@@ -715,7 +630,7 @@ const ogImage = product?.images?.[0] || undefined;
   const shareBtn = document.getElementById('shareProductBtn');
   const addToCartBtn = document.getElementById('addToCartBtn');
   const addToCartBtnText = document.getElementById('addToCartBtnText');
-  const cartCountBadge = document.getElementById('cartCountBadge');
+  const buyNowBtn = document.getElementById('buyNowBtn');
   const sliderTrack = document.getElementById('sliderTrack');
   const dots = document.querySelectorAll('.slider-dots .dot');
   const slides = document.querySelectorAll('.slide');
@@ -805,6 +720,10 @@ const ogImage = product?.images?.[0] || undefined;
     addToCartBtn.classList.add('sold-out');
     addToCartBtnText.textContent = 'স্টক নেই';
   }
+  if (meta?.isSoldOut && buyNowBtn) {
+    buyNowBtn.disabled = true;
+    buyNowBtn.classList.add('sold-out');
+  }
 
   sliderTrack?.addEventListener('scroll', () => {
     const index = Math.round(sliderTrack.scrollLeft / sliderTrack.clientWidth);
@@ -883,17 +802,23 @@ const ogImage = product?.images?.[0] || undefined;
     refreshCartCount();
   });
 
+  buyNowBtn?.addEventListener('click', () => {
+    if (meta?.isSoldOut) return;
+
+    if (!currentUserId) {
+      window.openAuthModal?.('login');
+      return;
+    }
+
+    // কার্ট স্পর্শ না করেই সরাসরি চেকআউটে — checkout.astro?buyNow=প্রোডাক্ট
+    // আইডি দেখে শুধু এই একটা প্রোডাক্টের অর্ডার সামারি বানাবে।
+    window.location.href = `/checkout?buyNow=${meta.productId}`;
+  });
+
   async function refreshCartCount() {
-    if (!currentUserId || !cartCountBadge) return;
+    if (!currentUserId) return;
     const { data } = await supabase.from('cart_items').select('quantity').eq('user_id', currentUserId);
     const total = (data || []).reduce((sum, row) => sum + row.quantity, 0);
-
-    if (total > 0) {
-      cartCountBadge.textContent = total;
-      cartCountBadge.style.display = 'flex';
-    } else {
-      cartCountBadge.style.display = 'none';
-    }
 
     // হেডারের গ্লোবাল কার্ট আইকনকে সাথে সাথে আপডেট করার জন্য
     window.dispatchEvent(new CustomEvent('smartfeni:cart-updated', { detail: { total } }));
