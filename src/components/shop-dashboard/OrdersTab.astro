@@ -21,8 +21,37 @@
 // তখন অর্ডার লিস্ট দেখা যাবে (view), কিন্তু কনফার্ম/ডেলিভার/বাতিল
 // অ্যাকশন বাটন (.order-actions) হাইড থাকবে — RLS policy অনুযায়ীও
 // এই পারমিশন ছাড়া অর্ডার স্ট্যাটাস আপডেট আটকে যায়।
+//
+// আপডেট ৩ (UI পুনর্বিন্যাস): Telegram অর্ডার নোটিফিকেশন কানেক্ট/
+// ডিসকানেক্ট সেকশন ProfileEditTab.astro থেকে এখানে সরানো হলো,
+// যেহেতু এটা অর্ডার নোটিফিকেশনের জন্যই ব্যবহৃত হয়। পারমিশন গেটিং
+// আগের মতোই 'mod-no-settings' ক্লাসেই রাখা হয়েছে (can_edit_settings) —
+// কারণ এটা শপের একটা সেটিংস ফিল্ড (telegram_chat_id) বদলায়,
+// can_manage_orders (mod-no-orders) না।
 // ============================================================
 ---
+
+<div class="dash-card">
+  <h3><i class="fab fa-telegram"></i> অর্ডার নোটিফিকেশন</h3>
+
+  <div id="telegramNotConnected">
+    <p class="form-hint" style="margin-top:0; margin-bottom:12px;">
+      Telegram কানেক্ট করলে নতুন অর্ডার এলেই সাথে সাথে নোটিফিকেশন পাবেন
+    </p>
+    <a href="#" id="telegramConnectBtn" class="secondary-btn" style="display:block; text-align:center; text-decoration:none;">
+      <i class="fab fa-telegram"></i> Telegram Connect করুন
+    </a>
+  </div>
+
+  <div id="telegramConnected" style="display:none;">
+    <p class="form-hint" style="margin-top:0; color:#1B7A3C; font-weight:700;">
+      <i class="fas fa-circle-check"></i> কানেক্টেড
+    </p>
+    <button type="button" class="secondary-btn" id="telegramDisconnectBtn" style="width:100%; text-align:center; margin-top:8px;">
+      <i class="fas fa-link-slash"></i> ডিসকানেক্ট করুন (অন্য অ্যাকাউন্টে বদলাতে)
+    </button>
+  </div>
+</div>
 
 <div class="dash-card">
   <h3><span class="section-icon-badge"><i class="fas fa-receipt"></i></span> অর্ডার (গত ৩০ দিন)</h3>
@@ -302,6 +331,18 @@
   body.mod-no-orders .order-actions {
     display: none !important;
   }
+
+  /* ============================================================
+     পারমিশন-ভিত্তিক hide — my-shop.astro এর init() ফাংশন body তে
+     'mod-no-settings' ক্লাস বসায় যখন মডারেটরের can_edit_settings
+     পারমিশন নেই। Telegram কানেক্ট/ডিসকানেক্ট শপের সেটিংস ফিল্ড
+     (telegram_chat_id) বদলায়, তাই এই পারমিশনেই গেট করা হলো
+     (ProfileEditTab.astro থেকে সরিয়ে আনা হয়েছে)।
+     ============================================================ */
+  body.mod-no-settings #telegramConnectBtn,
+  body.mod-no-settings #telegramDisconnectBtn {
+    display: none !important;
+  }
 </style>
 
 <script>
@@ -422,5 +463,37 @@
   window.addEventListener('smartfeni:shop-ready', (e) => {
     currentShopId = e.detail.shopId;
     loadOrders();
+
+    // ===== Telegram কানেকশন স্ট্যাটাস =====
+    const shop = e.detail.shop;
+    const telegramConnectBtn = document.getElementById('telegramConnectBtn');
+    const telegramNotConnected = document.getElementById('telegramNotConnected');
+    const telegramConnected = document.getElementById('telegramConnected');
+    const telegramDisconnectBtn = document.getElementById('telegramDisconnectBtn');
+
+    if (telegramConnectBtn) {
+      telegramConnectBtn.href = `https://t.me/SmartFeniShopBoT?start=${shop.id}`;
+    }
+
+    if (shop.telegram_chat_id) {
+      telegramNotConnected.style.display = 'none';
+      telegramConnected.style.display = 'block';
+    } else {
+      telegramNotConnected.style.display = 'block';
+      telegramConnected.style.display = 'none';
+    }
+
+    telegramDisconnectBtn?.addEventListener('click', async () => {
+      if (!confirm('Telegram ডিসকানেক্ট করতে চান? এরপর নতুন করে অন্য অ্যাকাউন্ট দিয়ে Connect করতে পারবেন।')) return;
+
+      const { error } = await supabase.from('shops').update({ telegram_chat_id: null }).eq('id', currentShopId);
+      if (error) {
+        alert('ডিসকানেক্ট ব্যর্থ: ' + error.message);
+        return;
+      }
+
+      telegramConnected.style.display = 'none';
+      telegramNotConnected.style.display = 'block';
+    });
   });
 </script>
