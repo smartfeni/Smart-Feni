@@ -15,6 +15,14 @@
 // আপডেট: WhatsApp লিংক এখন toWhatsAppNumber() হেল্পার দিয়ে কান্ট্রি
 // কোডসহ (88) বসানো হচ্ছে — প্রবাস থেকে ক্লিক করলে আগে নম্বর খুঁজে
 // পেত না, এখন ঠিকভাবে কাজ করবে।
+//
+// আপডেট (এখনই কিনুন): product/[id].astro থেকে
+// ?buyNow={productId} প্যারামিটার দিয়ে এলে এই পেজ cart_items টেবিল
+// থেকে না লোড করে সরাসরি শুধু ওই একটা প্রোডাক্টের অর্ডার সামারি
+// দেখায় (loadBuyNowForCheckout)। অর্ডার প্লেস করলে ইউজারের আসল
+// কার্ট অপরিবর্তিত থাকে (ডিলিট হয় না) — isBuyNowMode ফ্ল্যাগ দিয়ে
+// এই আচরণ নিয়ন্ত্রিত। বাকি ফ্লো (ফর্ম, Telegram নোটিফিকেশন, সাকসেস
+// স্টেট, শপ কন্টাক্ট) স্বাভাবিক কার্ট চেকআউটের মতোই।
 // ============================================================
 
 export const prerender = false;
@@ -580,6 +588,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     let currentUserId = null;
     let shopGroups = {};
+    let isBuyNowMode = false;
 
     function convertBanglaDigits(str) {
       const banglaDigits = '০১২৩৪৫৬৭৮৯';
@@ -634,6 +643,44 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         }
         shopGroups[ownerId].items.push(item);
       });
+
+      renderSummary();
+      checkoutContent.style.display = 'block';
+      checkoutFooter.style.display = 'block';
+    }
+
+    // ============================================================
+    // আপডেট (এখনই কিনুন): product/[id].astro থেকে
+    // /checkout?buyNow={productId} দিয়ে এলে কার্ট (cart_items) স্পর্শ
+    // না করেই শুধু ওই একটা প্রোডাক্টের অর্ডার সামারি বানানো হয়।
+    // অর্ডার প্লেস হলেও এখানে ইউজারের আসল কার্ট ডিলিট করা হয় না।
+    // ============================================================
+    async function loadBuyNowForCheckout(productId) {
+      const { data: listing, error } = await supabase
+        .from('listings')
+        .select('id, title, price, images, user_id, is_sold_out')
+        .eq('id', productId)
+        .maybeSingle();
+
+      loadingState.style.display = 'none';
+
+      if (error || !listing || listing.is_sold_out) {
+        emptyCartNotice.style.display = 'block';
+        return;
+      }
+
+      const { data: shop } = await supabase
+        .from('shops')
+        .select('*')
+        .eq('owner_id', listing.user_id)
+        .maybeSingle();
+
+      shopGroups = {
+        [listing.user_id]: {
+          shop: shop || null,
+          items: [{ listings: listing, quantity: 1 }],
+        },
+      };
 
       renderSummary();
       checkoutContent.style.display = 'block';
@@ -753,7 +800,9 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           await supabase.from('product_events').insert(checkoutEvents);
         }
 
-        await supabase.from('cart_items').delete().eq('user_id', currentUserId);
+        if (!isBuyNowMode) {
+          await supabase.from('cart_items').delete().eq('user_id', currentUserId);
+        }
 
         renderShopContacts();
         checkoutContent.style.display = 'none';
@@ -786,7 +835,15 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       if (profile?.full_name) nameInput.value = profile.full_name;
       if (profile?.phone) phoneInput.value = profile.phone;
 
-      await loadCartForCheckout();
+      const params = new URLSearchParams(window.location.search);
+      const buyNowProductId = params.get('buyNow');
+
+      if (buyNowProductId) {
+        isBuyNowMode = true;
+        await loadBuyNowForCheckout(buyNowProductId);
+      } else {
+        await loadCartForCheckout();
+      }
     }
 
     init();
