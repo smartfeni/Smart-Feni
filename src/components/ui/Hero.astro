@@ -9,6 +9,16 @@
 //        স্ক্রল ট্রিগার করা হচ্ছে যখন প্রথম অক্ষর টাইপ হয়ে রেজাল্ট
 //        দেখা যায় (handleSearch-এর ভেতরে), scrollIntoView-এর বদলে
 //        সরাসরি window.scrollTo দিয়ে অবস্থান হিসেব করে — বেশি নির্ভরযোগ্য
+// ফিক্স ৩: রোটেটিং হিন্ট ওয়ার্ড wipe অ্যানিমেশন মোবাইলে (বিশেষত
+//        TWA/WebView এ) আটকে আটকে যাচ্ছিল। কারণ: আগে `clip-path`
+//        (percentage-based inset) অ্যানিমেট করা হতো, যেটা প্রতি
+//        ফ্রেমে লেআউট-নির্ভর রিক্যালকুলেশন লাগাতে পারে এবং সব
+//        Android WebView এ compositor-only (GPU) থ্রেডে চলে না —
+//        ফলে main thread ব্যস্ত থাকলে ফ্রেম ড্রপ/জ্যাঙ্ক হয়। এখন
+//        clip-path এর বদলে একটা আলাদা মাস্ক-ওভারলে এলিমেন্ট
+//        `transform: translateX()` দিয়ে সরানো হচ্ছে — transform
+//        সবসময় compositor থ্রেডে চলে (main thread bottleneck হয়
+//        না), তাই সব ডিভাইসে স্মুথ থাকবে।
 // ============================================================
 ---
 
@@ -27,7 +37,10 @@
           />
           <span class="rotating-hint" id="rotatingHint">
             <span class="hint-fixed">কি লাগবে: </span>
-            <span class="wipe-word" id="wipeWord"></span>
+            <span class="wipe-word" id="wipeWord">
+              <span class="wipe-word-text" id="wipeWordText"></span>
+              <span class="wipe-mask" id="wipeMask"></span>
+            </span>
           </span>
         </div>
         <button class="btn-primary" onclick="handleSearchButtonClick()">
@@ -135,7 +148,16 @@
   (window as any).handleSearch = handleSearch;
   (window as any).handleSearchButtonClick = handleSearchButtonClick;
 
-  // ===== Wipe-style রোটেটিং হিন্ট =====
+  // ============================================================
+  // Wipe-style রোটেটিং হিন্ট — transform-ভিত্তিক (compositor-only,
+  // clip-path এর বদলে)। .wipe-word এর ভেতরে দুইটা চাইল্ড:
+  //   - .wipe-word-text: আসল টেক্সট (নরমাল ফ্লো, প্যারেন্টের width
+  //     এটার width অনুযায়ী auto-size হয়)
+  //   - .wipe-mask: সাদা ওভারলে (position:absolute, inset:0), যেটা
+  //     ডানদিক থেকে বামে স্লাইড করে টেক্সট ঢেকে দেয় (হাইড) বা ডানে
+  //     সরে গিয়ে টেক্সট দেখায় (রিভিল) — শুধু transform বদলায়,
+  //     লেআউট/পেইন্ট রিক্যালকুলেশন লাগে না, তাই স্মুথ থাকে
+  // ============================================================
   const hintWords = [
     'সিএনজি?',
     'ডাক্তার?',
@@ -149,47 +171,50 @@
     'রক্তদাতা?',
   ];
 
-  const wipeWordEl = document.getElementById('wipeWord');
+  const wipeWordTextEl = document.getElementById('wipeWordText');
+  const wipeMaskEl = document.getElementById('wipeMask');
   const searchInputEl = document.getElementById('searchInput') as HTMLInputElement;
   let wordIndex = 0;
   const HOLD_MS = 1300;
   const WIPE_MS = 400;
 
-  function setClip(el: HTMLElement, percent: number, animate: boolean) {
-    el.style.transition = animate ? `clip-path ${WIPE_MS}ms ease` : 'none';
-    el.style.clipPath = `inset(0 ${percent}% 0 0)`;
+  // covering=true → মাস্ক টেক্সটের উপর (হাইড), covering=false → মাস্ক ডানে সরানো (রিভিল)
+  function setMask(el: HTMLElement, covering: boolean, animate: boolean) {
+    el.style.transition = animate ? `transform ${WIPE_MS}ms ease` : 'none';
+    el.style.transform = covering ? 'translateX(0%)' : 'translateX(100%)';
   }
 
   function cycleWord() {
-    if (!wipeWordEl || !searchInputEl) return;
+    if (!wipeWordTextEl || !wipeMaskEl || !searchInputEl) return;
     if (document.activeElement === searchInputEl || searchInputEl.value) return;
 
-    setClip(wipeWordEl, 100, true);
+    // ধাপ ১: মাস্ক ডান থেকে বামে স্লাইড করে বর্তমান শব্দ ঢেকে দেয়
+    setMask(wipeMaskEl, true, true);
 
     setTimeout(() => {
       wordIndex = (wordIndex + 1) % hintWords.length;
-      wipeWordEl.textContent = hintWords[wordIndex];
-      setClip(wipeWordEl, 100, false);
+      wipeWordTextEl.textContent = hintWords[wordIndex];
 
-      // ফোর্স রিফ্লো — ব্রাউজারকে বাধ্য করা হচ্ছে 'transition: none'
-      // স্টেটটা আগে কমিট করতে। এটা না করলে নিচের rAF-এ transition
-      // আবার চালু করার সময় ব্রাউজার দুইটা স্টাইল-চেঞ্জ একসাথে ব্যাচ
-      // করে ফেলতে পারে, ফলে অ্যানিমেশন মাঝেমধ্যে স্কিপ/জাম্প করে
-      // আটকে আটকে যাওয়ার মতো লাগে। ডাবল rAF + reflow দিয়ে এটা
-      // নিশ্চিতভাবে ফিক্স হয়।
-      void wipeWordEl.offsetWidth;
+      // ধাপ ২: মাস্ক এখনো ঢাকা অবস্থায়, transition ছাড়াই কনফার্ম করা
+      setMask(wipeMaskEl, true, false);
+
+      // ফোর্স রিফ্লো — transition:none স্টেটটা কমিট করানোর জন্য,
+      // নাহলে ব্রাউজার পরের ফ্রেমে transition আবার চালু করার সময়
+      // দুইটা স্টাইল-চেঞ্জ একসাথে ব্যাচ করে ফেলতে পারে
+      void wipeMaskEl.offsetWidth;
 
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          setClip(wipeWordEl, 0, true);
+          // ধাপ ৩: মাস্ক ডানে সরে গিয়ে নতুন শব্দ রিভিল করে
+          setMask(wipeMaskEl, false, true);
         });
       });
     }, WIPE_MS);
   }
 
-  if (wipeWordEl) {
-    wipeWordEl.textContent = hintWords[0];
-    setClip(wipeWordEl, 0, false);
+  if (wipeWordTextEl && wipeMaskEl) {
+    wipeWordTextEl.textContent = hintWords[0];
+    setMask(wipeMaskEl, false, false);
   }
 
   setInterval(cycleWord, HOLD_MS + WIPE_MS);
@@ -296,12 +321,29 @@
   }
 
   .wipe-word {
+    position: relative;
+    display: inline-block;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .wipe-word-text {
     color: #1B2A4A;
     font-weight: 600;
     font-size: 0.95rem;
     white-space: nowrap;
     display: inline-block;
-    will-change: clip-path;
+  }
+
+  .wipe-mask {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    transform: translateX(0%);
+    will-change: transform;
+    /* GPU লেয়ার প্রোমোশন জোর করার জন্য — কিছু Android WebView তে
+       এটা ছাড়া transform অ্যানিমেশনও main thread এ পেইন্ট হতে পারে */
+    transform-style: preserve-3d;
   }
 
   .search-card .btn-primary {
@@ -350,7 +392,7 @@
     }
 
     .hint-fixed,
-    .wipe-word {
+    .wipe-word-text {
       font-size: 0.85rem;
     }
   }
