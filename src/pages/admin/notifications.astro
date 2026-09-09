@@ -85,6 +85,18 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <label class="field-label" style="margin-top: 14px;">মেসেজ</label>
           <textarea id="messageInput" rows="4" placeholder="মেসেজ লিখুন..."></textarea>
 
+          <!-- ছবি আপলোড (ঐচ্ছিক, নতুন — Phase 2) -->
+          <label class="field-label" style="margin-top: 14px;">ছবি (ঐচ্ছিক)</label>
+          <label for="imageInput" class="image-upload-box" id="imageUploadBox">
+            <img id="imagePreview" src="" alt="প্রিভিউ" style="display:none;" />
+            <span id="imageUploadPlaceholder"><i class="fas fa-image"></i> ছবি যোগ করুন (সর্বোচ্চ ২MB)</span>
+            <button type="button" id="imageRemoveBtn" style="display:none;" aria-label="ছবি সরান">
+              <i class="fas fa-xmark"></i>
+            </button>
+          </label>
+          <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" style="display:none;" />
+          <p class="send-feedback" id="imageFeedback"></p>
+
           <p class="send-feedback" id="sendFeedback"></p>
 
           <button id="sendBtn" class="send-btn" type="button" disabled>
@@ -335,6 +347,63 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       margin-bottom: 6px;
     }
 
+    /* ===== ছবি আপলোড বক্স (নতুন) ===== */
+    .image-upload-box {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 90px;
+      border: 1.5px dashed #D7E0EC;
+      border-radius: 14px;
+      cursor: pointer;
+      overflow: hidden;
+      background: #F8FAFC;
+      margin-bottom: 6px;
+      transition: border-color 0.2s ease;
+    }
+
+    .image-upload-box:hover {
+      border-color: #FF6B35;
+    }
+
+    .image-upload-box img {
+      width: 100%;
+      max-height: 180px;
+      object-fit: cover;
+      display: none;
+    }
+
+    .image-upload-box span {
+      font-size: 0.82rem;
+      color: #9AA8BC;
+      font-weight: 600;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .image-upload-box span i {
+      display: block;
+      font-size: 1.3rem;
+      margin-bottom: 6px;
+    }
+
+    .image-upload-box button {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(15, 23, 42, 0.6);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     .send-feedback {
       font-size: 0.82rem;
       font-weight: 700;
@@ -443,6 +512,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       white-space: pre-line;
     }
 
+    .log-item-image {
+      width: 100%;
+      max-height: 160px;
+      object-fit: cover;
+      border-radius: 10px;
+      margin-bottom: 8px;
+    }
+
     .log-item-meta {
       font-size: 0.75rem;
       color: #8FA0BC;
@@ -466,6 +543,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
+    import { compressImage } from '../../lib/imageCompress.js';
 
     function escapeHtml(str) {
       const div = document.createElement('div');
@@ -593,6 +671,82 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     }
 
     // ============================================================
+    // ছবি আপলোড হ্যান্ডলিং (নতুন — Phase 2)
+    // ============================================================
+    const imageInput = document.getElementById('imageInput');
+    const imagePreview = document.getElementById('imagePreview');
+    const imageUploadPlaceholder = document.getElementById('imageUploadPlaceholder');
+    const imageRemoveBtn = document.getElementById('imageRemoveBtn');
+    const imageFeedback = document.getElementById('imageFeedback');
+
+    let selectedImageFile = null;
+
+    imageInput.addEventListener('change', async () => {
+      const file = imageInput.files?.[0];
+      if (!file) return;
+
+      imageFeedback.className = 'send-feedback';
+      imageFeedback.textContent = '';
+
+      const compressed = await compressImage(file, { maxDimension: 1000 });
+
+      if (compressed.size > 2 * 1024 * 1024) {
+        imageFeedback.className = 'send-feedback error';
+        imageFeedback.textContent = 'ছবিটা ২MB এর চেয়ে বড় (কম্প্রেসের পরও), অন্য ছবি দিন';
+        imageInput.value = '';
+        return;
+      }
+
+      selectedImageFile = compressed;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        imagePreview.src = reader.result;
+        imagePreview.style.display = 'block';
+        imageUploadPlaceholder.style.display = 'none';
+        imageRemoveBtn.style.display = 'flex';
+      };
+      reader.readAsDataURL(compressed);
+    });
+
+    imageRemoveBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      selectedImageFile = null;
+      imageInput.value = '';
+      imagePreview.src = '';
+      imagePreview.style.display = 'none';
+      imageUploadPlaceholder.style.display = 'block';
+      imageRemoveBtn.style.display = 'none';
+      imageFeedback.className = 'send-feedback';
+      imageFeedback.textContent = '';
+    });
+
+    function resetImageState() {
+      selectedImageFile = null;
+      imageInput.value = '';
+      imagePreview.src = '';
+      imagePreview.style.display = 'none';
+      imageUploadPlaceholder.style.display = 'block';
+      imageRemoveBtn.style.display = 'none';
+    }
+
+    // নির্বাচিত ছবি Supabase Storage এ আপলোড করে পাবলিক URL রিটার্ন করে
+    async function uploadInboxImage(file) {
+      const fileName = `${Date.now()}-${crypto.randomUUID()}.jpg`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('inbox-images')
+        .upload(fileName, file, { contentType: file.type });
+
+      if (uploadError) {
+        throw new Error('ছবি আপলোড ব্যর্থ: ' + uploadError.message);
+      }
+
+      const { data: publicUrlData } = supabase.storage.from('inbox-images').getPublicUrl(fileName);
+      return publicUrlData.publicUrl;
+    }
+
+    // ============================================================
     // ব্যাচে insert করার হেল্পার (broadcast এর জন্য, ৫০০ জন করে)
     // ============================================================
     const BATCH_SIZE = 500;
@@ -619,6 +773,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const { data: { user: adminUser } } = await supabase.auth.getUser();
 
       try {
+        let imageUrl = null;
+        if (selectedImageFile) {
+          imageUrl = await uploadInboxImage(selectedImageFile);
+        }
+
         if (currentTarget === 'single') {
           if (!selectedUser) throw new Error('একজন ইউজার সিলেক্ট করুন');
 
@@ -626,6 +785,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             user_id: selectedUser.id,
             message,
             category: currentCategory,
+            image_url: imageUrl,
             sender_type: 'admin',
             sender_id: adminUser?.id || null,
           });
@@ -634,6 +794,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           await supabase.from('admin_notification_log').insert({
             message,
             category: currentCategory,
+            image_url: imageUrl,
             target_type: 'single',
             target_label: `${selectedUser.full_name || ''} (${selectedUser.phone || ''})`,
             recipient_count: 1,
@@ -649,6 +810,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             user_id: p.id,
             message,
             category: currentCategory,
+            image_url: imageUrl,
             sender_type: 'admin',
             sender_id: adminUser?.id || null,
           }));
@@ -659,6 +821,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           await supabase.from('admin_notification_log').insert({
             message,
             category: currentCategory,
+            image_url: imageUrl,
             target_type: 'broadcast',
             target_label: 'সবাইকে',
             recipient_count: rows.length,
@@ -671,6 +834,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         selectedUser = null;
         userSearchResult.innerHTML = '';
         userSearchInput.value = '';
+        resetImageState();
         loadLog();
       } catch (err) {
         showFeedback('পাঠানো ব্যর্থ: ' + err.message, 'error');
@@ -723,6 +887,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             </div>
             <span style="font-size:0.72rem;color:#8FA0BC;">${log.recipient_count} জনকে</span>
           </div>
+          ${log.image_url ? `<img src="${log.image_url}" alt="" class="log-item-image" />` : ''}
           <div class="log-item-msg">${escapeHtml(log.message)}</div>
           <div class="log-item-meta">${formatDate(log.created_at)}</div>
         `;
