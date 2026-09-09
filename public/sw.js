@@ -88,11 +88,19 @@ self.addEventListener("push", (event) => {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
-// নোটিফিকেশনে ট্যাপ করলে সংশ্লিষ্ট পেজে নিয়ে যাওয়া
+// নোটিফিকেশনে ট্যাপ করলে সরাসরি সেই নির্দিষ্ট মেসেজের ফুল-স্ক্রিন
+// ডিটেইল ভিউ খোলা — হোমপেজে গিয়ে আবার বেল আইকনে ক্লিক করার
+// দরকার নাই। notification_id থাকলে ?notif= প্যারামিটার যোগ করে
+// দেওয়া হচ্ছে, NotificationDrawer.astro এটা পড়ে অটো-ওপেন করবে।
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
-  const targetUrl = event.notification.data?.action_url || "/";
+  const notificationId = event.notification.data?.notification_id;
+  const actionUrl = event.notification.data?.action_url || "/";
+
+  const targetUrl = notificationId
+    ? `${actionUrl.split("?")[0]}?notif=${notificationId}`
+    : actionUrl;
 
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
