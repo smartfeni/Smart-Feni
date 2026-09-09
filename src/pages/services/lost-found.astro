@@ -11,23 +11,26 @@
 // আগে এই ফাইলের page-header CSS বাকি ক্যাটাগরি পেজ থেকে আলাদা
 // ছিল (padding, h1 ফন্ট-সাইজ, মোবাইল রেসপন্সিভ রুল মিসিং) —
 // এখন স্ট্যান্ডার্ড প্যাটার্নে মিলিয়ে দেওয়া হলো।
+//
+// আপডেট (মাইগ্রেশন): ListingDetailModal বাদ দিয়ে বাকি ৯টা ক্যাটাগরির
+// মতোই এখন /listing/[id].astro ডেডিকেটেড পেজে যায় (housing.astro এর
+// প্যাটার্ন অনুসরণ করে) — কার্ড এখন <a href="/listing/{id}">, সোয়াইপ-
+// কিউ (lostGrid/foundGrid আলাদা, একে অপরের সাথে না মিশে) সেভ হয়।
+// রিপোর্ট/ফ্ল্যাগ এখন ডিটেইল পেজেই হয়, তাই এখানে ReportModal আর
+// দরকার নেই। প্রিভিউ কার্ডের লাইক (গ্রিডে দেখানো) এটা আলাদা ফিচার,
+// অপরিবর্তিত আছে।
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import AddListingModal from '../../components/ui/AddListingModal.astro';
-import ListingDetailModal from '../../components/ui/ListingDetailModal.astro';
-import ReportModal from '../../components/shared/ReportModal.astro';
 import { supabase } from '../../lib/supabase.js';
 
 const typeOptions = [
   { id: 'lost', label: 'হারিয়ে গিয়েছে' },
   { id: 'found', label: 'পাওয়া গিয়েছে' },
 ];
-
-const typeNameMap = Object.fromEntries(typeOptions.map((t) => [t.id, t.label]));
-const typeIcons = { lost: 'fa-magnifying-glass', found: 'fa-hand-holding-heart' };
 
 const { data: lfListings } = await supabase
   .from('listings')
@@ -68,11 +71,10 @@ const foundItems = listings.filter((i) => i.type === 'found');
           </div>
         ) : (
           <div class="item-grid" id="lostGrid">
-            {lostItems.map((item, i) => (
-              <button
-                type="button"
+            {lostItems.map((item) => (
+              <a
+                href={`/listing/${item.id}`}
                 class="item-card lost-card"
-                data-detail-index={i}
                 data-target-id={item.id}
                 data-upazila-name={item.upazila || ''}
               >
@@ -91,7 +93,7 @@ const foundItems = listings.filter((i) => i.type === 'found');
                 <div class="item-meta">
                   <span><i class="fas fa-location-dot"></i> {item.upazila}</span>
                 </div>
-              </button>
+              </a>
             ))}
           </div>
         )}
@@ -106,11 +108,10 @@ const foundItems = listings.filter((i) => i.type === 'found');
           </div>
         ) : (
           <div class="item-grid" id="foundGrid">
-            {foundItems.map((item, i) => (
-              <button
-                type="button"
+            {foundItems.map((item) => (
+              <a
+                href={`/listing/${item.id}`}
                 class="item-card found-card"
-                data-detail-index={i}
                 data-target-id={item.id}
                 data-upazila-name={item.upazila || ''}
               >
@@ -129,7 +130,7 @@ const foundItems = listings.filter((i) => i.type === 'found');
                 <div class="item-meta">
                   <span><i class="fas fa-location-dot"></i> {item.upazila}</span>
                 </div>
-              </button>
+              </a>
             ))}
           </div>
         )}
@@ -137,12 +138,7 @@ const foundItems = listings.filter((i) => i.type === 'found');
     </div>
   </section>
 
-  <ListingDetailModal />
-  <ReportModal />
   <AddListingModal category="lost-found" typeOptions={typeOptions} titleLabel="আইটেমের নাম" priceLabel="" />
-
-  <script type="application/json" id="lostData" set:html={JSON.stringify(lostItems)} />
-  <script type="application/json" id="foundData" set:html={JSON.stringify(foundItems)} />
 </BaseLayout>
 
 <style>
@@ -264,6 +260,8 @@ const foundItems = listings.filter((i) => i.type === 'found');
     cursor: pointer;
     font-family: inherit;
     width: 100%;
+    text-decoration: none;
+    display: block;
   }
 
   .item-card:hover {
@@ -382,10 +380,8 @@ const foundItems = listings.filter((i) => i.type === 'found');
 
 <script>
   import { supabase } from '../../lib/supabase.js';
-  import { initListingDetailModal } from '../../lib/listingDetailModal.js';
   import { reorderByUserLocation } from '../../lib/locationSort.js';
   import { fetchLikeData, toggleLike, isLoggedIn } from '../../lib/contentEngagement.js';
-  import { initReportModal } from '../../lib/reportModal.js';
 
   // ট্যাব সুইচ
   const tabs = document.querySelectorAll('.tab');
@@ -403,30 +399,29 @@ const foundItems = listings.filter((i) => i.type === 'found');
   });
 
   // দুইটা গ্রিড আলাদাভাবে লোকেশন-সর্ট
-  reorderByUserLocation(document.getElementById('lostGrid'), 'upazilaName');
-  reorderByUserLocation(document.getElementById('foundGrid'), 'upazilaName');
+  const lostGrid = document.getElementById('lostGrid');
+  const foundGrid = document.getElementById('foundGrid');
+  reorderByUserLocation(lostGrid, 'upazilaName');
+  reorderByUserLocation(foundGrid, 'upazilaName');
 
   // ============================================================
-  // রিপোর্ট মডাল (একটাই ইনস্ট্যান্স, দুই ডিটেইল-মডাল কলেই শেয়ার হবে)
+  // সোয়াইপ-কিউ সেভ — /listing/[id].astro পেজে সোয়াইপ-টু-নেক্সট
+  // কাজ করার জন্য ক্লিকের সময় sessionStorage এ বর্তমান গ্রিডের
+  // আইডি-লিস্ট সেভ হয়। lostGrid আর foundGrid সম্পূর্ণ আলাদা রাখা
+  // হয়েছে যাতে "হারানো" থেকে সোয়াইপ করলে "পাওয়া" আইটেমের সাথে
+  // মিশে না যায় (দুটোরই category='lost-found', কিন্তু কিউ আলাদা
+  // তালিকা থেকে বানানো হয়)।
   // ============================================================
-  const report = initReportModal({
-    reasons: [
-      { value: 'resolved', label: 'ইতিমধ্যে সমাধান হয়ে গেছে' },
-      { value: 'wrong_info', label: 'ভুল তথ্য' },
-      { value: 'behavior', label: 'আচরণ খারাপ' },
-      { value: 'other', label: 'অন্যান্য' },
-    ],
-  });
+  function saveSwipeQueue(grid) {
+    if (!grid) return;
+    const ids = Array.from(grid.querySelectorAll('.item-card'))
+      .map((c) => c.dataset.targetId)
+      .filter(Boolean);
+    sessionStorage.setItem('smartfeni_swipe_queue', JSON.stringify({ category: 'lost-found', ids }));
+  }
 
-  // ডিটেইলস মডাল — lost ও found দুইটা আলাদা ডেটাসেট, তাই আলাদাভাবে init
-  const typeNameMap = { lost: 'হারানো', found: 'পাওয়া গিয়েছে' };
-  const typeIcons = { lost: 'fa-magnifying-glass', found: 'fa-hand-holding-heart' };
-
-  const lostData = JSON.parse(document.getElementById('lostData')?.textContent || '[]');
-  const foundData = JSON.parse(document.getElementById('foundData')?.textContent || '[]');
-
-  initListingDetailModal({ listings: lostData, typeNameMap, typeIcons, cardSelector: '#lostGrid .item-card', report });
-  initListingDetailModal({ listings: foundData, typeNameMap, typeIcons, cardSelector: '#foundGrid .item-card', report });
+  lostGrid?.addEventListener('click', () => saveSwipeQueue(lostGrid));
+  foundGrid?.addEventListener('click', () => saveSwipeQueue(foundGrid));
 
   // ============================================================
   // ➕পোস্ট ফ্লো — শেয়ার্ড ফাংশন: লগইন থাকলে সরাসরি লিস্টিং মোডাল
@@ -458,6 +453,9 @@ const foundItems = listings.filter((i) => i.type === 'found');
 
   // ============================================================
   // প্রিভিউ কার্ডে লাইক (দুই গ্রিড একসাথে, লগইন-গেটেড)
+  // কার্ড এখন <a> ট্যাগ, তাই লাইক বাটনে ক্লিকে preventDefault +
+  // stopPropagation — নাহলে ক্লিক করলে ডিটেইল পেজে চলে যাবে এবং/
+  // অথবা সোয়াইপ-কিউ ওভাররাইট হয়ে যাবে।
   // ============================================================
   const allCards = document.querySelectorAll('.item-card');
   let boundLikeButtons = new WeakSet();
@@ -489,6 +487,7 @@ const foundItems = listings.filter((i) => i.type === 'found');
           boundLikeButtons.add(btnEl);
 
           btnEl.addEventListener('click', async (e) => {
+            e.preventDefault();
             e.stopPropagation();
             btnEl.disabled = true;
             const result = await toggleLike('listing', id);
