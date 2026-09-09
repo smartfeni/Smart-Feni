@@ -26,8 +26,11 @@
     <option value="announcement">এনাউন্সমেন্ট</option>
   </select>
 
-  <label class="form-label">টাইটেল</label>
-  <input type="text" class="form-input" id="postTitleInput" />
+  <label class="form-label">টাইটেল<span class="required-mark">*</span></label>
+  <input type="text" class="form-input" id="postTitleInput" required />
+  <div class="field-error-msg" data-error-for="postTitleInput">
+    <i class="fas fa-circle-exclamation"></i><span>টাইটেল দিন</span>
+  </div>
 
   <label class="form-label" id="postDescLabel">বিবরণ</label>
   <textarea class="form-input" id="postDescInput" rows="3"></textarea>
@@ -44,8 +47,11 @@
 
   <!-- ===== শুধু ইভেন্ট টাইপে দেখাবে ===== -->
   <div id="eventOptionsBox" style="display:none;">
-    <label class="form-label">যোগাযোগ নম্বর (কল বাটনের জন্য)</label>
+    <label class="form-label" id="postContactPhoneLabel">যোগাযোগ নম্বর (কল বাটনের জন্য)</label>
     <input type="text" class="form-input" id="postContactPhone" placeholder="01xxxxxxxxx" />
+    <div class="field-error-msg" data-error-for="postContactPhone">
+      <i class="fas fa-circle-exclamation"></i><span>খেলাধুলা বিভাগে পাবলিশ করতে যোগাযোগ নম্বর দিন</span>
+    </div>
 
     <label class="event-checkbox-row">
       <input type="checkbox" id="listInSportsCheckbox" />
@@ -134,13 +140,41 @@
     msgEl.className = `form-msg ${type === 'error' ? 'show-error' : 'show-success'}`;
   }
 
+  // "ইভেন্ট" টাইপে "খেলাধুলা বিভাগে পাবলিশ" চেকবক্স টিক থাকলেই
+  // যোগাযোগ নম্বর mandatory হবে (ডাইনামিক required + * মার্ক)
+  function updateContactPhoneRequirement() {
+    const type = document.getElementById('postTypeInput').value;
+    const listInSports = document.getElementById('listInSportsCheckbox').checked;
+    const needed = type === 'event' && listInSports;
+    const input = document.getElementById('postContactPhone');
+    const label = document.getElementById('postContactPhoneLabel');
+
+    if (needed) {
+      input.setAttribute('required', 'required');
+      if (!label.querySelector('.required-mark')) {
+        const mark = document.createElement('span');
+        mark.className = 'required-mark';
+        mark.textContent = '*';
+        label.appendChild(mark);
+      }
+    } else {
+      input.removeAttribute('required');
+      input.classList.remove('field-invalid');
+      document.querySelector('[data-error-for="postContactPhone"]')?.classList.remove('show');
+      label.querySelector('.required-mark')?.remove();
+    }
+  }
+
   document.getElementById('postTypeInput')?.addEventListener('change', (e) => {
     const type = e.target.value;
     document.getElementById('postDateField').style.display = (type === 'achievement' || type === 'event') ? 'block' : 'none';
     document.getElementById('postImageField').style.display = (type === 'announcement') ? 'none' : 'block';
     document.getElementById('postDescLabel').textContent = type === 'announcement' ? 'বার্তা' : 'বিবরণ';
     document.getElementById('eventOptionsBox').style.display = type === 'event' ? 'block' : 'none';
+    updateContactPhoneRequirement();
   });
+
+  document.getElementById('listInSportsCheckbox')?.addEventListener('change', updateContactPhoneRequirement);
 
   document.getElementById('postImageInput')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
@@ -178,21 +212,15 @@
   }
 
   document.getElementById('addPostBtn')?.addEventListener('click', async () => {
-    const title = document.getElementById('postTitleInput').value.trim();
-    if (!title) {
-      showMsg('টাইটেল দিন');
+    if (!window.SFValidateForm(document.getElementById('addPostCard'))) {
       return;
     }
 
+    const title = document.getElementById('postTitleInput').value.trim();
     const type = document.getElementById('postTypeInput').value;
     const contactPhone = document.getElementById('postContactPhone').value.trim();
     const listInSports = document.getElementById('listInSportsCheckbox').checked;
     const shouldBroadcast = document.getElementById('broadcastCheckbox').checked;
-
-    if (type === 'event' && listInSports && !contactPhone) {
-      showMsg('খেলাধুলা বিভাগে পাবলিশ করতে যোগাযোগ নম্বর দিন');
-      return;
-    }
 
     const btn = document.getElementById('addPostBtn');
     const span = btn.querySelector('span');
@@ -251,7 +279,7 @@
 
     span.textContent = 'পোস্ট করুন';
     btn.disabled = false;
-    showMsg('পোস্ট হয়েছে ✓', 'success');
+    window.showToast('পোস্ট হয়েছে ✓', 'success');
     document.getElementById('postTitleInput').value = '';
     document.getElementById('postDescInput').value = '';
     document.getElementById('postDateInput').value = '';
@@ -260,6 +288,7 @@
     document.getElementById('listInSportsCheckbox').checked = false;
     document.getElementById('broadcastCheckbox').checked = false;
     selectedImageFile = null;
+    updateContactPhoneRequirement();
 
     loadPosts();
 
