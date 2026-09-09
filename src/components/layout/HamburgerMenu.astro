@@ -16,6 +16,17 @@
 //   isClubOwner  = !!is_club_owner
 // ডেলিভারি হিরো → /delivery-hero (delivery_riders-এ নিজের রো থাকলেই
 // দেখাবে, is_active অন/অফ যাই থাকুক)। লাকি ড্র → শুধু strict admin।
+//
+// আপডেট (প্রোফাইল ফ্ল্যাশ ফিক্স, Header.astro-র সাথে কনসিস্টেন্ট):
+// মেনু ওপেন করলেই আগে সব রোল-চেক নেটওয়ার্ক কল (profile + moderators
+// + delivery_riders) শেষ না হওয়া পর্যন্ত নাম "প্রোফাইল" আর সব
+// শপ/ক্লাব/অ্যাডমিন আইটেম হঠাৎ ভেসে উঠত। এখন cache-first: আগের
+// সফল ফলাফল localStorage ('sf_hamburger_cache_v1') এ রাখা হয়, মেনু
+// ওপেন করা মাত্রই সেটা সাথে সাথে দেখানো হয়, ব্যাকগ্রাউন্ডে ফ্রেশ
+// ডেটা এসে সাইলেন্টলি কারেক্ট করে দেয়। cache না থাকলে (প্রথমবার)
+// নাম/অ্যাভাটারে শুধু শিমার দেখাবে (আইটেমগুলো এমনিতেই ডিফল্ট hidden,
+// তাই ভুল কিছু দেখানোর ঝুঁকি নেই)। ভিন্ন ইউজারের cache পেলে (শেয়ারড
+// ডিভাইস) সেটা ক্লিয়ার করে ফ্রেশ ডেটার জন্য অপেক্ষা করে।
 // ============================================================
 ---
 
@@ -221,6 +232,36 @@
     font-size: 0.62rem;
   }
 
+  /* ===== স্কেলিটন শিমার — cache না থাকলে প্রথমবার মেনু ওপেনের সময়
+     (Header.astro-র hdr-skeleton এর সাথে কনসিস্টেন্ট প্যাটার্ন) ===== */
+  @keyframes hmShimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+  }
+
+  .hm-avatar.hm-skeleton {
+    background: linear-gradient(90deg, #EEF1F6 25%, #E2E6ED 37%, #EEF1F6 63%);
+    background-size: 400% 100%;
+    animation: hmShimmer 1.4s ease infinite;
+    border-color: #E2E6ED;
+  }
+
+  .hm-avatar.hm-skeleton #hmDefaultIcon,
+  .hm-avatar.hm-skeleton img {
+    visibility: hidden;
+  }
+
+  .hm-profile-name.hm-skeleton {
+    display: inline-block;
+    width: 90px;
+    height: 13px;
+    border-radius: 6px;
+    color: transparent;
+    background: linear-gradient(90deg, #EEF1F6 25%, #E2E6ED 37%, #EEF1F6 63%);
+    background-size: 400% 100%;
+    animation: hmShimmer 1.4s ease infinite;
+  }
+
   .hm-list {
     flex: 1;
     overflow-y: auto;
@@ -312,6 +353,8 @@
   const logoutText = document.getElementById('hmLogoutText');
   let logoutConfirming = false;
 
+  const HAMBURGER_CACHE_KEY = 'sf_hamburger_cache_v1';
+
   async function loadProfileAndRoles() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
@@ -324,23 +367,6 @@
 
     if (!profile) return;
 
-    profileName.textContent = profile.full_name || 'প্রোফাইল';
-    if (profile.avatar_url) {
-      avatarImg.src = profile.avatar_url;
-      avatarWrap?.classList.add('has-photo');
-    }
-
-    const isAdminOrMod = profile.role === 'admin' || profile.role === 'moderator';
-    const isAdmin = profile.role === 'admin';
-    const isShopOwner = !!profile.is_shop_owner;
-    const isClubOwner = !!profile.is_club_owner;
-
-    // ===== মডারেটর চেক — is_shop_owner/is_club_owner ফ্ল্যাগ শুধু
-    // আসল ওউনারের জন্য সেট হয়, মডারেটরের জন্য না। তাই moderators
-    // টেবিলে নিজের রো (যেকোনো entity_id) আছে কিনা আলাদাভাবে চেক
-    // করতে হবে — নাহলে মডারেটর হ্যামবার্গার মেনুতে "আমার শপ"/
-    // "আমার ক্লাব" দেখতেই পাবে না, /my-shop বা /my-club এ ঢোকার
-    // কোনো পথ থাকবে না। =====
     const { data: modRows } = await supabase
       .from('moderators')
       .select('entity_type')
@@ -349,28 +375,117 @@
     const isShopModerator = (modRows || []).some((m) => m.entity_type === 'shop');
     const isClubModerator = (modRows || []).some((m) => m.entity_type === 'club');
 
-    shopItem.style.display = isShopOwner || isShopModerator ? 'flex' : 'none';
-    clubItem.style.display = isClubOwner || isClubModerator ? 'flex' : 'none';
-    adminItem.style.display = isAdminOrMod ? 'flex' : 'none';
-    luckyDrawItem.style.display = isAdmin ? 'flex' : 'none';
-
-    // ডেলিভারি/রাইড হিরো — যার যেই ক্যাটাগরিতে (checkbox) রেজিস্ট্রেশন
-    // করা আছে সেটাই দেখাবে, is_active (অনলাইন/অফলাইন) যাই থাকুক না
-    // কেন — টগল অফ থাকলেও রাইডার নিজের ড্যাশবোর্ড অ্যাক্সেস করতে পারবে
+    // ===== ডেলিভারি/রাইড হিরো — যার যেই ক্যাটাগরিতে (checkbox)
+    // রেজিস্ট্রেশন করা আছে সেটাই দেখাবে, is_active (অনলাইন/অফলাইন)
+    // যাই থাকুক না কেন — টগল অফ থাকলেও রাইডার নিজের ড্যাশবোর্ড
+    // অ্যাক্সেস করতে পারবে =====
     const { data: riderRow } = await supabase
       .from('delivery_riders')
       .select('id, offers_delivery, offers_ride')
       .eq('profile_id', session.user.id)
       .maybeSingle();
 
-    riderItem.style.display = riderRow?.offers_delivery ? 'flex' : 'none';
-    rideRiderItem.style.display = riderRow?.offers_ride ? 'flex' : 'none';
+    const state = {
+      userId: session.user.id,
+      name: profile.full_name || null,
+      avatarUrl: profile.avatar_url || null,
+      isAdminOrMod: profile.role === 'admin' || profile.role === 'moderator',
+      isAdmin: profile.role === 'admin',
+      isShopOwner: !!profile.is_shop_owner,
+      isClubOwner: !!profile.is_club_owner,
+      isShopModerator,
+      isClubModerator,
+      offersDelivery: !!riderRow?.offers_delivery,
+      offersRide: !!riderRow?.offers_ride,
+    };
+
+    applyState(state);
+    writeHamburgerCache(state);
+  }
+
+  function applyState(state) {
+    setSkeleton(false);
+    profileName.textContent = state.name || 'প্রোফাইল';
+    if (state.avatarUrl) {
+      avatarImg.src = state.avatarUrl;
+      avatarWrap?.classList.add('has-photo');
+    } else {
+      avatarImg.src = '';
+      avatarWrap?.classList.remove('has-photo');
+    }
+
+    // ===== মডারেটর চেক — is_shop_owner/is_club_owner ফ্ল্যাগ শুধু
+    // আসল ওউনারের জন্য সেট হয়, মডারেটরের জন্য না। তাই moderators
+    // টেবিলে নিজের রো (যেকোনো entity_id) আছে কিনা আলাদাভাবে চেক
+    // করতে হবে — নাহলে মডারেটর হ্যামবার্গার মেনুতে "আমার শপ"/
+    // "আমার ক্লাব" দেখতেই পাবে না, /my-shop বা /my-club এ ঢোকার
+    // কোনো পথ থাকবে না। =====
+    shopItem.style.display = state.isShopOwner || state.isShopModerator ? 'flex' : 'none';
+    clubItem.style.display = state.isClubOwner || state.isClubModerator ? 'flex' : 'none';
+    adminItem.style.display = state.isAdminOrMod ? 'flex' : 'none';
+    luckyDrawItem.style.display = state.isAdmin ? 'flex' : 'none';
+    riderItem.style.display = state.offersDelivery ? 'flex' : 'none';
+    rideRiderItem.style.display = state.offersRide ? 'flex' : 'none';
+  }
+
+  function setSkeleton(on) {
+    avatarWrap?.classList.toggle('hm-skeleton', on);
+    profileName?.classList.toggle('hm-skeleton', on);
+  }
+
+  function readHamburgerCache() {
+    try {
+      const raw = localStorage.getItem(HAMBURGER_CACHE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeHamburgerCache(state) {
+    try {
+      localStorage.setItem(HAMBURGER_CACHE_KEY, JSON.stringify(state));
+    } catch {
+      // localStorage ব্লকড/ডিসেবল থাকলে চুপচাপ ইগনোর — cache ছাড়াই কাজ চলবে
+    }
+  }
+
+  function clearHamburgerCache() {
+    try {
+      localStorage.removeItem(HAMBURGER_CACHE_KEY);
+    } catch {
+      // ইগনোর
+    }
   }
 
   function openMenu() {
     overlay?.classList.add('open');
     document.body.style.overflow = 'hidden';
-    loadProfileAndRoles();
+
+    // ===== ধাপ ১ (cache-first): নেটওয়ার্ক ফেচ শেষ হওয়ার আগেই cache
+    // থাকলে সাথে সাথে দেখানো হয়। ধাপ ২ (skeleton): cache না থাকলে
+    // নাম/অ্যাভাটারে শিমার — আইটেমগুলো ডিফল্ট hidden-ই থাকে, তাই
+    // ভুল কিছু দেখানোর ঝুঁকি নেই। =====
+    const cached = readHamburgerCache();
+    if (cached) {
+      applyState(cached);
+    } else {
+      setSkeleton(true);
+    }
+
+    loadProfileAndRolesSafe(cached);
+  }
+
+  // সেশনের ইউজার আইডি cache-এর সাথে না মিললে (শেয়ারড ডিভাইসে
+  // অ্যাকাউন্ট বদল) — ভুল ইউজারের তথ্য দেখিয়ে না রেখে cache ক্লিয়ার
+  // করে স্কেলিটনে ফিরিয়ে ফ্রেশ ডেটার জন্য অপেক্ষা করা
+  async function loadProfileAndRolesSafe(cached) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && cached && cached.userId !== session.user.id) {
+      clearHamburgerCache();
+      setSkeleton(true);
+    }
+    await loadProfileAndRoles();
   }
 
   function closeMenu() {
@@ -396,6 +511,7 @@
       return;
     }
     await supabase.auth.signOut();
+    clearHamburgerCache();
     window.dispatchEvent(new CustomEvent('smartfeni:logged-out'));
     window.location.href = '/';
   });
