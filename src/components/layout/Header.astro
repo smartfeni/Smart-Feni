@@ -32,6 +32,20 @@
 // 'smartfeni:cart-updated' কাস্টম ইভেন্ট শুনে লাইভ আপডেট হয়, তাই
 // অ্যাড-টু-কার্টের সাথে সাথে হেডারেও কাউন্ট বদলে যায় (পেজ রিলোড
 // ছাড়াই)।
+//
+// আপডেট (প্রোফাইল ফ্ল্যাশ ফিক্স): স্ট্যাটিক সাইট হওয়ায় প্রতিটা পেজ
+// লোডে এই স্ক্রিপ্ট নতুন করে রান হয়, তাই সেশন/প্রোফাইল ফেচ শেষ না
+// হওয়া পর্যন্ত ডিফল্ট "প্রোফাইল" টেক্সট + জেনেরিক আইকন দেখাত (মনে
+// হতো লগইন নেই, ১-২ সেকেন্ড পর নাম/ছবি ভেসে উঠত)। এখন দুইটা লেয়ার
+// ফিক্স আছে:
+//  ১. Cache-first: প্রথম সফল ফেচের পর নাম/অ্যাভাটার localStorage
+//     ('sf_profile_cache_v1') এ ক্যাশ হয়। পরের যেকোনো পেজ লোডে
+//     নেটওয়ার্ক কল শেষ হওয়ার আগেই ক্যাশ থেকে সাথে সাথে দেখানো হয়,
+//     পরে ফ্রেশ ডেটা এসে সাইলেন্টলি ওভাররাইট/কারেক্ট করে দেয়।
+//  ২. Skeleton শিমার: একদম প্রথমবার (কোনো ক্যাশ নেই) — বিভ্রান্তিকর
+//     "প্রোফাইল"/জেনেরিক আইকনের বদলে পালসিং শিমার দেখাবে, যাতে
+//     স্পষ্ট বোঝা যায় লোড হচ্ছে, লগইন নেই এমন মনে না হয়।
+// লগ-আউট হলে ক্যাশ ক্লিয়ার হয়ে যায় (showLoggedOutState এ)।
 // ============================================================
 
 import LocationSelector from '../ui/LocationSelector.astro';
@@ -260,6 +274,35 @@ import AuthModal from '../ui/AuthModal.astro';
     font-size: 0.88rem;
   }
 
+  /* ===== স্কেলিটন শিমার — cache না থাকলে প্রথমবার লোডের সময় ===== */
+  @keyframes hdrShimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+  }
+
+  .profile-avatar.hdr-skeleton {
+    background: linear-gradient(90deg, #EEF1F6 25%, #E2E6ED 37%, #EEF1F6 63%);
+    background-size: 400% 100%;
+    animation: hdrShimmer 1.4s ease infinite;
+    border-color: #E2E6ED;
+  }
+
+  .profile-avatar.hdr-skeleton #profileDefaultIcon,
+  .profile-avatar.hdr-skeleton img {
+    visibility: hidden;
+  }
+
+  .profile-label.hdr-skeleton {
+    display: inline-block;
+    width: 44px;
+    height: 11px;
+    border-radius: 6px;
+    color: transparent;
+    background: linear-gradient(90deg, #EEF1F6 25%, #E2E6ED 37%, #EEF1F6 63%);
+    background-size: 400% 100%;
+    animation: hdrShimmer 1.4s ease infinite;
+  }
+
   @media (max-width: 768px) {
     .logo-center {
       --logo-h: 60px;
@@ -327,6 +370,38 @@ import AuthModal from '../ui/AuthModal.astro';
   let isLoggedIn = false;
   let currentUserId = null;
 
+  const PROFILE_CACHE_KEY = 'sf_profile_cache_v1';
+
+  function readProfileCache() {
+    try {
+      const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeProfileCache(userId, name, avatarUrl) {
+    try {
+      localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ userId, name, avatarUrl }));
+    } catch {
+      // localStorage ব্লকড/ডিসেবল থাকলে চুপচাপ ইগনোর — ক্যাশ ছাড়াই কাজ চলবে
+    }
+  }
+
+  function clearProfileCache() {
+    try {
+      localStorage.removeItem(PROFILE_CACHE_KEY);
+    } catch {
+      // ইগনোর
+    }
+  }
+
+  function setSkeleton(on) {
+    avatarWrap?.classList.toggle('hdr-skeleton', on);
+    label?.classList.toggle('hdr-skeleton', on);
+  }
+
   // ===== গ্লোবাল কার্ট আইকন =====
   function updateCartUI(total) {
     if (!headerCartBtn) return;
@@ -356,9 +431,13 @@ import AuthModal from '../ui/AuthModal.astro';
 
   function showLoggedInState(name, avatarUrl) {
     isLoggedIn = true;
+    setSkeleton(false);
     if (avatarUrl) {
       avatarImg.src = avatarUrl;
       avatarWrap?.classList.add('has-photo');
+    } else {
+      avatarImg.src = '';
+      avatarWrap?.classList.remove('has-photo');
     }
     if (label) {
       label.textContent = name || 'প্রোফাইল';
@@ -368,20 +447,44 @@ import AuthModal from '../ui/AuthModal.astro';
   function showLoggedOutState() {
     isLoggedIn = false;
     currentUserId = null;
+    setSkeleton(false);
     avatarImg.src = '';
     avatarWrap?.classList.remove('has-photo');
     if (label) {
       label.textContent = 'প্রোফাইল';
     }
     updateCartUI(0);
+    clearProfileCache();
+  }
+
+  // ===== ধাপ ১ (cache-first): নেটওয়ার্ক ফেচ শেষ হওয়ার আগেই cache
+  // থাকলে সাথে সাথে দেখানো হয় (ব্লাংক/ডিফল্ট "প্রোফাইল" ফ্ল্যাশ হয় না)।
+  // ধাপ ২ (skeleton): একদম প্রথমবার — cache-ই নেই — পালসিং শিমার
+  // দেখাবে, যাতে "লগইন নেই" মনে না হয়ে "লোড হচ্ছে" স্পষ্ট বোঝা যায়।
+  const cached = readProfileCache();
+  if (cached) {
+    showLoggedInState(cached.name, cached.avatarUrl);
+  } else {
+    setSkeleton(true);
   }
 
   // পেজ লোড হলে আগে থেকে সেশন আছে কিনা চেক করা (রিফ্রেশেও লগইন থাকবে)
   async function restoreSession() {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+
+    if (!session) {
+      showLoggedOutState();
+      return;
+    }
 
     currentUserId = session.user.id;
+
+    // cache অন্য ইউজারের হলে (শেয়ারড ডিভাইসে অ্যাকাউন্ট বদল) — ভুল
+    // নাম দেখিয়ে না রেখে স্কেলিটনে ফিরিয়ে ফ্রেশ ডেটার জন্য অপেক্ষা
+    if (cached && cached.userId !== currentUserId) {
+      clearProfileCache();
+      setSkeleton(true);
+    }
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -390,6 +493,7 @@ import AuthModal from '../ui/AuthModal.astro';
       .single();
 
     showLoggedInState(profile?.full_name, profile?.avatar_url);
+    writeProfileCache(currentUserId, profile?.full_name || null, profile?.avatar_url || null);
     refreshHeaderCartFromDb();
   }
 
@@ -412,6 +516,9 @@ import AuthModal from '../ui/AuthModal.astro';
 
     const { data: { session } } = await supabase.auth.getSession();
     currentUserId = session?.user?.id || null;
+    if (currentUserId) {
+      writeProfileCache(currentUserId, name || null, avatarUrl || null);
+    }
     refreshHeaderCartFromDb();
   });
 
