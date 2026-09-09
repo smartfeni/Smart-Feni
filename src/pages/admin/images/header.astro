@@ -1,462 +1,638 @@
+<!-- path: src/components/layout/Header.astro -->
 ---
 // ============================================================
-// পেজ: অ্যাডমিন — হেডার ব্যাকগ্রাউন্ড ম্যানেজমেন্ট (/admin/images/header)
-// ৭টা স্লট: 'header_default' (fallback, উপজেলা-নির্দিষ্ট ছবি না থাকলে
-// এটাই দেখাবে) + ৬টা উপজেলার জন্য আলাদা 'header_<slug>' ছবি।
-// কোনোটাই আপলোড না থাকলে বর্তমান প্লেইন হেডার-ই থাকবে (কিছু ভাঙবে না)।
-// প্রতিটা ছবি ক্যানভাসে 1600x240 এ ক্রপ হয়ে site/header/ ফোল্ডারে যায়।
+// কম্পোনেন্ট: হেডার (ন্যাভবার) — মিনিমাল
+// ব্র্যান্ড: স্মার্ট ফেনী
+// লেআউট: লোকেশন (বাম) — লোগো+ট্যাগলাইন (মাঝে) — প্রোফাইল (ডান)
+// আপডেট: উপজেলা-ভিত্তিক হেডার ব্যাকগ্রাউন্ড ইমেজ (site_images টেবিল
+// থেকে, smartfeni:upazila-changed ইভেন্ট শুনে লাইভ বদলায়)
+// আপডেট: লোগো site_images ('logo' key) থেকে ডাইনামিক লোড, না পেলে
+// ফলব্যাক /logo.png
+// আপডেট: প্রোফাইল আইকনে ক্লিক করলে লগইন থাকলে সরাসরি /profile/edit
+// এ যাবে, না থাকলে AuthModal খুলবে
+//
+// আপডেট (নতুন — বটম ন্যাভ যোগ হওয়ার পর): নোটিফিকেশন বেল এই হেডার
+// থেকে সরিয়ে ফেলা হলো — এখন bottom nav এর "মেসেজ" আইকন থেকে
+// NotificationDrawer.astro খুলবে, একই user_notifications লজিক
+// সেখানে move করা হয়েছে। Header এ ডুপ্লিকেট নোটিফিকেশন UI রাখা
+// হচ্ছে না।
+//
+// আপডেট (নতুন): scroll-hide behavior যোগ করা হলো — নিচের দিকে
+// স্ক্রল করলে হেডার উপরে স্লাইড করে লুকিয়ে যায় (translateY),
+// উপরের দিকে স্ক্রল করলে আবার ফিরে আসে। Bottom nav সবসময় ফিক্সড
+// থাকে বলে মূল নেভিগেশন সবসময় অ্যাক্সেসযোগ্য থাকে।
+// আপডেট (নতুন): গ্লোবাল কার্ট আইকন যোগ হলো (প্রোফাইল বাটনের পাশে) —
+// আগে কার্ট আইকন শুধু শপ প্রোফাইল/প্রোডাক্ট পেজে ফ্লোটিং বাটন হিসেবে
+// থাকত, অন্য কোনো ক্যাটাগরিতে (housing/job/repair ইত্যাদি) দেখা
+// যেত না বলে সাইটওয়াইড অ্যাক্সেস ছিল না। এখন হেডারে বসানো হলো যাতে
+// যেকোনো পেজ থেকে কার্টে যাওয়া যায়। কিন্তু কার্ট খালি থাকলে আইকনটাই
+// হাইড থাকে (housing/job এর মতো শপিং-অপ্রাসঙ্গিক ক্যাটাগরিতে খালি
+// কার্ট আইকন বেমানান লাগবে বলে) — কার্টে কিছু যোগ হলেই দেখা যাবে।
+// product/[id].astro ও ShopProfile.astro থেকে ডিসপ্যাচ করা
+// 'smartfeni:cart-updated' কাস্টম ইভেন্ট শুনে লাইভ আপডেট হয়, তাই
+// অ্যাড-টু-কার্টের সাথে সাথে হেডারেও কাউন্ট বদলে যায় (পেজ রিলোড
+// ছাড়াই)।
+//
+// আপডেট (প্রোফাইল ফ্ল্যাশ ফিক্স): স্ট্যাটিক সাইট হওয়ায় প্রতিটা পেজ
+// লোডে এই স্ক্রিপ্ট নতুন করে রান হয়, তাই সেশন/প্রোফাইল ফেচ শেষ না
+// হওয়া পর্যন্ত ডিফল্ট "প্রোফাইল" টেক্সট + জেনেরিক আইকন দেখাত (মনে
+// হতো লগইন নেই, ১-২ সেকেন্ড পর নাম/ছবি ভেসে উঠত)। এখন দুইটা লেয়ার
+// ফিক্স আছে:
+//  ১. Cache-first: প্রথম সফল ফেচের পর নাম/অ্যাভাটার localStorage
+//     ('sf_profile_cache_v1') এ ক্যাশ হয়। পরের যেকোনো পেজ লোডে
+//     নেটওয়ার্ক কল শেষ হওয়ার আগেই ক্যাশ থেকে সাথে সাথে দেখানো হয়,
+//     পরে ফ্রেশ ডেটা এসে সাইলেন্টলি ওভাররাইট/কারেক্ট করে দেয়।
+//  ২. Skeleton শিমার: একদম প্রথমবার (কোনো ক্যাশ নেই) — বিভ্রান্তিকর
+//     "প্রোফাইল"/জেনেরিক আইকনের বদলে পালসিং শিমার দেখাবে, যাতে
+//     স্পষ্ট বোঝা যায় লোড হচ্ছে, লগইন নেই এমন মনে না হয়।
+// লগ-আউট হলে ক্যাশ ক্লিয়ার হয়ে যায় (showLoggedOutState এ)।
 // ============================================================
 
-export const prerender = false;
-
-import BaseLayout from '../../../components/layout/BaseLayout.astro';
-
-const upazilas = [
-  { slug: 'default', name: 'ডিফল্ট (fallback)' },
-  { slug: 'feni-sadar', name: 'ফেনী সদর' },
-  { slug: 'chhagalnaiya', name: 'ছাগলনাইয়া' },
-  { slug: 'daganbhuiyan', name: 'দাগনভূঞা' },
-  { slug: 'parshuram', name: 'পরশুরাম' },
-  { slug: 'fulgazi', name: 'ফুলগাজী' },
-  { slug: 'sonagazi', name: 'সোনাগাজী' },
-];
+import LocationSelector from '../ui/LocationSelector.astro';
+import AuthModal from '../ui/AuthModal.astro';
 ---
 
-<BaseLayout title="হেডার ব্যাকগ্রাউন্ড | অ্যাডমিন">
-  <div class="admin-page">
-    <div class="container">
+<nav class="navbar" id="siteNavbar">
+  <div class="navbar-bg-overlay"></div>
+  <div class="container navbar-inner">
+    <div class="navbar-left">
+      <LocationSelector />
+    </div>
 
-      <div id="adminLoadingState" class="admin-loading">
-        <div class="admin-spinner"></div>
-        <p>যাচাই করা হচ্ছে...</p>
-      </div>
+    <a href="/" class="logo-center">
+      <img src="/logo.png" alt="স্মার্ট ফেনী লোগো" class="logo-img" id="siteLogoImg" />
+      <span class="logo-tagline">Global Standards. Local Service.</span>
+    </a>
 
-      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+    <div class="navbar-right">
+      <a href="/cart" class="header-cart-btn" id="headerCartBtn" aria-label="কার্ট" style="display:none;">
+        <i class="fas fa-cart-shopping"></i>
+        <span class="header-cart-badge" id="headerCartBadge">0</span>
+      </a>
 
-        <a href="/admin/images" class="back-link"><i class="fas fa-arrow-left"></i> ছবি ম্যানেজমেন্ট</a>
-
-        <div class="admin-header">
-          <h1>হেডার ব্যাকগ্রাউন্ড</h1>
-          <p class="admin-subtitle">প্রতিটা উপজেলার জন্য আলাদা হেডার ছবি — না থাকলে ডিফল্ট ছবি দেখাবে, সেটাও না থাকলে বর্তমান সাদা হেডার-ই থাকবে</p>
-        </div>
-
-        <div class="slots-container">
-          {upazilas.map((u) => (
-            <div class="slot-card" data-slug={u.slug}>
-              <p class="slot-title">{u.name}</p>
-              <div class="slot-preview-frame">
-                <img class="slot-current-img" src="" alt={u.name} style="display:none;" />
-                <div class="slot-empty-state"><i class="fas fa-image"></i><span>ছবি নেই</span></div>
-              </div>
-              <label class="slot-upload-btn">
-                <i class="fas fa-cloud-arrow-up"></i> ছবি বেছে নিন
-                <input type="file" accept="image/*" class="slot-file-input" style="display:none;" />
-              </label>
-              <div class="slot-new-preview" style="display:none;">
-                <canvas class="slot-canvas" width="1600" height="240"></canvas>
-                <div class="slot-new-actions">
-                  <button class="slot-save-btn">আপডেট করুন</button>
-                  <button class="slot-cancel-btn">বাতিল</button>
-                </div>
-              </div>
-              <button class="slot-remove-btn" style="display:none;">মুছে ফেলুন</button>
-              <p class="slot-message"></p>
-            </div>
-          ))}
-        </div>
-
-      </div>
+      <button class="profile-btn" id="profileBtn" aria-label="প্রোফাইল">
+        <span class="profile-avatar" id="profileAvatar">
+          <img id="profileAvatarImg" src="" alt="প্রোফাইল ছবি" />
+          <i class="fas fa-circle-user" id="profileDefaultIcon"></i>
+        </span>
+        <span class="profile-label" id="profileLabel">প্রোফাইল</span>
+      </button>
     </div>
   </div>
+</nav>
 
-  <style>
-    .admin-page {
-      min-height: 60vh;
-      padding: 32px 0 80px;
+<AuthModal />
+
+<style>
+  .navbar {
+    padding: 10px 0;
+    background: rgba(255, 255, 255, 0.98);
+    background-size: cover;
+    background-position: center;
+    position: sticky;
+    top: 0;
+    z-index: 999;
+    border-bottom: 1px solid rgba(27, 42, 74, 0.06);
+    transition: background-image 0.3s ease, transform 0.3s ease;
+  }
+
+  .navbar.nav-hidden {
+    transform: translateY(-100%);
+  }
+
+  .navbar-bg-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.9);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .navbar.has-bg-image {
+    background-color: transparent;
+  }
+
+  .navbar-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .navbar-left {
+    flex: 1;
+    display: flex;
+    justify-content: flex-start;
+    min-width: 0;
+  }
+
+  .navbar-right {
+    flex: 1;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .logo-center {
+    --logo-h: 84px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-decoration: none;
+    flex-shrink: 0;
+    line-height: 1.15;
+    padding: 2px 8px;
+  }
+
+  .logo-img {
+    height: var(--logo-h);
+    width: auto;
+    display: block;
+    margin-bottom: 3px;
+  }
+
+  .logo-tagline {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-style: italic;
+    color: #1B2A4A;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+
+  /* ===== গ্লোবাল কার্ট আইকন ===== */
+  .header-cart-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #F4F7FC;
+    border: 1px solid rgba(27, 42, 74, 0.06);
+    box-shadow: 0 2px 8px rgba(27, 42, 74, 0.05);
+    color: #1B2A4A;
+    font-size: 1.05rem;
+    text-decoration: none;
+    flex-shrink: 0;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .header-cart-btn:hover {
+    background: #FFF0EA;
+    color: #FF6B35;
+    box-shadow: 0 4px 12px rgba(255, 107, 53, 0.12);
+  }
+
+  .header-cart-badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    background: #FF6B35;
+    color: #fff;
+    font-size: 0.62rem;
+    font-weight: 700;
+    min-width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    border: 2px solid #fff;
+  }
+
+  @media (max-width: 480px) {
+    .header-cart-btn {
+      width: 34px;
+      height: 34px;
+      font-size: 0.92rem;
+    }
+  }
+
+  /* ===== প্রোফাইল আইকন (গোলাকার) ===== */
+  .profile-btn {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 4px 10px 4px 4px;
+    border-radius: 40px;
+    transition: background 0.2s ease;
+  }
+
+  .profile-btn:hover {
+    background: #F4F7FC;
+  }
+
+  .profile-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #FFF0EA;
+    border: 2px solid #FFE3D4;
+    box-shadow: 0 2px 8px rgba(255, 107, 53, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .profile-btn:hover .profile-avatar {
+    border-color: #FF6B35;
+    box-shadow: 0 4px 12px rgba(255, 107, 53, 0.16);
+  }
+
+  .profile-avatar #profileDefaultIcon {
+    color: #FF6B35;
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+
+  .profile-avatar img {
+    display: none;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .profile-avatar.has-photo #profileDefaultIcon {
+    display: none;
+  }
+
+  .profile-avatar.has-photo img {
+    display: block;
+  }
+
+  .profile-label {
+    color: #1B2A4A;
+    font-weight: 600;
+    font-size: 0.88rem;
+  }
+
+  /* ===== স্কেলিটন শিমার — cache না থাকলে প্রথমবার লোডের সময় ===== */
+  @keyframes hdrShimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+  }
+
+  .profile-avatar.hdr-skeleton {
+    background: linear-gradient(90deg, #EEF1F6 25%, #E2E6ED 37%, #EEF1F6 63%);
+    background-size: 400% 100%;
+    animation: hdrShimmer 1.4s ease infinite;
+    border-color: #E2E6ED;
+  }
+
+  .profile-avatar.hdr-skeleton #profileDefaultIcon,
+  .profile-avatar.hdr-skeleton img {
+    visibility: hidden;
+  }
+
+  .profile-label.hdr-skeleton {
+    display: inline-block;
+    width: 44px;
+    height: 11px;
+    border-radius: 6px;
+    color: transparent;
+    background: linear-gradient(90deg, #EEF1F6 25%, #E2E6ED 37%, #EEF1F6 63%);
+    background-size: 400% 100%;
+    animation: hdrShimmer 1.4s ease infinite;
+  }
+
+  @media (max-width: 768px) {
+    .logo-center {
+      --logo-h: 60px;
     }
 
-    .admin-loading {
-      display: flex;
+    .logo-tagline {
+      font-size: 0.6rem;
+    }
+
+    .profile-btn {
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      padding: 120px 0;
-      color: #5A6E85;
+      gap: 2px;
+      padding: 4px 6px;
+    }
+
+    .profile-label {
+      font-size: 0.62rem;
       font-weight: 600;
     }
 
-    .admin-spinner {
-      width: 36px;
-      height: 36px;
-      border: 3px solid #E5EAF0;
-      border-top-color: #FF6B35;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+    .profile-avatar {
+      width: 34px;
+      height: 34px;
     }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .back-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      color: #5A6E85;
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 0.88rem;
-      margin-bottom: 20px;
-    }
-
-    .back-link:hover {
-      color: #FF6B35;
-    }
-
-    .admin-header {
-      margin-bottom: 24px;
-    }
-
-    .admin-header h1 {
-      font-size: 1.6rem;
-      font-weight: 700;
-      color: #1B2A4A;
-    }
-
-    .admin-subtitle {
-      font-size: 0.85rem;
-      color: #8FA0BC;
-      margin-top: 4px;
-      font-weight: 600;
-    }
-
-    .slots-container {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .slot-card {
-      background: #fff;
-      border-radius: 20px;
-      padding: 18px;
-      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
-    }
-
-    .slot-title {
-      font-size: 0.9rem;
-      font-weight: 700;
-      color: #1B2A4A;
-      margin-bottom: 10px;
-    }
-
-    .slot-preview-frame {
-      position: relative;
-      width: 100%;
-      aspect-ratio: 1600 / 240;
-      border-radius: 14px;
-      overflow: hidden;
-      background: #F4F7FC;
-      margin-bottom: 12px;
-    }
-
-    .slot-preview-frame img, .slot-canvas {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-
-    .slot-empty-state {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      color: #B0BCCB;
-      font-size: 0.78rem;
-      font-weight: 600;
-    }
-
-    .slot-empty-state i {
+    .profile-avatar #profileDefaultIcon {
       font-size: 1.3rem;
     }
+  }
 
-    .slot-upload-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      background: #F4F7FC;
-      color: #1B2A4A;
-      border: 1.5px dashed #D7E0EC;
-      padding: 10px;
-      border-radius: 12px;
-      font-weight: 600;
-      font-size: 0.85rem;
-      cursor: pointer;
+  @media (max-width: 480px) {
+    .logo-center {
+      --logo-h: 50px;
     }
 
-    .slot-upload-btn:hover {
-      border-color: #FF6B35;
+    .logo-tagline {
+      font-size: 0.52rem;
     }
 
-    .slot-new-preview {
-      margin-top: 12px;
+    .profile-avatar {
+      width: 30px;
+      height: 30px;
     }
 
-    .slot-new-actions {
-      display: flex;
-      gap: 8px;
-      margin-top: 10px;
+    .profile-avatar #profileDefaultIcon {
+      font-size: 1.15rem;
     }
 
-    .slot-save-btn {
-      flex: 1;
-      background: #FF6B35;
-      color: #fff;
-      border: none;
-      padding: 10px;
-      border-radius: 10px;
-      font-weight: 700;
-      font-size: 0.85rem;
-      cursor: pointer;
+    .profile-label {
+      font-size: 0.56rem;
+    }
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const profileBtn = document.getElementById('profileBtn');
+  const avatarWrap = document.getElementById('profileAvatar');
+  const avatarImg = document.getElementById('profileAvatarImg');
+  const label = document.getElementById('profileLabel');
+  const headerCartBtn = document.getElementById('headerCartBtn');
+  const headerCartBadge = document.getElementById('headerCartBadge');
+
+  let isLoggedIn = false;
+  let currentUserId = null;
+
+  const PROFILE_CACHE_KEY = 'sf_profile_cache_v1';
+
+  function readProfileCache() {
+    try {
+      const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeProfileCache(userId, name, avatarUrl) {
+    try {
+      localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ userId, name, avatarUrl }));
+    } catch {
+      // localStorage ব্লকড/ডিসেবল থাকলে চুপচাপ ইগনোর — ক্যাশ ছাড়াই কাজ চলবে
+    }
+  }
+
+  function clearProfileCache() {
+    try {
+      localStorage.removeItem(PROFILE_CACHE_KEY);
+    } catch {
+      // ইগনোর
+    }
+  }
+
+  function setSkeleton(on) {
+    avatarWrap?.classList.toggle('hdr-skeleton', on);
+    label?.classList.toggle('hdr-skeleton', on);
+  }
+
+  // ===== গ্লোবাল কার্ট আইকন =====
+  function updateCartUI(total) {
+    if (!headerCartBtn) return;
+    if (total > 0) {
+      headerCartBadge.textContent = total > 99 ? '৯৯+' : total;
+      headerCartBtn.style.display = 'flex';
+    } else {
+      headerCartBtn.style.display = 'none';
+    }
+  }
+
+  async function refreshHeaderCartFromDb() {
+    if (!currentUserId) {
+      updateCartUI(0);
+      return;
+    }
+    const { data } = await supabase.from('cart_items').select('quantity').eq('user_id', currentUserId);
+    const total = (data || []).reduce((sum, row) => sum + row.quantity, 0);
+    updateCartUI(total);
+  }
+
+  // product/[id].astro ও ShopProfile.astro থেকে অ্যাড-টু-কার্টের পর
+  // ডিসপ্যাচ করা ইভেন্ট শুনে সাথে সাথে ব্যাজ আপডেট (পেজ রিলোড ছাড়াই)
+  window.addEventListener('smartfeni:cart-updated', (e) => {
+    updateCartUI(e.detail?.total ?? 0);
+  });
+
+  function showLoggedInState(name, avatarUrl) {
+    isLoggedIn = true;
+    setSkeleton(false);
+    if (avatarUrl) {
+      avatarImg.src = avatarUrl;
+      avatarWrap?.classList.add('has-photo');
+    } else {
+      avatarImg.src = '';
+      avatarWrap?.classList.remove('has-photo');
+    }
+    if (label) {
+      label.textContent = name || 'প্রোফাইল';
+    }
+  }
+
+  function showLoggedOutState() {
+    isLoggedIn = false;
+    currentUserId = null;
+    setSkeleton(false);
+    avatarImg.src = '';
+    avatarWrap?.classList.remove('has-photo');
+    if (label) {
+      label.textContent = 'প্রোফাইল';
+    }
+    updateCartUI(0);
+    clearProfileCache();
+  }
+
+  // ===== ধাপ ১ (cache-first): নেটওয়ার্ক ফেচ শেষ হওয়ার আগেই cache
+  // থাকলে সাথে সাথে দেখানো হয় (ব্লাংক/ডিফল্ট "প্রোফাইল" ফ্ল্যাশ হয় না)।
+  // ধাপ ২ (skeleton): একদম প্রথমবার — cache-ই নেই — পালসিং শিমার
+  // দেখাবে, যাতে "লগইন নেই" মনে না হয়ে "লোড হচ্ছে" স্পষ্ট বোঝা যায়।
+  const cached = readProfileCache();
+  if (cached) {
+    showLoggedInState(cached.name, cached.avatarUrl);
+  } else {
+    setSkeleton(true);
+  }
+
+  // পেজ লোড হলে আগে থেকে সেশন আছে কিনা চেক করা (রিফ্রেশেও লগইন থাকবে)
+  async function restoreSession() {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
+      showLoggedOutState();
+      return;
     }
 
-    .slot-save-btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
+    currentUserId = session.user.id;
+
+    // cache অন্য ইউজারের হলে (শেয়ারড ডিভাইসে অ্যাকাউন্ট বদল) — ভুল
+    // নাম দেখিয়ে না রেখে স্কেলিটনে ফিরিয়ে ফ্রেশ ডেটার জন্য অপেক্ষা
+    if (cached && cached.userId !== currentUserId) {
+      clearProfileCache();
+      setSkeleton(true);
     }
 
-    .slot-cancel-btn {
-      background: #F4F7FC;
-      color: #5A6E85;
-      border: none;
-      padding: 10px 16px;
-      border-radius: 10px;
-      font-weight: 700;
-      font-size: 0.85rem;
-      cursor: pointer;
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name, avatar_url')
+      .eq('id', session.user.id)
+      .single();
+
+    showLoggedInState(profile?.full_name, profile?.avatar_url);
+    writeProfileCache(currentUserId, profile?.full_name || null, profile?.avatar_url || null);
+    refreshHeaderCartFromDb();
+  }
+
+  restoreSession();
+
+  // প্রোফাইল বাটন — লগইন করা না থাকলে AuthModal খুলবে, থাকলে সরাসরি
+  // প্রোফাইল পেজে নিয়ে যাবে
+  profileBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (isLoggedIn) {
+      window.location.href = '/profile/edit';
+    } else {
+      window.openAuthModal?.('login');
+    }
+  });
+
+  window.addEventListener('smartfeni:auth-changed', async (e) => {
+    const { name, avatarUrl } = e.detail || {};
+    showLoggedInState(name, avatarUrl);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    currentUserId = session?.user?.id || null;
+    if (currentUserId) {
+      writeProfileCache(currentUserId, name || null, avatarUrl || null);
+    }
+    refreshHeaderCartFromDb();
+  });
+
+  window.addEventListener('smartfeni:logged-out', () => {
+    showLoggedOutState();
+  });
+
+  // ============================================================
+  // উপজেলা-ভিত্তিক হেডার ব্যাকগ্রাউন্ড ইমেজ
+  // ============================================================
+  const navbar = document.getElementById('siteNavbar');
+  const BUCKET = 'listing-images';
+  const STORAGE_KEY = 'smartfeni_upazila';
+
+  function publicUrl(path, updatedAt) {
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    const bust = updatedAt ? new Date(updatedAt).getTime() : Date.now();
+    return `${data.publicUrl}?v=${bust}`;
+  }
+
+  async function loadHeaderBg(upazilaSlug) {
+    if (!navbar) return;
+
+    let record = null;
+
+    if (upazilaSlug) {
+      const { data } = await supabase
+        .from('site_images')
+        .select('storage_path, updated_at')
+        .eq('image_key', `header_${upazilaSlug}`)
+        .maybeSingle();
+      record = data;
     }
 
-    .slot-remove-btn {
-      width: 100%;
-      background: #FFF0EA;
-      color: #D14343;
-      border: none;
-      padding: 9px;
-      border-radius: 10px;
-      font-weight: 700;
-      font-size: 0.8rem;
-      cursor: pointer;
-      margin-top: 10px;
+    if (!record) {
+      const { data } = await supabase
+        .from('site_images')
+        .select('storage_path, updated_at')
+        .eq('image_key', 'header_default')
+        .maybeSingle();
+      record = data;
     }
 
-    .slot-message {
-      text-align: center;
-      font-size: 0.8rem;
-      font-weight: 600;
-      margin-top: 8px;
+    if (record?.storage_path) {
+      navbar.style.backgroundImage = `url('${publicUrl(record.storage_path, record.updated_at)}')`;
+      navbar.classList.add('has-bg-image');
+    } else {
+      navbar.style.backgroundImage = '';
+      navbar.classList.remove('has-bg-image');
+    }
+  }
+
+  const savedUpazila = localStorage.getItem(STORAGE_KEY);
+  loadHeaderBg(savedUpazila);
+
+  window.addEventListener('smartfeni:upazila-changed', (e) => {
+    loadHeaderBg(e.detail?.upazila);
+  });
+
+  // ============================================================
+  // ডাইনামিক লোগো
+  // ============================================================
+  const logoImg = document.getElementById('siteLogoImg');
+
+  async function loadDynamicLogo() {
+    const { data } = await supabase
+      .from('site_images')
+      .select('storage_path, updated_at')
+      .eq('image_key', 'logo')
+      .maybeSingle();
+
+    if (data?.storage_path && logoImg) {
+      logoImg.src = publicUrl(data.storage_path, data.updated_at);
+    }
+  }
+
+  loadDynamicLogo();
+
+  // ============================================================
+  // Scroll-hide — নিচে স্ক্রল করলে হেডার লুকাবে, উপরে স্ক্রল করলে
+  // ফিরে আসবে। ছোট থ্রেশহোল্ড (৬px) রাখা হয়েছে যাতে সামান্য
+  // ফ্লিকার/জিটার স্ক্রলে হেডার বারবার লাফায় না। পেজের একদম উপরে
+  // (scrollY <= 0) থাকলে সবসময় ভিজিবল থাকবে।
+  // ============================================================
+  let lastScrollY = window.scrollY;
+  let ticking = false;
+  const SCROLL_THRESHOLD = 6;
+
+  function handleScroll() {
+    const currentScrollY = window.scrollY;
+    const diff = currentScrollY - lastScrollY;
+
+    if (currentScrollY <= 0) {
+      navbar?.classList.remove('nav-hidden');
+    } else if (diff > SCROLL_THRESHOLD) {
+      navbar?.classList.add('nav-hidden');
+      lastScrollY = currentScrollY;
+    } else if (diff < -SCROLL_THRESHOLD) {
+      navbar?.classList.remove('nav-hidden');
+      lastScrollY = currentScrollY;
     }
 
-    .slot-message.success {
-      color: #1B7A3C;
+    ticking = false;
+  }
+
+  window.addEventListener('scroll', () => {
+    if (!ticking) {
+      window.requestAnimationFrame(handleScroll);
+      ticking = true;
     }
-
-    .slot-message.error {
-      color: #D14343;
-    }
-  </style>
-
-  <script>
-    import { initAdminGuard } from '../../../lib/adminGuard.js';
-    import { supabase } from '../../../lib/supabase.js';
-
-    const BUCKET = 'listing-images';
-
-    function storagePath(slug) {
-      return `site/header/${slug}.jpg`;
-    }
-
-    function imageKey(slug) {
-      return `header_${slug}`;
-    }
-
-    function publicUrl(path) {
-      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-      return data.publicUrl;
-    }
-
-    const slotCards = document.querySelectorAll('.slot-card');
-
-    slotCards.forEach((card) => {
-      const slug = card.dataset.slug;
-      const currentImg = card.querySelector('.slot-current-img');
-      const emptyState = card.querySelector('.slot-empty-state');
-      const fileInput = card.querySelector('.slot-file-input');
-      const newPreviewWrap = card.querySelector('.slot-new-preview');
-      const canvas = card.querySelector('.slot-canvas');
-      const saveBtn = card.querySelector('.slot-save-btn');
-      const cancelBtn = card.querySelector('.slot-cancel-btn');
-      const removeBtn = card.querySelector('.slot-remove-btn');
-      const messageEl = card.querySelector('.slot-message');
-
-      let croppedBlob = null;
-      let hasExisting = false;
-
-      function showMessage(text, type) {
-        messageEl.textContent = text;
-        messageEl.className = `slot-message ${type}`;
-        setTimeout(() => { messageEl.textContent = ''; messageEl.className = 'slot-message'; }, 4000);
-      }
-
-      async function loadCurrent() {
-        const { data } = await supabase
-          .from('site_images')
-          .select('storage_path, updated_at')
-          .eq('image_key', imageKey(slug))
-          .maybeSingle();
-
-        if (!data) {
-          hasExisting = false;
-          currentImg.style.display = 'none';
-          emptyState.style.display = 'flex';
-          removeBtn.style.display = 'none';
-          return;
-        }
-
-        hasExisting = true;
-        const cacheBust = data.updated_at ? new Date(data.updated_at).getTime() : Date.now();
-        currentImg.src = `${publicUrl(data.storage_path)}?v=${cacheBust}`;
-        currentImg.style.display = 'block';
-        emptyState.style.display = 'none';
-        removeBtn.style.display = 'block';
-      }
-
-      fileInput.addEventListener('change', () => {
-        const file = fileInput.files?.[0];
-        if (!file) return;
-
-        const img = new Image();
-        img.onload = () => {
-          const ctx = canvas.getContext('2d');
-          const targetW = 1600, targetH = 240;
-          const targetRatio = targetW / targetH;
-          const imgRatio = img.width / img.height;
-
-          let sx, sy, sWidth, sHeight;
-          if (imgRatio > targetRatio) {
-            sHeight = img.height;
-            sWidth = sHeight * targetRatio;
-            sx = (img.width - sWidth) / 2;
-            sy = 0;
-          } else {
-            sWidth = img.width;
-            sHeight = sWidth / targetRatio;
-            sx = 0;
-            sy = (img.height - sHeight) / 2;
-          }
-
-          ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-          canvas.toBlob((blob) => { croppedBlob = blob; }, 'image/jpeg', 0.85);
-
-          newPreviewWrap.style.display = 'block';
-        };
-        img.src = URL.createObjectURL(file);
-      });
-
-      cancelBtn.addEventListener('click', () => {
-        newPreviewWrap.style.display = 'none';
-        fileInput.value = '';
-        croppedBlob = null;
-      });
-
-      saveBtn.addEventListener('click', async () => {
-        if (!croppedBlob) return;
-
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'আপলোড হচ্ছে...';
-
-        // ছবি আপলোড — সার্ভার-সাইড /api/upload-image রুট দিয়ে (service role
-        // key ব্যবহার করে)। আগে ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload()
-        // কল হতো, কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ
-        // হচ্ছিল ("new row violates row-level security policy" — লগে
-        // কনফার্ম করা হয়েছে)।
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          showMessage('আগে লগইন করুন', 'error');
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'আপডেট করুন';
-          return;
-        }
-
-        const path = storagePath(slug);
-
-        const uploadFormData = new FormData();
-        uploadFormData.append('file', croppedBlob);
-        uploadFormData.append('path', path);
-        uploadFormData.append('contentType', 'image/jpeg');
-
-        const uploadRes = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          body: uploadFormData,
-        });
-        const uploadResult = await uploadRes.json();
-
-        if (!uploadRes.ok) {
-          showMessage('আপলোড ব্যর্থ: ' + uploadResult.error, 'error');
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'আপডেট করুন';
-          return;
-        }
-
-        const { error: dbError } = await supabase
-          .from('site_images')
-          .upsert({ image_key: imageKey(slug), storage_path: path, updated_at: new Date().toISOString() });
-
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'আপডেট করুন';
-
-        if (dbError) {
-          showMessage('সেভ ব্যর্থ: ' + dbError.message, 'error');
-          return;
-        }
-
-        showMessage('আপডেট হয়েছে!', 'success');
-        newPreviewWrap.style.display = 'none';
-        fileInput.value = '';
-        croppedBlob = null;
-        loadCurrent();
-      });
-
-      let confirmingRemove = false;
-      removeBtn.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          removeBtn.textContent = 'নিশ্চিত করুন?';
-          return;
-        }
-
-        await supabase.storage.from(BUCKET).remove([storagePath(slug)]);
-        await supabase.from('site_images').delete().eq('image_key', imageKey(slug));
-
-        confirmingRemove = false;
-        removeBtn.textContent = 'মুছে ফেলুন';
-        showMessage('ছবি সরানো হয়েছে', 'success');
-        loadCurrent();
-      });
-
-      card._loadCurrent = loadCurrent;
-    });
-
-    window.addEventListener('smartfeni:admin-ready', () => {
-      slotCards.forEach((card) => card._loadCurrent?.());
-    });
-
-    initAdminGuard();
-  </script>
-</BaseLayout>
+  }, { passive: true });
+</script>
