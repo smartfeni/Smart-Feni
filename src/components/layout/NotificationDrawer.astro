@@ -5,35 +5,60 @@
 // (আগের সব কমেন্ট/হিস্ট্রি অপরিবর্তিত)
 //
 // আপডেট (Blood Request ফিচার): category='blood_request' নোটিফিকেশনে
-// এখন ইনলাইন "স্কিপ" / "আমি রক্তদানে আগ্রহী" বাটন দেখাবে। রিকোয়েস্টের
-// লাইভ status (blood_requests টেবিল থেকে ব্যাচে ফেচ করা) চেক করে —
-// active না থাকলে বাটনের বদলে "ইতিমধ্যে ম্যানেজ হয়ে গেছে" লেখা দেখাবে।
-// "আগ্রহী" চাপলে respond_to_blood_request() RPC কল হয়।
+// ইনলাইন "স্কিপ" / "আমি রক্তদানে আগ্রহী" বাটন, লাইভ status চেক।
+//
+// আপডেট (Phase 2 — ছবি): ছবি থাম্বনেইল + ফুলস্ক্রিন লাইটবক্স।
+//
+// আপডেট (এই সেশন — HungerStation-স্টাইল ডিটেইল ভিউ):
+// - আগে লিস্ট আইটেমে ক্লিক করলে ইনলাইন টেক্সট ক্লাম্প/এক্সপান্ড হতো,
+//   এখন একটা পূর্ণাঙ্গ ফুল-স্ক্রিন ডিটেইল ভিউ খোলে (ক্যাটাগরি চিপ,
+//   তারিখ, বড় ছবি, সম্পূর্ণ টেক্সট) — যেভাবে HungerStation এর
+//   Inbox কাজ করে
+// - ছবি ট্যাপ ও টেক্সট/আইটেম ট্যাপ এখন সম্পূর্ণ আলাদা এরিয়া —
+//   ছবি ট্যাপে শুধু লাইটবক্স খোলে (stopPropagation), বাকি এরিয়া
+//   ট্যাপে ডিটেইল ভিউ খোলে, কনফ্লিক্ট নাই
+// - push notification ক্লিক করলে sw.js এখন ?notif={id} সহ URL এ
+//   পাঠায় — পেজ লোড হলে এই প্যারামিটার পড়ে সরাসরি সেই নোটিফিকেশনের
+//   ডিটেইল ভিউ অটো-ওপেন হয় (bell আইকনে আলাদা করে ক্লিক করা লাগে না)
 // ============================================================
 ---
 
 <div class="nd-overlay" id="notificationDrawerOverlay">
   <aside class="nd-panel" id="notificationDrawerPanel">
-    <div class="nd-header">
-      <h2><i class="fas fa-bell"></i> নোটিফিকেশন</h2>
-      <div class="nd-header-actions">
-        <button id="notifMarkAllBtn" type="button">সব পড়া হয়েছে</button>
-        <button class="nd-close" id="notificationDrawerClose" aria-label="বন্ধ করুন">
-          <i class="fas fa-xmark"></i>
-        </button>
+    <!-- ===== লিস্ট ভিউ ===== -->
+    <div class="nd-view" id="notifListView">
+      <div class="nd-header">
+        <h2><i class="fas fa-bell"></i> নোটিফিকেশন</h2>
+        <div class="nd-header-actions">
+          <button id="notifMarkAllBtn" type="button">সব পড়া হয়েছে</button>
+          <button class="nd-close" id="notificationDrawerClose" aria-label="বন্ধ করুন">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
       </div>
+
+      <div class="nd-list" id="notifList"></div>
+
+      <p class="nd-empty" id="notifEmpty" style="display:none;">
+        <i class="fas fa-bell-slash"></i>
+        কোনো নোটিফিকেশন নেই
+      </p>
     </div>
 
-    <div class="nd-list" id="notifList"></div>
-
-    <p class="nd-empty" id="notifEmpty" style="display:none;">
-      <i class="fas fa-bell-slash"></i>
-      কোনো নোটিফিকেশন নেই
-    </p>
+    <!-- ===== ফুল-স্ক্রিন ডিটেইল ভিউ (নতুন — HungerStation স্টাইল) ===== -->
+    <div class="nd-view nd-detail-view" id="notifDetailView" style="display:none;">
+      <div class="nd-detail-header">
+        <button class="nd-back" id="notifDetailBackBtn" type="button" aria-label="ফিরে যান">
+          <i class="fas fa-arrow-left"></i>
+        </button>
+        <h2>নোটিফিকেশন</h2>
+      </div>
+      <div class="nd-detail-body" id="notifDetailBody"></div>
+    </div>
   </aside>
 </div>
 
-<!-- ছবি ফুলস্ক্রিন লাইটবক্স (নতুন — Phase 2) -->
+<!-- ছবি ফুলস্ক্রিন লাইটবক্স -->
 <div class="nd-lightbox" id="imgLightbox">
   <button type="button" class="nd-lightbox-close" id="imgLightboxClose" aria-label="বন্ধ করুন">
     <i class="fas fa-xmark"></i>
@@ -66,10 +91,17 @@
     flex-direction: column;
     transform: translateX(100%);
     transition: transform 0.28s ease;
+    overflow: hidden;
   }
 
   .nd-overlay.open .nd-panel {
     transform: translateX(0);
+  }
+
+  .nd-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
   }
 
   .nd-header {
@@ -160,7 +192,48 @@
     color: #D7E0EC;
   }
 
-  /* ===== ছবি ফুলস্ক্রিন লাইটবক্স (নতুন) ===== */
+  /* ===== ফুল-স্ক্রিন ডিটেইল ভিউ (নতুন) ===== */
+  .nd-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 20px;
+    border-bottom: 1px solid #EEF3F9;
+  }
+
+  .nd-detail-header h2 {
+    font-size: 1.05rem;
+    color: #1B2A4A;
+    font-weight: 700;
+  }
+
+  .nd-back {
+    background: #F4F7FC;
+    border: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: #1B2A4A;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .nd-back:hover {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .nd-detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+
+  /* ===== ছবি ফুলস্ক্রিন লাইটবক্স ===== */
   .nd-lightbox {
     display: none;
     position: fixed;
@@ -202,9 +275,8 @@
 </style>
 
 <!-- ============================================================
-  is:global — .notif-item এলিমেন্টগুলো JS দিয়ে ডাইনামিকালি বানানো
-  হয় বলে Astro এর স্কোপড CSS এদের উপর বসে না (Header.astro থেকে
-  অপরিবর্তিত রাখা হয়েছে)।
+  is:global — .notif-item, .nd-detail-* এলিমেন্টগুলো JS দিয়ে
+  ডাইনামিকালি বানানো হয় বলে Astro এর স্কোপড CSS এদের উপর বসে না।
 ============================================================ -->
 <style is:global>
   .notif-item {
@@ -285,11 +357,6 @@
     -webkit-box-orient: vertical;
   }
 
-  .notif-item-msg.expanded {
-    -webkit-line-clamp: unset;
-    display: block;
-  }
-
   .notif-item.unread .notif-item-msg {
     font-weight: 600;
   }
@@ -323,7 +390,6 @@
     text-decoration: underline;
   }
 
-  /* ===== Blood Request ইনলাইন বাটন (নতুন) ===== */
   .notif-blood-actions {
     display: flex;
     gap: 8px;
@@ -367,7 +433,6 @@
     color: #1E9E5A;
   }
 
-  /* ===== নোটিফিকেশনের ছবি থাম্বনেইল (নতুন — Phase 2) ===== */
   .notif-item-image {
     width: 100%;
     max-height: 140px;
@@ -375,6 +440,63 @@
     border-radius: 10px;
     margin-bottom: 8px;
     cursor: zoom-in;
+  }
+
+  /* ===== ডিটেইল ভিউয়ের ভেতরের কনটেন্ট (নতুন — HungerStation স্টাইল) ===== */
+  .nd-detail-chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .nd-detail-chip {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 5px 14px;
+    border-radius: 20px;
+    background: #F1F4F8;
+    color: #5A6E85;
+  }
+
+  .nd-detail-chip.chip-blood_request,
+  .nd-detail-chip.chip-blood_response {
+    background: #FDEAEA;
+    color: #D14343;
+  }
+
+  .nd-detail-chip.chip-promo {
+    background: #FDF0D5;
+    color: #B36B00;
+  }
+
+  .nd-detail-chip.chip-delivery_hero,
+  .nd-detail-chip.chip-rider_offer,
+  .nd-detail-chip.chip-shop_order {
+    background: #E8F2FF;
+    color: #1D6FE0;
+  }
+
+  .nd-detail-date {
+    font-size: 0.78rem;
+    color: #9AA8BC;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+
+  .nd-detail-image {
+    width: 100%;
+    border-radius: 14px;
+    margin-bottom: 18px;
+    cursor: zoom-in;
+  }
+
+  .nd-detail-text {
+    font-size: 0.95rem;
+    color: #1B2A4A;
+    line-height: 1.8;
+    white-space: pre-line;
+    margin-bottom: 18px;
   }
 </style>
 
@@ -387,27 +509,31 @@
   const notifEmpty = document.getElementById('notifEmpty');
   const notifMarkAllBtn = document.getElementById('notifMarkAllBtn');
 
-  // ===== ছবি লাইটবক্স (নতুন) =====
+  const listView = document.getElementById('notifListView');
+  const detailView = document.getElementById('notifDetailView');
+  const detailBody = document.getElementById('notifDetailBody');
+  const detailBackBtn = document.getElementById('notifDetailBackBtn');
+
   const imgLightbox = document.getElementById('imgLightbox');
   const imgLightboxImg = document.getElementById('imgLightboxImg');
   const imgLightboxClose = document.getElementById('imgLightboxClose');
 
-  function openLightbox(src) {
-    imgLightboxImg.src = src;
-    imgLightbox.classList.add('open');
-  }
-
-  function closeLightbox() {
-    imgLightbox.classList.remove('open');
-    imgLightboxImg.src = '';
-  }
-
-  imgLightboxClose?.addEventListener('click', closeLightbox);
-  imgLightbox?.addEventListener('click', (e) => {
-    if (e.target === imgLightbox) closeLightbox();
-  });
-
   let currentUserId = null;
+  let latestNotifications = [];
+  let bloodStatusMap = new Map();
+  let respondedSet = new Set();
+
+  const categoryChipLabels = {
+    listing_status: 'লিস্টিং স্ট্যাটাস',
+    delivery_hero: 'ডেলিভারি হিরো',
+    blood_request: 'ব্লাড রিকোয়েস্ট',
+    blood_response: 'ব্লাড রেসপন্স',
+    rider_offer: 'রাইডার অফার',
+    shop_order: 'অর্ডার',
+    promo: 'অফার-প্রমো',
+    message: 'মেসেজ',
+    system: 'সিস্টেম',
+  };
 
   function toBnDigits(num) {
     const bn = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
@@ -428,17 +554,23 @@
     return `${toBnDigits(Math.floor(diffDay / 30))} মাস আগে`;
   }
 
+  function absoluteDateBn(dateString) {
+    const d = new Date(dateString);
+    return d.toLocaleDateString('bn-BD', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
   function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str ?? '';
     return div.innerHTML;
   }
 
-  let latestNotifications = [];
-
-  // ============================================================
-  // Blood Request status লেবেল (Bengali)
-  // ============================================================
   function bloodStatusLabel(status) {
     if (status === 'fulfilled') return '✅ এই রিকোয়েস্টটি ম্যানেজ হয়ে গেছে';
     if (status === 'expired') return '⏱️ এই রিকোয়েস্টের মেয়াদ শেষ হয়ে গেছে';
@@ -446,7 +578,138 @@
     return null;
   }
 
-  async function renderNotifications(items, bloodStatusMap, respondedSet) {
+  // ============================================================
+  // লাইটবক্স
+  // ============================================================
+  function openLightbox(src) {
+    imgLightboxImg.src = src;
+    imgLightbox.classList.add('open');
+  }
+
+  function closeLightbox() {
+    imgLightbox.classList.remove('open');
+    imgLightboxImg.src = '';
+  }
+
+  imgLightboxClose?.addEventListener('click', closeLightbox);
+  imgLightbox?.addEventListener('click', (e) => {
+    if (e.target === imgLightbox) closeLightbox();
+  });
+
+  // ============================================================
+  // মার্ক রিড (হেল্পার, সব জায়গায় রিইউজ)
+  // ============================================================
+  async function markRead(n) {
+    if (n.is_read) return;
+    n.is_read = true;
+    await supabase.from('user_notifications').update({ is_read: true }).eq('id', n.id);
+    updateBadgeCount();
+  }
+
+  // ============================================================
+  // ফুল-স্ক্রিন ডিটেইল ভিউ (নতুন — HungerStation স্টাইল)
+  // ============================================================
+  function renderBloodActionHtml(n) {
+    const isBloodRequest = n.category === 'blood_request' && n.related_entity_id;
+    if (!isBloodRequest) return '';
+
+    const status = bloodStatusMap.get(n.related_entity_id) || 'active';
+    const alreadyResponded = respondedSet.has(n.related_entity_id);
+    const doneLabel = bloodStatusLabel(status) || (alreadyResponded ? '✅ আপনি আগ্রহ জানিয়েছেন' : null);
+
+    if (doneLabel) {
+      return `<span class="notif-blood-status">${doneLabel}</span>`;
+    }
+
+    return `
+      <span class="notif-blood-actions">
+        <button type="button" class="notif-blood-btn skip" data-blood-skip>স্কিপ</button>
+        <button type="button" class="notif-blood-btn interested" data-blood-interested data-request-id="${n.related_entity_id}">আমি রক্তদানে আগ্রহী</button>
+      </span>
+    `;
+  }
+
+  function wireBloodActionButtons(container, n) {
+    const actionsRow = container.querySelector('.notif-blood-actions');
+
+    const skipBtn = container.querySelector('[data-blood-skip]');
+    skipBtn?.addEventListener('click', async () => {
+      actionsRow?.remove();
+      await markRead(n);
+    });
+
+    const interestedBtn = container.querySelector('[data-blood-interested]');
+    interestedBtn?.addEventListener('click', async () => {
+      const requestId = interestedBtn.getAttribute('data-request-id');
+      interestedBtn.disabled = true;
+      skipBtn.disabled = true;
+      interestedBtn.textContent = 'পাঠানো হচ্ছে...';
+
+      const { data, error } = await supabase.rpc('respond_to_blood_request', {
+        p_blood_request_id: requestId,
+        p_donor_user_id: currentUserId,
+      });
+
+      if (error || !data?.success) {
+        const alreadyManaged = data?.error === 'already_managed';
+        const label = alreadyManaged
+          ? bloodStatusLabel(data.status) || 'এই রিকোয়েস্টটি ইতিমধ্যে ম্যানেজ হয়ে গেছে'
+          : 'কিছু ভুল হয়েছে, আবার চেষ্টা করুন';
+        const span = document.createElement('span');
+        span.className = 'notif-blood-status';
+        span.textContent = label;
+        actionsRow?.replaceWith(span);
+        return;
+      }
+
+      respondedSet.add(requestId);
+      const span = document.createElement('span');
+      span.className = 'notif-blood-status';
+      span.textContent = '✅ আপনার আগ্রহ জানানো হয়েছে, রিকোয়েস্টার শীঘ্রই যোগাযোগ করবেন';
+      actionsRow?.replaceWith(span);
+      await markRead(n);
+    });
+  }
+
+  function openDetailView(n) {
+    detailBody.innerHTML = `
+      <div class="nd-detail-chips">
+        <span class="nd-detail-chip chip-${n.category}">${categoryChipLabels[n.category] || 'নোটিফিকেশন'}</span>
+      </div>
+      <p class="nd-detail-date">${absoluteDateBn(n.created_at)}</p>
+      ${n.image_url ? `<img src="${n.image_url}" alt="" class="nd-detail-image" data-detail-image />` : ''}
+      <p class="nd-detail-text">${escapeHtml(n.message)}</p>
+      ${n.listing_id ? '<button type="button" class="notif-item-link" data-open-listing>সম্পর্কিত লিস্টিং দেখুন →</button>' : ''}
+      <div data-blood-slot>${renderBloodActionHtml(n)}</div>
+    `;
+
+    const detailImage = detailBody.querySelector('[data-detail-image]');
+    detailImage?.addEventListener('click', () => openLightbox(n.image_url));
+
+    const linkBtn = detailBody.querySelector('[data-open-listing]');
+    linkBtn?.addEventListener('click', () => {
+      window.location.href = `/listing/${n.listing_id}`;
+    });
+
+    wireBloodActionButtons(detailBody, n);
+
+    listView.style.display = 'none';
+    detailView.style.display = 'flex';
+
+    markRead(n);
+  }
+
+  function closeDetailView() {
+    detailView.style.display = 'none';
+    listView.style.display = 'flex';
+  }
+
+  detailBackBtn?.addEventListener('click', closeDetailView);
+
+  // ============================================================
+  // লিস্ট ভিউ রেন্ডার
+  // ============================================================
+  function renderNotifications(items) {
     notifList.innerHTML = '';
 
     if (!items || items.length === 0) {
@@ -456,13 +719,6 @@
     notifEmpty.style.display = 'none';
 
     items.forEach((n) => {
-      const isBloodRequest = n.category === 'blood_request' && n.related_entity_id;
-      const bloodStatus = isBloodRequest ? (bloodStatusMap.get(n.related_entity_id) || 'active') : null;
-      const alreadyResponded = isBloodRequest && respondedSet.has(n.related_entity_id);
-      const bloodDoneLabel = isBloodRequest
-        ? (bloodStatusLabel(bloodStatus) || (alreadyResponded ? '✅ আপনি আগ্রহ জানিয়েছেন' : null))
-        : null;
-
       const el = document.createElement('button');
       el.type = 'button';
       el.className = `notif-item ${n.is_read ? '' : 'unread'}`;
@@ -473,103 +729,19 @@
           <span class="notif-item-msg">${escapeHtml(n.message)}</span>
           <span class="notif-item-footer">
             <span class="notif-item-time">${relativeTimeBn(n.created_at)}</span>
-            ${n.listing_id ? '<button type="button" class="notif-item-link" data-open-listing>সম্পর্কিত লিস্টিং দেখুন →</button>' : ''}
           </span>
-          ${
-            isBloodRequest
-              ? bloodDoneLabel
-                ? `<span class="notif-blood-status">${bloodDoneLabel}</span>`
-                : `<span class="notif-blood-actions">
-                    <button type="button" class="notif-blood-btn skip" data-blood-skip>স্কিপ</button>
-                    <button type="button" class="notif-blood-btn interested" data-blood-interested data-request-id="${n.related_entity_id}">আমি রক্তদানে আগ্রহী</button>
-                  </span>`
-              : ''
-          }
         </span>
       `;
 
-      // মূল আইটেমে ক্লিক করলে — টেক্সট এক্সপ্যান্ড/কোলাপ্স + read মার্ক
-      el.addEventListener('click', async () => {
-        const msgEl = el.querySelector('.notif-item-msg');
-        msgEl.classList.toggle('expanded');
-
-        if (!n.is_read) {
-          n.is_read = true;
-          el.classList.remove('unread');
-          await supabase.from('user_notifications').update({ is_read: true }).eq('id', n.id);
-          updateBadgeCount();
-        }
-      });
-
-      // "সম্পর্কিত লিস্টিং দেখুন"
-      const linkBtn = el.querySelector('[data-open-listing]');
-      linkBtn?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        window.location.href = `/listing/${n.listing_id}`;
-      });
-
-      // ছবি থাম্বনেইলে ক্লিক করলে ফুলস্ক্রিন লাইটবক্স খোলা (নতুন — Phase 2)
+      // ছবি ট্যাপ — শুধু লাইটবক্স খুলবে, ডিটেইল ভিউ খুলবে না
       const imageEl = el.querySelector('[data-view-image]');
       imageEl?.addEventListener('click', (e) => {
         e.stopPropagation();
         openLightbox(n.image_url);
       });
 
-      // "স্কিপ" — শুধু read মার্ক করে বাটন সরিয়ে দেওয়া, কোনো DB action নাই
-      const skipBtn = el.querySelector('[data-blood-skip]');
-      skipBtn?.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const actionsRow = el.querySelector('.notif-blood-actions');
-        actionsRow?.remove();
-        if (!n.is_read) {
-          n.is_read = true;
-          el.classList.remove('unread');
-          await supabase.from('user_notifications').update({ is_read: true }).eq('id', n.id);
-          updateBadgeCount();
-        }
-      });
-
-      // "আমি রক্তদানে আগ্রহী" — respond_to_blood_request() RPC কল
-      const interestedBtn = el.querySelector('[data-blood-interested]');
-      interestedBtn?.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const btn = e.currentTarget;
-        const requestId = btn.getAttribute('data-request-id');
-        const actionsRow = el.querySelector('.notif-blood-actions');
-
-        btn.disabled = true;
-        el.querySelector('[data-blood-skip]').disabled = true;
-        btn.textContent = 'পাঠানো হচ্ছে...';
-
-        const { data, error } = await supabase.rpc('respond_to_blood_request', {
-          p_blood_request_id: requestId,
-          p_donor_user_id: currentUserId,
-        });
-
-        if (error || !data?.success) {
-          const alreadyManaged = data?.error === 'already_managed';
-          const label = alreadyManaged
-            ? bloodStatusLabel(data.status) || 'এই রিকোয়েস্টটি ইতিমধ্যে ম্যানেজ হয়ে গেছে'
-            : 'কিছু ভুল হয়েছে, আবার চেষ্টা করুন';
-          const span = document.createElement('span');
-          span.className = alreadyManaged ? 'notif-blood-status' : 'notif-blood-status';
-          span.textContent = label;
-          actionsRow?.replaceWith(span);
-          return;
-        }
-
-        const span = document.createElement('span');
-        span.className = 'notif-blood-status';
-        span.textContent = '✅ আপনার আগ্রহ জানানো হয়েছে, রিকোয়েস্টার শীঘ্রই যোগাযোগ করবেন';
-        actionsRow?.replaceWith(span);
-
-        if (!n.is_read) {
-          n.is_read = true;
-          el.classList.remove('unread');
-          await supabase.from('user_notifications').update({ is_read: true }).eq('id', n.id);
-          updateBadgeCount();
-        }
-      });
+      // বাকি পুরো আইটেম ট্যাপ — ফুল-স্ক্রিন ডিটেইল ভিউ খুলবে
+      el.addEventListener('click', () => openDetailView(n));
 
       notifList.appendChild(el);
     });
@@ -582,12 +754,15 @@
     );
   }
 
+  // ============================================================
+  // লোড + deep-link হ্যান্ডলিং (?notif=xxx)
+  // ============================================================
   async function loadNotifications() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       currentUserId = null;
       latestNotifications = [];
-      renderNotifications([], new Map(), new Set());
+      renderNotifications([]);
       updateBadgeCount();
       return;
     }
@@ -604,14 +779,13 @@
 
     latestNotifications = data || [];
 
-    // Blood request category এর সব related_entity_id ব্যাচে ফেচ করা —
-    // প্রতিটার জন্য আলাদা কোয়েরি না করে একবারেই status ম্যাপ বানানো
     const bloodRequestIds = latestNotifications
       .filter((n) => n.category === 'blood_request' && n.related_entity_id)
       .map((n) => n.related_entity_id);
 
-    const bloodStatusMap = new Map();
-    const respondedSet = new Set();
+    bloodStatusMap = new Map();
+    respondedSet = new Set();
+
     if (bloodRequestIds.length > 0) {
       const { data: statusRows } = await supabase
         .from('blood_requests')
@@ -620,8 +794,6 @@
 
       (statusRows || []).forEach((r) => bloodStatusMap.set(r.id, r.status));
 
-      // এই ডোনার (currentUserId) নিজে যেসব রিকোয়েস্টে আগেই "আগ্রহী" চেপেছে
-      // সেগুলোর তালিকা — যাতে বাটন আবার না দেখায়
       const { data: responseRows } = await supabase
         .from('blood_request_responses')
         .select('blood_request_id')
@@ -631,22 +803,55 @@
       (responseRows || []).forEach((r) => respondedSet.add(r.blood_request_id));
     }
 
-    renderNotifications(latestNotifications, bloodStatusMap, respondedSet);
+    renderNotifications(latestNotifications);
     updateBadgeCount();
+  }
+
+  // পেজ লোড হওয়ার সময় (বা push নোটিফিকেশনে ক্লিক করে আসলে) URL এ
+  // ?notif=xxx থাকলে সরাসরি সেই নোটিফিকেশনের ডিটেইল ভিউ অটো-ওপেন করা
+  async function checkDeepLinkNotification() {
+    const params = new URLSearchParams(window.location.search);
+    const notifId = params.get('notif');
+    if (!notifId) return;
+
+    // URL পরিষ্কার করা (পরে রিফ্রেশ করলে যেন আবার অটো-ওপেন না হয়)
+    params.delete('notif');
+    const newUrl = window.location.pathname + (params.toString() ? `?${params}` : '');
+    window.history.replaceState({}, '', newUrl);
+
+    let target = latestNotifications.find((n) => n.id === notifId);
+
+    if (!target) {
+      // সাম্প্রতিক ২০টার মধ্যে না থাকলে (পুরনো নোটিফিকেশন) সরাসরি ফেচ
+      const { data } = await supabase
+        .from('user_notifications')
+        .select('*')
+        .eq('id', notifId)
+        .maybeSingle();
+      target = data;
+    }
+
+    if (!target) return;
+
+    openDrawer();
+    openDetailView(target);
   }
 
   function openDrawer() {
     overlay?.classList.add('open');
     document.body.style.overflow = 'hidden';
-    loadNotifications();
   }
 
   function closeDrawer() {
     overlay?.classList.remove('open');
     document.body.style.overflow = '';
+    closeDetailView();
   }
 
-  window.addEventListener('smartfeni:open-notification-drawer', openDrawer);
+  window.addEventListener('smartfeni:open-notification-drawer', () => {
+    openDrawer();
+    loadNotifications();
+  });
 
   closeBtn?.addEventListener('click', closeDrawer);
   overlay?.addEventListener('click', (e) => {
@@ -661,13 +866,14 @@
     loadNotifications();
   });
 
-  async function initialBadgeCheck() {
+  async function init() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
-    loadNotifications();
+    await loadNotifications();
+    await checkDeepLinkNotification();
   }
 
-  initialBadgeCheck();
+  init();
 
   window.addEventListener('smartfeni:auth-changed', () => {
     loadNotifications();
