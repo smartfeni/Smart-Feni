@@ -30,6 +30,24 @@
 //   একই মডেল অটো-ওপেন হয়
 // - Push notification ট্যাপ (?notif=id) এখন ড্রয়ার না খুলেই সরাসরি
 //   এই মডেল ওপেন করে
+//
+// আপডেট (এই সেশন):
+// - ব্লাড রিকোয়েস্ট স্কিপ/আগ্রহী বাটন এখন ড্রয়ারের লিস্ট আইটেমেও
+//   দেখাবে (আগে শুধু ফুল-ভিউ মডেলে ছিল) — লিস্ট আইটেম <button> থেকে
+//   <div role="button"> এ পরিবর্তন করা হয়েছে যাতে ভেতরে নেস্টেড বাটন
+//   (স্কিপ/আগ্রহী) বসানো যায় (HTML এ button এর ভেতর button বসানো
+//   ইনভ্যালিড, ব্রাউজার DOM ভেঙে ফেলত)
+// - স্কিপ করলে এখন নতুন blood_request_skips টেবিলে সেভ হয় (আগে
+//   কোথাও সেভ হতো না, ড্রয়ার আবার খুললে বাটন ফিরে আসতো) — এখন
+//   "আপনি স্কিপ করেছেন" স্ট্যাটাস স্থায়ীভাবে দেখাবে
+// - রিকোয়েস্ট অন্য কেউ ম্যানেজ করে ফেললে (fulfilled/expired/
+//   cancelled) — এটা আগে থেকেই fresh লোড করত, এখন লিস্টেও দেখাবে
+// - "সম্পর্কিত লিস্টিং দেখুন" জেনেরিক বাটনের বদলে এখন link_label
+//   থাকলে (অ্যাডমিন প্যানেল থেকে সেট করা নির্দিষ্ট শপ/ক্লাব/লিস্টিং
+//   এর নাম) সেই নামটাই বাটনে দেখাবে, action_url এ নিয়ে যাবে
+// - .notif-item-image / .log-item স্টাইলের ছবি লোড হওয়ার সময়
+//   লেআউট জাম্প (CLS) কমাতে ফিক্সড height + হালকা প্লেসহোল্ডার
+//   ব্যাকগ্রাউন্ড যোগ হলো (স্লো নেটওয়ার্কে alignment ভাঙা ঠিক করতে)
 // ============================================================
 ---
 
@@ -305,6 +323,14 @@
     transition: background 0.15s ease;
   }
 
+  /* নোট: এখন .notif-item একটা <div role="button"> (আগে <button> ছিল,
+     ভেতরে স্কিপ/আগ্রহী বাটন বসানোর জন্য div করা হয়েছে) — ফোকাস রিং
+     রাখা হলো কীবোর্ড ব্যবহারকারীদের জন্য */
+  .notif-item:focus-visible {
+    outline: 2px solid #FF6B35;
+    outline-offset: -2px;
+  }
+
   .notif-item:last-child {
     border-bottom: none;
   }
@@ -444,12 +470,24 @@
     color: #1E9E5A;
   }
 
+  /* স্কিপ করা হয়েছে — সবুজ "সফল" রঙের বদলে নিউট্রাল ধূসর */
+  .notif-blood-status.skipped {
+    background: #F1F4F8;
+    color: #5A6E85;
+  }
+
+  /* নোট: max-height এর বদলে ফিক্সড height + হালকা প্লেসহোল্ডার
+     ব্যাকগ্রাউন্ড — ছবি লোড হওয়ার আগেই জায়গা রিজার্ভ থাকে, স্লো
+     নেটওয়ার্কে ছবি লোড হওয়ার সময় লিস্ট আইটেম আর জাম্প/এলোমেলো
+     হবে না */
   .notif-item-image {
+    display: block;
     width: 100%;
-    max-height: 140px;
+    height: 140px;
     object-fit: cover;
     border-radius: 10px;
     margin-bottom: 8px;
+    background: #F1F4F8;
   }
 
   /* ===== মডেল পপ-আপের ভেতরের কনটেন্ট ===== */
@@ -495,9 +533,12 @@
   }
 
   .nd-detail-image {
+    display: block;
     width: 100%;
+    min-height: 120px;
     border-radius: 14px;
     margin-bottom: 18px;
+    background: #F1F4F8;
   }
 
   .nd-detail-text {
@@ -526,6 +567,7 @@
   let latestNotifications = [];
   let bloodStatusMap = new Map();
   let respondedSet = new Set();
+  let skippedSet = new Set();
   let notifChannel = null;
 
   const categoryChipLabels = {
@@ -601,16 +643,26 @@
     if (!isBloodRequest) return '';
 
     const status = bloodStatusMap.get(n.related_entity_id) || 'active';
+    const managedLabel = bloodStatusLabel(status);
     const alreadyResponded = respondedSet.has(n.related_entity_id);
-    const doneLabel = bloodStatusLabel(status) || (alreadyResponded ? '✅ আপনি আগ্রহ জানিয়েছেন' : null);
+    const alreadySkipped = skippedSet.has(n.related_entity_id);
 
-    if (doneLabel) {
-      return `<span class="notif-blood-status">${doneLabel}</span>`;
+    // অগ্রাধিকার: রিকোয়েস্ট ম্যানেজ হয়ে গেলে সেটাই সবার আগে দেখাবে
+    // (নিজে রেসপন্স/স্কিপ করেছেন কিনা তার আগেই) — কারণ ততক্ষণে
+    // অন্য কেউ ইতিমধ্যে ম্যানেজ করে ফেলেছে
+    if (managedLabel) {
+      return `<span class="notif-blood-status">${managedLabel}</span>`;
+    }
+    if (alreadyResponded) {
+      return `<span class="notif-blood-status">✅ আপনি আগ্রহ জানিয়েছেন</span>`;
+    }
+    if (alreadySkipped) {
+      return `<span class="notif-blood-status skipped">🚫 আপনি এই রিকোয়েস্টটি স্কিপ করেছেন</span>`;
     }
 
     return `
       <span class="notif-blood-actions">
-        <button type="button" class="notif-blood-btn skip" data-blood-skip>স্কিপ</button>
+        <button type="button" class="notif-blood-btn skip" data-blood-skip data-request-id="${n.related_entity_id}">স্কিপ</button>
         <button type="button" class="notif-blood-btn interested" data-blood-interested data-request-id="${n.related_entity_id}">আমি রক্তদানে আগ্রহী</button>
       </span>
     `;
@@ -620,13 +672,32 @@
     const actionsRow = container.querySelector('.notif-blood-actions');
 
     const skipBtn = container.querySelector('[data-blood-skip]');
-    skipBtn?.addEventListener('click', async () => {
-      actionsRow?.remove();
+    skipBtn?.addEventListener('click', async (e) => {
+      // পুরো লিস্ট আইটেম ট্যাপ করলে ফুল-ভিউ মডেল খোলে — এই বাটনের
+      // ক্লিক যেন সেই প্যারেন্ট হ্যান্ডলারে বাবল করে মডেল না খুলে ফেলে
+      e.stopPropagation();
+      const requestId = skipBtn.getAttribute('data-request-id');
+      const interestedSibling = container.querySelector('[data-blood-interested]');
+      skipBtn.disabled = true;
+      if (interestedSibling) interestedSibling.disabled = true;
+
+      // blood_request_skips এ সেভ (duplicate হলে চুপচাপ ignore)
+      await supabase.from('blood_request_skips').upsert(
+        { blood_request_id: requestId, user_id: currentUserId },
+        { onConflict: 'blood_request_id,user_id', ignoreDuplicates: true }
+      );
+      skippedSet.add(requestId);
+
+      const span = document.createElement('span');
+      span.className = 'notif-blood-status skipped';
+      span.textContent = '🚫 আপনি এই রিকোয়েস্টটি স্কিপ করেছেন';
+      actionsRow?.replaceWith(span);
       await markRead(n);
     });
 
     const interestedBtn = container.querySelector('[data-blood-interested]');
-    interestedBtn?.addEventListener('click', async () => {
+    interestedBtn?.addEventListener('click', async (e) => {
+      e.stopPropagation();
       const requestId = interestedBtn.getAttribute('data-request-id');
       interestedBtn.disabled = true;
       skipBtn.disabled = true;
@@ -666,12 +737,26 @@
       <p class="nd-detail-date">${absoluteDateBn(n.created_at)}</p>
       ${n.image_url ? `<img src="${n.image_url}" alt="" class="nd-detail-image" />` : ''}
       <p class="nd-detail-text">${escapeHtml(n.message)}</p>
-      ${n.listing_id ? '<button type="button" class="notif-item-link" data-open-listing>সম্পর্কিত লিস্টিং দেখুন →</button>' : ''}
+      ${
+        n.action_url
+          ? `<button type="button" class="notif-item-link" data-open-link>${escapeHtml(n.link_label || 'বিস্তারিত দেখুন')} →</button>`
+          : n.listing_id
+          ? '<button type="button" class="notif-item-link" data-open-listing>সম্পর্কিত লিস্টিং দেখুন →</button>'
+          : ''
+      }
       <div data-blood-slot>${renderBloodActionHtml(n)}</div>
     `;
 
-    const linkBtn = modalBody.querySelector('[data-open-listing]');
+    // link_label/action_url অ্যাডমিন থেকে সেট করা থাকলে (নতুন —
+    // নির্দিষ্ট শপ/ক্লাব/লিস্টিং প্রমো লিংক) সেটাই প্রায়োরিটি পাবে,
+    // নাহলে পুরনো listing_id ফলব্যাক
+    const linkBtn = modalBody.querySelector('[data-open-link]');
     linkBtn?.addEventListener('click', () => {
+      window.location.href = n.action_url;
+    });
+
+    const listingBtn = modalBody.querySelector('[data-open-listing]');
+    listingBtn?.addEventListener('click', () => {
       window.location.href = `/listing/${n.listing_id}`;
     });
 
@@ -710,22 +795,38 @@
     notifEmpty.style.display = 'none';
 
     items.forEach((n) => {
-      const el = document.createElement('button');
-      el.type = 'button';
+      // নোট: আগে এটা <button> ছিল, এখন <div role="button"> —
+      // ব্লাড রিকোয়েস্টের স্কিপ/আগ্রহী বাটন ভেতরে বসানোর জন্য
+      // (HTML এ button এর ভেতর button বসানো যায় না, ব্রাউজার
+      // ইনভ্যালিড নেস্টিং সামলাতে গিয়ে DOM ভেঙে লেআউট নষ্ট করে দিত)
+      const el = document.createElement('div');
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
       el.className = `notif-item ${n.is_read ? '' : 'unread'}`;
       el.innerHTML = `
         <span class="notif-item-icon"><i class="fas fa-bell"></i></span>
         <span class="notif-item-body">
           ${n.image_url ? `<img src="${n.image_url}" alt="" class="notif-item-image" />` : ''}
           <span class="notif-item-msg">${escapeHtml(n.message)}</span>
+          <div data-blood-slot>${renderBloodActionHtml(n)}</div>
           <span class="notif-item-footer">
             <span class="notif-item-time">${relativeTimeBn(n.created_at)}</span>
           </span>
         </span>
       `;
 
-      // পুরো আইটেম (ছবিসহ) ট্যাপ করলে ফুল-ভিউ মডেল পপ-আপ খুলবে
+      wireBloodActionButtons(el, n);
+
+      // পুরো আইটেম (ছবিসহ) ট্যাপ/এন্টার-কী করলে ফুল-ভিউ মডেল পপ-আপ
+      // খুলবে — স্কিপ/আগ্রহী বাটনের ক্লিক stopPropagation করা থাকায়
+      // এতে কনফ্লিক্ট হয় না
       el.addEventListener('click', () => openNotifModal(n));
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openNotifModal(n);
+        }
+      });
 
       notifList.appendChild(el);
     });
@@ -809,6 +910,7 @@
 
     bloodStatusMap = new Map();
     respondedSet = new Set();
+    skippedSet = new Set();
 
     if (bloodRequestIds.length > 0) {
       const { data: statusRows } = await supabase
@@ -825,6 +927,14 @@
         .in('blood_request_id', bloodRequestIds);
 
       (responseRows || []).forEach((r) => respondedSet.add(r.blood_request_id));
+
+      const { data: skipRows } = await supabase
+        .from('blood_request_skips')
+        .select('blood_request_id')
+        .eq('user_id', currentUserId)
+        .in('blood_request_id', bloodRequestIds);
+
+      (skipRows || []).forEach((r) => skippedSet.add(r.blood_request_id));
     }
 
     renderNotifications(latestNotifications);
@@ -835,31 +945,66 @@
   // পেজ লোড হওয়ার সময় (বা push নোটিফিকেশনে ক্লিক করে আসলে) URL এ
   // ?notif=xxx থাকলে সরাসরি সেই নোটিফিকেশনের ফুল-ভিউ মডেল অটো-ওপেন
   // করা (ড্রয়ার না খুলেই)
+  //
+  // আপডেট (এই সেশন — দেরি ফিক্স): আগে এটা loadNotifications() পুরো
+  // শেষ হওয়ার (২০টা নোটিফিকেশন + ব্লাড স্ট্যাটাস/রেসপন্স — একাধিক
+  // সিকোয়েন্সিয়াল কোয়েরি) অপেক্ষা করে তারপর চলত, যার কারণে push
+  // ট্যাপ করে ঢুকলে পপ-আপ আসতে ২-৫ সেকেন্ড দেরি হতো। এখন init() এ
+  // এটা loadNotifications() এর আগে, সবার আগে চালানো হয় (নিচে init()
+  // দেখুন) — সরাসরি নির্দিষ্ট আইডি দিয়ে একবারে ফেচ করে, আর ব্লাড
+  // রিকোয়েস্ট হলে তার স্ট্যাটাস/রেসপন্স/স্কিপ — এই ৩টা কোয়েরি
+  // সমান্তরালে (Promise.all) চালায় — ফলে পুরো ২০টা নোটিফিকেশনের
+  // লিস্ট + প্রতিটার ব্লাড স্ট্যাটাস লোড হওয়ার জন্য আর অপেক্ষা করতে
+  // হয় না।
   async function checkDeepLinkNotification() {
     const params = new URLSearchParams(window.location.search);
     const notifId = params.get('notif');
-    if (!notifId) return;
+    if (!notifId) return false;
 
     // URL পরিষ্কার করা (পরে রিফ্রেশ করলে যেন আবার অটো-ওপেন না হয়)
     params.delete('notif');
     const newUrl = window.location.pathname + (params.toString() ? `?${params}` : '');
     window.history.replaceState({}, '', newUrl);
 
-    let target = latestNotifications.find((n) => n.id === notifId);
+    const { data: target } = await supabase
+      .from('user_notifications')
+      .select('*')
+      .eq('id', notifId)
+      .maybeSingle();
 
-    if (!target) {
-      // সাম্প্রতিক ২০টার মধ্যে না থাকলে (পুরনো নোটিফিকেশন) সরাসরি ফেচ
-      const { data } = await supabase
-        .from('user_notifications')
-        .select('*')
-        .eq('id', notifId)
-        .maybeSingle();
-      target = data;
+    if (!target) return false;
+
+    if (target.category === 'blood_request' && target.related_entity_id) {
+      const reqId = target.related_entity_id;
+      const [{ data: statusRow }, { data: responseRows }, { data: skipRows }] = await Promise.all([
+        supabase.from('blood_requests').select('id, status').eq('id', reqId).maybeSingle(),
+        supabase.from('blood_request_responses').select('blood_request_id').eq('donor_user_id', currentUserId).eq('blood_request_id', reqId),
+        supabase.from('blood_request_skips').select('blood_request_id').eq('user_id', currentUserId).eq('blood_request_id', reqId),
+      ]);
+      if (statusRow) bloodStatusMap.set(statusRow.id, statusRow.status);
+      if (responseRows?.length) respondedSet.add(reqId);
+      if (skipRows?.length) skippedSet.add(reqId);
     }
 
-    if (!target) return;
-
     openNotifModal(target);
+    return true;
+  }
+
+  // নতুন — অ্যাপ/সাইট সরাসরি ওপেন করলে (push ট্যাপ ছাড়াই — push অফ
+  // থাকলে, মিস হলে, বা push ইগনোর করে সরাসরি অ্যাপে ঢুকলেও) কোনো
+  // unread নোটিফিকেশন থাকলে সেটা অটো পপ-আপ দেখাবে। একই অ্যাপ
+  // সেশনে (ট্যাব/অ্যাপ বন্ধ না হওয়া পর্যন্ত) একবারই দেখাবে — সাইটের
+  // ভেতরে পেজ-টু-পেজ ক্লিক করার সময় বারবার দেখাবে না। এর মধ্যে নতুন
+  // নোটিফিকেশন এলে সেটা আলাদাভাবে Realtime সাবস্ক্রিপশন (উপরে) দিয়ে
+  // সাথে সাথে দেখানো হয়, এই ফাংশনের সাথে সম্পর্ক নেই।
+  function checkAutoPopupOnEntry() {
+    if (sessionStorage.getItem('sf_notif_autopopup_shown')) return;
+
+    const unread = latestNotifications.find((n) => !n.is_read);
+    if (!unread) return;
+
+    sessionStorage.setItem('sf_notif_autopopup_shown', '1');
+    openNotifModal(unread);
   }
 
   function openDrawer() {
@@ -895,8 +1040,18 @@
   async function init() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
+    currentUserId = session.user.id;
+
+    // push ডীপ-লিংক থাকলে সেটা সবার আগে, আলাদাভাবে, দ্রুত চেক করা
+    // হয় (নিজের প্রয়োজনীয় ২-৩টা ছোট কোয়েরি ছাড়া আর কিছুর জন্য
+    // অপেক্ষা করে না) — তারপর পুরো ২০টা নোটিফিকেশনের লিস্ট +
+    // ব্লাড স্ট্যাটাস ম্যাপ ব্যাকগ্রাউন্ডে লোড হয় (ড্রয়ার লিস্টের জন্য)
+    const deepLinkHandled = await checkDeepLinkNotification();
     await loadNotifications();
-    await checkDeepLinkNotification();
+
+    if (!deepLinkHandled) {
+      checkAutoPopupOnEntry();
+    }
   }
 
   init();
