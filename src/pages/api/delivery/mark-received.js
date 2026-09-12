@@ -5,7 +5,8 @@
 // কাস্টমার নিজের রিকোয়েস্টেই এটা করতে পারবে (RLS নিজেই নিশ্চিত করে)।
 // ============================================================
 
-import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
+import { sendNotification } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -63,7 +64,35 @@ export async function POST({ request }) {
       );
     }
 
-    // TODO: রাইডারকে নোটিফিকেশন — "কাস্টমার রিসিভড মার্ক করেছে, কনফার্ম করো"
+    // রাইডারকে জানানো — "কাস্টমার রিসিভড মার্ক করেছে, কনফার্ম করো"
+    // (accepted_rider_id হলো delivery_riders.id, প্রোফাইল আইডি না —
+    // তাই আলাদা করে profile_id বের করতে হচ্ছে। কাস্টমারের নিজের client
+    // দিয়ে অন্য রাইডারের প্রোফাইল পড়ার RLS নাও থাকতে পারে, তাই adminClient
+    // ব্যবহার করা হলো — best-effort, ব্যর্থ হলেও মূল রেসপন্সে প্রভাব পড়বে না)
+    const { client: adminClient } = getAdminClient();
+    if (adminClient && updated.accepted_rider_id) {
+      const { data: riderRow } = await adminClient
+        .from('delivery_riders')
+        .select('profile_id')
+        .eq('id', updated.accepted_rider_id)
+        .maybeSingle();
+
+      if (riderRow?.profile_id) {
+        const isRide = updated.category === 'ride';
+        await sendNotification(adminClient, {
+          userId: riderRow.profile_id,
+          message: isRide
+            ? 'কাস্টমার যাত্রা সম্পন্ন হিসেবে মার্ক করেছেন — ডেলিভারি কনফার্ম করে সম্পন্ন করুন'
+            : 'কাস্টমার পণ্য রিসিভড মার্ক করেছেন — ডেলিভারি কনফার্ম করে সম্পন্ন করুন',
+          category: 'rider_offer',
+          actionUrl: isRide ? '/ride-hero' : '/delivery-hero',
+          relatedEntityType: 'delivery_request',
+          relatedEntityId: requestId,
+          senderType: 'customer',
+          senderId: user.id,
+        });
+      }
+    }
 
     return new Response(
       JSON.stringify({ success: true, request: updated }),
