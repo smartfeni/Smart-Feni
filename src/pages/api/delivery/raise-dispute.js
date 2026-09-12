@@ -13,6 +13,7 @@
 // ============================================================
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
+import { sendBulkNotifications } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -108,7 +109,26 @@ export async function POST({ request }) {
       );
     }
 
-    // TODO: এডমিনকে নোটিফিকেশন — "নতুন ডিসপিউট রিপোর্ট হয়েছে"
+    // শুধু এডমিনদের জানানো হবে — অন্য পক্ষকে (যে রিপোর্ট করেনি) ইচ্ছাকৃতভাবে
+    // জানানো হচ্ছে না, যাতে এডমিন প্রথমে নিজে দেখে সিদ্ধান্ত নিতে পারে,
+    // দুই পক্ষ একে অপরের সাথে আগেভাগে তর্কে না জড়ায়। best-effort,
+    // ব্যর্থ হলেও ডিসপিউট রেইজ সফল হয়েছে এই রেসপন্সে প্রভাব পড়বে না
+    const categoryLabel = updated.category === 'ride' ? 'রাইড' : 'ডেলিভারি';
+
+    const { data: admins } = await adminClient
+      .from('profiles')
+      .select('id')
+      .eq('role', 'admin');
+
+    await sendBulkNotifications(adminClient, (admins || []).map((a) => a.id), () => ({
+      message: `নতুন ডিসপিউট রিপোর্ট হয়েছে (${reporterLabel}) — ${categoryLabel} রিকোয়েস্ট`,
+      category: 'system',
+      actionUrl: '/admin/delivery-disputes',
+      relatedEntityType: 'delivery_request',
+      relatedEntityId: requestId,
+      senderType: 'system',
+      priority: 'high',
+    }));
 
     return new Response(
       JSON.stringify({ success: true, request: updated }),
