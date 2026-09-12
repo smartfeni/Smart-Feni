@@ -9,6 +9,7 @@
 // ============================================================
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
+import { sendNotification } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -101,6 +102,21 @@ export async function POST({ request }) {
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    // কাস্টমারকে জানানো — best-effort, ব্যর্থ হলেও পিকআপ মার্ক হয়ে গেছে
+    // এই রেসপন্সে কোনো প্রভাব পড়বে না। updated রো-তেই customer_profile_id
+    // ও category আগে থেকে আছে (update().select() সব কলাম রিটার্ন করে)
+    const isRide = updated.category === 'ride';
+    await sendNotification(adminClient, {
+      userId: updated.customer_profile_id,
+      message: isRide ? 'হিরো পিকআপ সম্পন্ন করেছেন, আপনাকে নিয়ে গন্তব্যের পথে রওনা দিয়েছেন' : 'হিরো পিকআপ সম্পন্ন করেছেন, আপনার ডেলিভারি নিয়ে পথে আছেন',
+      category: 'delivery_hero',
+      actionUrl: '/my-orders',
+      relatedEntityType: 'delivery_request',
+      relatedEntityId: requestId,
+      senderType: 'rider',
+      senderId: user.id,
+    });
 
     return new Response(
       JSON.stringify({ success: true, request: updated }),
