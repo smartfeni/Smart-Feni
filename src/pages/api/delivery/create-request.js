@@ -9,8 +9,9 @@
 // গেলে (status='confirmed') এই expiry আর প্রযোজ্য না।
 // ============================================================
 
-import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendTelegramBroadcast } from '../../../lib/telegramNotify.js';
+import { sendBulkNotifications } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -118,7 +119,7 @@ export async function POST({ request }) {
     // অনলাইন/অফলাইন টগল নির্বিশেষে (আগের সিদ্ধান্ত অনুযায়ী)
     let heroQuery = client
       .from('delivery_riders')
-      .select('profiles!delivery_riders_profile_id_fkey(telegram_chat_id)')
+      .select('profile_id, profiles!delivery_riders_profile_id_fkey(telegram_chat_id)')
       .eq('verification_status', 'approved')
       .eq(finalCategory === 'ride' ? 'offers_ride' : 'offers_delivery', true)
       .eq('upazila', upazila);
@@ -137,6 +138,22 @@ export async function POST({ request }) {
       chatIds,
       `🔔 নতুন ${categoryLabel} রিকোয়েস্ট!\n📍 ${upazila}\n💰 প্রস্তাবিত মূল্য: ৳${price}\n\nঅ্যাপে গিয়ে অফার দিন।`
     );
+
+    // একই ম্যাচিং হিরোদের in-app + push নোটিফিকেশন (Telegram লিংক করা
+    // না থাকলেও যেন সবাই জানতে পারে) — ব্যর্থ হলেও মূল রিকোয়েস্ট
+    // তৈরি আটকাবে না, তাই আলাদা try/catch ছাড়াই best-effort কল
+    const matchingHeroProfileIds = (matchingHeroes || []).map((h) => h.profile_id).filter(Boolean);
+    const { client: adminClient } = getAdminClient();
+    if (adminClient && matchingHeroProfileIds.length > 0) {
+      await sendBulkNotifications(adminClient, matchingHeroProfileIds, () => ({
+        message: `নতুন ${categoryLabel} রিকোয়েস্ট এসেছে — ${upazila}, প্রস্তাবিত মূল্য ৳${price}`,
+        category: 'rider_offer',
+        actionUrl: finalCategory === 'ride' ? '/ride-hero' : '/delivery-hero',
+        relatedEntityType: 'delivery_request',
+        relatedEntityId: data.id,
+        senderType: 'system',
+      }));
+    }
 
     return new Response(
       JSON.stringify({ success: true, request: data }),
