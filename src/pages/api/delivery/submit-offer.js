@@ -7,7 +7,8 @@
 // পুরনোটাই আপডেট হয়, created_at রিসেট হয় — withdraw উইন্ডো নতুন করে শুরু)।
 // ============================================================
 
-import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
+import { sendNotification } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -55,7 +56,7 @@ export async function POST({ request }) {
     // রিকোয়েস্ট যাচাই
     const { data: reqRow, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, category, customer_asking_price, vehicle_type')
+      .select('id, status, category, customer_asking_price, vehicle_type, customer_profile_id')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -132,6 +133,22 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'অফার দেওয়া ব্যর্থ: ' + (upsertError?.message || 'অজানা কারণ') }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // কাস্টমারকে নতুন সেরা মূল্যের কথা জানানো — best-effort, ব্যর্থ হলেও
+    // অফার সফল হয়েছে এই রেসপন্সে কোনো প্রভাব পড়বে না
+    const { client: adminClient } = getAdminClient();
+    if (adminClient) {
+      await sendNotification(adminClient, {
+        userId: reqRow.customer_profile_id,
+        message: `আপনার ${reqRow.category === 'ride' ? 'রাইড' : 'ডেলিভারি'} রিকোয়েস্টে নতুন সেরা মূল্য এসেছে — ৳${price}`,
+        category: 'delivery_hero',
+        actionUrl: '/my-orders',
+        relatedEntityType: 'delivery_request',
+        relatedEntityId: requestId,
+        senderType: 'rider',
+        senderId: user.id,
+      });
     }
 
     return new Response(
