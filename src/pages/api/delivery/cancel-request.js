@@ -6,7 +6,8 @@
 // করা যাবে না (ডিসপিউট ফ্লো দিয়ে হ্যান্ডল হবে)।
 // ============================================================
 
-import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
+import { sendBulkNotifications } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -62,6 +63,28 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'বাতিল ব্যর্থ: ' + (updateError?.message || 'অজানা কারণ') }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // যারা এই রিকোয়েস্টে একটিভ অফার দিয়ে রেখেছিল তাদের জানানো —
+    // best-effort, ব্যর্থ হলেও বাতিল সফল হয়েছে এই রেসপন্সে প্রভাব পড়বে না
+    const { data: activeOffers } = await client
+      .from('delivery_offers')
+      .select('rider_profile_id')
+      .eq('request_id', requestId)
+      .eq('status', 'active');
+
+    const { client: adminClient } = getAdminClient();
+    if (adminClient) {
+      const riderProfileIds = (activeOffers || []).map((o) => o.rider_profile_id).filter(Boolean);
+      const categoryLabel = updated.category === 'ride' ? 'রাইড' : 'ডেলিভারি';
+      await sendBulkNotifications(adminClient, riderProfileIds, () => ({
+        message: `দুঃখিত, একটা ${categoryLabel} রিকোয়েস্ট কাস্টমার বাতিল করে দিয়েছেন`,
+        category: 'rider_offer',
+        actionUrl: updated.category === 'ride' ? '/ride-hero' : '/delivery-hero',
+        relatedEntityType: 'delivery_request',
+        relatedEntityId: requestId,
+        senderType: 'system',
+      }));
     }
 
     return new Response(
