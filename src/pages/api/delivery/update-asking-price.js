@@ -5,7 +5,8 @@
 // রিকোয়েস্ট বাতিল করে নতুন করে পোস্ট করতে হবে।
 // ============================================================
 
-import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
+import { sendBulkNotifications } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -85,6 +86,30 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'দাম আপডেট ব্যর্থ: ' + (updateError?.message || 'অজানা কারণ') }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // একটিভ অফার দেওয়া হিরোদের জানানো — কাস্টমার দাম বাড়িয়েছে, হয়তো
+    // তারা আরেকটু কম অফার দিয়ে জিততে পারবে। best-effort, ব্যর্থ হলেও
+    // দাম আপডেট সফল হয়েছে এই রেসপন্সে প্রভাব পড়বে না
+    const { data: activeOffers } = await client
+      .from('delivery_offers')
+      .select('rider_profile_id')
+      .eq('request_id', requestId)
+      .eq('status', 'active');
+
+    const { client: adminClient } = getAdminClient();
+    if (adminClient) {
+      const riderProfileIds = (activeOffers || []).map((o) => o.rider_profile_id).filter(Boolean);
+      const categoryLabel = updated.category === 'ride' ? 'রাইড' : 'ডেলিভারি';
+      await sendBulkNotifications(adminClient, riderProfileIds, () => ({
+        message: `একটা ${categoryLabel} রিকোয়েস্টে কাস্টমার দাম বাড়িয়েছেন — নতুন করে অফার দিয়ে দেখুন`,
+        category: 'rider_offer',
+        actionUrl: updated.category === 'ride' ? '/ride-hero' : '/delivery-hero',
+        relatedEntityType: 'delivery_request',
+        relatedEntityId: requestId,
+        senderType: 'customer',
+        senderId: user.id,
+      }));
     }
 
     return new Response(
