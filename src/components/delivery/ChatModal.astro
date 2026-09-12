@@ -1,0 +1,466 @@
+---
+// ============================================================
+// কম্পোনেন্ট: ইন-অ্যাপ চ্যাট মোডাল (রিইউজেবল)
+// ব্যবহার হবে: my-orders.astro (কাস্টমার সাইড), delivery-hero.astro ও
+// ride-hero.astro (হিরো সাইড) — WhatsApp বাটনের বিকল্প হিসেবে।
+//
+// DisputeReasonModal.astro-র প্যাটার্ন অনুসরণ করে বানানো (bottom-sheet
+// মোডাল, window.openXModal() গ্লোবাল ফাংশন দিয়ে খোলা)।
+//
+// ব্যবহারবিধি (কলিং পেজ থেকে):
+//   <ChatModal />  ← পেজের যেকোনো জায়গায় একবার বসালেই হবে
+//   window.openChatModal({ requestId: req.id, otherPartyName: 'করিম' });
+//
+// মেসেজ পাঠানো/পড়া সরাসরি chatClient.js দিয়ে (RLS-সুরক্ষিত), কোনো
+// API endpoint লাগে না। নতুন মেসেজ এলে DB ট্রিগার অটো নোটিফিকেশন
+// পাঠিয়ে দেয়, তাই এখানে আলাদা করে কিছু করা লাগছে না।
+// ============================================================
+---
+
+<div class="cm-overlay" id="cmOverlay">
+  <div class="cm-modal">
+    <div class="cm-header">
+      <div class="cm-header-info">
+        <div class="cm-header-avatar"><i class="fas fa-user"></i></div>
+        <div>
+          <p class="cm-header-name" id="cmOtherName">চ্যাট</p>
+          <p class="cm-header-sub">সরাসরি মেসেজ</p>
+        </div>
+      </div>
+      <button class="cm-close" id="cmClose" type="button" aria-label="বন্ধ করুন">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+
+    <div class="cm-messages" id="cmMessages">
+      <p class="cm-loading" id="cmLoading">লোড হচ্ছে...</p>
+    </div>
+
+    <div class="cm-input-row">
+      <input type="file" id="cmCameraInput" accept="image/*" capture="environment" hidden />
+      <input type="file" id="cmGalleryInput" accept="image/*" hidden />
+      <button class="cm-icon-btn" id="cmCameraBtn" type="button" aria-label="ক্যামেরা">
+        <i class="fas fa-camera"></i>
+      </button>
+      <button class="cm-icon-btn" id="cmGalleryBtn" type="button" aria-label="গ্যালারি">
+        <i class="fas fa-image"></i>
+      </button>
+      <input type="text" id="cmInput" placeholder="মেসেজ লিখুন..." maxlength="500" />
+      <button class="cm-send-btn" id="cmSendBtn" type="button" aria-label="পাঠান">
+        <i class="fas fa-paper-plane"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { getChatMessages, sendChatMessage, markMessagesRead, subscribeToChatMessages, uploadChatImage } from '../../lib/chatClient.js';
+  import { compressImage } from '../../lib/imageCompress.js';
+  import { supabase } from '../../lib/supabase.js';
+
+  const overlay = document.getElementById('cmOverlay');
+  const closeBtn = document.getElementById('cmClose');
+  const messagesEl = document.getElementById('cmMessages');
+  const loadingEl = document.getElementById('cmLoading');
+  const otherNameEl = document.getElementById('cmOtherName');
+  const inputEl = document.getElementById('cmInput');
+  const sendBtn = document.getElementById('cmSendBtn');
+  const cameraBtn = document.getElementById('cmCameraBtn');
+  const galleryBtn = document.getElementById('cmGalleryBtn');
+  const cameraInput = document.getElementById('cmCameraInput');
+  const galleryInput = document.getElementById('cmGalleryInput');
+
+  let activeRequestId = null;
+  let currentUserId = null;
+  let activeChannel = null;
+
+  function formatTime(iso) {
+    return new Date(iso).toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function renderMessage(msg) {
+    const isMine = msg.sender_id === currentUserId;
+    const bubble = document.createElement('div');
+    bubble.className = `cm-msg ${isMine ? 'cm-msg-mine' : 'cm-msg-theirs'}`;
+    const imageHtml = msg.image_url ? `<img class="cm-msg-image" src="${msg.image_url}" alt="ছবি" />` : '';
+    const textHtml = msg.message ? `<p class="cm-msg-text"></p>` : '';
+    bubble.innerHTML = `
+      ${imageHtml}
+      ${textHtml}
+      <span class="cm-msg-time">${formatTime(msg.created_at)}</span>
+    `;
+    if (msg.message) {
+      bubble.querySelector('.cm-msg-text').textContent = msg.message;
+    }
+    bubble.querySelector('.cm-msg-image')?.addEventListener('click', () => {
+      window.open(msg.image_url, '_blank', 'noopener');
+    });
+    return bubble;
+  }
+
+  function scrollToBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function appendMessage(msg) {
+    // খালি-অবস্থা টেক্সট থাকলে সরিয়ে দেওয়া
+    messagesEl.querySelector('.cm-empty')?.remove();
+    messagesEl.appendChild(renderMessage(msg));
+    scrollToBottom();
+  }
+
+  function cleanupChannel() {
+    if (activeChannel) {
+      supabase.removeChannel(activeChannel);
+      activeChannel = null;
+    }
+  }
+
+  function closeModal() {
+    overlay.classList.remove('active');
+    document.body.style.overflow = '';
+    cleanupChannel();
+    activeRequestId = null;
+  }
+
+  window.openChatModal = async function ({ requestId, otherPartyName }) {
+    if (!requestId) return;
+
+    activeRequestId = requestId;
+    otherNameEl.textContent = otherPartyName || 'চ্যাট';
+    messagesEl.innerHTML = '';
+    loadingEl.style.display = 'block';
+    messagesEl.appendChild(loadingEl);
+    overlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+
+    const { data: { user } } = await supabase.auth.getUser();
+    currentUserId = user?.id || null;
+
+    const { data: messages, error } = await getChatMessages(requestId);
+    loadingEl.style.display = 'none';
+    messagesEl.innerHTML = '';
+
+    if (error) {
+      messagesEl.innerHTML = `<p class="cm-empty">মেসেজ লোড করা যায়নি</p>`;
+    } else if (messages.length === 0) {
+      messagesEl.innerHTML = `<p class="cm-empty">এখনো কোনো মেসেজ নেই, প্রথম মেসেজ পাঠান!</p>`;
+    } else {
+      messages.forEach((msg) => messagesEl.appendChild(renderMessage(msg)));
+      scrollToBottom();
+    }
+
+    markMessagesRead(requestId);
+
+    cleanupChannel();
+    activeChannel = subscribeToChatMessages(requestId, (newMsg) => {
+      appendMessage(newMsg);
+      if (newMsg.sender_id !== currentUserId) {
+        markMessagesRead(requestId);
+      }
+    });
+
+    inputEl.value = '';
+    inputEl.focus();
+  };
+
+  overlay?.addEventListener('click', (e) => {
+    if (e.target === overlay) closeModal();
+  });
+  closeBtn?.addEventListener('click', closeModal);
+
+  async function handleSend() {
+    const text = inputEl.value.trim();
+    if (!text || !activeRequestId) return;
+
+    inputEl.value = '';
+    sendBtn.disabled = true;
+
+    const { error } = await sendChatMessage(activeRequestId, text);
+
+    sendBtn.disabled = false;
+    if (error) {
+      window.showToast?.(error, 'error');
+      inputEl.value = text;
+    }
+    // সফল হলে appendMessage করার দরকার নাই — Realtime সাবস্ক্রিপশন
+    // নিজে থেকেই এই মেসেজটা ফেরত পেয়ে দেখিয়ে দিবে (নিজেরটাও)
+  }
+
+  sendBtn?.addEventListener('click', handleSend);
+  inputEl?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleSend();
+  });
+
+  cameraBtn?.addEventListener('click', () => cameraInput.click());
+  galleryBtn?.addEventListener('click', () => galleryInput.click());
+
+  async function handleImageSelect(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // একই ছবি আবার সিলেক্ট করলেও change ইভেন্ট যেন ফায়ার হয়
+    if (!file || !activeRequestId) return;
+
+    cameraBtn.disabled = true;
+    galleryBtn.disabled = true;
+
+    const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.8 });
+    const { url, error: uploadError } = await uploadChatImage(activeRequestId, compressed);
+
+    if (uploadError || !url) {
+      window.showToast?.('ছবি আপলোড ব্যর্থ: ' + (uploadError || 'অজানা কারণ'), 'error');
+      cameraBtn.disabled = false;
+      galleryBtn.disabled = false;
+      return;
+    }
+
+    const { error: sendError } = await sendChatMessage(activeRequestId, '', url);
+    cameraBtn.disabled = false;
+    galleryBtn.disabled = false;
+
+    if (sendError) {
+      window.showToast?.(sendError, 'error');
+    }
+    // সফল হলে Realtime সাবস্ক্রিপশন নিজে থেকেই মেসেজ দেখিয়ে দিবে
+  }
+
+  cameraInput?.addEventListener('change', handleImageSelect);
+  galleryInput?.addEventListener('change', handleImageSelect);
+</script>
+
+<style>
+  .cm-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 1000;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .cm-overlay.active {
+    display: flex;
+  }
+
+  .cm-modal {
+    background: #fff;
+    width: 100%;
+    max-width: 460px;
+    height: 78vh;
+    border-radius: 24px 24px 0 0;
+    display: flex;
+    flex-direction: column;
+    animation: cm-slide-up 0.25s ease;
+    overflow: hidden;
+  }
+
+  @media (min-width: 560px) {
+    .cm-overlay {
+      align-items: center;
+    }
+    .cm-modal {
+      border-radius: 24px;
+      height: 70vh;
+    }
+  }
+
+  @keyframes cm-slide-up {
+    from { transform: translateY(24px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .cm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 18px;
+    border-bottom: 1.5px solid #F0F2F6;
+    flex-shrink: 0;
+  }
+
+  .cm-header-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .cm-header-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+    flex-shrink: 0;
+  }
+
+  .cm-header-name {
+    font-size: 0.92rem;
+    font-weight: 800;
+    color: #1B2A4A;
+  }
+
+  .cm-header-sub {
+    font-size: 0.72rem;
+    color: #8A97A8;
+  }
+
+  .cm-close {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: #F4F7FC;
+    color: #5A6E85;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+  }
+
+  .cm-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: #F8FAFC;
+  }
+
+  .cm-loading,
+  .cm-empty {
+    text-align: center;
+    font-size: 0.82rem;
+    color: #8A97A8;
+    margin-top: 20px;
+  }
+
+  .cm-msg {
+    max-width: 78%;
+    padding: 9px 13px;
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .cm-msg-mine {
+    align-self: flex-end;
+    background: #FF6B35;
+    border-bottom-right-radius: 4px;
+  }
+
+  .cm-msg-mine .cm-msg-text {
+    color: #fff;
+  }
+
+  .cm-msg-mine .cm-msg-time {
+    color: rgba(255, 255, 255, 0.75);
+    align-self: flex-end;
+  }
+
+  .cm-msg-theirs {
+    align-self: flex-start;
+    background: #fff;
+    border: 1.5px solid #E5EAF0;
+    border-bottom-left-radius: 4px;
+  }
+
+  .cm-msg-theirs .cm-msg-text {
+    color: #1B2A4A;
+  }
+
+  .cm-msg-theirs .cm-msg-time {
+    color: #A9B4C2;
+  }
+
+  .cm-msg-text {
+    font-size: 0.88rem;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+
+  .cm-msg-time {
+    font-size: 0.66rem;
+    font-weight: 600;
+  }
+
+  .cm-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border-top: 1.5px solid #F0F2F6;
+    flex-shrink: 0;
+    background: #fff;
+  }
+
+  .cm-input-row input {
+    flex: 1;
+    border: 1.5px solid #E5EAF0;
+    border-radius: 22px;
+    padding: 11px 16px;
+    font-size: 0.88rem;
+    font-family: inherit;
+    color: #1B2A4A;
+  }
+
+  .cm-input-row input:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+
+  .cm-icon-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: none;
+    background: #F4F7FC;
+    color: #5A6E85;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+
+  .cm-icon-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .cm-msg-image {
+    width: 100%;
+    max-width: 220px;
+    border-radius: 12px;
+    cursor: pointer;
+    display: block;
+  }
+
+  .cm-send-btn {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: none;
+    background: #FF6B35;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+  }
+
+  .cm-send-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+</style>
