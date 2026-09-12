@@ -19,7 +19,7 @@ import { supabase } from './supabase.js';
 export async function getChatMessages(requestId) {
   const { data, error } = await supabase
     .from('delivery_chat_messages')
-    .select('id, request_id, sender_id, message, is_read, created_at')
+    .select('id, request_id, sender_id, message, image_url, is_read, created_at')
     .eq('request_id', requestId)
     .order('created_at', { ascending: true });
 
@@ -30,11 +30,12 @@ export async function getChatMessages(requestId) {
   return { data: data || [], error: null };
 }
 
-// নতুন মেসেজ পাঠানো
-export async function sendChatMessage(requestId, message) {
+// নতুন মেসেজ পাঠানো — টেক্সট, ছবি, বা দুটোই একসাথে হতে পারে
+// (কমপক্ষে একটা থাকতে হবে — DB constraint দিয়ে নিশ্চিত করা)
+export async function sendChatMessage(requestId, message, imageUrl = null) {
   const trimmed = (message || '').trim();
-  if (!trimmed) {
-    return { error: 'মেসেজ খালি রাখা যাবে না' };
+  if (!trimmed && !imageUrl) {
+    return { error: 'মেসেজ বা ছবি — অন্তত একটা দিতে হবে' };
   }
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -45,7 +46,8 @@ export async function sendChatMessage(requestId, message) {
   const { error } = await supabase.from('delivery_chat_messages').insert({
     request_id: requestId,
     sender_id: user.id,
-    message: trimmed,
+    message: trimmed || null,
+    image_url: imageUrl,
   });
 
   if (error) {
@@ -53,6 +55,23 @@ export async function sendChatMessage(requestId, message) {
   }
 
   return { error: null };
+}
+
+// চ্যাট ছবি Supabase Storage-এ আপলোড করা (compressImage দিয়ে আগে
+// থেকেই কম্প্রেস করা ফাইল আসবে বলে ধরে নেওয়া হচ্ছে — কলিং কোডে
+// imageCompress.js ব্যবহার করা উচিত, payment-proof আপলোডের প্যাটার্নে)
+export async function uploadChatImage(requestId, file) {
+  const fileName = `${requestId}/${Date.now()}-${file.name}`;
+  const { data: uploadData, error: uploadError } = await supabase.storage
+    .from('chat-images')
+    .upload(fileName, file);
+
+  if (uploadError) {
+    return { url: null, error: uploadError.message };
+  }
+
+  const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(uploadData.path);
+  return { url: urlData.publicUrl, error: null };
 }
 
 // অন্য পক্ষের পাঠানো মেসেজগুলো "পড়া হয়েছে" মার্ক করা (চ্যাট খোলার সময় কল হবে)
