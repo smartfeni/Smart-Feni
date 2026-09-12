@@ -786,6 +786,81 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
       margin: 4px 0 10px;
     }
 
+    .dh-stage-box {
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin: 10px 0;
+    }
+
+    .dh-stage-box.stage-pickup {
+      background: #FFF0EA;
+      border: 1.5px solid #FF6B35;
+    }
+
+    .dh-stage-box.stage-dropoff {
+      background: #E8F6EC;
+      border: 1.5px solid #1B7A3C;
+    }
+
+    .dh-stage-label {
+      font-size: 0.74rem;
+      font-weight: 800;
+      color: #FF6B35;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .stage-dropoff .dh-stage-label {
+      color: #1B7A3C;
+    }
+
+    .dh-stage-address {
+      font-size: 0.82rem;
+      color: #1B2A4A;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .dh-stage-instruction {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 0.74rem;
+      color: #1B2A4A;
+      font-weight: 600;
+      line-height: 1.4;
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 8px;
+      padding: 6px 9px;
+      margin-bottom: 10px;
+    }
+
+    .dh-stage-instruction i {
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+
+    .dh-stage-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-mark-pickup {
+      flex: 1;
+      background: #FF6B35;
+      color: #fff;
+      border: none;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .btn-mark-pickup:disabled {
+      opacity: 0.7;
+    }
+
     .dh-customer-info {
       display: flex;
       align-items: center;
@@ -900,7 +975,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
   <script>
     import { supabase } from '../lib/supabase.js';
     import { toWhatsAppNumber } from '../lib/whatsapp.js';
-    import { confirmDelivery, expireRequests, withdrawOffer, submitHeroOffer, acceptBestPrice } from '../lib/deliveryClient.js';
+    import { confirmDelivery, expireRequests, withdrawOffer, submitHeroOffer, acceptBestPrice, markPickupDone } from '../lib/deliveryClient.js';
 
     const authGate = document.getElementById('authGate');
     const notRiderGate = document.getElementById('notRiderGate');
@@ -1142,7 +1217,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
     async function loadActiveDeliveries(riderId) {
       const { data: activeRequests } = await supabase
         .from('delivery_requests')
-        .select('id, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, final_price, status, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .select('id, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
         .eq('accepted_rider_id', riderId)
         .in('status', ['confirmed', 'delivered'])
         .order('created_at', { ascending: false });
@@ -1165,27 +1240,33 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
         const customerName = customer?.full_name || 'কাস্টমার';
         const customerPhone = customer?.phone;
 
-        const hasPickupCoords = req.pickup_lat && req.pickup_lng;
-        const hasDropCoords = req.drop_lat && req.drop_lng;
-        let distanceRowsHtml = '';
+        // দুই-ধাপের স্টেজ: পিকআপ না হওয়া পর্যন্ত পিকআপ লোকেশন হাইলাইট,
+        // পিকআপ সম্পন্ন হলে ডেলিভারি (ড্রপ) লোকেশন হাইলাইট — Ride Hero-র
+        // প্যাটার্ন অনুসরণ করে, একই pickup_done_at কলাম ও mark-pickup-done API ব্যবহার করে
+        const isPickupDone = !!req.pickup_done_at;
+        let stageHtml = '';
 
-        if (hasPickupCoords && heroLiveLocation) {
-          const d1 = haversineKm(heroLiveLocation.lat, heroLiveLocation.lng, req.pickup_lat, req.pickup_lng);
-          distanceRowsHtml += `
-            <div class="dh-distance-row">
-              <span><i class="fas fa-route"></i> আপনার থেকে পিকআপ: ${formatKm(d1)}</span>
-              <button type="button" class="dh-maps-btn" data-lat="${req.pickup_lat}" data-lng="${req.pickup_lng}"><i class="fas fa-diamond-turn-right"></i></button>
-            </div>
-          `;
-        }
-        if (hasDropCoords) {
-          const d2 = hasPickupCoords
-            ? haversineKm(req.pickup_lat, req.pickup_lng, req.drop_lat, req.drop_lng)
-            : (heroLiveLocation ? haversineKm(heroLiveLocation.lat, heroLiveLocation.lng, req.drop_lat, req.drop_lng) : null);
-          distanceRowsHtml += `
-            <div class="dh-distance-row">
-              <span><i class="fas fa-route"></i> ${hasPickupCoords ? 'পিকআপ থেকে ডেলিভারি' : 'আপনার থেকে ডেলিভারি'}: ${d2 !== null ? formatKm(d2) : '—'}</span>
-              <button type="button" class="dh-maps-btn" data-lat="${req.drop_lat}" data-lng="${req.drop_lng}"><i class="fas fa-diamond-turn-right"></i></button>
+        if (req.status === 'confirmed') {
+          const targetLat = isPickupDone ? req.drop_lat : req.pickup_lat;
+          const targetLng = isPickupDone ? req.drop_lng : req.pickup_lng;
+          const targetAddress = isPickupDone ? (req.drop_address || '') : (req.pickup_address || req.area_detail || '');
+          const targetInstruction = isPickupDone ? req.drop_instructions : req.pickup_instructions;
+          const targetLabel = isPickupDone ? 'ডেলিভারি লোকেশন' : 'পিকআপ লোকেশন';
+          let distanceText = '';
+          if (heroLiveLocation && targetLat && targetLng) {
+            const d = haversineKm(heroLiveLocation.lat, heroLiveLocation.lng, targetLat, targetLng);
+            distanceText = ` · ${formatKm(d)} দূরে`;
+          }
+
+          stageHtml = `
+            <div class="dh-stage-box ${isPickupDone ? 'stage-dropoff' : 'stage-pickup'}">
+              <span class="dh-stage-label"><i class="fas ${isPickupDone ? 'fa-flag-checkered' : 'fa-location-dot'}"></i> ${targetLabel}${distanceText}</span>
+              <p class="dh-stage-address">${targetAddress}</p>
+              ${targetInstruction ? `<p class="dh-stage-instruction"><i class="fas fa-circle-info"></i> ${targetInstruction}</p>` : ''}
+              <div class="dh-stage-actions">
+                ${targetLat && targetLng ? `<button type="button" class="dh-maps-btn" data-lat="${targetLat}" data-lng="${targetLng}"><i class="fas fa-diamond-turn-right"></i></button>` : ''}
+                ${!isPickupDone ? `<button type="button" class="btn-mark-pickup" data-request-id="${req.id}">পিকআপ সম্পন্ন হয়েছে</button>` : ''}
+              </div>
             </div>
           `;
         }
@@ -1194,8 +1275,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
           <p class="dh-active-status"><i class="fas fa-circle"></i> ${statusLabel}</p>
           <p class="dh-req-desc">${req.description || ''}</p>
           <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.pickup_address || req.area_detail || ''} → ${req.drop_address || ''}</p>
-          ${buildInstructionsHtml(req.pickup_instructions, req.drop_instructions)}
-          ${distanceRowsHtml}
+          ${stageHtml}
           <p class="dh-active-price">৳${req.final_price || 0}</p>
           <div class="dh-customer-info">
             <span class="dh-customer-avatar"><i class="fas fa-user"></i></span>
@@ -1215,6 +1295,19 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
           btn.addEventListener('click', () => {
             window.open(googleMapsDirectionsUrl(btn.dataset.lat, btn.dataset.lng), '_blank', 'noopener');
           });
+        });
+
+        card.querySelector('.btn-mark-pickup')?.addEventListener('click', async (e) => {
+          e.target.disabled = true;
+          e.target.textContent = 'হচ্ছে...';
+          const { error } = await markPickupDone({ requestId: req.id });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            e.target.textContent = 'পিকআপ সম্পন্ন হয়েছে';
+            return;
+          }
+          loadRiderSection();
         });
 
         card.querySelector('.dispute-link')?.addEventListener('click', () => {
