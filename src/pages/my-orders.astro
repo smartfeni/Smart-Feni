@@ -314,6 +314,83 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
       padding: 4px 0;
     }
 
+    .customer-stage-box {
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin: 4px 0 12px;
+    }
+
+    .customer-stage-box.stage-pickup {
+      background: #FFF0EA;
+      border: 1.5px solid #FF6B35;
+    }
+
+    .customer-stage-box.stage-dropoff {
+      background: #E8F6EC;
+      border: 1.5px solid #1B7A3C;
+    }
+
+    .customer-stage-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #FF6B35;
+      margin-bottom: 8px;
+    }
+
+    .stage-dropoff .customer-stage-status {
+      color: #1B7A3C;
+    }
+
+    .customer-stage-status i {
+      font-size: 0.5rem;
+    }
+
+    .customer-stage-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #5A6E85;
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .customer-stage-address {
+      font-size: 0.82rem;
+      color: #1B2A4A;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .customer-stage-instruction {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 0.74rem;
+      color: #1B2A4A;
+      font-weight: 600;
+      line-height: 1.4;
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 8px;
+      padding: 6px 9px;
+      margin-bottom: 6px;
+    }
+
+    .customer-stage-instruction i {
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+
+    .customer-stage-time {
+      font-size: 0.72rem;
+      color: #1B7A3C;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
     .order-contact-row {
       display: flex;
       gap: 10px;
@@ -676,8 +753,8 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
     const STEPS = ['pending', 'confirmed', 'delivered'];
     const STEP_LABELS = { pending: 'পেন্ডিং', confirmed: 'কনফার্মড', delivered: 'ডেলিভার্ড' };
 
-    const DELIVERY_STEPS = ['open', 'confirmed', 'completed'];
-    const DELIVERY_STEP_LABELS = { open: 'রিকোয়েস্ট', confirmed: 'কনফার্মড', completed: 'সম্পন্ন' };
+    const DELIVERY_STEPS = ['open', 'confirmed', 'picked_up', 'completed'];
+    const DELIVERY_STEP_LABELS = { open: 'রিকোয়েস্ট', confirmed: 'কনফার্মড', picked_up: 'পিকআপ সম্পন্ন', completed: 'সম্পন্ন' };
 
     let currentUserId = null;
     let refreshTimer = null;
@@ -714,16 +791,23 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
     }
 
     // ============ DELIVERY স্টেপার ============
-    function renderDeliveryStepper(status) {
+    function renderDeliveryStepper(req) {
+      const status = req.status;
       if (status === 'cancelled') {
         return `<div class="cancelled-note"><i class="fas fa-xmark"></i> রিকোয়েস্টটি বাতিল হয়েছে</div>`;
       }
       if (status === 'disputed') {
         return `<div class="disputed-note"><i class="fas fa-triangle-exclamation"></i> এডমিন পর্যালোচনা করছে</div>`;
       }
+
+      // confirmed অবস্থায় pickup_done_at সেট থাকলে (বা status already delivered/completed
+      // হয়ে গেলে, যার মানে পিকআপ তো আগেই হয়ে গেছে) "picked_up" ধাপ দেখাবে
       let mapped = status;
-      if (status === 'delivered') mapped = 'confirmed';
+      if (status === 'confirmed' && req.pickup_done_at) mapped = 'picked_up';
+      if (status === 'delivered') mapped = 'picked_up';
+
       const currentIndex = DELIVERY_STEPS.indexOf(mapped === 'open' ? 'open' : mapped);
+      const pickedUpLabel = req.category === 'ride' ? 'যাত্রা শুরু' : 'পিকআপ সম্পন্ন';
       let dotsHtml = '';
       DELIVERY_STEPS.forEach((step, i) => {
         const isDone = i <= currentIndex;
@@ -732,7 +816,9 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
           dotsHtml += `<div class="step-line ${i < currentIndex ? 'done' : ''}"></div>`;
         }
       });
-      const labelsHtml = DELIVERY_STEPS.map((s) => `<span>${DELIVERY_STEP_LABELS[s]}</span>`).join('');
+      const labelsHtml = DELIVERY_STEPS
+        .map((s) => `<span>${s === 'picked_up' ? pickedUpLabel : DELIVERY_STEP_LABELS[s]}</span>`)
+        .join('');
       return `<div class="status-stepper">${dotsHtml}</div><div class="step-label-row">${labelsHtml}</div>`;
     }
 
@@ -794,7 +880,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
             <p class="order-date">${formatDate(req.created_at)}</p>
           </div>
         </div>
-        ${renderDeliveryStepper(req.status)}
+        ${renderDeliveryStepper(req)}
         <p class="delivery-desc">${req.description || ''}</p>
         <p class="delivery-area"><i class="fas fa-location-dot"></i> ${pickupText}${dropText ? ` → ${dropText}` : ''}</p>
       `;
@@ -830,6 +916,31 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 
         bodyHtml += `<button class="btn-cancel-request" data-request-id="${req.id}"><i class="fas fa-ban"></i> রিকোয়েস্ট বাতিল করুন</button>`;
       } else if (req.status === 'confirmed') {
+        // লাইভ স্টেজ তথ্য (হিরো সাইডের mark-pickup-done এর উপর ভিত্তি করে) —
+        // শুধু তথ্য দেখানোর জন্য, কোনো বাটন/অ্যাকশন নাই, তাই হিরোর
+        // .dh-stage-box থেকে আলাদা .customer-stage-box ক্লাস ব্যবহার হলো
+        const isPickupDone = !!req.pickup_done_at;
+        const isRide = req.category === 'ride';
+        const stageStatusText = isPickupDone
+          ? (isRide ? 'হিরো আপনাকে নিয়ে গন্তব্যের পথে' : 'হিরো আপনার ডেলিভারি নিয়ে পথে')
+          : 'হিরো পিকআপের পথে আসছে';
+        const stageTargetLabel = isPickupDone ? (isRide ? 'গন্তব্য' : 'ডেলিভারি লোকেশন') : 'পিকআপ লোকেশন';
+        const stageTargetAddress = isPickupDone ? dropText : pickupText;
+        const stageTargetInstruction = isPickupDone ? req.drop_instructions : req.pickup_instructions;
+        const pickupTimeText = req.pickup_done_at
+          ? new Date(req.pickup_done_at).toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' })
+          : null;
+
+        bodyHtml += `
+          <div class="customer-stage-box ${isPickupDone ? 'stage-dropoff' : 'stage-pickup'}">
+            <span class="customer-stage-status"><i class="fas fa-circle"></i> ${stageStatusText}</span>
+            <span class="customer-stage-label">${stageTargetLabel}</span>
+            <p class="customer-stage-address">${stageTargetAddress || ''}</p>
+            ${stageTargetInstruction ? `<p class="customer-stage-instruction"><i class="fas fa-circle-info"></i> ${stageTargetInstruction}</p>` : ''}
+            ${pickupTimeText ? `<p class="customer-stage-time"><i class="fas fa-check"></i> পিকআপ হয়েছে: ${pickupTimeText}</p>` : ''}
+          </div>
+        `;
+
         bodyHtml += `
           <div class="order-contact-row">
             ${acceptedRiderPhone ? `
