@@ -6,8 +6,9 @@
 // (confirm_customer_deal RPC দিয়ে, অ্যাটমিক)
 // ============================================================
 
-import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendTelegramMessage, sendTelegramBroadcast } from '../../../lib/telegramNotify.js';
+import { sendNotification, sendBulkNotifications } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -52,7 +53,7 @@ export async function POST({ request }) {
     // জেতা হিরোকে জানানো + যারা হেরেছে তাদেরও জানানো
     const { data: reqRow } = await client
       .from('delivery_requests')
-      .select('final_price, accepted_rider_id, delivery_riders!delivery_requests_accepted_rider_id_fkey(profile_id, profiles!delivery_riders_profile_id_fkey(telegram_chat_id))')
+      .select('final_price, category, accepted_rider_id, delivery_riders!delivery_requests_accepted_rider_id_fkey(profile_id, profiles!delivery_riders_profile_id_fkey(telegram_chat_id))')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -68,7 +69,7 @@ export async function POST({ request }) {
 
     const { data: losingOffers } = await client
       .from('delivery_offers')
-      .select('profiles!delivery_offers_rider_profile_id_fkey(telegram_chat_id)')
+      .select('rider_profile_id, profiles!delivery_offers_rider_profile_id_fkey(telegram_chat_id)')
       .eq('request_id', requestId)
       .eq('status', 'closed_by_other')
       .neq('rider_profile_id', winnerProfileId || '');
@@ -81,6 +82,39 @@ export async function POST({ request }) {
       losingChatIds,
       `দুঃখিত, কাস্টমার আরেকজন হিরোর প্রস্তাব নিশ্চিত করেছে। পরের বার আরেকটু কম দাম দিয়ে চেষ্টা করুন!`
     );
+
+    // জেতা হিরো + হারা হিরোদের in-app/push নোটিফিকেশন — best-effort
+    const { client: adminClient } = getAdminClient();
+    if (adminClient) {
+      const categoryLabel = reqRow?.category === 'ride' ? 'রাইড' : 'ডেলিভারি';
+      const actionUrl = reqRow?.category === 'ride' ? '/ride-hero' : '/delivery-hero';
+
+      if (winnerProfileId) {
+        await sendNotification(adminClient, {
+          userId: winnerProfileId,
+          message: `🎉 কাস্টমার আপনার প্রস্তাব নিশ্চিত করেছে! মূল্য: ৳${reqRow.final_price}`,
+          category: 'rider_offer',
+          actionUrl,
+          relatedEntityType: 'delivery_request',
+          relatedEntityId: requestId,
+          senderType: 'customer',
+          senderId: user.id,
+        });
+      }
+
+      const losingRiderProfileIds = (losingOffers || [])
+        .map((o) => o.rider_profile_id)
+        .filter(Boolean);
+
+      await sendBulkNotifications(adminClient, losingRiderProfileIds, () => ({
+        message: `দুঃখিত, কাস্টমার আরেকজন হিরোর প্রস্তাব নিশ্চিত করেছেন — পরের বার আরেকটু কম দাম দিয়ে চেষ্টা করুন!`,
+        category: 'rider_offer',
+        actionUrl,
+        relatedEntityType: 'delivery_request',
+        relatedEntityId: requestId,
+        senderType: 'system',
+      }));
+    }
 
     return new Response(
       JSON.stringify({ success: true }),
