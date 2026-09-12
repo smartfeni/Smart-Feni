@@ -8,6 +8,7 @@
 // ============================================================
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
+import { sendNotification } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -110,6 +111,22 @@ export async function POST({ request }) {
       // কিন্তু ইউজারকে error দেখাচ্ছি না কারণ মূল কাজ (delivery completed) সফল হয়েছে
       console.error('Rider stats আপডেট ব্যর্থ:', statsError.message);
     }
+
+    // কাস্টমারকে জানানো — সম্পন্ন হয়েছে, রিভিউ দিতে বলা। best-effort,
+    // updatedRequest রো-তে customer_profile_id ও category আগে থেকেই আছে
+    const isRide = updatedRequest.category === 'ride';
+    await sendNotification(adminClient, {
+      userId: updatedRequest.customer_profile_id,
+      message: isRide
+        ? 'আপনার যাত্রা সম্পন্ন হয়েছে! হিরোকে একটা রিভিউ দিন'
+        : 'আপনার ডেলিভারি সম্পন্ন হয়েছে! হিরোকে একটা রিভিউ দিন',
+      category: 'delivery_hero',
+      actionUrl: '/my-orders',
+      relatedEntityType: 'delivery_request',
+      relatedEntityId: requestId,
+      senderType: 'rider',
+      senderId: user.id,
+    });
 
     return new Response(
       JSON.stringify({ success: true, request: updatedRequest }),
