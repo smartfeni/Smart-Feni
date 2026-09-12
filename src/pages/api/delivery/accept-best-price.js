@@ -4,8 +4,9 @@
 // (Postgres RPC accept_service_request দিয়ে, race-condition প্রুফ)
 // ============================================================
 
-import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendTelegramBroadcast } from '../../../lib/telegramNotify.js';
+import { sendNotification, sendBulkNotifications } from '../../../lib/notify.js';
 
 export const prerender = false;
 
@@ -30,7 +31,7 @@ export async function POST({ request }) {
 
     const { data: heroRow, error: heroError } = await client
       .from('delivery_riders')
-      .select('id, vehicle_type, offers_delivery, offers_ride, verification_status')
+      .select('id, vehicle_type, offers_delivery, offers_ride, verification_status, profiles!delivery_riders_profile_id_fkey(full_name)')
       .eq('profile_id', user.id)
       .maybeSingle();
 
@@ -43,7 +44,7 @@ export async function POST({ request }) {
 
     const { data: reqRow, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, category, customer_asking_price, vehicle_type')
+      .select('id, status, category, customer_asking_price, vehicle_type, customer_profile_id')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -99,7 +100,7 @@ export async function POST({ request }) {
     // গেছে, তাদের জানানো (নিজেকে বাদ দিয়ে)
     const { data: losingOffers } = await client
       .from('delivery_offers')
-      .select('profiles!delivery_offers_rider_profile_id_fkey(telegram_chat_id)')
+      .select('rider_profile_id, profiles!delivery_offers_rider_profile_id_fkey(telegram_chat_id)')
       .eq('request_id', requestId)
       .eq('status', 'closed_by_other')
       .neq('rider_profile_id', user.id);
@@ -112,6 +113,38 @@ export async function POST({ request }) {
       losingChatIds,
       `দুঃখিত, একটা রিকোয়েস্ট আরেকজন হিরো নিয়ে নিয়েছে। পরের বার দ্রুত অফার দিন!`
     );
+
+    // কাস্টমারকে কনফার্মেশন + হারা হিরোদের in-app/push নোটিফিকেশন —
+    // best-effort, ব্যর্থ হলেও accept সফল হয়েছে এই রেসপন্সে প্রভাব পড়বে না
+    const { client: adminClient } = getAdminClient();
+    if (adminClient) {
+      const heroName = heroRow.profiles?.full_name || 'একজন হিরো';
+      const categoryLabel = reqRow.category === 'ride' ? 'রাইড' : 'ডেলিভারি';
+
+      await sendNotification(adminClient, {
+        userId: reqRow.customer_profile_id,
+        message: `আপনার ${categoryLabel} রিকোয়েস্ট কনফার্ম হয়েছে! ${heroName} আসছেন — ৳${finalPrice}`,
+        category: 'delivery_hero',
+        actionUrl: '/my-orders',
+        relatedEntityType: 'delivery_request',
+        relatedEntityId: requestId,
+        senderType: 'rider',
+        senderId: user.id,
+      });
+
+      const losingRiderProfileIds = (losingOffers || [])
+        .map((o) => o.rider_profile_id)
+        .filter(Boolean);
+
+      await sendBulkNotifications(adminClient, losingRiderProfileIds, () => ({
+        message: `দুঃখিত, একটা ${categoryLabel} রিকোয়েস্ট আরেকজন হিরো নিয়ে নিয়েছেন — পরের বার দ্রুত অফার দিন!`,
+        category: 'rider_offer',
+        actionUrl: reqRow.category === 'ride' ? '/ride-hero' : '/delivery-hero',
+        relatedEntityType: 'delivery_request',
+        relatedEntityId: requestId,
+        senderType: 'system',
+      }));
+    }
 
     return new Response(
       JSON.stringify({ success: true, price: finalPrice }),
