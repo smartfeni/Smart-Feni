@@ -1220,12 +1220,21 @@ import ChatModal from '../components/delivery/ChatModal.astro';
 
     // ===== চলমান ডেলিভারি (এখন কাস্টমারের তথ্য সহ) =====
     async function loadActiveDeliveries(riderId) {
-      const { data: activeRequests } = await supabase
+      const { data: rawRequests } = await supabase
         .from('delivery_requests')
-        .select('id, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .select('id, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, updated_at, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
         .eq('accepted_rider_id', riderId)
-        .in('status', ['confirmed', 'delivered'])
+        .in('status', ['confirmed', 'delivered', 'completed'])
         .order('created_at', { ascending: false });
+
+      // completed অবস্থা শুধু ১ ঘন্টা পর্যন্ত দেখাবো (ডিসপিউট রেইজ করার
+      // সুযোগ দেওয়ার জন্য) — এরপর লিস্ট থেকে বাদ, নাহলে পুরনো সম্পন্ন
+      // অর্ডার চিরকাল এখানে জমা হতে থাকবে
+      const oneHourMs = 60 * 60 * 1000;
+      const activeRequests = (rawRequests || []).filter((req) => {
+        if (req.status !== 'completed') return true;
+        return Date.now() - new Date(req.updated_at).getTime() <= oneHourMs;
+      });
 
       riderActiveDeliveryList.innerHTML = '';
 
@@ -1240,7 +1249,9 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         const card = document.createElement('div');
         card.className = 'dh-active-card';
 
-        const statusLabel = req.status === 'confirmed' ? 'কনফার্মড — ডেলিভারি চলছে' : 'কাস্টমার রিসিভড মার্ক করেছে';
+        const statusLabel = req.status === 'confirmed'
+          ? 'কনফার্মড — ডেলিভারি চলছে'
+          : (req.status === 'delivered' ? 'কাস্টমার রিসিভড মার্ক করেছে' : 'সম্পন্ন হয়েছে');
         const customer = req.profiles;
         const customerName = customer?.full_name || 'কাস্টমার';
         const customerPhone = customer?.phone;
