@@ -36,7 +36,7 @@
       <p class="cm-loading" id="cmLoading">লোড হচ্ছে...</p>
     </div>
 
-    <div class="cm-input-row">
+    <div class="cm-input-row" id="cmInputRow">
       <input type="file" id="cmCameraInput" accept="image/*" capture="environment" hidden />
       <input type="file" id="cmGalleryInput" accept="image/*" hidden />
       <button class="cm-icon-btn" id="cmCameraBtn" type="button" aria-label="ক্যামেরা">
@@ -69,6 +69,7 @@
   const galleryBtn = document.getElementById('cmGalleryBtn');
   const cameraInput = document.getElementById('cmCameraInput');
   const galleryInput = document.getElementById('cmGalleryInput');
+  const inputRowEl = document.getElementById('cmInputRow');
 
   let activeRequestId = null;
   let currentUserId = null;
@@ -123,11 +124,12 @@
     activeRequestId = null;
   }
 
-  window.openChatModal = async function ({ requestId, otherPartyName }) {
+  window.openChatModal = async function ({ requestId, otherPartyName, readOnly = false }) {
     if (!requestId) return;
 
     activeRequestId = requestId;
     otherNameEl.textContent = otherPartyName || 'চ্যাট';
+    inputRowEl.style.display = readOnly ? 'none' : 'flex';
     messagesEl.innerHTML = '';
     loadingEl.style.display = 'block';
     messagesEl.appendChild(loadingEl);
@@ -144,24 +146,27 @@
     if (error) {
       messagesEl.innerHTML = `<p class="cm-empty">মেসেজ লোড করা যায়নি</p>`;
     } else if (messages.length === 0) {
-      messagesEl.innerHTML = `<p class="cm-empty">এখনো কোনো মেসেজ নেই, প্রথম মেসেজ পাঠান!</p>`;
+      messagesEl.innerHTML = `<p class="cm-empty">এখনো কোনো মেসেজ নেই${readOnly ? '' : ', প্রথম মেসেজ পাঠান!'}</p>`;
     } else {
       messages.forEach((msg) => messagesEl.appendChild(renderMessage(msg)));
       scrollToBottom();
     }
 
-    markMessagesRead(requestId);
-
+    // readOnly (এডমিন রিভিউ) মোডে মার্ক-রিড বা রিয়েলটাইম সাবস্ক্রিপশন
+    // দরকার নাই — এডমিন শুধু ডিসপিউটের সময় একবার হিস্ট্রি দেখবে
     cleanupChannel();
-    activeChannel = subscribeToChatMessages(requestId, (newMsg) => {
-      appendMessage(newMsg);
-      if (newMsg.sender_id !== currentUserId) {
-        markMessagesRead(requestId);
-      }
-    });
+    if (!readOnly) {
+      markMessagesRead(requestId);
+      activeChannel = subscribeToChatMessages(requestId, (newMsg) => {
+        appendMessage(newMsg);
+        if (newMsg.sender_id !== currentUserId) {
+          markMessagesRead(requestId);
+        }
+      });
+    }
 
     inputEl.value = '';
-    inputEl.focus();
+    if (!readOnly) inputEl.focus();
   };
 
   overlay?.addEventListener('click', (e) => {
@@ -437,8 +442,11 @@
   }
 
   .cm-msg-image {
-    width: 100%;
-    max-width: 220px;
+    width: 200px;
+    height: 200px;
+    aspect-ratio: 1 / 1;
+    object-fit: contain;
+    background: #F4F7FC;
     border-radius: 12px;
     cursor: pointer;
     display: block;
