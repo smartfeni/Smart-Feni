@@ -38,7 +38,7 @@ export async function POST({ request }) {
 
     const { data: deliveryRequest, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, customer_profile_id, accepted_rider_id')
+      .select('id, status, customer_profile_id, accepted_rider_id, updated_at')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -69,11 +69,29 @@ export async function POST({ request }) {
       );
     }
 
-    if (!['confirmed', 'delivered'].includes(deliveryRequest.status)) {
+    const allowedStatuses = ['confirmed', 'delivered', 'completed'];
+    if (!allowedStatuses.includes(deliveryRequest.status)) {
       return new Response(
         JSON.stringify({ error: 'এই অবস্থায় ডিসপিউট রেইজ করা যাবে না' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // completed হওয়ার পর ১ ঘন্টা পর্যন্ত ডিসপিউট রেইজ করা যাবে (যেমন
+    // পণ্য পাওয়ার পর ত্রুটি ধরা পড়লে সাথে সাথে না হলেও রিপোর্ট করার
+    // সুযোগ থাকা দরকার) — এরপর আর যাবে না। আলাদা completed_at কলাম
+    // নাই, তাই updated_at ব্যবহার করা হলো (confirm-delivery.js এটাই
+    // completed হওয়ার মুহূর্তে সেট করে, আর completed টার্মিনাল স্টেট
+    // হওয়ায় এরপর আর বদলায় না — নিরাপদ প্রক্সি)
+    if (deliveryRequest.status === 'completed') {
+      const completedAt = new Date(deliveryRequest.updated_at).getTime();
+      const oneHourMs = 60 * 60 * 1000;
+      if (Date.now() - completedAt > oneHourMs) {
+        return new Response(
+          JSON.stringify({ error: 'সম্পন্ন হওয়ার ১ ঘন্টার মধ্যেই শুধু ডিসপিউট রেইজ করা যায়' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     const { client: adminClient, error: adminError } = getAdminClient();
