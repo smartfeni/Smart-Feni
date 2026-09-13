@@ -73,6 +73,28 @@ export async function POST({ request }) {
       );
     }
 
+    // নতুন দাম অবশ্যই বর্তমান সর্বনিম্ন হিরো অফারের চেয়ে কম থাকতে হবে —
+    // নাহলে কাস্টমার সরাসরি accept-best-price দিয়ে ওই হিরোর অফারই
+    // নিয়ে নিতে পারবে, নতুন করে দাম বাড়িয়ে অফারকে ছাড়িয়ে যাওয়ার
+    // দরকার নাই (এটাই নেগোসিয়েশনের জায়গা খোলা রাখে)
+    const { data: activeOffers } = await client
+      .from('delivery_offers')
+      .select('offer_price, rider_profile_id')
+      .eq('request_id', requestId)
+      .eq('status', 'active');
+
+    const lowestOffer = (activeOffers || []).reduce(
+      (min, o) => (o.offer_price < min ? o.offer_price : min),
+      Infinity
+    );
+
+    if (lowestOffer !== Infinity && price >= lowestOffer) {
+      return new Response(
+        JSON.stringify({ error: `নতুন দাম অবশ্যই বর্তমান সর্বনিম্ন হিরো অফারের (৳${lowestOffer}) চেয়ে কম হতে হবে — এর বেশি হলে সরাসরি ওই অফারই গ্রহণ করুন` }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { data: updated, error: updateError } = await client
       .from('delivery_requests')
       .update({ customer_asking_price: price, updated_at: new Date().toISOString() })
@@ -90,13 +112,8 @@ export async function POST({ request }) {
 
     // একটিভ অফার দেওয়া হিরোদের জানানো — কাস্টমার দাম বাড়িয়েছে, হয়তো
     // তারা আরেকটু কম অফার দিয়ে জিততে পারবে। best-effort, ব্যর্থ হলেও
-    // দাম আপডেট সফল হয়েছে এই রেসপন্সে প্রভাব পড়বে না
-    const { data: activeOffers } = await client
-      .from('delivery_offers')
-      .select('rider_profile_id')
-      .eq('request_id', requestId)
-      .eq('status', 'active');
-
+    // দাম আপডেট সফল হয়েছে এই রেসপন্সে প্রভাব পড়বে না। উপরে যাচাইয়ের
+    // জন্য আনা activeOffers-ই রিইউজ করা হলো, আলাদা কুয়েরির দরকার নাই
     const { client: adminClient } = getAdminClient();
     if (adminClient) {
       const riderProfileIds = (activeOffers || []).map((o) => o.rider_profile_id).filter(Boolean);
