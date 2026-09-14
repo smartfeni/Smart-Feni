@@ -473,7 +473,36 @@
     const telegramDisconnectBtn = document.getElementById('telegramDisconnectBtn');
 
     if (telegramConnectBtn) {
-      telegramConnectBtn.href = `https://t.me/SmartFeniShopBoT?start=${shop.id}`;
+      // সিকিউরিটি ফিক্স: আগে সরাসরি shop.id (UUID) পাঠানো হতো, যেটা
+      // যে কেউ জেনে গেলে অন্যের শপের নোটিফিকেশন হাইজ্যাক করতে পারত।
+      // এখন একবার-ব্যবহারযোগ্য সিক্রেট টোকেন জেনারেট করে সেটা পাঠানো হয়।
+      telegramConnectBtn.style.pointerEvents = 'none';
+      telegramConnectBtn.style.opacity = '0.6';
+
+      (async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const res = await fetch('/api/shop-telegram-connect-token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ shopId: shop.id }),
+          });
+          const result = await res.json();
+
+          if (res.ok && result.token) {
+            telegramConnectBtn.href = `https://t.me/SmartFeniShopBoT?start=${result.token}`;
+            telegramConnectBtn.style.pointerEvents = '';
+            telegramConnectBtn.style.opacity = '';
+          } else {
+            telegramConnectBtn.textContent = 'লিংক তৈরি ব্যর্থ, রিফ্রেশ করুন';
+          }
+        } catch (err) {
+          telegramConnectBtn.textContent = 'লিংক তৈরি ব্যর্থ, রিফ্রেশ করুন';
+        }
+      })();
     }
 
     if (shop.telegram_chat_id) {
