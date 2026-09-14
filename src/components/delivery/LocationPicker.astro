@@ -25,6 +25,16 @@
 // z-index 51) উপরে চলে আসতে না পারে। isolate একটা নতুন, সম্পূর্ণ
 // আলাদা stacking context বানিয়ে দেয় — ভেতরে Leaflet যত বড় z-index
 // ব্যবহার করুক না কেন, সেটা .lp-map এর বাইরে কখনো "escape" করবে না।
+//
+// ============================================================
+// নতুন (ঐচ্ছিক): enableSuggestions prop — true হলে এই instance-এ:
+// ১. টাইপ করার সময় /api/location-suggestions-search থেকে নাম-ভিত্তিক
+//    সাজেশন ড্রপডাউন দেখায় (থাম্বনেইল + নাম + উপজেলা), ক্লিক করলে
+//    টেক্সটে নাম বসে আর lat/lng ব্যাকএন্ডে এমবেডেড থাকে।
+// ২. ম্যাপ থেকে পিন করে "সেভ করুন" চাপার সময় একটা ঐচ্ছিক "নাম" ফিল্ড
+//    দেখায় — নাম দিলে সেটা /api/save-location-suggestion-এ সেভ হয়ে
+//    ভবিষ্যতের জন্য সাজেশন-ডাটাবেসে যোগ হয় (খালি রাখলে কিছুই সেভ হয় না)।
+// ডিফল্ট false — drop/Ride Hero-তে কোনো পরিবর্তন হয় না।
 // ============================================================
 
 interface Props {
@@ -33,12 +43,25 @@ interface Props {
   allowAutoLocate?: boolean;
   placeholder?: string;
   required?: boolean;
+  enableSuggestions?: boolean;
 }
 
-const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নবী হোটেল, ফেনী সদর', required = true } = Astro.props;
+const {
+  id,
+  label,
+  allowAutoLocate = false,
+  placeholder = 'যেমন: নবী হোটেল, ফেনী সদর',
+  required = true,
+  enableSuggestions = false,
+} = Astro.props;
 ---
 
-<div class="lp-wrap" data-lp-id={id} data-auto-locate={allowAutoLocate ? '1' : '0'}>
+<div
+  class="lp-wrap"
+  data-lp-id={id}
+  data-auto-locate={allowAutoLocate ? '1' : '0'}
+  data-enable-suggestions={enableSuggestions ? '1' : '0'}
+>
   <label class="lp-label">{label}{required && <span class="required-mark">*</span>}</label>
 
   <div class="lp-address-row">
@@ -48,12 +71,16 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
       class="lp-address-input"
       placeholder={placeholder}
       required={required}
+      autocomplete="off"
     />
     <button type="button" class="lp-map-select-btn">
       <i class="fas fa-map-location-dot"></i>
       <span>ম্যাপে সিলেক্ট করুন</span>
     </button>
   </div>
+
+  {enableSuggestions && <div class="lp-suggest-results"></div>}
+
   {required && (
     <div class="field-error-msg" data-error-for={`lp-${id}-address`}>
       <i class="fas fa-circle-exclamation"></i><span>ঠিকানা দিন বা ম্যাপ থেকে সিলেক্ট করুন</span>
@@ -100,6 +127,16 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
         <i class="fas fa-map-pin"></i>
         <span class="lp-address-text">ম্যাপে পিন বসান বা সার্চ করুন</span>
       </p>
+      {enableSuggestions && (
+        <div class="lp-suggest-name-row">
+          <input
+            type="text"
+            class="lp-suggest-name-input"
+            placeholder="এই জায়গার নাম দিন (ঐচ্ছিক) — যেমন: নবী হোটেল"
+            maxlength="60"
+          />
+        </div>
+      )}
       <button type="button" class="lp-save-btn">
         <i class="fas fa-check"></i> সেভ করুন
       </button>
@@ -156,6 +193,29 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
     }
   }
 
+  // নতুন: নিজেদের লোকেশন-সাজেশন API থেকে অটোকমপ্লিট ফলাফল আনা
+  async function fetchLocationSuggestions(query: string) {
+    try {
+      const res = await fetch(`/api/location-suggestions-search?q=${encodeURIComponent(query)}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.results || [];
+    } catch {
+      return [];
+    }
+  }
+
+  // নতুন: কাস্টমার ম্যাপ-পিনের সাথে নাম দিলে fire-and-forget সেভ করা
+  function saveLocationSuggestion(name: string, lat: number, lng: number) {
+    fetch('/api/save-location-suggestion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, lat, lng }),
+    }).catch(() => {
+      /* ব্যর্থ হলেও মূল ফ্লো আটকাবে না — নীরবে ইগনোর */
+    });
+  }
+
   function initPicker(wrap: HTMLElement) {
     const L = (window as any).L;
 
@@ -179,6 +239,11 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
     const outInstructions = wrap.querySelector('.lp-out-instructions') as HTMLInputElement;
 
     const allowAutoLocate = wrap.dataset.autoLocate === '1';
+    const enableSuggestions = wrap.dataset.enableSuggestions === '1';
+
+    // নতুন: সাজেশন ড্রপডাউন + ম্যাপ-কনফার্ম নাম ফিল্ড (শুধু enableSuggestions=1 হলে DOM-এ থাকে)
+    const suggestResults = wrap.querySelector('.lp-suggest-results') as HTMLElement | null;
+    const suggestNameInput = wrap.querySelector('.lp-suggest-name-input') as HTMLInputElement | null;
 
     let map: any = null;
     let marker: any = null;
@@ -264,6 +329,16 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
       addressInput.value = pendingAddress;
       addressInput.classList.remove('field-invalid');
       wrap.querySelector(`[data-error-for="${addressInput.id}"]`)?.classList.remove('show');
+
+      // নতুন: ঐচ্ছিক নাম দেওয়া থাকলে সাজেশন-ডাটাবেসে ফায়ার-অ্যান্ড-ফরগেট সেভ
+      if (enableSuggestions && suggestNameInput) {
+        const suggestName = suggestNameInput.value.trim();
+        if (suggestName) {
+          saveLocationSuggestion(suggestName, pendingLat, pendingLng);
+        }
+        suggestNameInput.value = '';
+      }
+
       closeOverlay();
     });
 
@@ -279,7 +354,77 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
       outInstructions.value = instructionsInput.value.trim();
     });
 
-    // ============ সার্চ ============
+    // ============ নতুন: লোকেশন-সাজেশন অটোকমপ্লিট (শুধু enableSuggestions=1) ============
+    if (enableSuggestions && suggestResults) {
+      function setSuggestResultsVisible(visible: boolean) {
+        suggestResults!.classList.toggle('active', visible);
+      }
+
+      function renderSuggestItem(item: any) {
+        const thumb = item.image_url
+          ? `<img src="${item.image_url}" class="lp-suggest-thumb" alt="" loading="lazy" />`
+          : `<div class="lp-suggest-thumb lp-suggest-thumb-fallback"><i class="fas fa-location-dot"></i></div>`;
+        const sub = item.upazila ? `<span class="lp-suggest-sub">${item.upazila}</span>` : '';
+        return `
+          <div class="lp-suggest-item" data-lat="${item.lat}" data-lng="${item.lng}" data-name="${(item.name || '').replace(/"/g, '&quot;')}">
+            ${thumb}
+            <div class="lp-suggest-text">
+              <span class="lp-suggest-name">${item.name}</span>
+              ${sub}
+            </div>
+          </div>
+        `;
+      }
+
+      let suggestTimer: ReturnType<typeof setTimeout>;
+      addressInput.addEventListener('input', () => {
+        clearTimeout(suggestTimer);
+        const q = addressInput.value.trim();
+        if (q.length < 2) {
+          suggestResults!.innerHTML = '';
+          setSuggestResultsVisible(false);
+          return;
+        }
+        suggestTimer = setTimeout(async () => {
+          const results = await fetchLocationSuggestions(q);
+          if (!results.length) {
+            setSuggestResultsVisible(false);
+            return;
+          }
+          suggestResults!.innerHTML = results.map(renderSuggestItem).join('');
+          setSuggestResultsVisible(true);
+
+          suggestResults!.querySelectorAll('.lp-suggest-item').forEach((el) => {
+            el.addEventListener('click', () => {
+              const target = el as HTMLElement;
+              const name = target.dataset.name || '';
+              const lat = parseFloat(target.dataset.lat || '');
+              const lng = parseFloat(target.dataset.lng || '');
+
+              addressInput.value = name;
+              outAddress.value = name;
+              outLat.value = Number.isFinite(lat) ? String(lat) : '';
+              outLng.value = Number.isFinite(lng) ? String(lng) : '';
+              outMode.value = 'suggestion';
+              addressInput.classList.remove('field-invalid');
+              wrap.querySelector(`[data-error-for="${addressInput.id}"]`)?.classList.remove('show');
+
+              setSuggestResultsVisible(false);
+            });
+          });
+        }, 350);
+      });
+
+      addressInput.addEventListener('focus', () => {
+        if (suggestResults!.innerHTML) setSuggestResultsVisible(true);
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!wrap.contains(e.target as Node)) setSuggestResultsVisible(false);
+      });
+    }
+
+    // ============ সার্চ (ম্যাপ ওভারলের ভেতরের Nominatim সার্চ) ============
     function setSearchResultsVisible(visible: boolean) {
       searchResults.classList.toggle('active', visible);
     }
@@ -382,6 +527,7 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
   }
 
   .lp-address-row {
+    position: relative;
     display: flex;
     gap: 8px;
   }
@@ -426,6 +572,24 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
     .lp-map-select-btn span {
       display: inline;
     }
+  }
+
+  /* নতুন: অটোকমপ্লিট সাজেশন ড্রপডাউন — address-row এর ঠিক নিচে */
+  .lp-suggest-results {
+    display: none;
+    position: relative;
+    margin-top: 6px;
+    background: #fff;
+    border: 1px solid #E5EAF0;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(27, 42, 74, 0.1);
+    max-height: 260px;
+    overflow-y: auto;
+    z-index: 40;
+  }
+
+  .lp-suggest-results.active {
+    display: block;
   }
 
   .lp-instructions-wrap {
@@ -632,6 +796,28 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
     flex-shrink: 0;
   }
 
+  /* নতুন: ম্যাপ-কনফার্মে ঐচ্ছিক নাম ফিল্ড */
+  .lp-suggest-name-row {
+    margin-bottom: 12px;
+  }
+
+  .lp-suggest-name-input {
+    width: 100%;
+    padding: 11px 14px;
+    border-radius: 12px;
+    border: 1.5px dashed #E5EAF0;
+    font-size: 0.82rem;
+    color: #1B2A4A;
+    box-sizing: border-box;
+    background: #F8FAFC;
+  }
+
+  .lp-suggest-name-input:focus {
+    outline: none;
+    border-color: #FF6B35;
+    background: #fff;
+  }
+
   .lp-save-btn {
     width: 100%;
     background: #1B2A4A;
@@ -650,7 +836,7 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
 </style>
 
 <style is:global>
-  /* সার্চ রেজাল্ট আইটেম — JS দিয়ে innerHTML হিসেবে বসে, তাই global প্রয়োজন */
+  /* সার্চ রেজাল্ট আইটেম (ম্যাপ ওভারলের ভেতরের Nominatim সার্চ) — JS দিয়ে innerHTML হিসেবে বসে, তাই global প্রয়োজন */
   .lp-search-item {
     padding: 11px 14px;
     font-size: 0.82rem;
@@ -680,6 +866,61 @@ const { id, label, allowAutoLocate = false, placeholder = 'যেমন: নব�
     padding: 14px;
     text-align: center;
     font-size: 0.8rem;
+    color: #99A9BE;
+  }
+
+  /* নতুন: লোকেশন-সাজেশন অটোকমপ্লিট আইটেম — JS দিয়ে innerHTML হিসেবে বসে, তাই global */
+  .lp-suggest-item {
+    padding: 9px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #F0F3F8;
+  }
+
+  .lp-suggest-item:last-child {
+    border-bottom: none;
+  }
+
+  .lp-suggest-item:hover {
+    background: #FFF6F2;
+  }
+
+  .lp-suggest-thumb {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #F4F7FC;
+  }
+
+  .lp-suggest-thumb-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #FF6B35;
+    font-size: 1rem;
+  }
+
+  .lp-suggest-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .lp-suggest-name {
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .lp-suggest-sub {
+    font-size: 0.72rem;
     color: #99A9BE;
   }
 </style>
