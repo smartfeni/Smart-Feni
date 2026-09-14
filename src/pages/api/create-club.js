@@ -4,6 +4,14 @@
 // Supabase Auth এ ইউজার তৈরি করে, clubs টেবিলে row বসায়,
 // তারপর profiles এ is_club_owner ও club_id সেট করে দেয়।
 // এই key কখনো ব্রাউজারে পাঠানো হয় না — শুধু এই সার্ভার ফাইলেই থাকে।
+//
+// আপডেট (সিকিউরিটি ফিক্স — এই এন্ডপয়েন্টে আগে কোনো auth check
+// ছিল না, যে কেউ URL জানলে সরাসরি নতুন ক্লাব ওউনার বানিয়ে ফেলতে
+// পারত। এখন caller-এর Authorization টোকেন যাচাই হয় →
+// profiles.role admin/moderator কিনা চেক হয়, তারপরই বাকি কাজ চলে):
+// ১. Authorization হেডার থেকে টোকেন বের করা
+// ২. supabaseAdmin.auth.getUser(token) দিয়ে টোকেন ভ্যালিড কিনা যাচাই
+// ৩. caller-এর profiles.role === 'admin'/'moderator' কিনা চেক
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -31,6 +39,15 @@ function slugify(input) {
 
 export async function POST({ request }) {
   try {
+    const authHeader = request.headers.get('Authorization') || '';
+    const token = authHeader.replace('Bearer ', '');
+
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'অননুমোদিত — লগইন করুন' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const { clubName, slug, phone, password, upajila } = await request.json();
 
     if (!clubName || !slug || !phone || !password) {
@@ -77,6 +94,26 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+
+    // caller যে টোকেন দিয়ে কল করেছে সেটা সত্যিই admin/moderator এর কিনা যাচাই
+    const { data: callerData, error: callerError } = await supabaseAdmin.auth.getUser(token);
+    if (callerError || !callerData?.user) {
+      return new Response(JSON.stringify({ error: 'অননুমোদিত — সেশন সঠিক না' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { data: callerProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('role')
+      .eq('id', callerData.user.id)
+      .single();
+
+    if (!callerProfile || !['admin', 'moderator'].includes(callerProfile.role)) {
+      return new Response(JSON.stringify({ error: 'শুধু admin/moderator এই অ্যাকশন নিতে পারবেন' }), {
+        status: 403, headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     // স্লাগ আগে থেকে ব্যবহৃত কিনা চেক — clubs আর shops দুটো টেবিলেই,
     // কারণ দুটোই একই top-level URL namespace শেয়ার করে (/[slug])
