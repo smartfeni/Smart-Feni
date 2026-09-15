@@ -1,13 +1,14 @@
 // ============================================================
 // API এন্ডপয়েন্ট: push subscription সেভ করা (/api/push/subscribe)
-// ফাংশন: ব্রাউজার থেকে পাওয়া push subscription (endpoint + keys)
+// ফাংশন: browser (VAPID endpoint+keys) অথবা native android app
+//         (FCM token) থেকে পাওয়া push subscription
 //         Supabase এর push_subscriptions টেবিলে সেভ করা
 //
 // নোট: প্রজেক্টের existing কনভেনশন অনুযায়ী (change-phone.js,
 //       delete-user.js এর মতো) accessToken সরাসরি request body
 //       তে পাঠানো হচ্ছে, cookie/header ভিত্তিক auth না।
 //
-// একই ইউজারের একাধিক ডিভাইস থাকতে পারে — endpoint UNIQUE
+// একই ইউজারের একাধিক ডিভাইস থাকতে পারে — endpoint/fcm_token UNIQUE
 // constraint থাকায় upsert করলে ডুপ্লিকেট হবে না।
 // ============================================================
 
@@ -17,13 +18,39 @@ export const prerender = false;
 
 export async function POST({ request }) {
   try {
-    const { accessToken, endpoint, keys, device_label } = await request.json();
+    const body = await request.json();
+    const { accessToken, platform = 'web', device_label } = body;
 
-    if (!accessToken || !endpoint || !keys?.p256dh || !keys?.auth) {
+    if (!accessToken) {
       return new Response(
-        JSON.stringify({ error: 'accessToken, endpoint ও keys আবশ্যক' }),
+        JSON.stringify({ error: 'accessToken আবশ্যক' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    if (platform !== 'web' && platform !== 'android') {
+      return new Response(
+        JSON.stringify({ error: 'platform অবশ্যই web অথবা android হতে হবে' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (platform === 'web') {
+      const { endpoint, keys } = body;
+      if (!endpoint || !keys?.p256dh || !keys?.auth) {
+        return new Response(
+          JSON.stringify({ error: 'web platform এর জন্য endpoint ও keys আবশ্যক' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    } else {
+      const { fcm_token } = body;
+      if (!fcm_token) {
+        return new Response(
+          JSON.stringify({ error: 'android platform এর জন্য fcm_token আবশ্যক' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
@@ -50,21 +77,43 @@ export async function POST({ request }) {
       );
     }
 
-    // endpoint UNIQUE হওয়ায় upsert করলে একই ডিভাইস দ্বিতীয়বার সাবস্ক্রাইব করলে
-    // পুরনো রেকর্ডটাই আপডেট হবে (last_used_at রিফ্রেশ), নতুন ডুপ্লিকেট তৈরি হবে না
-    const { error: upsertError } = await callerClient
-      .from('push_subscriptions')
-      .upsert(
-        {
-          user_id: callerUser.id,
-          endpoint,
-          p256dh_key: keys.p256dh,
-          auth_key: keys.auth,
-          device_label: device_label || 'Unknown device',
-          last_used_at: new Date().toISOString(),
-        },
-        { onConflict: 'endpoint' }
-      );
+    let upsertError;
+
+    if (platform === 'web') {
+      const { endpoint, keys } = body;
+      // endpoint UNIQUE হওয়ায় upsert করলে একই ডিভাইস দ্বিতীয়বার সাবস্ক্রাইব করলে
+      // পুরনো রেকর্ডটাই আপডেট হবে (last_used_at রিফ্রেশ), নতুন ডুপ্লিকেট তৈরি হবে না
+      ({ error: upsertError } = await callerClient
+        .from('push_subscriptions')
+        .upsert(
+          {
+            user_id: callerUser.id,
+            platform: 'web',
+            endpoint,
+            p256dh_key: keys.p256dh,
+            auth_key: keys.auth,
+            device_label: device_label || 'Unknown device',
+            last_used_at: new Date().toISOString(),
+          },
+          { onConflict: 'endpoint' }
+        ));
+    } else {
+      const { fcm_token } = body;
+      // fcm_token UNIQUE হওয়ায় একই ডিভাইস দ্বিতীয়বার register করলে
+      // পুরনো রেকর্ডটাই আপডেট হবে, নতুন ডুপ্লিকেট তৈরি হবে না
+      ({ error: upsertError } = await callerClient
+        .from('push_subscriptions')
+        .upsert(
+          {
+            user_id: callerUser.id,
+            platform: 'android',
+            fcm_token,
+            device_label: device_label || 'Android App',
+            last_used_at: new Date().toISOString(),
+          },
+          { onConflict: 'fcm_token' }
+        ));
+    }
 
     if (upsertError) {
       return new Response(

@@ -2,19 +2,50 @@
 // API এন্ডপয়েন্ট: আসল push notification পাঠানো (/api/push/send)
 // ফাংশন: Supabase এর dispatch_pending_push_notifications() cron
 //         থেকে (pg_net এর মাধ্যমে) কল হয় — এখানে সেই ইউজারের
-//         সব ডিভাইসে (একাধিক হতে পারে) আসল push পাঠানো হয়
+//         সব ডিভাইসে (web + android, একাধিক হতে পারে) আসল push পাঠানো হয়
+//
+// আপডেট (নেটিভ পার্মিশন প্রজেক্ট): dual-send —
+//         platform === 'web'     → web-push (VAPID)
+//         platform === 'android' → firebase-admin (FCM)
 //
 // নিরাপত্তা: X-Internal-Secret হেডার যাচাই করা হয় — শুধু
 // Supabase cron থেকেই কল আসার কথা, বাইরের কেউ কল করলে 401 পাবে
 //
-// Stale subscription cleanup: 404/410 রেসপন্স এলে (মানে ব্রাউজার/
-// ডিভাইসে সাবস্ক্রিপশন আর ভ্যালিড না) সেই রেকর্ড ডিলিট করা হয়
+// Stale subscription cleanup:
+//   - web: 404/410 রেসপন্স এলে রেকর্ড ডিলিট
+//   - android: FCM 'messaging/registration-token-not-registered' বা
+//     'messaging/invalid-registration-token' এলে রেকর্ড ডিলিট
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
+import admin from 'firebase-admin';
 
 export const prerender = false;
+
+// Firebase Admin singleton — serverless function বারবার cold-start
+// হলেও একই process এ multiple init এড়াতে চেক করা হয়
+function getFirebaseAdmin() {
+  if (admin.apps.length > 0) {
+    return admin.app();
+  }
+
+  const projectId = import.meta.env.FIREBASE_PROJECT_ID;
+  const clientEmail = import.meta.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = (import.meta.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+
+  if (!projectId || !clientEmail || !privateKey) {
+    return null;
+  }
+
+  return admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId,
+      clientEmail,
+      privateKey,
+    }),
+  });
+}
 
 export async function POST({ request }) {
   try {
@@ -52,11 +83,13 @@ export async function POST({ request }) {
 
     webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 
+    const firebaseApp = getFirebaseAdmin();
+
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
     const { data: subscriptions, error: fetchError } = await supabaseAdmin
       .from('push_subscriptions')
-      .select('id, endpoint, p256dh_key, auth_key')
+      .select('id, platform, endpoint, p256dh_key, auth_key, fcm_token')
       .eq('user_id', user_id);
 
     if (fetchError) {
@@ -73,7 +106,14 @@ export async function POST({ request }) {
       });
     }
 
-    const payload = JSON.stringify({
+    const webSubs = subscriptions.filter((s) => s.platform === 'android' ? false : true);
+    const androidSubs = subscriptions.filter((s) => s.platform === 'android');
+
+    let sentCount = 0;
+    const staleSubscriptionIds = [];
+
+    // ---------- Web (VAPID) ----------
+    const webPayload = JSON.stringify({
       notification_id,
       title,
       body,
@@ -82,23 +122,19 @@ export async function POST({ request }) {
       action_url,
     });
 
-    let sentCount = 0;
-    const staleSubscriptionIds = [];
-
-    // ইউজারের একাধিক ডিভাইসে (একাধিক subscription) সমান্তরালে পাঠানো
     await Promise.all(
-      subscriptions.map(async (sub) => {
+      webSubs.map(async (sub) => {
         try {
           await webpush.sendNotification(
             {
               endpoint: sub.endpoint,
               keys: { p256dh: sub.p256dh_key, auth: sub.auth_key },
             },
-            payload
+            webPayload
           );
           sentCount++;
         } catch (err) {
-          // 404/410 মানে এই সাবস্ক্রিপশন আর ভ্যালিড না (ব্রাউজার আনইনস্টল/ডেটা ক্লিয়ার ইত্যাদি)
+          // 404/410 মানে এই সাবস্ক্রিপশন আর ভ্যালিড না (ব্রাউজার/ডিভাইসে ডেটা ক্লিয়ার ইত্যাদি)
           if (err.statusCode === 404 || err.statusCode === 410) {
             staleSubscriptionIds.push(sub.id);
           }
@@ -106,6 +142,44 @@ export async function POST({ request }) {
         }
       })
     );
+
+    // ---------- Android (FCM) ----------
+    if (androidSubs.length > 0 && firebaseApp) {
+      const messaging = admin.messaging(firebaseApp);
+
+      await Promise.all(
+        androidSubs.map(async (sub) => {
+          try {
+            await messaging.send({
+              token: sub.fcm_token,
+              notification: {
+                title,
+                body: body || '',
+                imageUrl: image_url || undefined,
+              },
+              data: {
+                notification_id: notification_id ? String(notification_id) : '',
+                category: category || '',
+                action_url: action_url || '',
+              },
+              android: {
+                priority: 'high',
+              },
+            });
+            sentCount++;
+          } catch (err) {
+            const code = err?.errorInfo?.code || err?.code || '';
+            if (
+              code === 'messaging/registration-token-not-registered' ||
+              code === 'messaging/invalid-registration-token'
+            ) {
+              staleSubscriptionIds.push(sub.id);
+            }
+            // অন্য এরর সাইলেন্টলি স্কিপ, পরের নোটিফিকেশনে আবার ট্রাই হবে
+          }
+        })
+      );
+    }
 
     if (staleSubscriptionIds.length > 0) {
       await supabaseAdmin.from('push_subscriptions').delete().in('id', staleSubscriptionIds);
