@@ -57,6 +57,7 @@
   import { getChatMessages, sendChatMessage, markMessagesRead, subscribeToChatMessages, uploadChatImage } from '../../lib/chatClient.js';
   import { compressImage } from '../../lib/imageCompress.js';
   import { supabase } from '../../lib/supabase.js';
+  import { isNativeApp, capturePhoto } from '../../lib/native-bridge.js';
 
   const overlay = document.getElementById('cmOverlay');
   const closeBtn = document.getElementById('cmClose');
@@ -197,12 +198,33 @@
     if (e.key === 'Enter') handleSend();
   });
 
-  cameraBtn?.addEventListener('click', () => cameraInput.click());
-  galleryBtn?.addEventListener('click', () => galleryInput.click());
+  cameraBtn?.addEventListener('click', async () => {
+    if (isNativeApp()) {
+      try {
+        const file = await capturePhoto('camera');
+        await processImageFile(file);
+      } catch (err) {
+        // ইউজার ক্যামেরা বন্ধ করলে বা permission না দিলে নীরবে ইগনোর
+      }
+      return;
+    }
+    cameraInput.click();
+  });
 
-  async function handleImageSelect(e) {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // একই ছবি আবার সিলেক্ট করলেও change ইভেন্ট যেন ফায়ার হয়
+  galleryBtn?.addEventListener('click', async () => {
+    if (isNativeApp()) {
+      try {
+        const file = await capturePhoto('gallery');
+        await processImageFile(file);
+      } catch (err) {
+        // ইউজার গ্যালারি থেকে বাছাই বাতিল করলে নীরবে ইগনোর
+      }
+      return;
+    }
+    galleryInput.click();
+  });
+
+  async function processImageFile(file) {
     if (!file || !activeRequestId) return;
 
     cameraBtn.disabled = true;
@@ -226,6 +248,12 @@
       window.showToast?.(sendError, 'error');
     }
     // সফল হলে Realtime সাবস্ক্রিপশন নিজে থেকেই মেসেজ দেখিয়ে দিবে
+  }
+
+  async function handleImageSelect(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // একই ছবি আবার সিলেক্ট করলেও change ইভেন্ট যেন ফায়ার হয়
+    await processImageFile(file);
   }
 
   cameraInput?.addEventListener('change', handleImageSelect);
