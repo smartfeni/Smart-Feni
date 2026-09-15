@@ -1,25 +1,23 @@
 // ============================================================
 // ফাইল: src/lib/push.js
-// ফাংশন: ব্রাউজারে Push Notification পারমিশন চাওয়া, subscribe
-//         করা এবং সাবস্ক্রিপশন সার্ভারে পাঠানো (Phase 4)
+// ফাংশন: Push Notification পারমিশন চাওয়া, subscribe করা এবং
+//         সাবস্ক্রিপশন সার্ভারে পাঠানো — Browser (Web Push/VAPID)
+//         এবং Native Android App (FCM) দুটোই সাপোর্ট করে।
 //
-// আপডেট: VAPID public key এখন import.meta.env এর বদলে
-//         window.__SMARTFENI_VAPID_KEY থেকে পড়া হচ্ছে —
-//         কারণ Vercel এ "PUBLIC_" দিয়ে শুরু নাম সেভ করা যাচ্ছিল
-//         না, তাই env var নাম রাখা হয়েছে "PUSH_KEY_PUBLIC"
-//         (prefix ছাড়া) — কিন্তু Astro/Vite এর নিয়মে
-//         import.meta.env দিয়ে ক্লায়েন্ট-সাইডে অ্যাক্সেস করতে
-//         "PUBLIC_" প্রিফিক্স আবশ্যক। তাই BaseLayout.astro এর
-//         সার্ভার-সাইড ফ্রন্টম্যাটার থেকে ভ্যালুটা পড়ে
-//         window global variable হিসেবে পেজে বসানো হয়েছে
-//         (GA_MEASUREMENT_ID এর মতো define:vars প্যাটার্নে)।
+// আপডেট (নেটিভ পার্মিশন প্রজেক্ট): isNativeApp() চেক করে
+//         native app এ থাকলে @capacitor/push-notifications দিয়ে
+//         FCM token নিয়ে subscribe করবে (platform: 'android'),
+//         browser এ থাকলে আগের VAPID flow অপরিবর্তিত (platform: 'web')।
 //
-// ব্যবহার (অন্য কম্পোনেন্ট থেকে):
-//   import { subscribeToPush, getPushPermissionState } from '../../lib/push.js';
+// ব্যবহার (অন্য কম্পোনেন্ট থেকে, আগের মতোই অপরিবর্তিত):
+//   import { subscribeToPush, getPushPermissionState, isPushSupported } from '../../lib/push.js';
 //   const result = await subscribeToPush();
 // ============================================================
 
 import { supabase } from './supabase.js';
+import { isNativeApp } from './native-bridge.js';
+
+const NATIVE_PUSH_GRANTED_KEY = 'smartfeni_push_granted';
 
 // VAPID public key (base64url string) কে Uint8Array এ কনভার্ট করা,
 // pushManager.subscribe() এর applicationServerKey এর জন্য এই ফরম্যাট লাগে
@@ -36,17 +34,76 @@ function urlBase64ToUint8Array(base64String) {
 
 // বর্তমান পারমিশন স্ট্যাটাস চেক করার জন্য — 'granted' | 'denied' | 'default'
 export function getPushPermissionState() {
+  if (isNativeApp()) {
+    return localStorage.getItem(NATIVE_PUSH_GRANTED_KEY) === '1' ? 'granted' : 'default';
+  }
   if (!('Notification' in window)) return 'unsupported';
   return Notification.permission;
 }
 
-// ব্রাউজার এই ফিচার সাপোর্ট করে কিনা (পুরনো ব্রাউজার/কিছু iOS ভার্সনে সাপোর্ট নাই)
+// app এ (native) সবসময় সাপোর্টেড ধরা হয় (Capacitor plugin এর মাধ্যমে);
+// browser এ পুরনো ফিচার-চেক অপরিবর্তিত
 export function isPushSupported() {
+  if (isNativeApp()) return true;
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 
-// মূল ফাংশন — permission চাওয়া, subscribe করা, সার্ভারে সেভ করা
-export async function subscribeToPush() {
+// ------------------ Native (Android app / FCM) ------------------
+async function subscribeNative() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    return { success: false, error: 'নোটিফিকেশন অন করতে আগে লগইন করুন' };
+  }
+
+  const { PushNotifications } = await import('@capacitor/push-notifications');
+
+  let permStatus = await PushNotifications.checkPermissions();
+  if (permStatus.receive !== 'granted') {
+    permStatus = await PushNotifications.requestPermissions();
+  }
+  if (permStatus.receive !== 'granted') {
+    return { success: false, error: 'পারমিশন দেওয়া হয়নি', permission: 'denied' };
+  }
+
+  return new Promise((resolve) => {
+    PushNotifications.addListener('registration', async (token) => {
+      try {
+        const ua = navigator.userAgent;
+        const response = await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accessToken: session.access_token,
+            platform: 'android',
+            fcm_token: token.value,
+            device_label: 'Android App',
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          resolve({ success: false, error: result.error || 'সাবস্ক্রিপশন সেভ করতে ব্যর্থ' });
+          return;
+        }
+
+        localStorage.setItem(NATIVE_PUSH_GRANTED_KEY, '1');
+        resolve({ success: true });
+      } catch (err) {
+        resolve({ success: false, error: String(err) });
+      }
+    });
+
+    PushNotifications.addListener('registrationError', (err) => {
+      resolve({ success: false, error: 'FCM রেজিস্ট্রেশন ব্যর্থ: ' + JSON.stringify(err) });
+    });
+
+    PushNotifications.register();
+  });
+}
+
+// ------------------ Web (Browser / VAPID) ------------------
+async function subscribeWeb() {
   if (!isPushSupported()) {
     return { success: false, error: 'এই ব্রাউজার পুশ নোটিফিকেশন সাপোর্ট করে না' };
   }
@@ -56,13 +113,11 @@ export async function subscribeToPush() {
     return { success: false, error: 'VAPID কী কনফিগার করা নেই' };
   }
 
-  // ইউজার লগইন করা আছে কিনা চেক
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
     return { success: false, error: 'নোটিফিকেশন অন করতে আগে লগইন করুন' };
   }
 
-  // ব্রাউজারের নেটিভ পারমিশন পপ-আপ (এটা শুধু soft-ask মোডালে "হ্যাঁ" চাপার পরই কল করা উচিত)
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') {
     return { success: false, error: 'পারমিশন দেওয়া হয়নি', permission };
@@ -71,7 +126,6 @@ export async function subscribeToPush() {
   try {
     const registration = await navigator.serviceWorker.ready;
 
-    // আগে থেকে subscribe করা থাকলে সেটাই রিইউজ করা, নতুন করে subscribe না করে
     let subscription = await registration.pushManager.getSubscription();
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
@@ -82,7 +136,6 @@ export async function subscribeToPush() {
 
     const subJson = subscription.toJSON();
 
-    // ডিভাইস লেবেল অনুমান করা (ডিবাগিং সুবিধার জন্য, ইউজার এটা দেখবে না)
     const ua = navigator.userAgent;
     const deviceLabel = /Android/i.test(ua)
       ? 'Chrome - Android'
@@ -95,6 +148,7 @@ export async function subscribeToPush() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         accessToken: session.access_token,
+        platform: 'web',
         endpoint: subJson.endpoint,
         keys: subJson.keys,
         device_label: deviceLabel,
@@ -111,4 +165,12 @@ export async function subscribeToPush() {
   } catch (err) {
     return { success: false, error: String(err) };
   }
+}
+
+// ------------------ মূল এন্ট্রি পয়েন্ট ------------------
+export async function subscribeToPush() {
+  if (isNativeApp()) {
+    return subscribeNative();
+  }
+  return subscribeWeb();
 }
