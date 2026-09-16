@@ -163,6 +163,7 @@
 <script>
   import { subscribeToPush, getPushPermissionState, isPushSupported } from '../../lib/push.js';
   import { supabase } from '../../lib/supabase.js';
+  import { isNativeApp } from '../../lib/native-bridge.js';
 
   const COOLDOWN_KEY = 'smartfeni_push_prompt_dismissed_at';
   const COOLDOWN_DAYS = 7;
@@ -190,6 +191,18 @@
     if (!session) return; // লগইন করা না থাকলে প্রম্পট দেখানো হবে না
 
     if (!shouldShowPrompt()) return;
+
+    if (isNativeApp()) {
+      // App এর ভেতরে কাস্টম ওয়েব-স্টাইল মোডাল দেখানো হবে না —
+      // একই দেরির পর সরাসরি নেটিভ OS পারমিশন popup দেখাবে
+      setTimeout(async () => {
+        const result = await subscribeToPush();
+        if (!result.success && result.permission === 'denied') {
+          localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
+        }
+      }, 2500);
+      return;
+    }
 
     // একটু দেরি করে দেখানো — পেজ লোড হওয়ার সাথে সাথেই না, যাতে বিরক্তিকর না লাগে
     setTimeout(() => {
