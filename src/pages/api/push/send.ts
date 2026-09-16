@@ -15,8 +15,15 @@
 //   - web: 404/410 রেসপন্স এলে রেকর্ড ডিলিট
 //   - android: FCM 'messaging/registration-token-not-registered' বা
 //     'messaging/invalid-registration-token' এলে রেকর্ড ডিলিট
+//
+// [FIX 2026-09-16] getFirebaseAdmin() try/catch দিয়ে সেফ করা হয়েছে —
+// আগে firebase-admin bundling ইস্যুতে admin.apps undefined হয়ে
+// পুরো রিকোয়েস্ট crash করতো (500 error), ফলে web push (VAPID)
+// পর্যন্ত পাঠানো হতো না — যদিও কোনো android ডিভাইসই ছিল না।
+// এখন Firebase init ব্যর্থ হলেও null রিটার্ন করে, web push স্বাভাবিকভাবে চলে।
 // ============================================================
 
+import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 import admin from 'firebase-admin';
@@ -26,28 +33,33 @@ export const prerender = false;
 // Firebase Admin singleton — serverless function বারবার cold-start
 // হলেও একই process এ multiple init এড়াতে চেক করা হয়
 function getFirebaseAdmin() {
-  if (admin.apps.length > 0) {
-    return admin.app();
+  try {
+    if (admin.apps && admin.apps.length > 0) {
+      return admin.app();
+    }
+
+    const projectId = import.meta.env.FIREBASE_PROJECT_ID;
+    const clientEmail = import.meta.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = (import.meta.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+
+    if (!projectId || !clientEmail || !privateKey) {
+      return null;
+    }
+
+    return admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId,
+        clientEmail,
+        privateKey,
+      }),
+    });
+  } catch (err) {
+    console.error('Firebase admin init failed:', err);
+    return null; // Firebase ব্যর্থ হলেও web push চলবে
   }
-
-  const projectId = import.meta.env.FIREBASE_PROJECT_ID;
-  const clientEmail = import.meta.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = (import.meta.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
-
-  if (!projectId || !clientEmail || !privateKey) {
-    return null;
-  }
-
-  return admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId,
-      clientEmail,
-      privateKey,
-    }),
-  });
 }
 
-export async function POST({ request }) {
+export const POST: APIRoute = async ({ request }) => {
   try {
     const internalSecret = request.headers.get('X-Internal-Secret');
     const expectedSecret = import.meta.env.PUSH_INTERNAL_SECRET;
@@ -179,6 +191,8 @@ export async function POST({ request }) {
           }
         })
       );
+    } else if (androidSubs.length > 0 && !firebaseApp) {
+      console.error('Android subscription আছে কিন্তু Firebase Admin init ব্যর্থ — env vars চেক করুন');
     }
 
     if (staleSubscriptionIds.length > 0) {
@@ -195,4 +209,4 @@ export async function POST({ request }) {
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
-}
+};
