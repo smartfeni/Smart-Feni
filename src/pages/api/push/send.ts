@@ -15,51 +15,45 @@
 //   - web: 404/410 রেসপন্স এলে রেকর্ড ডিলিট
 //   - android: FCM 'messaging/registration-token-not-registered' বা
 //     'messaging/invalid-registration-token' এলে রেকর্ড ডিলিট
-//
-// [FIX 2026-09-16] getFirebaseAdmin() try/catch দিয়ে সেফ করা হয়েছে —
-// আগে firebase-admin bundling ইস্যুতে admin.apps undefined হয়ে
-// পুরো রিকোয়েস্ট crash করতো (500 error), ফলে web push (VAPID)
-// পর্যন্ত পাঠানো হতো না — যদিও কোনো android ডিভাইসই ছিল না।
-// এখন Firebase init ব্যর্থ হলেও null রিটার্ন করে, web push স্বাভাবিকভাবে চলে।
 // ============================================================
 
-import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
-import admin from 'firebase-admin';
+import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 
 export const prerender = false;
 
 // Firebase Admin singleton — serverless function বারবার cold-start
 // হলেও একই process এ multiple init এড়াতে চেক করা হয়
+//
+// নোট: `import admin from 'firebase-admin'` (namespace-style import) Vercel এর
+// serverless bundler এ ESM/CJS interop সমস্যা করে (admin.credential undefined
+// হয়ে যায়) — তাই এখানে firebase-admin/app ও firebase-admin/messaging থেকে
+// সরাসরি (modular) ফাংশন import করা হচ্ছে, যেটা bundler-safe।
 function getFirebaseAdmin() {
-  try {
-    if (admin.apps && admin.apps.length > 0) {
-      return admin.app();
-    }
-
-    const projectId = import.meta.env.FIREBASE_PROJECT_ID;
-    const clientEmail = import.meta.env.FIREBASE_CLIENT_EMAIL;
-    const privateKey = (import.meta.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
-
-    if (!projectId || !clientEmail || !privateKey) {
-      return null;
-    }
-
-    return admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId,
-        clientEmail,
-        privateKey,
-      }),
-    });
-  } catch (err) {
-    console.error('Firebase admin init failed:', err);
-    return null; // Firebase ব্যর্থ হলেও web push চলবে
+  if (getApps().length > 0) {
+    return getApp();
   }
+
+  const projectId = import.meta.env.FIREBASE_PROJECT_ID;
+  const clientEmail = import.meta.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = (import.meta.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+
+  if (!projectId || !clientEmail || !privateKey) {
+    return null;
+  }
+
+  return initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail,
+      privateKey,
+    }),
+  });
 }
 
-export const POST: APIRoute = async ({ request }) => {
+export async function POST({ request }) {
   try {
     const internalSecret = request.headers.get('X-Internal-Secret');
     const expectedSecret = import.meta.env.PUSH_INTERNAL_SECRET;
@@ -157,7 +151,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     // ---------- Android (FCM) ----------
     if (androidSubs.length > 0 && firebaseApp) {
-      const messaging = admin.messaging(firebaseApp);
+      const messaging = getMessaging(firebaseApp);
 
       await Promise.all(
         androidSubs.map(async (sub) => {
@@ -191,8 +185,6 @@ export const POST: APIRoute = async ({ request }) => {
           }
         })
       );
-    } else if (androidSubs.length > 0 && !firebaseApp) {
-      console.error('Android subscription আছে কিন্তু Firebase Admin init ব্যর্থ — env vars চেক করুন');
     }
 
     if (staleSubscriptionIds.length > 0) {
@@ -209,4 +201,4 @@ export const POST: APIRoute = async ({ request }) => {
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
-};
+}
