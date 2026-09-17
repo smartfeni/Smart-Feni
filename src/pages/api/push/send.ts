@@ -19,15 +19,21 @@
 
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
-import admin from 'firebase-admin';
+import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 
 export const prerender = false;
 
 // Firebase Admin singleton — serverless function বারবার cold-start
 // হলেও একই process এ multiple init এড়াতে চেক করা হয়
+//
+// নোট: `import admin from 'firebase-admin'` (namespace-style import) Vercel এর
+// serverless bundler এ ESM/CJS interop সমস্যা করে (admin.credential undefined
+// হয়ে যায়) — তাই এখানে firebase-admin/app ও firebase-admin/messaging থেকে
+// সরাসরি (modular) ফাংশন import করা হচ্ছে, যেটা bundler-safe।
 function getFirebaseAdmin() {
-  if (admin.apps.length > 0) {
-    return admin.app();
+  if (getApps().length > 0) {
+    return getApp();
   }
 
   const projectId = import.meta.env.FIREBASE_PROJECT_ID;
@@ -38,8 +44,8 @@ function getFirebaseAdmin() {
     return null;
   }
 
-  return admin.initializeApp({
-    credential: admin.credential.cert({
+  return initializeApp({
+    credential: cert({
       projectId,
       clientEmail,
       privateKey,
@@ -145,7 +151,7 @@ export async function POST({ request }) {
 
     // ---------- Android (FCM) ----------
     if (androidSubs.length > 0 && firebaseApp) {
-      const messaging = admin.messaging(firebaseApp);
+      const messaging = getMessaging(firebaseApp);
 
       await Promise.all(
         androidSubs.map(async (sub) => {
