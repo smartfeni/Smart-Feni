@@ -69,3 +69,21 @@ export async function capturePhoto(source = 'camera') {
     type: blob.type || `image/${ext}`,
   });
 }
+
+// ---------------- Hardware Back Button ----------------
+// Android এর back বাটন চাপলে: WebView history তে আগের পেজ থাকলে
+// সেখানে ফিরে যাবে; না থাকলে (হোমপেজে থাকলে) app বন্ধ না করে
+// minimize করবে (Android home এ চলে যাবে)।
+export async function initBackButtonHandler() {
+  if (!isNativeApp()) return;
+
+  const { App } = await import('@capacitor/app');
+
+  App.addListener('backButton', ({ canGoBack }) => {
+    if (canGoBack) {
+      window.history.back();
+    } else {
+      App.minimizeApp();
+    }
+  });
+}
