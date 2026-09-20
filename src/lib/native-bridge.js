@@ -12,6 +12,10 @@
 // আপডেট: Android back বাটন এখন আগে খোলা drawer/modal বন্ধ করে
 // (notification, category, post-flow, hamburger, auth, chat ইত্যাদি),
 // তারপর কিছু খোলা না থাকলে তবেই পেজ পিছনে যায়।
+//
+// আপডেট: Splash screen (অ্যাপ আইকন) এখন ওয়েবসাইটের পেজ পুরো লোড
+// হওয়া পর্যন্ত থাকে, তারপর সরে যায় (hideSplashWhenReady)।
+// capacitor.config.json এ সর্বোচ্চ ১৫ সেকেন্ডের সেফটি লিমিট আছে।
 // ============================================================
 
 import { Capacitor } from '@capacitor/core';
@@ -150,6 +154,7 @@ export async function initBackButtonHandler() {
 
   // BaseLayout প্রতিটা পেজ লোডে এই ফাংশন চালায় — তাই শেষ পেজ মনে রাখার কাজও এখানেই
   rememberLastUrl();
+  hideSplashWhenReady();
 
   const { App } = await import('@capacitor/app');
 
@@ -186,5 +191,38 @@ async function rememberLastUrl() {
     });
   } catch (err) {
     // সেভ ফেইল করলে অ্যাপের কিছু যায় আসে না — error.html তখন হোমে ফিরবে
+  }
+}
+
+// ---------------- Splash Screen ----------------
+// অ্যাপ খোলার সময় splash (আইকন) দেখায়; ওয়েবসাইটের পেজ লোড শেষ হলে সরিয়ে দেয়।
+// পেজ ধীরে লোড হলেও ৪ সেকেন্ডের বেশি আটকে রাখে না।
+// (সাইট একেবারেই না খুললে capacitor.config.json এর ১৫ সেকেন্ডের লিমিট কাজ করে)
+async function hideSplashWhenReady() {
+  try {
+    if (!isNativeApp()) return;
+
+    const { SplashScreen } = await import('@capacitor/splash-screen');
+
+    let hidden = false;
+    const hide = () => {
+      if (hidden) return;
+      hidden = true;
+      // দুইবার requestAnimationFrame: প্রথম পেজ আঁকা হওয়ার পর সরায়, যাতে সাদা ঝলক না আসে
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          SplashScreen.hide({ fadeOutDuration: 200 }).catch(() => {});
+        });
+      });
+    };
+
+    if (document.readyState === 'complete') {
+      hide();
+    } else {
+      window.addEventListener('load', hide, { once: true });
+      setTimeout(hide, 4000);
+    }
+  } catch (err) {
+    // ফেইল করলে capacitor.config.json এর সেফটি লিমিটে splash নিজে সরে যাবে
   }
 }
