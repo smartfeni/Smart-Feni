@@ -7,10 +7,16 @@
 //         requireInteraction বিহেভিয়ার। Blood Request/Response
 //         urgent priority কিন্তু requireInteraction=false
 //         (voluntary action, জোর করে থাকবে না)।
+// বাগফিক্স: আগে এখানে একটা "fetch" হ্যান্ডলার ছিল যেটা নেট ফেইল করলে
+//         খালি ক্যাশ থেকে কিছুই ফেরত দিত না — ফলে অ্যাপে ইন্টারনেট থাকা
+//         অবস্থাতেও সাময়িক ফেইলে "Web page not available / net::ERR_FAILED"
+//         আসত, আর Capacitor এর errorPath (ব্র্যান্ডেড এরর পেজ) কাজ করত না।
+//         এখন কোনো fetch হ্যান্ডলার নেই, তাই পেজ লোড সবসময় সরাসরি
+//         নেটওয়ার্ক দিয়ে হয় এবং ফেইল করলে অ্যাপের নিজস্ব এরর পেজ আসে।
+//         (অফলাইন ক্যাশ ভবিষ্যতে সঠিক ফলব্যাক সহ যোগ হবে।)
 // ============================================================
 
 const CACHE_NAME = "smartfeni-v1";
-const OFFLINE_URL = "/";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -27,14 +33,6 @@ self.addEventListener("activate", (event) => {
     )
   );
   self.clients.claim();
-});
-
-self.addEventListener("fetch", (event) => {
-  if (event.request.mode === "navigate") {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match(OFFLINE_URL))
-    );
-  }
 });
 
 // ============================================================
