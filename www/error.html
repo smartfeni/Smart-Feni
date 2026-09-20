@@ -11,6 +11,8 @@
          Android-এর ডিফল্ট "Web page not available" পেজের বদলে এটা দেখাবে।
     নোট: সব CSS/JS/আইকন ভেতরেই — কোনো বাইরের ফাইল লাগে না, তাই অফলাইনেও চলে।
          capacitor.config.json এ server.errorPath = "error.html" দিলে চালু হবে।
+    আপডেট: এই পেজ দেখা গেলেই Splash screen (অ্যাপ আইকন) সরে যায়, যাতে
+         সাইট লোড না হলেও আইকনের নিচে এরর পেজ আটকে না থাকে।
   -->
   <style>
     :root {
@@ -192,6 +194,27 @@
         descEl.classList.add('nudge');
       }
 
+      // Capacitor plugin নেওয়ার নিরাপদ উপায় (না পেলে null)
+      function getPlugin(name) {
+        try {
+          var C = window.Capacitor;
+          if (!C) return null;
+          if (C.Plugins && C.Plugins[name]) return C.Plugins[name];
+          if (typeof C.registerPlugin === 'function') return C.registerPlugin(name);
+        } catch (e) {}
+        return null;
+      }
+
+      // এরর পেজ দেখা গেলে Splash screen সরিয়ে দেয়
+      function hideSplash() {
+        try {
+          var S = getPlugin('SplashScreen');
+          if (!S || typeof S.hide !== 'function') return;
+          var r = S.hide({ fadeOutDuration: 200 });
+          if (r && typeof r.catch === 'function') r.catch(function () {});
+        } catch (e) {}
+      }
+
       // শুধু নিজের সাইটের URL-ই গ্রহণযোগ্য — অন্য কিছু হলে হোমে যাবে
       function safe(url) {
         try {
@@ -211,7 +234,7 @@
           }
           setTimeout(function () { finish(HOME); }, 1500);
           try {
-            var P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Preferences;
+            var P = getPlugin('Preferences');
             if (!P) { finish(HOME); return; }
             P.get({ key: KEY })
               .then(function (r) { finish(r && r.value ? safe(r.value) : HOME); })
@@ -266,6 +289,10 @@
       });
 
       show(navigator.onLine ? 'server' : 'offline');
+
+      // Splash সরাও (Capacitor bridge তৈরি হতে দেরি হলে ০.৩ সেকেন্ড পরে আবার চেষ্টা)
+      hideSplash();
+      setTimeout(hideSplash, 300);
     })();
   </script>
 </body>
