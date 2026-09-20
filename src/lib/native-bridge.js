@@ -8,6 +8,10 @@
 // নেটিভ স্টোরেজে (Preferences, key: sf_last_url) সেভ হয়, যাতে ইন্টারনেট/
 // সার্ভার সমস্যায় www/error.html এ "আবার চেষ্টা করুন" চাপলে ঠিক ওই
 // পেজেই ফেরা যায়।
+//
+// আপডেট: Android back বাটন এখন আগে খোলা drawer/modal বন্ধ করে
+// (notification, category, post-flow, hamburger, auth, chat ইত্যাদি),
+// তারপর কিছু খোলা না থাকলে তবেই পেজ পিছনে যায়।
 // ============================================================
 
 import { Capacitor } from '@capacitor/core';
@@ -76,9 +80,71 @@ export async function capturePhoto(source = 'camera') {
 }
 
 // ---------------- Hardware Back Button ----------------
-// Android এর back বাটন চাপলে: WebView history তে আগের পেজ থাকলে
-// সেখানে ফিরে যাবে; না থাকলে (হোমপেজে থাকলে) app বন্ধ না করে
-// minimize করবে (Android home এ চলে যাবে)।
+// Android এর back বাটন চাপলে:
+//   ১) কোনো drawer/modal খোলা থাকলে সবচেয়ে উপরেরটা বন্ধ হবে (পেজ পিছনে যাবে না)
+//   ২) কিছু খোলা না থাকলে: WebView history তে আগের পেজ থাকলে সেখানে ফিরে যাবে
+//   ৩) history ও না থাকলে (হোমপেজে) app বন্ধ না করে minimize করবে
+
+// সাইটের সব drawer/modal এর "খোলা" অবস্থার ক্লাস — .open বা .active
+// (নতুন drawer/modal এই নামের নিয়ম মানলে নিজে থেকেই কাজ করবে)
+const OPEN_OVERLAY_SELECTOR = [
+  '[class*="overlay"].open',
+  '[class*="overlay"].active',
+  '[class*="-modal"].open',
+  '#sf-chat-panel.sf-open',
+].join(',');
+
+const CLOSE_BUTTON_SELECTOR = [
+  'button[aria-label*="বন্ধ"]',
+  'button[aria-label*="close" i]',
+  'button[class*="close"]',
+  'button[id*="Close"]',
+  'button[id*="close"]',
+].join(',');
+
+function isVisible(el) {
+  const style = window.getComputedStyle(el);
+  return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
+}
+
+// একাধিক খোলা থাকলে z-index সবচেয়ে বেশি যেটার সেটা; সমান হলে DOM এ যেটা পরে
+function getTopOpenOverlay() {
+  const open = Array.from(document.querySelectorAll(OPEN_OVERLAY_SELECTOR)).filter(isVisible);
+  let top = null;
+  let topZ = -Infinity;
+  open.forEach((el) => {
+    const z = parseInt(window.getComputedStyle(el).zIndex, 10);
+    const zIndex = Number.isNaN(z) ? 0 : z;
+    if (zIndex >= topZ) {
+      top = el;
+      topZ = zIndex;
+    }
+  });
+  return top;
+}
+
+// drawer/modal এর নিজের close কোড চালানোর জন্য ইউজারের মতোই ক্লিক করে
+// (এতে body scroll-lock ইত্যাদি তাদের নিজের নিয়মেই ঠিক হয়)
+function closeTopOverlay() {
+  const overlay = getTopOpenOverlay();
+  if (!overlay) return false;
+
+  const closeBtn = overlay.querySelector(CLOSE_BUTTON_SELECTOR);
+  if (closeBtn) {
+    closeBtn.click();
+    return true;
+  }
+
+  const backdrop = overlay.querySelector('[class*="backdrop"]');
+  if (backdrop) {
+    backdrop.click();
+    return true;
+  }
+
+  overlay.click();
+  return true;
+}
+
 export async function initBackButtonHandler() {
   if (!isNativeApp()) return;
 
@@ -88,6 +154,8 @@ export async function initBackButtonHandler() {
   const { App } = await import('@capacitor/app');
 
   App.addListener('backButton', ({ canGoBack }) => {
+    if (closeTopOverlay()) return;
+
     if (canGoBack) {
       window.history.back();
     } else {
