@@ -13,8 +13,9 @@
 // (notification, category, post-flow, hamburger, auth, chat ইত্যাদি),
 // তারপর কিছু খোলা না থাকলে তবেই পেজ পিছনে যায়।
 //
-// আপডেট: Splash screen (অ্যাপ আইকন) এখন ওয়েবসাইটের পেজ পুরো লোড
-// হওয়া পর্যন্ত থাকে, তারপর সরে যায় (hideSplashWhenReady)।
+// আপডেট: Splash screen (অ্যাপ আইকন) এখন পেজের HTML পার্স হয়ে প্রথম
+// ফ্রেম আঁকা হলেই সরে যায় (hideSplashWhenReady) — আগে সব ছবি নামা
+// (`load` ইভেন্ট) পর্যন্ত অপেক্ষা করত, তাই ধীর নেটে ১০+ সেকেন্ড লাগত।
 // capacitor.config.json এ সর্বোচ্চ ১৫ সেকেন্ডের সেফটি লিমিট আছে।
 // ============================================================
 
@@ -195,8 +196,10 @@ async function rememberLastUrl() {
 }
 
 // ---------------- Splash Screen ----------------
-// অ্যাপ খোলার সময় splash (আইকন) দেখায়; ওয়েবসাইটের পেজ লোড শেষ হলে সরিয়ে দেয়।
-// পেজ ধীরে লোড হলেও ৪ সেকেন্ডের বেশি আটকে রাখে না।
+// অ্যাপ খোলার সময় splash (আইকন) দেখায়; ওয়েবসাইটের পেজ পার্স হয়ে প্রথম
+// ফ্রেম আঁকা হলেই সরিয়ে দেয়। ছবি/ফন্ট নামার জন্য অপেক্ষা করে না —
+// ওগুলো পেজে ধীরে ধীরে দেখা যাবে (ধীর নেটে splash ১০+ সেকেন্ড আটকে
+// থাকা এড়াতে)।
 // (সাইট একেবারেই না খুললে capacitor.config.json এর ১৫ সেকেন্ডের লিমিট কাজ করে)
 async function hideSplashWhenReady() {
   try {
@@ -216,11 +219,10 @@ async function hideSplashWhenReady() {
       });
     };
 
-    if (document.readyState === 'complete') {
-      hide();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', hide, { once: true });
     } else {
-      window.addEventListener('load', hide, { once: true });
-      setTimeout(hide, 4000);
+      hide();
     }
   } catch (err) {
     // ফেইল করলে capacitor.config.json এর সেফটি লিমিটে splash নিজে সরে যাবে
