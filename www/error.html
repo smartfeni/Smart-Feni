@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F8FAFC">
+  <title>Smart Feni</title>
+  <!--
+    ফাইল: www/error.html
+    কাজ: অ্যাপে ইন্টারনেট না থাকলে বা সার্ভার সাড়া না দিলে
+         Android-এর ডিফল্ট "Web page not available" পেজের বদলে এটা দেখাবে।
+    নোট: সব CSS/JS/আইকন ভেতরেই — কোনো বাইরের ফাইল লাগে না, তাই অফলাইনেও চলে।
+         capacitor.config.json এ server.errorPath = "error.html" দিলে চালু হবে।
+  -->
+  <style>
+    :root {
+      --navy: #1B2A4A;
+      --orange: #FF6B35;
+      --bg: #F8FAFC;
+      --muted: #55647F;
+      --line: #D5DCE8;
+    }
+
+    * { box-sizing: border-box; margin: 0; }
+
+    html, body { height: 100%; }
+
+    body {
+      background: var(--bg);
+      color: var(--navy);
+      font-family: system-ui, -apple-system, "Noto Sans Bengali", "Hind Siliguri", "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
+    }
+
+    main {
+      width: 100%;
+      max-width: 340px;
+    }
+
+    .icon {
+      display: block;
+      width: 96px;
+      height: 96px;
+      margin: 0 auto 28px;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      line-height: 1.4;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    #desc {
+      font-size: 1rem;
+      line-height: 1.7;
+      color: var(--muted);
+      margin-bottom: 32px;
+    }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    button {
+      font: inherit;
+      font-size: 1.0625rem;
+      font-weight: 600;
+      min-height: 52px;
+      border-radius: 16px;
+      padding: 0 20px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #retry {
+      background: var(--navy);
+      color: #fff;
+      border: 2px solid var(--navy);
+    }
+
+    #retry:disabled {
+      opacity: 0.7;
+      cursor: default;
+    }
+
+    #home {
+      background: transparent;
+      color: var(--navy);
+      border: 2px solid var(--line);
+    }
+
+    button:focus-visible {
+      outline: 3px solid var(--orange);
+      outline-offset: 2px;
+    }
+
+    .brand {
+      margin-top: 40px;
+      font-size: 0.875rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .brand strong {
+      display: block;
+      color: var(--navy);
+      font-size: 1rem;
+    }
+
+    @keyframes nudge {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); }
+      75% { transform: translateX(6px); }
+    }
+
+    .nudge { animation: nudge 0.3s ease-in-out; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .nudge { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <svg class="icon" viewBox="0 0 96 96" aria-hidden="true">
+      <g fill="none" stroke="#1B2A4A" stroke-width="6" stroke-linecap="round">
+        <path d="M14 38a48 48 0 0 1 68 0"/>
+        <path d="M27 51a30 30 0 0 1 42 0"/>
+        <path d="M39 63a13 13 0 0 1 18 0"/>
+      </g>
+      <circle cx="48" cy="75" r="4.5" fill="#1B2A4A"/>
+      <path d="M18 14L80 82" stroke="#F8FAFC" stroke-width="14" stroke-linecap="round"/>
+      <path d="M18 14L80 82" stroke="#FF6B35" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+
+    <h1 id="title">পেজটি খোলা যাচ্ছে না</h1>
+    <p id="desc" role="status" aria-live="polite">আমাদের সার্ভারে পৌঁছানো যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।</p>
+
+    <div class="actions">
+      <button id="retry" type="button">আবার চেষ্টা করুন</button>
+      <button id="home" type="button">হোমে যান</button>
+    </div>
+
+    <p class="brand">
+      <strong>স্মার্ট ফেনী</strong>
+      প্রয়োজন আপনার, দায়িত্ব আমাদের
+    </p>
+  </main>
+
+  <script>
+    (function () {
+      var HOME = 'https://smartfeni.com/';
+      var KEY = 'sf_last_url'; // native-bridge.js এই key-তে শেষ দেখা পেজ সেভ করে
+      var going = false;
+
+      var titleEl = document.getElementById('title');
+      var descEl = document.getElementById('desc');
+      var retryBtn = document.getElementById('retry');
+      var homeBtn = document.getElementById('home');
+
+      var TEXT = {
+        offline: {
+          title: 'ইন্টারনেট সংযোগ নেই',
+          desc: 'মোবাইল ডেটা বা ওয়াই-ফাই চালু আছে কিনা দেখুন। সংযোগ ফিরলে অ্যাপ নিজেই আবার খুলবে।'
+        },
+        server: {
+          title: 'পেজটি খোলা যাচ্ছে না',
+          desc: 'আমাদের সার্ভারে পৌঁছানো যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।'
+        },
+        back: {
+          title: 'সংযোগ ফিরেছে',
+          desc: 'পেজটি খোলা হচ্ছে…'
+        }
+      };
+
+      function show(state) {
+        titleEl.textContent = TEXT[state].title;
+        descEl.textContent = TEXT[state].desc;
+      }
+
+      function nudge() {
+        descEl.classList.remove('nudge');
+        void descEl.offsetWidth;
+        descEl.classList.add('nudge');
+      }
+
+      // শুধু নিজের সাইটের URL-ই গ্রহণযোগ্য — অন্য কিছু হলে হোমে যাবে
+      function safe(url) {
+        try {
+          var u = new URL(url);
+          return u.origin === 'https://smartfeni.com' ? u.href : HOME;
+        } catch (e) {
+          return HOME;
+        }
+      }
+
+      // Preferences থেকে শেষ দেখা পেজ পড়ে; না পেলে বা দেরি হলে হোম
+      function getLastUrl() {
+        return new Promise(function (resolve) {
+          var done = false;
+          function finish(u) {
+            if (!done) { done = true; resolve(u || HOME); }
+          }
+          setTimeout(function () { finish(HOME); }, 1500);
+          try {
+            var P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Preferences;
+            if (!P) { finish(HOME); return; }
+            P.get({ key: KEY })
+              .then(function (r) { finish(r && r.value ? safe(r.value) : HOME); })
+              .catch(function () { finish(HOME); });
+          } catch (e) {
+            finish(HOME);
+          }
+        });
+      }
+
+      function go(url) {
+        if (going) return;
+        going = true;
+        window.location.replace(url);
+      }
+
+      function tryOpen(getUrl) {
+        if (going) return;
+        if (!navigator.onLine) {
+          show('offline');
+          nudge();
+          return;
+        }
+        retryBtn.disabled = true;
+        retryBtn.textContent = 'চেষ্টা করছি…';
+        getUrl().then(go);
+      }
+
+      retryBtn.addEventListener('click', function () { tryOpen(getLastUrl); });
+      homeBtn.addEventListener('click', function () {
+        tryOpen(function () { return Promise.resolve(HOME); });
+      });
+
+      // নেট ফিরলে নিজে থেকেই আবার খুলবে
+      window.addEventListener('online', function () {
+        if (going) return;
+        show('back');
+        getLastUrl().then(go);
+      });
+
+      window.addEventListener('offline', function () {
+        if (going) return;
+        show('offline');
+      });
+
+      // পেজ আবার দেখা গেলে (back চাপার পর) বাটন ঠিক করে দেয়
+      window.addEventListener('pageshow', function () {
+        going = false;
+        retryBtn.disabled = false;
+        retryBtn.textContent = 'আবার চেষ্টা করুন';
+        show(navigator.onLine ? 'server' : 'offline');
+      });
+
+      show(navigator.onLine ? 'server' : 'offline');
+    })();
+  </script>
+</body>
+</html>
