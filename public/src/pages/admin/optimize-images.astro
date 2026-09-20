@@ -1,0 +1,351 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — ছবি ছোট করুন (/admin/optimize-images)
+// কেন লাগলো: প্রোফাইল ছবি গড়ে ১.১ MB, ক্লাব কভার ~১ MB — সাইট/অ্যাপ ধীরে
+//            লোড হচ্ছিল। এই পেজ বড় ছবিগুলো ব্রাউজারে (canvas দিয়ে) ছোট
+//            করে /api/admin/optimize-image এ পাঠায়; API আগে original
+//            _backup/ এ কপি করে, তারপর একই পাথে ছোট ছবি আপলোড করে।
+//            তাই ছবির কোনো লিংক বদলায় না, আর কোনো secret key লাগে না।
+// নিরাপদ: বারবার চালানো যায় (ছোট ছবি আর ছোঁয়া হয় না)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="ছবি ছোট করুন | অ্যাডমিন">
+  <div class="oi-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="oi-loading">
+        <div class="oi-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" style="display:none;">
+
+        <a href="/admin" class="oi-back"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="oi-header">
+          <h1>ছবি ছোট করুন</h1>
+          <p>বড় ছবি (২৫০ KB এর বেশি) ছোট করে সাইট ও অ্যাপ দ্রুত করা হয়। লিংক বদলায় না।</p>
+        </div>
+
+        <div class="oi-card">
+          <h3><i class="fas fa-shield-halved"></i> কীভাবে কাজ করে</h3>
+          <ul class="oi-list">
+            <li>প্রথমে "স্ক্যান করুন" — কোন ছবি ছোট করা যাবে তার তালিকা (কিছু বদলায় না)।</li>
+            <li>তারপর "শুরু করুন" — প্রতিটা ছবির <strong>original আগে <code>_backup/</code> ফোল্ডারে কপি</strong> হয়, তারপর ছোট ছবি একই জায়গায় বসে।</li>
+            <li>প্রথমে "কতটা প্রসেস করবেন" এ <strong>৫</strong> লিখে টেস্ট করে দেখুন।</li>
+            <li>ফোনে কাজ করলে ট্যাব খোলা রাখুন; থামাতে "থামান" চাপুন।</li>
+          </ul>
+        </div>
+
+        <div class="oi-card">
+          <div class="oi-row">
+            <button id="scanBtn" class="oi-btn oi-btn-secondary" type="button">
+              <i class="fas fa-magnifying-glass"></i> স্ক্যান করুন
+            </button>
+            <p id="scanSummary" class="oi-summary"></p>
+          </div>
+
+          <div class="oi-row" id="runRow" style="display:none;">
+            <label class="oi-label" for="limitInput">কতটা প্রসেস করবেন (খালি = সব)</label>
+            <input id="limitInput" class="oi-input" type="number" min="1" inputmode="numeric" placeholder="যেমন: 5" />
+            <div class="oi-actions">
+              <button id="startBtn" class="oi-btn oi-btn-primary" type="button">
+                <i class="fas fa-play"></i> শুরু করুন
+              </button>
+              <button id="stopBtn" class="oi-btn oi-btn-danger" type="button" style="display:none;">
+                <i class="fas fa-stop"></i> থামান
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="oi-card" id="progressCard" style="display:none;">
+          <div class="oi-progress"><div class="oi-progress-bar" id="progressBar"></div></div>
+          <p class="oi-stats" id="statsLine"></p>
+          <div class="oi-log" id="logBox" aria-live="polite"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</BaseLayout>
+
+<style is:global>
+  .oi-page { padding: 24px 0 60px; background: #F8FAFC; min-height: 70vh; }
+  .oi-loading { text-align: center; padding: 60px 0; color: #55647F; }
+  .oi-spinner {
+    width: 36px; height: 36px; margin: 0 auto 12px;
+    border: 4px solid #E3E9F2; border-top-color: #FF6B35; border-radius: 50%;
+    animation: oi-spin 0.9s linear infinite;
+  }
+  @keyframes oi-spin { to { transform: rotate(360deg); } }
+  .oi-back { display: inline-block; margin-bottom: 14px; color: #1B2A4A; font-weight: 600; text-decoration: none; }
+  .oi-header h1 { font-size: 1.5rem; color: #1B2A4A; margin: 0 0 6px; }
+  .oi-header p { color: #55647F; margin: 0 0 18px; line-height: 1.6; }
+  .oi-card {
+    background: #fff; border-radius: 20px; padding: 20px;
+    box-shadow: 0 2px 12px rgba(27, 42, 74, 0.08); margin-bottom: 16px;
+  }
+  .oi-card h3 { margin: 0 0 10px; font-size: 1.05rem; color: #1B2A4A; }
+  .oi-list { margin: 0; padding-left: 20px; color: #3A4A66; line-height: 1.8; font-size: 0.95rem; }
+  .oi-list code { background: #EEF2F8; padding: 1px 6px; border-radius: 6px; }
+  .oi-row { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .oi-row:last-child { margin-bottom: 0; }
+  .oi-summary { margin: 0; color: #1B2A4A; font-weight: 600; line-height: 1.6; }
+  .oi-label { font-size: 0.9rem; color: #55647F; }
+  .oi-input {
+    border: 2px solid #D5DCE8; border-radius: 12px; padding: 12px 14px; font: inherit; max-width: 240px;
+  }
+  .oi-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .oi-btn {
+    font: inherit; font-weight: 600; min-height: 48px; padding: 0 20px; border-radius: 14px;
+    border: 2px solid transparent; cursor: pointer;
+  }
+  .oi-btn:disabled { opacity: 0.55; cursor: default; }
+  .oi-btn-primary { background: #1B2A4A; color: #fff; }
+  .oi-btn-secondary { background: #fff; color: #1B2A4A; border-color: #D5DCE8; }
+  .oi-btn-danger { background: #fff; color: #B42318; border-color: #F2B8B5; }
+  .oi-progress { height: 10px; background: #E3E9F2; border-radius: 999px; overflow: hidden; }
+  .oi-progress-bar { height: 100%; width: 0; background: #FF6B35; transition: width 0.2s; }
+  .oi-stats { margin: 12px 0; color: #1B2A4A; font-weight: 600; line-height: 1.7; }
+  .oi-log {
+    max-height: 320px; overflow-y: auto; background: #F8FAFC; border-radius: 12px; padding: 10px 12px;
+    font-size: 0.82rem; line-height: 1.7; color: #3A4A66; word-break: break-all;
+  }
+  .oi-log .ok { color: #067647; }
+  .oi-log .skip { color: #7A8AA5; }
+  .oi-log .err { color: #B42318; }
+</style>
+
+<script>
+  import { initAdminGuard } from '../../lib/adminGuard.js';
+  import { supabase } from '../../lib/supabase.js';
+
+  const BUCKET = 'listing-images';
+  const MIN_SIZE = 250 * 1024;   // এর ছোট ছবি ছোঁয়া হবে না
+  const MIN_SAVING = 0.10;       // কমপক্ষে ১০% ছোট না হলে বদলাবে না
+  const QUALITY = 0.8;
+
+  const scanBtn = document.getElementById('scanBtn');
+  const scanSummary = document.getElementById('scanSummary');
+  const runRow = document.getElementById('runRow');
+  const limitInput = document.getElementById('limitInput');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const progressCard = document.getElementById('progressCard');
+  const progressBar = document.getElementById('progressBar');
+  const statsLine = document.getElementById('statsLine');
+  const logBox = document.getElementById('logBox');
+
+  let candidates = [];
+  let running = false;
+  let stopRequested = false;
+
+  initAdminGuard();
+
+  // ফোল্ডার/ফাইলের নিয়ম — null মানে ছোঁবে না
+  function maxSideFor(path) {
+    const p = path.toLowerCase();
+    if (p.startsWith('site/') || p.startsWith('screenshot-imports/') || p.startsWith('_backup/')) return null;
+    if (p.startsWith('avatars/')) return 400;   // প্রোফাইল ছবি
+    if (p.includes('logo')) return 512;         // ক্লাব/শপ লোগো
+    return 1280;                                // কভার, লিস্টিং, পোস্ট ইত্যাদি
+  }
+
+  function mimeForPath(path) {
+    const p = path.toLowerCase();
+    if (p.endsWith('.png')) return 'image/png';
+    if (p.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
+  }
+
+  function mb(bytes) {
+    return (bytes / 1048576).toFixed(1);
+  }
+
+  async function getToken() {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token || '';
+  }
+
+  function log(text, cls = '') {
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = text;
+    logBox.prepend(line);
+    while (logBox.childElementCount > 200) logBox.lastElementChild.remove();
+  }
+
+  async function listLevel(prefix) {
+    const token = await getToken();
+    const res = await fetch('/api/admin/optimize-image?prefix=' + encodeURIComponent(prefix), {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    return data;
+  }
+
+  // ---------- স্ক্যান ----------
+  scanBtn.addEventListener('click', async () => {
+    scanBtn.disabled = true;
+    runRow.style.display = 'none';
+    scanSummary.textContent = 'স্ক্যান হচ্ছে... (একটু সময় লাগতে পারে)';
+    candidates = [];
+
+    try {
+      const queue = [''];
+      while (queue.length) {
+        const prefix = queue.shift();
+        const { folders = [], files = [] } = await listLevel(prefix);
+
+        for (const folder of folders) {
+          const sub = prefix + folder + '/';
+          if (maxSideFor(sub) !== null) queue.push(sub);
+        }
+        for (const file of files) {
+          const path = prefix + file.name;
+          if (file.size >= MIN_SIZE && maxSideFor(path) !== null) {
+            candidates.push({ path, size: file.size });
+          }
+        }
+        scanSummary.textContent = `স্ক্যান হচ্ছে... ${candidates.length}টা বড় ছবি পাওয়া গেছে`;
+      }
+
+      candidates.sort((a, b) => b.size - a.size);
+      const total = candidates.reduce((sum, c) => sum + c.size, 0);
+
+      if (candidates.length === 0) {
+        scanSummary.textContent = 'কোনো বড় ছবি নেই — সবকিছু ইতিমধ্যে ঠিক আছে ✅';
+      } else {
+        scanSummary.textContent = `${candidates.length}টা ছবি ছোট করার যোগ্য (মোট ${mb(total)} MB)`;
+        runRow.style.display = '';
+      }
+    } catch (err) {
+      scanSummary.textContent = 'স্ক্যান ব্যর্থ: ' + err.message;
+    } finally {
+      scanBtn.disabled = false;
+    }
+  });
+
+  // ---------- একটা ছবি ছোট করে পাঠানো ----------
+  async function processOne(item) {
+    const { path } = item;
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    const resp = await fetch(data.publicUrl + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!resp.ok) throw new Error('ডাউনলোড ব্যর্থ (HTTP ' + resp.status + ')');
+    const original = await resp.blob();
+
+    // imageOrientation: ফোনের ঘোরানো ছবি সোজা করে (canvas এ EXIF থাকে না)
+    const bitmap = await createImageBitmap(original, { imageOrientation: 'from-image' });
+    const maxSide = maxSideFor(path);
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    const mime = mimeForPath(path);
+    if (mime === 'image/jpeg') {
+      ctx.fillStyle = '#ffffff';            // JPEG তে স্বচ্ছতা নেই
+      ctx.fillRect(0, 0, width, height);
+    }
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    if (bitmap.close) bitmap.close();
+
+    const resized = await new Promise((resolve) => canvas.toBlob(resolve, mime, QUALITY));
+    if (!resized) throw new Error('ছবি এনকোড করা যায়নি');
+
+    if (resized.size > original.size * (1 - MIN_SAVING)) {
+      return { status: 'skip', before: original.size, after: resized.size };
+    }
+
+    const form = new FormData();
+    form.append('path', path);
+    form.append('file', resized, 'image');
+    const token = await getToken();
+    const res = await fetch('/api/admin/optimize-image', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token },
+      body: form,
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(result.error || 'HTTP ' + res.status);
+
+    return { status: 'ok', before: original.size, after: resized.size };
+  }
+
+  // ---------- শুরু / থামান ----------
+  startBtn.addEventListener('click', async () => {
+    if (running || candidates.length === 0) return;
+
+    const limit = parseInt(limitInput.value, 10);
+    const list = Number.isFinite(limit) && limit > 0 ? candidates.slice(0, limit) : candidates.slice();
+
+    running = true;
+    stopRequested = false;
+    scanBtn.disabled = true;
+    startBtn.style.display = 'none';
+    stopBtn.style.display = '';
+    progressCard.style.display = '';
+    logBox.innerHTML = '';
+
+    let done = 0, changed = 0, skipped = 0, failed = 0, saved = 0;
+
+    function render() {
+      progressBar.style.width = Math.round((done / list.length) * 100) + '%';
+      statsLine.textContent =
+        `${done}/${list.length} · ছোট হয়েছে ${changed} · স্কিপ ${skipped} · ব্যর্থ ${failed} · সাশ্রয় ${mb(saved)} MB`;
+    }
+    render();
+
+    for (const item of list) {
+      if (stopRequested) {
+        log('থামানো হয়েছে।', 'skip');
+        break;
+      }
+      try {
+        const r = await processOne(item);
+        if (r.status === 'ok') {
+          changed++;
+          saved += r.before - r.after;
+          log(`✓ ${item.path}: ${Math.round(r.before / 1024)} KB → ${Math.round(r.after / 1024)} KB`, 'ok');
+        } else {
+          skipped++;
+          log(`– ${item.path}: বড় লাভ নেই, বদলানো হয়নি`, 'skip');
+        }
+      } catch (err) {
+        failed++;
+        log(`✗ ${item.path}: ${err.message}`, 'err');
+      }
+      done++;
+      render();
+    }
+
+    running = false;
+    scanBtn.disabled = false;
+    startBtn.style.display = '';
+    stopBtn.style.display = 'none';
+    log(`শেষ। ${changed}টা ছোট হয়েছে, মোট ${mb(saved)} MB সাশ্রয়। আবার "স্ক্যান করুন" চেপে বাকি দেখুন।`, 'ok');
+  });
+
+  stopBtn.addEventListener('click', () => {
+    stopRequested = true;
+    stopBtn.disabled = true;
+    setTimeout(() => { stopBtn.disabled = false; }, 1500);
+  });
+
+  window.addEventListener('beforeunload', (e) => {
+    if (running) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+</script>
