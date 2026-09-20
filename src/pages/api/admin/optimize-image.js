@@ -142,6 +142,7 @@ export async function POST({ request }) {
     const formData = await request.formData();
     const path = formData.get('path');
     const file = formData.get('file');
+    const requestedContentType = formData.get('contentType');
 
     if (!isSafePath(path) || !IMAGE_EXT.test(path) || isBlocked(path)) {
       return json({ error: 'এই পাথের ছবি বদলানো যাবে না' }, 400);
@@ -152,6 +153,14 @@ export async function POST({ request }) {
     if (file.size > MAX_UPLOAD_BYTES) {
       return json({ error: 'ফাইল বেশি বড়' }, 413);
     }
+
+    // ক্লায়েন্ট মাঝেমধ্যে ফরম্যাট বদলে দেয় (যেমন PNG ফটোকে JPEG করে, পাথ
+    // অপরিবর্তিত রেখেই) — তাই path এর extension থেকে অনুমান না করে, ক্লায়েন্ট
+    // যা পাঠিয়েছে সেটাই ব্যবহার করা হচ্ছে (allow-list দিয়ে যাচাই করে)
+    const ALLOWED_CONTENT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+    const contentType = ALLOWED_CONTENT_TYPES.has(requestedContentType)
+      ? requestedContentType
+      : mimeForPath(path);
 
     // ১) original ব্যাকআপ (আগে থেকে ব্যাকআপ থাকলে সেটাই আসল — সেটা ছোঁয়া হয় না)
     const { error: copyError } = await supabaseAdmin.storage
@@ -166,7 +175,7 @@ export async function POST({ request }) {
     const arrayBuffer = await file.arrayBuffer();
     const { error: uploadError } = await supabaseAdmin.storage.from(BUCKET).upload(path, arrayBuffer, {
       upsert: true,
-      contentType: mimeForPath(path),
+      contentType,
       cacheControl: CACHE_CONTROL,
     });
 
