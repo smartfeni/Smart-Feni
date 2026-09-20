@@ -3,6 +3,11 @@
 // platform detect করে সঠিক API (native plugin বা web API) ব্যবহার করে।
 // Website এ (browser) এই ফাইল থাকলেও কোনো আচরণ বদলাবে না —
 // শুধু app এর ভেতরে চললেই native path নেয়।
+//
+// আপডেট: rememberLastUrl() যোগ — অ্যাপে প্রতিটা পেজ খুললে তার URL
+// নেটিভ স্টোরেজে (Preferences, key: sf_last_url) সেভ হয়, যাতে ইন্টারনেট/
+// সার্ভার সমস্যায় www/error.html এ "আবার চেষ্টা করুন" চাপলে ঠিক ওই
+// পেজেই ফেরা যায়।
 // ============================================================
 
 import { Capacitor } from '@capacitor/core';
@@ -77,6 +82,9 @@ export async function capturePhoto(source = 'camera') {
 export async function initBackButtonHandler() {
   if (!isNativeApp()) return;
 
+  // BaseLayout প্রতিটা পেজ লোডে এই ফাংশন চালায় — তাই শেষ পেজ মনে রাখার কাজও এখানেই
+  rememberLastUrl();
+
   const { App } = await import('@capacitor/app');
 
   App.addListener('backButton', ({ canGoBack }) => {
@@ -86,4 +94,29 @@ export async function initBackButtonHandler() {
       App.minimizeApp();
     }
   });
+}
+
+// ---------------- Last Visited Page (Error Page Retry) ----------------
+// অ্যাপে শেষ যে পেজ খোলা হয়েছিল তার URL নেটিভ স্টোরেজে রাখে।
+// www/error.html একই key (sf_last_url) থেকে পড়ে "আবার চেষ্টা করুন" এ ওই পেজে ফেরে।
+// নিরাপত্তা: hash বাদ যায়; পাসওয়ার্ড রিসেট বা token/code যুক্ত URL সেভ হয় না।
+const LAST_URL_KEY = 'sf_last_url';
+
+async function rememberLastUrl() {
+  try {
+    if (!isNativeApp()) return;
+    if (window.location.origin !== 'https://smartfeni.com') return;
+
+    const { pathname, search } = window.location;
+    if (pathname.startsWith('/reset-password') || pathname.startsWith('/api/')) return;
+    if (/token|code=/i.test(search)) return;
+
+    const { Preferences } = await import('@capacitor/preferences');
+    await Preferences.set({
+      key: LAST_URL_KEY,
+      value: window.location.origin + pathname + search,
+    });
+  } catch (err) {
+    // সেভ ফেইল করলে অ্যাপের কিছু যায় আসে না — error.html তখন হোমে ফিরবে
+  }
 }
