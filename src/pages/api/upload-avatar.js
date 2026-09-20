@@ -8,6 +8,7 @@
 // ভেরিফিকেশন ধাপটাই বাইপাস হয়ে যায়। ইউজারের পরিচয় client-এর
 // পাঠানো userId থেকে না নিয়ে, Authorization header-এর access
 // token থেকে সার্ভার নিজে যাচাই করে বের করে (নিরাপত্তার জন্য)।
+// আপডেট: আপলোডে cacheControl = ১ বছর (ছবি দ্রুত লোড হওয়ার জন্য)।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -67,6 +68,9 @@ export async function POST({ request }) {
       .upload(filePath, arrayBuffer, {
         upsert: true,
         contentType: file.type || 'image/jpeg',
+        // প্রতিটা আপলোডের পাথ ইউনিক (userId + timestamp), তাই ১ বছরের ক্যাশ নিরাপদ।
+        // আগে ডিফল্ট ১ ঘণ্টা ছিল — ফলে অ্যাপ/ব্রাউজার ঘণ্টায় ঘণ্টায় ছবি আবার নামাতো।
+        cacheControl: '31536000',
       });
 
     if (uploadError) {
