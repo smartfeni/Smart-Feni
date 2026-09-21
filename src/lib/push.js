@@ -9,6 +9,14 @@
 //         FCM token নিয়ে subscribe করবে (platform: 'android'),
 //         browser এ থাকলে আগের VAPID flow অপরিবর্তিত (platform: 'web')।
 //
+// আপডেট (নোটিফিকেশন লাইফসাইকেল): initNativePushLifecycle() —
+//         অ্যাপে (Android) প্রতিটা পেজ লোডে native-bridge.js থেকে চলে:
+//         ১) লগইন থাকলে (ও ফোনে অনুমতি দেওয়া থাকলে) বর্তমান FCM টোকেন
+//            বর্তমান ইউজারের নামে সার্ভারে সিঙ্ক (একই ইউজারের জন্য ২৪ ঘণ্টায় একবার)
+//            → ইউজার বদলালে/টোকেন বদলালে ঠিক থাকে
+//         ২) লগআউটে ফোনের FCM টোকেন মুছে ফেলা (unregister) → আগের ইউজারের
+//            নোটিফিকেশন আর এই ফোনে আসে না
+//
 // ব্যবহার (অন্য কম্পোনেন্ট থেকে, আগের মতোই অপরিবর্তিত):
 //   import { subscribeToPush, getPushPermissionState, isPushSupported } from '../../lib/push.js';
 //   const result = await subscribeToPush();
@@ -173,4 +181,93 @@ export async function subscribeToPush() {
     return subscribeNative();
   }
   return subscribeWeb();
+}
+
+// ------------------ Native লাইফসাইকেল (লগইন / লগআউট / টোকেন রিফ্রেশ) ------------------
+// সমস্যা যেটা ঠিক করে: "অনুমতি দেওয়া আছে" ফ্ল্যাগ (smartfeni_push_granted) ফোনে একবারই
+// সেভ থাকে, ইউজারের নামে না। তাই লগআউট করে অন্য কেউ লগইন করলে নতুন ইউজারের সাবস্ক্রিপশন
+// তৈরি হতো না, আর টোকেন আগের ইউজারের নামে থেকে যেত (আগের ইউজারের নোটিফিকেশন আসতে থাকত)।
+const SYNC_KEY = 'smartfeni_push_last_sync'; // মান: "<userId>:<সময়>"
+const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+let lifecycleStarted = false;
+let currentSession = null;
+let registrationListenerAdded = false;
+
+async function syncNativeToken(session) {
+  try {
+    if (!session?.user?.id) return;
+
+    // একই ইউজারের জন্য ২৪ ঘণ্টার মধ্যে আবার সিঙ্ক নয়; ইউজার বদলালে সাথে সাথে সিঙ্ক
+    const [lastUserId, lastTime] = (localStorage.getItem(SYNC_KEY) || '').split(':');
+    if (lastUserId === session.user.id && Date.now() - Number(lastTime) < SYNC_INTERVAL_MS) return;
+
+    const { PushNotifications } = await import('@capacitor/push-notifications');
+
+    // ফোনের সেটিংসে অনুমতি না থাকলে কিছু করি না (অনুমতি চাওয়া প্রম্পটের কাজ)
+    const permStatus = await PushNotifications.checkPermissions();
+    if (permStatus.receive !== 'granted') return;
+
+    if (!registrationListenerAdded) {
+      registrationListenerAdded = true;
+      await PushNotifications.addListener('registration', async (token) => {
+        const activeSession = currentSession;
+        if (!activeSession?.user?.id) return;
+        try {
+          const response = await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              accessToken: activeSession.access_token,
+              platform: 'android',
+              fcm_token: token.value,
+              device_label: 'Android App',
+            }),
+          });
+          // সফল হলেই সময় সেভ — ব্যর্থ হলে পরের পেজ লোডে আবার চেষ্টা হবে
+          if (response.ok) {
+            localStorage.setItem(SYNC_KEY, `${activeSession.user.id}:${Date.now()}`);
+          }
+        } catch (err) {
+          // নেটওয়ার্ক সমস্যা — পরের পেজ লোডে আবার চেষ্টা
+        }
+      });
+    }
+
+    await PushNotifications.register();
+  } catch (err) {
+    // সিঙ্ক ফেইল করলে অ্যাপ স্বাভাবিক চলবে
+  }
+}
+
+async function handleNativeSignedOut() {
+  try {
+    localStorage.removeItem(SYNC_KEY);
+    const { PushNotifications } = await import('@capacitor/push-notifications');
+    // ফোনের FCM টোকেন মুছে ফেলা — আগের ইউজারের নোটিফিকেশন আর আসবে না;
+    // সার্ভারের পুরোনো রেকর্ড send.ts নিজেই মুছে দেবে (মরা টোকেন ধরে)
+    if (typeof PushNotifications.unregister === 'function') {
+      await PushNotifications.unregister();
+    }
+  } catch (err) {
+    // ফেইল করলে পরের লগইনে টোকেন নতুন ইউজারের নামে সরে যাবে
+  }
+}
+
+export function initNativePushLifecycle() {
+  if (!isNativeApp() || lifecycleStarted) return;
+  lifecycleStarted = true;
+
+  supabase.auth.onAuthStateChange((event, session) => {
+    currentSession = session;
+
+    // setTimeout: onAuthStateChange এর ভেতরে সরাসরি async কাজ না করাই নিরাপদ (supabase-js এর পরামর্শ)
+    if (event === 'SIGNED_OUT') {
+      setTimeout(handleNativeSignedOut, 0);
+      return;
+    }
+    if (session && (event === 'INITIAL_SESSION' || event === 'SIGNED_IN')) {
+      setTimeout(() => syncNativeToken(session), 0);
+    }
+  });
 }
