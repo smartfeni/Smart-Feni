@@ -15,6 +15,18 @@
 //
 // BaseLayout.astro এ গ্লোবালি মাউন্ট করা হবে (NotificationDrawer
 // এর মতো), যেকোনো পেজে লগইন থাকলে অটো-দেখাবে।
+//
+// আপডেট (Android অ্যাপ): অ্যাপে কোনো নিজস্ব মোডাল/popup দেখানো হয় না —
+// শুধু Android এর নিজের নোটিফিকেশন ডায়ালগ। অনুমতির আসল অবস্থা
+// (checkPermissions) দেখে:
+//   granted → কোনো ডায়ালগ ছাড়াই চুপচাপ সিঙ্ক (যেমন রিইনস্টলের পর)
+//   denied  → কিছুই দেখায় না (Android তখন ডায়ালগ দেখায়ই না;
+//             প্রোফাইলের নোটিফিকেশন কার্ডে নির্দেশনা আছে)
+//   prompt  → ২.৫ সেকেন্ড পরে Android এর ডায়ালগ (৭ দিনের cooldown সহ)
+// নির্দিষ্ট মুহূর্তে (ডোনার টগল, হিরো নিবন্ধন, প্রথম অর্ডার) অপেক্ষা ছাড়াই
+// চাইতে যেকোনো পেজ থেকে ইভেন্ট পাঠান:
+//   window.dispatchEvent(new CustomEvent('smartfeni:ask-push'))
+// ওয়েব ব্রাউজারের soft-ask মোডাল যেমন ছিল তেমনই।
 // ============================================================
 ---
 
@@ -167,6 +179,19 @@
 
   const COOLDOWN_KEY = 'smartfeni_push_prompt_dismissed_at';
   const COOLDOWN_DAYS = 7;
+  const ASK_SESSION_KEY = 'smartfeni_push_ask_event_done';
+
+  // ফোনের নোটিফিকেশন অনুমতির আসল অবস্থা (Android):
+  // 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale' | 'unknown'
+  async function getNativePermissionStatus() {
+    try {
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+      const perm = await PushNotifications.checkPermissions();
+      return perm.receive;
+    } catch (err) {
+      return 'unknown';
+    }
+  }
 
   function shouldShowPrompt() {
     if (!isPushSupported()) return false;
@@ -190,19 +215,33 @@
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return; // লগইন করা না থাকলে প্রম্পট দেখানো হবে না
 
-    if (!shouldShowPrompt()) return;
-
     if (isNativeApp()) {
-      // App এর ভেতরে কাস্টম ওয়েব-স্টাইল মোডাল দেখানো হবে না —
-      // একই দেরির পর সরাসরি নেটিভ OS পারমিশন popup দেখাবে
+      // অ্যাপে কোনো কাস্টম মোডাল নেই — শুধু Android এর নিজের ডায়ালগ, ফোনের
+      // আসল অনুমতির অবস্থা দেখে
+      const status = await getNativePermissionStatus();
+
+      if (status === 'granted') {
+        // আগে থেকেই অনুমতি আছে (যেমন রিইনস্টলের পর) — ডায়ালগ ছাড়াই সিঙ্ক
+        subscribeToPush();
+        return;
+      }
+      if (status === 'denied') {
+        // স্থায়ীভাবে ব্লক — Android আর ডায়ালগ দেখায় না, তাই কিছু করার নেই
+        return;
+      }
+
+      if (!shouldShowPrompt()) return; // ৭ দিনের cooldown / আগে জিজ্ঞেস করা হয়েছে
+
       setTimeout(async () => {
-        const result = await subscribeToPush();
+        const result = await subscribeToPush(); // Android এর নিজের ডায়ালগ
         if (!result.success && result.permission === 'denied') {
           localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
         }
       }, 2500);
       return;
     }
+
+    if (!shouldShowPrompt()) return;
 
     // একটু দেরি করে দেখানো — পেজ লোড হওয়ার সাথে সাথেই না, যাতে বিরক্তিকর না লাগে
     setTimeout(() => {
@@ -244,4 +283,29 @@
   } else {
     initPrompt();
   }
+
+  // নির্দিষ্ট মুহূর্তে (ডোনার টগল, হিরো নিবন্ধন, প্রথম অর্ডার) অপেক্ষা ছাড়াই অনুমতি চাওয়া।
+  // শুধু অ্যাপে; ৭ দিনের cooldown মানে না (ইউজার এইমাত্র প্রাসঙ্গিক কিছু করেছে),
+  // কিন্তু ফোনে ব্লক থাকলে কিছু করে না এবং এক সেশনে একবারের বেশি নয়।
+  window.addEventListener('smartfeni:ask-push', async () => {
+    if (!isNativeApp()) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const status = await getNativePermissionStatus();
+    if (status === 'granted') {
+      subscribeToPush();
+      return;
+    }
+    if (status === 'denied') return;
+
+    if (sessionStorage.getItem(ASK_SESSION_KEY)) return;
+    sessionStorage.setItem(ASK_SESSION_KEY, '1');
+
+    const result = await subscribeToPush(); // Android এর নিজের ডায়ালগ
+    if (!result.success && result.permission === 'denied') {
+      localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
+    }
+  });
 </script>
