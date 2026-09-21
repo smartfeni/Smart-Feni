@@ -28,6 +28,11 @@
 // Settings → Apps → Smart Feni → Notifications এ আলাদা চ্যানেল হিসেবে
 // নিয়ন্ত্রণ করা যায়। কার্ডে এখন নোটিফিকেশনের অবস্থা (চালু/বন্ধ), "চালু করুন"
 // বাটন ও সেটিংসের নির্দেশনা দেখায়। notification_preferences টেবিল অক্ষুণ্ণ।
+//
+// আপডেট (ব্লাড ডোনার + নোটিফিকেশন): ডোনার চালু করার সময় অ্যাপে অনুমতি না
+// থাকলে Android এর ডায়ালগ চাওয়া হয় (smartfeni:ask-push ইভেন্ট), আর ডোনার
+// চালু থাকা অবস্থায় ফোনে নোটিফিকেশন বন্ধ থাকলে ডোনার কার্ডের নিচে সতর্কবার্তা
+// দেখায় (রক্তের জরুরি অনুরোধ না পৌঁছানোর ঝুঁকি)।
 // ============================================================
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
@@ -1244,7 +1249,7 @@ const upazilas = [
     }
 
     setDonorToggle(!!profile.is_blood_donor);
-    updateDonorHint();
+    updateDonorNotifWarning();
   }
 
   function setDonorToggle(on) {
@@ -1261,6 +1266,54 @@ const upazilas = [
         : 'ব্লাড গ্রুপ যোগ করলে চালু করা যাবে (এডিট করুন থেকে)';
       donorToggleHint.classList.remove('hint-error');
     }
+  }
+
+  // ===== ডোনারের নোটিফিকেশন সতর্কতা (শুধু অ্যাপে) =====
+  // ডোনার চালু কিন্তু ফোনে নোটিফিকেশন বন্ধ — রক্তের জরুরি অনুরোধ পৌঁছাবে না।
+  async function getNativePushStatus() {
+    if (!isNativeApp()) return null;
+    try {
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+      const perm = await PushNotifications.checkPermissions();
+      return perm.receive;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  async function updateDonorNotifWarning() {
+    updateDonorHint(); // আগে স্বাভাবিক লেখা
+    if (!isDonorOn || !currentProfile?.blood_group) return;
+
+    const status = await getNativePushStatus();
+    if (status === null || status === 'granted') return; // ওয়েব বা অনুমতি আছে — সতর্কতা নয়
+
+    if (donorToggleHint) {
+      donorToggleHint.textContent =
+        '⚠️ নোটিফিকেশন বন্ধ আছে — রক্তের জরুরি অনুরোধ পেতে ফোনের Settings → Apps → Smart Feni → Notifications চালু করুন';
+      donorToggleHint.classList.add('hint-error');
+    }
+  }
+
+  // অনুমতির ডায়ালগে উত্তর দেওয়া পর্যন্ত অপেক্ষা (সর্বোচ্চ ~৩০ সেকেন্ড), তারপর সতর্কতা হালনাগাদ
+  async function watchPushPermissionThenUpdate() {
+    const initial = await getNativePushStatus();
+    if (initial === null) return; // ওয়েব — কিছু করার নেই
+    if (initial === 'granted' || initial === 'denied') {
+      // ডায়ালগ আসবে না — সরাসরি হালনাগাদ
+      updateDonorNotifWarning();
+      return;
+    }
+
+    let tries = 0;
+    const timer = setInterval(async () => {
+      tries++;
+      const status = await getNativePushStatus();
+      if (status !== initial || tries >= 30) {
+        clearInterval(timer);
+        updateDonorNotifWarning();
+      }
+    }, 1000);
   }
 
   donorToggleBtn?.addEventListener('click', async () => {
@@ -1291,6 +1344,13 @@ const upazilas = [
 
     currentProfile.is_blood_donor = newValue;
     updateDonorHint();
+
+    if (newValue) {
+      // ডোনার চালু হলো — অ্যাপে অনুমতি না থাকলে Android এর ডায়ালগ চাওয়া হবে,
+      // তারপর ফলাফল দেখে সতর্কতা হালনাগাদ
+      window.dispatchEvent(new CustomEvent('smartfeni:ask-push'));
+      watchPushPermissionThenUpdate();
+    }
   });
 
   // ===== সংগঠন (ঐচ্ছিক) — ক্লাব লিস্ট লোড ও ইনস্ট্যান্ট সেভ =====
