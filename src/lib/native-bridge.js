@@ -22,6 +22,7 @@
 //   ১) Android notification channel তৈরি (ফোনের Settings → Apps → Smart Feni
 //      → Notifications এ প্রতিটার আলাদা সুইচ/শব্দ; আইডি send.ts এর সাথে মিলতে হবে)
 //   ২) পুশে ট্যাপ করলে সঠিক পেজে যাওয়া (ওয়েবের sw.js notificationclick এর মতোই)
+//   ৩) লগইন/লগআউটে FCM টোকেন সিঙ্ক ও মোছা (push.js এর initNativePushLifecycle)
 // ============================================================
 
 import { Capacitor } from '@capacitor/core';
@@ -294,6 +295,14 @@ async function initNotificationHandlers() {
     // ১) ট্যাপ হ্যান্ডলার — অ্যাপ বন্ধ থাকা অবস্থায় ট্যাপ করে খুললেও ইভেন্টটা
     //    listener বসার সাথে সাথে পৌঁছায়
     PushNotifications.addListener('pushNotificationActionPerformed', handleNotificationTap);
+
+    // ১.৫) লগইন/লগআউটে টোকেন সিঙ্ক (আলাদা try — এটা ফেইল করলে চ্যানেল তৈরি আটকাবে না)
+    try {
+      const { initNativePushLifecycle } = await import('./push.js');
+      initNativePushLifecycle();
+    } catch (err) {
+      // ফেইল করলে টোকেন সিঙ্ক শুধু প্রম্পটের মাধ্যমেই হবে (আগের মতো)
+    }
 
     // ২) চ্যানেল তৈরি — একবার সফল হলে ফ্ল্যাগ সেভ, তাই প্রতি পেজে আবার নয়
     if (localStorage.getItem(CHANNELS_FLAG) !== 'done') {
