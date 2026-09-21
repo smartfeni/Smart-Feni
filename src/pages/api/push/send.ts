@@ -8,6 +8,11 @@
 //         platform === 'web'     → web-push (VAPID)
 //         platform === 'android' → firebase-admin (FCM)
 //
+// আপডেট (নোটিফিকেশন চ্যানেল): Android পুশে ক্যাটাগরি অনুযায়ী
+//         notification channel (শব্দ/গুরুত্ব ইউজার ফোনের সেটিংসে ঠিক করবে),
+//         priority অনুযায়ী FCM priority ও মেয়াদ (TTL), চ্যাটে গ্রুপিং tag,
+//         ব্র্যান্ড রঙ। ওয়েব-পুশ অংশ অপরিবর্তিত। 'low' priority পাঠানো হয় না।
+//
 // নিরাপত্তা: X-Internal-Secret হেডার যাচাই করা হয় — শুধু
 // Supabase cron থেকেই কল আসার কথা, বাইরের কেউ কল করলে 401 পাবে
 //
@@ -23,6 +28,54 @@ import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 
 export const prerender = false;
+
+// ---------- Android notification channel ম্যাপ ----------
+// চ্যানেল আইডিগুলো অ্যাপে (native-bridge.js, PushNotifications.createChannel)
+// একই আইডিতে তৈরি হয়। অ্যাপে চ্যানেল না থাকলে (পুরোনো ভার্সন) FCM নিজে
+// সাধারণ চ্যানেলে দেখায় — ভাঙে না।
+const CHANNEL_BY_CATEGORY = {
+  blood_request: 'sf_blood_v1',
+  blood_response: 'sf_blood_v1',
+  rider_offer: 'sf_rider_v1',
+  delivery_hero: 'sf_delivery_v1',
+  shop_order: 'sf_orders_v1',
+  order_status: 'sf_orders_v1',
+  message: 'sf_message_v1',
+  listing_status: 'sf_updates_v1',
+  account_status: 'sf_updates_v1',
+  club_request: 'sf_updates_v1',
+  security: 'sf_updates_v1',
+  promo: 'sf_promo_v1',
+  system: 'sf_admin_v1',
+};
+const DEFAULT_CHANNEL = 'sf_updates_v1';
+
+// priority → FCM priority ও মেয়াদ (ms)। মেয়াদ পেরিয়ে গেলে ডিভাইস অনলাইনে
+// এলেও পুরোনো নোটিফিকেশন আর আসে না (যেমন ১ ঘণ্টা আগের রক্তের অনুরোধ)।
+const HOUR = 60 * 60 * 1000;
+const PRIORITY_CONFIG = {
+  urgent: { fcmPriority: 'high', ttl: 1 * HOUR },
+  high: { fcmPriority: 'high', ttl: 6 * HOUR },
+  normal: { fcmPriority: 'normal', ttl: 24 * HOUR },
+};
+const BRAND_COLOR = '#FF6B35';
+
+function buildAndroidConfig({ category, priority, related_entity_id }) {
+  const cfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.normal;
+  const notification = {
+    channelId: CHANNEL_BY_CATEGORY[category] || DEFAULT_CHANNEL,
+    color: BRAND_COLOR,
+  };
+  // চ্যাট: একই কথোপকথনের নতুন মেসেজ আগেরটার জায়গায় বসে (স্ট্যাক হয় না)
+  if (category === 'message' && related_entity_id) {
+    notification.tag = `chat_${related_entity_id}`;
+  }
+  return {
+    priority: cfg.fcmPriority,
+    ttl: cfg.ttl,
+    notification,
+  };
+}
 
 // Firebase Admin singleton — serverless function বারবার cold-start
 // হলেও একই process এ multiple init এড়াতে চেক করা হয়
@@ -65,13 +118,21 @@ export async function POST({ request }) {
       );
     }
 
-    const { notification_id, user_id, title, body, category, image_url, action_url } = await request.json();
+    const { notification_id, user_id, title, body, category, priority, related_entity_id, image_url, action_url } = await request.json();
 
     if (!user_id || !title) {
       return new Response(
         JSON.stringify({ error: 'user_id ও title আবশ্যক' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // low priority শুধু অ্যাপের বেল তালিকার জন্য — পুশ পাঠানো হয় না
+    if (priority === 'low') {
+      return new Response(JSON.stringify({ success: true, sent: 0, note: 'low priority — পুশ নেই' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
@@ -166,11 +227,11 @@ export async function POST({ request }) {
               data: {
                 notification_id: notification_id ? String(notification_id) : '',
                 category: category || '',
+                priority: priority || 'normal',
+                related_entity_id: related_entity_id ? String(related_entity_id) : '',
                 action_url: action_url || '',
               },
-              android: {
-                priority: 'high',
-              },
+              android: buildAndroidConfig({ category, priority, related_entity_id }),
             });
             sentCount++;
           } catch (err) {
@@ -180,8 +241,11 @@ export async function POST({ request }) {
               code === 'messaging/invalid-registration-token'
             ) {
               staleSubscriptionIds.push(sub.id);
+            } else {
+              // শুধু এরর কোড লগ (টোকেন/মেসেজ না) — Vercel logs এ কারণ দেখার জন্য
+              console.error('FCM পাঠানো ব্যর্থ:', code || 'unknown');
             }
-            // অন্য এরর সাইলেন্টলি স্কিপ, পরের নোটিফিকেশনে আবার ট্রাই হবে
+            // এরর সাইলেন্টলি স্কিপ, পরের নোটিফিকেশনে আবার ট্রাই হবে
           }
         })
       );
