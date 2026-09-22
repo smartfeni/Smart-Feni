@@ -1,3 +1,5 @@
+//
+// আপডেট (N19): sendNotification/sendBulkNotifications এ priority: 'high' যোগ — কাস্টমারকে কনফার্মেশন ও হারা হিরোকে ফলাফল সাথে সাথে জানা দরকার।
 // ============================================================
 // API এন্ডপয়েন্ট: হিরো বর্তমান সেরা মূল্যে সরাসরি Accept করবে
 // (/api/delivery/accept-best-price) — ফার্স্ট-ক্লিক-উইন্স, অ্যাটমিক
@@ -130,6 +132,7 @@ export async function POST({ request }) {
         relatedEntityId: requestId,
         senderType: 'rider',
         senderId: user.id,
+        priority: 'high',
       });
 
       const losingRiderProfileIds = (losingOffers || [])
@@ -143,6 +146,7 @@ export async function POST({ request }) {
         relatedEntityType: 'delivery_request',
         relatedEntityId: requestId,
         senderType: 'system',
+        priority: 'high',
       }));
     }
 
