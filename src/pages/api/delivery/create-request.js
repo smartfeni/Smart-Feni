@@ -1,3 +1,5 @@
+//
+// আপডেট (N19): sendBulkNotifications এ priority: 'high' যোগ — নতুন রিকোয়েস্ট মিলে যাওয়া হিরোদের কাছে জরুরি হিসেবে যাওয়া দরকার।
 // ============================================================
 // API এন্ডপয়েন্ট: কাস্টমার নতুন ডেলিভারি রিকোয়েস্ট তৈরি করবে (/api/delivery/create-request)
 // লগইন করা কাস্টমার কল করবে (Authorization: Bearer <token> হেডার সহ)।
@@ -152,6 +154,7 @@ export async function POST({ request }) {
         relatedEntityType: 'delivery_request',
         relatedEntityId: data.id,
         senderType: 'system',
+        priority: 'high',
       }));
     }
 
