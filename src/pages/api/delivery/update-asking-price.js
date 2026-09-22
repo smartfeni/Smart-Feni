@@ -1,3 +1,5 @@
+//
+// আপডেট (N19): sendBulkNotifications এ priority: 'high' যোগ — দাম বাড়ানো হিরোদের সাথে সাথে জানা দরকার।
 // ============================================================
 // API এন্ডপয়েন্ট: কাস্টমার নিজের প্রস্তাবিত মূল্য বাড়াবে
 // (/api/delivery/update-asking-price)
@@ -126,6 +128,7 @@ export async function POST({ request }) {
         relatedEntityId: requestId,
         senderType: 'customer',
         senderId: user.id,
+        priority: 'high',
       }));
     }
 
