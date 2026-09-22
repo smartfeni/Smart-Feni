@@ -1,3 +1,5 @@
+//
+// আপডেট (N19): sendNotification/sendBulkNotifications এ priority: 'high' যোগ — জেতা ও হারা হিরোকে ফলাফল সাথে সাথে জানা দরকার।
 // ============================================================
 // API এন্ডপয়েন্ট: কাস্টমার বর্তমান সর্বনিম্ন হিরো অফার Confirm করবে
 // (/api/delivery/confirm-best-price)
@@ -99,6 +101,7 @@ export async function POST({ request }) {
           relatedEntityId: requestId,
           senderType: 'customer',
           senderId: user.id,
+          priority: 'high',
         });
       }
 
@@ -113,6 +116,7 @@ export async function POST({ request }) {
         relatedEntityType: 'delivery_request',
         relatedEntityId: requestId,
         senderType: 'system',
+        priority: 'high',
       }));
     }
 
