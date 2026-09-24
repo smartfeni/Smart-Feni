@@ -252,12 +252,33 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
-    const mime = mimeForPath(path);
-    if (mime === 'image/jpeg') {
+    let mime = mimeForPath(path);
+
+    if (mime === 'image/png' && !path.toLowerCase().includes('logo')) {
+      // PNG আসলে ফটো কিনা (transparency লাগে কিনা) চেক করা হচ্ছে —
+      // PNG lossless বলে dimension না কমলে সাইজ প্রায় কমেই না, তাই
+      // স্বচ্ছতা সত্যিই না লাগলে JPEG এ কনভার্ট করাই ভালো (অনেক বেশি ছোট হয়)
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      const { data } = ctx.getImageData(0, 0, width, height);
+      let hasAlpha = false;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] < 250) { hasAlpha = true; break; }
+      }
+      if (!hasAlpha) {
+        mime = 'image/jpeg';
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(bitmap, 0, 0, width, height);
+      }
+      // hasAlpha === true হলে PNG-ই থাকবে, উপরের draw-ই চূড়ান্ত
+    } else if (mime === 'image/jpeg') {
       ctx.fillStyle = '#ffffff';            // JPEG তে স্বচ্ছতা নেই
       ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(bitmap, 0, 0, width, height);
+    } else {
+      ctx.drawImage(bitmap, 0, 0, width, height);
     }
-    ctx.drawImage(bitmap, 0, 0, width, height);
     if (bitmap.close) bitmap.close();
 
     const resized = await new Promise((resolve) => canvas.toBlob(resolve, mime, QUALITY));
@@ -270,6 +291,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     const form = new FormData();
     form.append('path', path);
     form.append('file', resized, 'image');
+    form.append('contentType', mime); // path এর extension অপরিবর্তিত থাকলেও bytes ভিন্ন ফরম্যাটের হতে পারে
     const token = await getToken();
     const res = await fetch('/api/admin/optimize-image', {
       method: 'POST',
@@ -279,7 +301,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     const result = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(result.error || 'HTTP ' + res.status);
 
-    return { status: 'ok', before: original.size, after: resized.size };
+    return { status: 'ok', before: original.size, after: resized.size, converted: mime !== mimeForPath(path) };
   }
 
   // ---------- শুরু / থামান ----------
@@ -316,7 +338,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         if (r.status === 'ok') {
           changed++;
           saved += r.before - r.after;
-          log(`✓ ${item.path}: ${Math.round(r.before / 1024)} KB → ${Math.round(r.after / 1024)} KB`, 'ok');
+          log(`✓ ${item.path}: ${Math.round(r.before / 1024)} KB → ${Math.round(r.after / 1024)} KB${r.converted ? ' (PNG→JPEG)' : ''}`, 'ok');
         } else {
           skipped++;
           log(`– ${item.path}: বড় লাভ নেই, বদলানো হয়নি`, 'skip');

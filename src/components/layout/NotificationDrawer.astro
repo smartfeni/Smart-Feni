@@ -48,6 +48,14 @@
 // - .notif-item-image / .log-item স্টাইলের ছবি লোড হওয়ার সময়
 //   লেআউট জাম্প (CLS) কমাতে ফিক্সড height + হালকা প্লেসহোল্ডার
 //   ব্যাকগ্রাউন্ড যোগ হলো (স্লো নেটওয়ার্কে alignment ভাঙা ঠিক করতে)
+//
+// আপডেট (নোটিফিকেশন চ্যানেল/priority — অ্যাপ):
+// - Realtime এ নতুন নোটিফিকেশন এলে পুরো পর্দার popup শুধু priority='urgent'
+//   (ব্লাড রিকোয়েস্ট/সাড়া, নিরাপত্তা) এর জন্য। বাকিগুলো ছোট ব্যানার (ট্যাপ
+//   করলে সেই নোটিফিকেশন খোলে, ৫ সেকেন্ডে সরে যায়); 'low' এ ব্যানারও নেই —
+//   শুধু বেলের সংখ্যা ও তালিকা
+// - অ্যাপে ঢোকার অটো-popup ও শুধু unread 'urgent' থাকলে
+// - নতুন ক্যাটাগরির লেবেল/রঙ: order_status, account_status, club_request, security
 // ============================================================
 ---
 
@@ -80,6 +88,15 @@
     </button>
     <div class="nd-modal-body" id="notifModalBody"></div>
   </div>
+</div>
+
+<!-- ===== নতুন নোটিফিকেশনের ছোট ব্যানার (urgent ছাড়া) — ট্যাপ করলে নোটিফিকেশন খোলে ===== -->
+<div class="nd-banner" id="ndBanner" role="status" aria-live="polite">
+  <span class="nd-banner-icon" id="ndBannerIcon">🔔</span>
+  <span class="nd-banner-text">
+    <span class="nd-banner-title" id="ndBannerTitle"></span>
+    <span class="nd-banner-msg" id="ndBannerMsg"></span>
+  </span>
 </div>
 
 <style>
@@ -548,6 +565,91 @@
     white-space: pre-line;
     margin-bottom: 18px;
   }
+
+  /* ===== নতুন নোটিফিকেশনের ছোট ব্যানার ===== */
+  .nd-banner {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    left: 12px;
+    right: 12px;
+    max-width: 520px;
+    margin: 0 auto;
+    z-index: 2400; /* ড্রয়ার (2200) এর উপরে, মডাল (2500) এর নিচে */
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: #fff;
+    border-radius: 16px;
+    border-left: 4px solid #FF6B35;
+    box-shadow: 0 8px 28px rgba(27, 42, 74, 0.22);
+    cursor: pointer;
+    transform: translateY(-140%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.25s ease, opacity 0.25s ease;
+  }
+
+  .nd-banner.show {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .nd-banner-icon {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #F1F4F8;
+    border-radius: 50%;
+    font-size: 1.1rem;
+  }
+
+  .nd-banner-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .nd-banner-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
+  .nd-banner-msg {
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: #55647F;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nd-banner { transition: none; }
+  }
+
+  /* নতুন ক্যাটাগরির চিপ রঙ */
+  .nd-detail-chip.chip-order_status {
+    background: #E8F2FF;
+    color: #1D6FE0;
+  }
+
+  .nd-detail-chip.chip-account_status,
+  .nd-detail-chip.chip-club_request {
+    background: #E6F6EC;
+    color: #067647;
+  }
+
+  .nd-detail-chip.chip-security {
+    background: #FFF1E6;
+    color: #B54708;
+  }
 </style>
 
 <script>
@@ -580,6 +682,27 @@
     promo: 'অফার-প্রমো',
     message: 'মেসেজ',
     system: 'সিস্টেম',
+    order_status: 'অর্ডার আপডেট',
+    account_status: 'আবেদনের ফলাফল',
+    club_request: 'ক্লাব আবেদন',
+    security: 'নিরাপত্তা',
+  };
+
+  // ব্যানারের আইকন (ক্যাটাগরি অনুযায়ী)
+  const categoryEmoji = {
+    blood_request: '🩸',
+    blood_response: '🩸',
+    delivery_hero: '📦',
+    rider_offer: '🚴',
+    shop_order: '🛍️',
+    order_status: '🛍️',
+    message: '💬',
+    listing_status: '📋',
+    account_status: '📋',
+    club_request: '📋',
+    security: '🔒',
+    promo: '🎁',
+    system: '⚙️',
   };
 
   function toBnDigits(num) {
@@ -733,6 +856,7 @@
   }
 
   function openNotifModal(n) {
+    hideNotifBanner();
     modalBody.innerHTML = `
       <div class="nd-detail-chips">
         <span class="nd-detail-chip chip-${n.category}">${categoryChipLabels[n.category] || 'নোটিফিকেশন'}</span>
@@ -846,6 +970,53 @@
   // Realtime সাবস্ক্রিপশন — নতুন নোটিফিকেশন (ব্লাড রিকোয়েস্টসহ)
   // এলে সাথে সাথে ফুল-ভিউ মডেল অটো-ওপেন
   // ============================================================
+  // ============================================================
+  // নতুন নোটিফিকেশন কীভাবে দেখানো হবে (priority অনুযায়ী)
+  //   urgent → পুরো পর্দার popup (ব্লাড, নিরাপত্তা)
+  //   low    → কিছু না (শুধু বেলের সংখ্যা ও তালিকা)
+  //   বাকি   → ছোট ব্যানার, ট্যাপ করলে নোটিফিকেশন খোলে
+  // ============================================================
+  const bannerEl = document.getElementById('ndBanner');
+  const bannerIconEl = document.getElementById('ndBannerIcon');
+  const bannerTitleEl = document.getElementById('ndBannerTitle');
+  const bannerMsgEl = document.getElementById('ndBannerMsg');
+  let bannerTimer = null;
+  let bannerNotif = null;
+
+  function hideNotifBanner() {
+    clearTimeout(bannerTimer);
+    bannerNotif = null;
+    bannerEl?.classList.remove('show');
+  }
+
+  function showNotifBanner(n) {
+    if (!bannerEl) return;
+    bannerNotif = n;
+    bannerIconEl.textContent = categoryEmoji[n.category] || '🔔';
+    bannerTitleEl.textContent = categoryChipLabels[n.category] || 'নোটিফিকেশন';
+    bannerMsgEl.textContent = n.message || '';
+    bannerEl.classList.add('show');
+
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(hideNotifBanner, 5000);
+  }
+
+  bannerEl?.addEventListener('click', () => {
+    const target = bannerNotif;
+    hideNotifBanner();
+    if (target) openNotifModal(target);
+  });
+
+  function handleIncomingNotification(n) {
+    if (n.priority === 'urgent') {
+      openNotifModal(n);
+    } else if (n.priority === 'low') {
+      // শুধু বেলের সংখ্যা ও তালিকা (আগেই আপডেট হয়েছে)
+    } else {
+      showNotifBanner(n);
+    }
+  }
+
   function subscribeRealtime() {
     if (notifChannel) {
       supabase.removeChannel(notifChannel);
@@ -868,7 +1039,7 @@
           latestNotifications = [newNotif, ...latestNotifications];
           renderNotifications(latestNotifications);
           updateBadgeCount();
-          openNotifModal(newNotif);
+          handleIncomingNotification(newNotif);
         }
       )
       .subscribe();
@@ -1003,7 +1174,8 @@
   function checkAutoPopupOnEntry() {
     if (sessionStorage.getItem('sf_notif_autopopup_shown')) return;
 
-    const unread = latestNotifications.find((n) => !n.is_read);
+    // শুধু urgent unread হলে popup (বাকিগুলো বেলের সংখ্যায় দেখা যায়)
+    const unread = latestNotifications.find((n) => !n.is_read && n.priority === 'urgent');
     if (!unread) return;
 
     sessionStorage.setItem('sf_notif_autopopup_shown', '1');

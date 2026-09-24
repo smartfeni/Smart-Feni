@@ -1,3 +1,5 @@
+//
+// আপডেট (N19): sendNotification এ priority: 'high' যোগ — নতুন সেরা মূল্য কাস্টমারের কাছে সাথে সাথে যাওয়া দরকার।
 // ============================================================
 // API এন্ডপয়েন্ট: হিরো নতুন প্রতিযোগিতামূলক অফার দিবে
 // (/api/delivery/submit-offer) — Smart Hero / Ride Hero "সেরা মূল্য" মডেল
@@ -157,6 +159,7 @@ export async function POST({ request }) {
         message: `আপনার ${reqRow.category === 'ride' ? 'রাইড' : 'ডেলিভারি'} রিকোয়েস্টে নতুন সেরা মূল্য এসেছে — ৳${price}`,
         category: 'delivery_hero',
         actionUrl: '/my-orders',
+        priority: 'high',
         relatedEntityType: 'delivery_request',
         relatedEntityId: requestId,
         senderType: 'rider',

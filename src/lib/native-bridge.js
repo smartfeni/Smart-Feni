@@ -17,6 +17,12 @@
 // ফ্রেম আঁকা হলেই সরে যায় (hideSplashWhenReady) — আগে সব ছবি নামা
 // (`load` ইভেন্ট) পর্যন্ত অপেক্ষা করত, তাই ধীর নেটে ১০+ সেকেন্ড লাগত।
 // capacitor.config.json এ সর্বোচ্চ ১৫ সেকেন্ডের সেফটি লিমিট আছে।
+//
+// আপডেট: নোটিফিকেশন (initNotificationHandlers) —
+//   ১) Android notification channel তৈরি (ফোনের Settings → Apps → Smart Feni
+//      → Notifications এ প্রতিটার আলাদা সুইচ/শব্দ; আইডি send.ts এর সাথে মিলতে হবে)
+//   ২) পুশে ট্যাপ করলে সঠিক পেজে যাওয়া (ওয়েবের sw.js notificationclick এর মতোই)
+//   ৩) লগইন/লগআউটে FCM টোকেন সিঙ্ক ও মোছা (push.js এর initNativePushLifecycle)
 // ============================================================
 
 import { Capacitor } from '@capacitor/core';
@@ -156,6 +162,7 @@ export async function initBackButtonHandler() {
   // BaseLayout প্রতিটা পেজ লোডে এই ফাংশন চালায় — তাই শেষ পেজ মনে রাখার কাজও এখানেই
   rememberLastUrl();
   hideSplashWhenReady();
+  initNotificationHandlers();
 
   const { App } = await import('@capacitor/app');
 
@@ -226,5 +233,96 @@ async function hideSplashWhenReady() {
     }
   } catch (err) {
     // ফেইল করলে capacitor.config.json এর সেফটি লিমিটে splash নিজে সরে যাবে
+  }
+}
+
+// ---------------- Notification Channels + Tap Handler ----------------
+// চ্যানেল আইডি অবশ্যই src/pages/api/push/send.ts এর CHANNEL_BY_CATEGORY এর সাথে মিলতে হবে।
+// ⚠️ চ্যানেল একবার তৈরি হলে শব্দ/গুরুত্ব অ্যাপ আর বদলাতে পারে না (ইউজার বদলায়)।
+// বদলাতে হলে নতুন আইডি (_v2) দিন এবং CHANNELS_FLAG এর ভার্সনও বাড়ান।
+// importance: 1 min · 2 low · 3 default · 4 high · 5 max
+const NOTIF_CHANNELS = [
+  { id: 'sf_blood_v1', name: '🩸 জরুরি রক্ত', description: 'রক্তের জরুরি অনুরোধ ও ডোনারের সাড়া', importance: 5, visibility: 1, vibration: true },
+  { id: 'sf_rider_v1', name: '🚴 হিরো রিকোয়েস্ট', description: 'নতুন ডেলিভারি/রাইড রিকোয়েস্ট', importance: 4, visibility: 1, vibration: true },
+  { id: 'sf_delivery_v1', name: '📦 ডেলিভারি আপডেট', description: 'ডেলিভারির প্রতিটা ধাপের খবর', importance: 4, visibility: 1, vibration: true },
+  { id: 'sf_orders_v1', name: '🛍️ অর্ডার', description: 'শপের নতুন অর্ডার ও অর্ডারের অবস্থা', importance: 4, visibility: 1, vibration: true },
+  { id: 'sf_message_v1', name: '💬 মেসেজ', description: 'চ্যাট ও সরাসরি মেসেজ', importance: 4, visibility: 1, vibration: true },
+  { id: 'sf_updates_v1', name: '📋 লিস্টিং ও আবেদন আপডেট', description: 'লিস্টিং অনুমোদন, আবেদনের ফলাফল, নিরাপত্তা সতর্কতা', importance: 3, visibility: 1, vibration: true },
+  { id: 'sf_promo_v1', name: '🎁 অফার', description: 'অফার ও ঘোষণা', importance: 2, visibility: 1, vibration: false },
+];
+
+// শুধু অ্যাডমিন/মডারেটরের ফোনে (/admin পেজ খুললে তৈরি হয়)
+const ADMIN_CHANNEL = {
+  id: 'sf_admin_v1', name: '⚙️ অ্যাডমিন সতর্কতা', description: 'অ্যাডমিন/মডারেটরদের জন্য সাইট সতর্কতা',
+  importance: 3, visibility: 1, vibration: true,
+};
+
+const CHANNELS_FLAG = 'sf_notif_channels_v1';
+const ADMIN_CHANNEL_FLAG = 'sf_notif_admin_channel_v1';
+
+// পুশে ট্যাপ → সঠিক পেজ (ওয়েবের sw.js এর মতো: action_url এর পাথ + ?notif=<id>,
+// যাতে নোটিফিকেশন ড্রয়ার ওই পেজে গিয়ে নোটিফিকেশনটা খুলে দেখায়)
+function handleNotificationTap(event) {
+  try {
+    const data = event?.notification?.data || {};
+    const rawUrl = data.action_url || '/';
+    const url = new URL(rawUrl, window.location.origin);
+
+    // শুধু নিজের সাইটের লিংক
+    if (url.origin !== window.location.origin) return;
+
+    const notifId = data.notification_id;
+    const target = notifId
+      ? `${url.pathname}?notif=${encodeURIComponent(notifId)}`
+      : url.pathname + url.search;
+
+    window.location.href = target;
+  } catch (err) {
+    // ট্যাপ হ্যান্ডলিং ফেইল করলে অ্যাপ যেমন খুলেছে তেমনই থাকবে
+  }
+}
+
+async function createChannelOnce(PushNotifications, channel) {
+  await PushNotifications.createChannel(channel);
+}
+
+async function initNotificationHandlers() {
+  try {
+    if (!isNativeApp()) return;
+
+    const { PushNotifications } = await import('@capacitor/push-notifications');
+
+    // ১) ট্যাপ হ্যান্ডলার — অ্যাপ বন্ধ থাকা অবস্থায় ট্যাপ করে খুললেও ইভেন্টটা
+    //    listener বসার সাথে সাথে পৌঁছায়
+    PushNotifications.addListener('pushNotificationActionPerformed', handleNotificationTap);
+
+    // ১.৫) লগইন/লগআউটে টোকেন সিঙ্ক (আলাদা try — এটা ফেইল করলে চ্যানেল তৈরি আটকাবে না)
+    try {
+      const { initNativePushLifecycle } = await import('./push.js');
+      initNativePushLifecycle();
+    } catch (err) {
+      // ফেইল করলে টোকেন সিঙ্ক শুধু প্রম্পটের মাধ্যমেই হবে (আগের মতো)
+    }
+
+    // ২) চ্যানেল তৈরি — একবার সফল হলে ফ্ল্যাগ সেভ, তাই প্রতি পেজে আবার নয়
+    if (localStorage.getItem(CHANNELS_FLAG) !== 'done') {
+      for (const channel of NOTIF_CHANNELS) {
+        await createChannelOnce(PushNotifications, channel);
+      }
+      localStorage.setItem(CHANNELS_FLAG, 'done');
+    }
+
+    // ৩) অ্যাডমিন চ্যানেল — শুধু অ্যাডমিন/মডারেটর যখন অ্যাডমিন পেজ খোলে
+    window.addEventListener('smartfeni:admin-ready', async () => {
+      try {
+        if (localStorage.getItem(ADMIN_CHANNEL_FLAG) === 'done') return;
+        await createChannelOnce(PushNotifications, ADMIN_CHANNEL);
+        localStorage.setItem(ADMIN_CHANNEL_FLAG, 'done');
+      } catch (err) {
+        // ফেইল করলে অ্যাডমিন নোটিফিকেশন সাধারণ চ্যানেলে আসবে — ভাঙবে না
+      }
+    });
+  } catch (err) {
+    // প্লাগইন না থাকলে (পুরোনো অ্যাপ ভার্সন) বা ফেইল করলে চুপচাপ বাদ — নোটিফিকেশন সাধারণ চ্যানেলে আসবে
   }
 }

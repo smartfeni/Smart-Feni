@@ -14,6 +14,9 @@
 //    পৌঁছাবে না)
 // ৫. profiles.phone আপডেট
 // ============================================================
+//
+// আপডেট (N17): ফোন নম্বর সফলভাবে বদলালে ইউজারকে নিরাপত্তা সতর্কতা
+// (security ক্যাটাগরি) পাঠানো হয়, supabaseAdmin দিয়ে সরাসরি create_notification।
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -120,6 +123,21 @@ export async function POST({ request }) {
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    // নিরাপত্তা সতর্কতা — সার্ভার-সাইড, তাই সরাসরি create_notification (এই কনটেক্সট আগে থেকেই বিশ্বস্ত)।
+    // ব্যর্থ হলেও ফোন বদল সফলই থাকবে (নোটিফিকেশন ব্যর্থতা মূল কাজ আটকাবে না)
+    await supabaseAdmin.rpc('create_notification', {
+      p_recipient_user_id: callerUser.id,
+      p_category: 'security',
+      p_message: '🔒 আপনার ফোন নম্বর বদলানো হয়েছে',
+      p_image_url: null,
+      p_action_url: '/profile/edit',
+      p_related_entity_type: null,
+      p_related_entity_id: null,
+      p_sender_type: 'system',
+      p_sender_id: null,
+      p_priority: 'high',
+    }).then(() => {}, () => {});
 
     return new Response(
       JSON.stringify({ success: true }),

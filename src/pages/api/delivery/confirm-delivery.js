@@ -1,3 +1,5 @@
+//
+// আপডেট (N19): sendNotification এ priority: 'high' যোগ — ডেলিভারি সম্পন্ন হওয়ার খবর কাস্টমারের কাছে সাথে সাথে যাওয়া দরকার।
 // ============================================================
 // API এন্ডপয়েন্ট: রাইডার ডেলিভারি কনফার্ম করবে (/api/delivery/confirm-delivery)
 // status: delivered -> completed
@@ -122,6 +124,7 @@ export async function POST({ request }) {
         : 'আপনার ডেলিভারি সম্পন্ন হয়েছে! হিরোকে একটা রিভিউ দিন',
       category: 'delivery_hero',
       actionUrl: '/my-orders',
+      priority: 'high',
       relatedEntityType: 'delivery_request',
       relatedEntityId: requestId,
       senderType: 'rider',
