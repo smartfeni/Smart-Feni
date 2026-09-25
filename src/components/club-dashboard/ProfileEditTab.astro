@@ -6,6 +6,13 @@
 // 'mod-no-settings' ক্লাস বসায় যখন মডারেটরের can_edit_settings
 // পারমিশন নেই। তখন সব ইনপুট readonly-দেখাবে (ভিউ করা যাবে, এডিট
 // না), লোগো/কভার পরিবর্তন ও সেভ বাটন হাইড হয়ে যাবে।
+//
+// আপডেট (RLS বাগফিক্স): আগে ছবি সরাসরি ক্লায়েন্ট থেকে
+// supabase.storage.upload() দিয়ে আপলোড হতো, যেটা "new row violates
+// row-level security policy" এরর দিত (সেশন JWT storage সার্ভিস
+// ভেরিফাই করতে ব্যর্থ হতো, /api/upload-image.js-এর কমেন্টে বিস্তারিত)।
+// এখন সাইটের বাকি জায়গার মতোই /api/upload-image.js (service role,
+// server-side) দিয়ে আপলোড হয়।
 // ============================================================
 ---
 
@@ -126,20 +133,37 @@
     selectedCoverFile = file ? await compressImage(file, { maxDimension: 1600 }) : null;
   });
 
-  // বাগফিক্স: আগে upload fail করলে error silently ignore হয়ে যেত
-  // (শুধু null return করত), তাই ইউজার বুঝতে পারতেন না কেন ছবি সেভ
-  // হচ্ছে না। এখন error console-এ log হয় + { url, error } রিটার্ন
-  // করে যাতে কলার (saveProfileBtn হ্যান্ডলার) exact কারণ দেখাতে পারে।
+  // বাগফিক্স: এখন সাইটের বাকি জায়গার মতোই /api/upload-image.js
+  // (service role, server-side) দিয়ে আপলোড হয় — client-side সরাসরি
+  // supabase.storage.upload() আর ব্যবহার হচ্ছে না, তাই RLS এরর আসবে না।
   async function uploadImage(file, prefix) {
-    const ext = file.name.split('.').pop();
-    const path = `clubs/${prefix}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true });
-    if (error) {
-      console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, error.message);
-      return { url: null, error: error.message };
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `clubs/${prefix}-${Date.now()}.${ext}`;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return { url: null, error: 'সেশন পাওয়া যায়নি, আবার লগইন করুন' };
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', path);
+
+      const res = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: formData,
+      });
+      const result = await res.json();
+
+      if (!res.ok || !result.url) {
+        console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, result.error);
+        return { url: null, error: result.error || 'আপলোড ব্যর্থ' };
+      }
+      return { url: result.url, error: null };
+    } catch (err) {
+      console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, err.message);
+      return { url: null, error: err.message };
     }
-    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
-    return { url: data?.publicUrl || null, error: null };
   }
 
   document.getElementById('saveProfileBtn')?.addEventListener('click', async () => {
@@ -149,10 +173,6 @@
     span.textContent = 'সেভ হচ্ছে...';
     btn.disabled = true;
 
-    // বাগফিক্স: ছবি আপলোডের ঠিক আগে সেশন সতেজ (refresh) করে নেওয়া হচ্ছে।
-    // ফর্ম পূরণ করতে করতে access token মেয়াদ পার হয়ে গেলে storage
-    // আপলোড 'anon' হিসেবে গিয়ে RLS ভায়োলেশন দিত। getSession() কল করলে
-    // supabase-js নিজে থেকেই expired token refresh করার চেষ্টা করে।
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       span.textContent = original;
@@ -215,11 +235,4 @@
     document.getElementById('addressInput').value = club.address || '';
     document.getElementById('establishedInput').value = club.established_year || '';
     document.getElementById('latInput').value = club.latitude || '';
-    document.getElementById('lngInput').value = club.longitude || '';
-
-    if (club.logo_image) {
-      document.getElementById('logoPreview').src = club.logo_image;
-      document.getElementById('logoCircle').classList.add('has-photo');
-    }
-  });
-</script>
+    document.getElementById('lngInput').value = club.lo
