@@ -23,6 +23,8 @@
 //      → Notifications এ প্রতিটার আলাদা সুইচ/শব্দ; আইডি send.ts এর সাথে মিলতে হবে)
 //   ২) পুশে ট্যাপ করলে সঠিক পেজে যাওয়া (ওয়েবের sw.js notificationclick এর মতোই)
 //   ৩) লগইন/লগআউটে FCM টোকেন সিঙ্ক ও মোছা (push.js এর initNativePushLifecycle)
+//   ৪) অফলাইন ব্যানার (O4) — নেট নেই বোঝা গেলে ওপরে পাতলা বার;
+//      এটা ওয়েব ও অ্যাপ দুই জায়গাতেই কাজ করে (isNativeApp() গার্ড ছাড়া)
 // ============================================================
 
 import { Capacitor } from '@capacitor/core';
@@ -163,6 +165,7 @@ export async function initBackButtonHandler() {
   rememberLastUrl();
   hideSplashWhenReady();
   initNotificationHandlers();
+  initOfflineBanner();
 
   const { App } = await import('@capacitor/app');
 
@@ -324,5 +327,54 @@ async function initNotificationHandlers() {
     });
   } catch (err) {
     // প্লাগইন না থাকলে (পুরোনো অ্যাপ ভার্সন) বা ফেইল করলে চুপচাপ বাদ — নোটিফিকেশন সাধারণ চ্যানেলে আসবে
+  }
+}
+
+// ---------------- Offline Banner ----------------
+// নেট না থাকলে পেজের উপরে একটা পাতলা বার দেখায়। ওয়েব ও অ্যাপ দুই জায়গাতেই
+// কাজ করে (isNativeApp() গার্ড ইচ্ছাকৃতভাবে নেই)। কাস্টমারের ভাষায় লেখা —
+// "ক্যাশ", "সার্ভার" এর মতো টেকনিক্যাল শব্দ ব্যবহার করা হয়নি।
+const OFFLINE_BANNER_ID = 'sf-offline-banner';
+
+function ensureOfflineBannerEl() {
+  let el = document.getElementById(OFFLINE_BANNER_ID);
+  if (el) return el;
+
+  el = document.createElement('div');
+  el.id = OFFLINE_BANNER_ID;
+  el.setAttribute('role', 'status');
+  el.textContent = '📡 আপনি অফলাইনে আছেন — সংরক্ষিত তথ্য দেখানো হচ্ছে';
+  Object.assign(el.style, {
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    right: '0',
+    zIndex: '4000', // ড্রয়ার/মডালের চেয়েও ওপরে, সবসময় দেখা যাবে
+    padding: 'calc(8px + env(safe-area-inset-top, 0px)) 16px 8px',
+    background: '#FFF1E6',
+    color: '#7A4A1E',
+    fontSize: '0.85rem',
+    fontWeight: '600',
+    textAlign: 'center',
+    borderBottom: '1px solid #F3D9BE',
+    transform: 'translateY(-100%)',
+    transition: 'transform 0.25s ease',
+  });
+  document.body.appendChild(el);
+  return el;
+}
+
+function setOfflineBannerVisible(visible) {
+  const el = ensureOfflineBannerEl();
+  el.style.transform = visible ? 'translateY(0)' : 'translateY(-100%)';
+}
+
+function initOfflineBanner() {
+  try {
+    setOfflineBannerVisible(!navigator.onLine);
+    window.addEventListener('online', () => setOfflineBannerVisible(false));
+    window.addEventListener('offline', () => setOfflineBannerVisible(true));
+  } catch (err) {
+    // ব্যানার দেখানো না গেলেও সাইট স্বাভাবিক চলবে
   }
 }
