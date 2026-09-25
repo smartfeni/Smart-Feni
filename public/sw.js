@@ -20,6 +20,8 @@
 //   ৫) কখনো ক্যাশ নয়: /api/, /admin, /cart, /checkout, /my-, /profile,
 //      /reset-password, GET ছাড়া অন্য মেথড, Supabase-এর ডাটাবেস/auth কল
 //   ৬) কিছুই না পেলে (প্রথমবার অফলাইনে) → offline.html (O2)
+//   ৭) install এ আগে থেকে ক্যাশ (O3): emergency, doctor-directory, blood —
+//      অফলাইনে সবচেয়ে বেশি দরকার, tel: লিংক নেট ছাড়াও কাজ করে
 // ============================================================
 const CACHE_NAME = "smartfeni-v2";
 const IMAGE_CACHE_NAME = "smartfeni-images-v1";
@@ -119,11 +121,19 @@ async function networkFirstWithTimeout(request) {
   }
 }
 
+// O3: গুরুত্বপূর্ণ পেজ — অফলাইনে সবচেয়ে বেশি দরকার পড়তে পারে
+// (ইমার্জেন্সি নম্বর, ডাক্তার/হাসপাতাল তালিকা, ব্লাড ডোনার — tel: লিংক নেট
+// ছাড়াও কাজ করে)। প্রতিটা আলাদাভাবে try করা হয়, একটা ব্যর্থ হলেও বাকিগুলো
+// ও install থেমে যাবে না।
+const PRECACHE_PAGES = ["/services/emergency", "/services/doctor-directory", "/services/blood"];
+
 self.addEventListener("install", (event) => {
   self.skipWaiting();
-  // অফলাইন পেজ আগেই ক্যাশে রাখা, নাহলে প্রথমবার অফলাইনে সেটাও মিস হবে
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.add(OFFLINE_URL).catch(() => {}))
+    caches.open(CACHE_NAME).then(async (cache) => {
+      await cache.add(OFFLINE_URL).catch(() => {});
+      await Promise.all(PRECACHE_PAGES.map((url) => cache.add(url).catch(() => {})));
+    })
   );
 });
 
