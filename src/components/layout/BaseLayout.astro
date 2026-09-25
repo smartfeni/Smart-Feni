@@ -393,10 +393,55 @@ const localBusinessSchema = {
       border-color: #E74C3C !important;
       background: #FFF5F5 !important;
     }
+
+    /* ============================================================
+       Pull to Refresh (শুধু নেটিভ Android অ্যাপে চালু হয় —
+       ওয়েব/ব্রাউজারে ব্রাউজারের নিজস্ব pull-to-refresh এমনিতেই কাজ করে)
+       ============================================================ */
+    .sf-ptr-indicator {
+      position: fixed;
+      top: 0;
+      left: 50%;
+      width: 40px;
+      height: 40px;
+      margin-left: -20px;
+      transform: translateY(-60px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 3000;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .sf-ptr-indicator.sf-ptr-visible {
+      opacity: 1;
+    }
+
+    .sf-ptr-spinner {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(27, 42, 74, 0.15);
+    }
+
+    .sf-ptr-indicator.sf-ptr-loading .sf-ptr-spinner {
+      animation: sf-ptr-spin 0.7s linear infinite;
+    }
+
+    @keyframes sf-ptr-spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
   <Header />
+  <div id="sf-ptr-indicator" class="sf-ptr-indicator">
+    <div class="sf-ptr-spinner"></div>
+  </div>
   <main>
     <slot />
   </main>
@@ -434,6 +479,62 @@ const localBusinessSchema = {
     }
 
     initBackButtonHandler();
+  </script>
+
+  <script>
+    // ============================================================
+    // Pull to Refresh — শুধু নেটিভ Android অ্যাপে (Capacitor WebView-তে
+    // ব্রাউজারের নিজস্ব pull-to-refresh জেসচার থাকে না, তাই কাস্টম করে
+    // দেওয়া হলো)। ওয়েবে ব্রাউজার নিজেই এটা হ্যান্ডেল করে, তাই সেখানে
+    // এই স্ক্রিপ্ট কিছু করে না (ডাবল pull-to-refresh এড়াতে)।
+    // ============================================================
+    import { isNativeApp } from '../../lib/native-bridge.js';
+
+    if (isNativeApp()) {
+      const indicator = document.getElementById('sf-ptr-indicator');
+      const PULL_THRESHOLD = 70; // px, এর বেশি টানলে ছাড়ার পর রিফ্রেশ হবে
+      const MAX_PULL = 100;
+      const RESISTANCE = 0.5; // রাবার-ব্যান্ড ইফেক্ট
+
+      let startY = 0;
+      let pulling = false;
+      let refreshing = false;
+
+      document.addEventListener('touchstart', (e) => {
+        if (refreshing || window.scrollY > 0) return;
+        startY = e.touches[0].clientY;
+        pulling = true;
+      }, { passive: true });
+
+      document.addEventListener('touchmove', (e) => {
+        if (!pulling || refreshing) return;
+
+        const deltaY = e.touches[0].clientY - startY;
+        if (deltaY <= 0) return;
+
+        const pullDistance = Math.min(deltaY * RESISTANCE, MAX_PULL);
+        indicator.style.transform = `translateY(${-60 + pullDistance}px)`;
+        indicator.classList.add('sf-ptr-visible');
+      }, { passive: true });
+
+      document.addEventListener('touchend', (e) => {
+        if (!pulling || refreshing) return;
+        pulling = false;
+
+        const deltaY = e.changedTouches[0].clientY - startY;
+        const pullDistance = Math.min(deltaY * RESISTANCE, MAX_PULL);
+
+        if (pullDistance >= PULL_THRESHOLD * RESISTANCE) {
+          refreshing = true;
+          indicator.style.transform = 'translateY(20px)';
+          indicator.classList.add('sf-ptr-loading');
+          window.location.reload();
+        } else {
+          indicator.style.transform = 'translateY(-60px)';
+          indicator.classList.remove('sf-ptr-visible');
+        }
+      });
+    }
   </script>
 
   <script>
