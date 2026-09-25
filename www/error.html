@@ -4,14 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#F8FAFC">
-  <title>অফলাইন — Smart Feni</title>
+  <title>Smart Feni</title>
   <!--
-    ফাইল: public/offline.html (O2)
-    কাজ: sw.js এর networkFirstWithTimeout() ফলব্যাক — নেট না থাকলে এবং
-         পেজটা আগে কখনো ক্যাশ না হয়ে থাকলে এটা দেখাবে (ওয়েবসাইট/PWA-তে)।
-         www/error.html এর অ্যাপ-সংস্করণ, ডিজাইন একই রাখা হয়েছে।
-    নোট: install ধাপেই sw.js এই ফাইলটা আগে থেকে ক্যাশে রাখে, তাই এই পেজ
-         নিজেই সবসময় অফলাইনে পাওয়া যাবে।
+    ফাইল: www/error.html
+    কাজ: অ্যাপে ইন্টারনেট না থাকলে বা সার্ভার সাড়া না দিলে
+         Android-এর ডিফল্ট "Web page not available" পেজের বদলে এটা দেখাবে।
+    নোট: সব CSS/JS/আইকন ভেতরেই — কোনো বাইরের ফাইল লাগে না, তাই অফলাইনেও চলে।
+         capacitor.config.json এ server.errorPath = "error.html" দিলে চালু হবে।
+    আপডেট: এই পেজ দেখা গেলেই Splash screen (অ্যাপ আইকন) সরে যায়, যাতে
+         সাইট লোড না হলেও আইকনের নিচে এরর পেজ আটকে না থাকে।
   -->
   <style>
     :root {
@@ -38,34 +39,95 @@
       padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
     }
 
-    main { width: 100%; max-width: 340px; }
+    main {
+      width: 100%;
+      max-width: 340px;
+    }
 
-    .icon { display: block; width: 96px; height: 96px; margin: 0 auto 28px; }
+    .icon {
+      display: block;
+      width: 96px;
+      height: 96px;
+      margin: 0 auto 28px;
+    }
 
-    h1 { font-size: 1.5rem; line-height: 1.4; font-weight: 700; margin-bottom: 10px; }
+    h1 {
+      font-size: 1.5rem;
+      line-height: 1.4;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
 
-    p.desc { font-size: 1rem; line-height: 1.7; color: var(--muted); margin-bottom: 32px; }
+    #desc {
+      font-size: 1rem;
+      line-height: 1.7;
+      color: var(--muted);
+      margin-bottom: 32px;
+    }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
 
     button {
       font: inherit;
       font-size: 1.0625rem;
       font-weight: 600;
       min-height: 52px;
-      width: 100%;
       border-radius: 16px;
       padding: 0 20px;
       cursor: pointer;
-      background: var(--navy);
-      color: #fff;
-      border: 2px solid var(--navy);
       -webkit-tap-highlight-color: transparent;
     }
 
-    button:disabled { opacity: 0.7; cursor: default; }
-    button:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
+    #retry {
+      background: var(--navy);
+      color: #fff;
+      border: 2px solid var(--navy);
+    }
 
-    .brand { margin-top: 40px; font-size: 0.875rem; color: var(--muted); line-height: 1.6; }
-    .brand strong { display: block; color: var(--navy); font-size: 1rem; }
+    #retry:disabled {
+      opacity: 0.7;
+      cursor: default;
+    }
+
+    #home {
+      background: transparent;
+      color: var(--navy);
+      border: 2px solid var(--line);
+    }
+
+    button:focus-visible {
+      outline: 3px solid var(--orange);
+      outline-offset: 2px;
+    }
+
+    .brand {
+      margin-top: 40px;
+      font-size: 0.875rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .brand strong {
+      display: block;
+      color: var(--navy);
+      font-size: 1rem;
+    }
+
+    @keyframes nudge {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); }
+      75% { transform: translateX(6px); }
+    }
+
+    .nudge { animation: nudge 0.3s ease-in-out; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .nudge { animation: none; }
+    }
   </style>
 </head>
 <body>
@@ -81,33 +143,156 @@
       <path d="M18 14L80 82" stroke="#FF6B35" stroke-width="6" stroke-linecap="round"/>
     </svg>
 
-    <h1>ইন্টারনেট সংযোগ নেই</h1>
-    <p class="desc" id="desc">এই পেজটা এখন দেখানো যাচ্ছে না। ইন্টারনেট ফিরলে আবার চেষ্টা করুন।</p>
+    <h1 id="title">পেজটি খোলা যাচ্ছে না</h1>
+    <p id="desc" role="status" aria-live="polite">আমাদের সার্ভারে পৌঁছানো যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।</p>
 
-    <button id="retry" type="button">আবার চেষ্টা করুন</button>
+    <div class="actions">
+      <button id="retry" type="button">আবার চেষ্টা করুন</button>
+      <button id="home" type="button">হোমে যান</button>
+    </div>
 
-    <p class="brand"><strong>স্মার্ট ফেনী</strong>প্রয়োজন আপনার, দায়িত্ব আমাদের</p>
+    <p class="brand">
+      <strong>স্মার্ট ফেনী</strong>
+      প্রয়োজন আপনার, দায়িত্ব আমাদের
+    </p>
   </main>
 
   <script>
     (function () {
-      var retryBtn = document.getElementById('retry');
-      var descEl = document.getElementById('desc');
+      var HOME = 'https://smartfeni.com/';
+      var KEY = 'sf_last_url'; // native-bridge.js এই key-তে শেষ দেখা পেজ সেভ করে
+      var going = false;
 
-      function tryReload() {
+      var titleEl = document.getElementById('title');
+      var descEl = document.getElementById('desc');
+      var retryBtn = document.getElementById('retry');
+      var homeBtn = document.getElementById('home');
+
+      var TEXT = {
+        offline: {
+          title: 'ইন্টারনেট সংযোগ নেই',
+          desc: 'মোবাইল ডেটা বা ওয়াই-ফাই চালু আছে কিনা দেখুন। সংযোগ ফিরলে অ্যাপ নিজেই আবার খুলবে।'
+        },
+        server: {
+          title: 'পেজটি খোলা যাচ্ছে না',
+          desc: 'আমাদের সার্ভারে পৌঁছানো যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।'
+        },
+        back: {
+          title: 'সংযোগ ফিরেছে',
+          desc: 'পেজটি খোলা হচ্ছে…'
+        }
+      };
+
+      function show(state) {
+        titleEl.textContent = TEXT[state].title;
+        descEl.textContent = TEXT[state].desc;
+      }
+
+      function nudge() {
+        descEl.classList.remove('nudge');
+        void descEl.offsetWidth;
+        descEl.classList.add('nudge');
+      }
+
+      // Capacitor plugin নেওয়ার নিরাপদ উপায় (না পেলে null)
+      function getPlugin(name) {
+        try {
+          var C = window.Capacitor;
+          if (!C) return null;
+          if (C.Plugins && C.Plugins[name]) return C.Plugins[name];
+          if (typeof C.registerPlugin === 'function') return C.registerPlugin(name);
+        } catch (e) {}
+        return null;
+      }
+
+      // এরর পেজ দেখা গেলে Splash screen সরিয়ে দেয়
+      function hideSplash() {
+        try {
+          var S = getPlugin('SplashScreen');
+          if (!S || typeof S.hide !== 'function') return;
+          var r = S.hide({ fadeOutDuration: 200 });
+          if (r && typeof r.catch === 'function') r.catch(function () {});
+        } catch (e) {}
+      }
+
+      // শুধু নিজের সাইটের URL-ই গ্রহণযোগ্য — অন্য কিছু হলে হোমে যাবে
+      function safe(url) {
+        try {
+          var u = new URL(url);
+          return u.origin === 'https://smartfeni.com' ? u.href : HOME;
+        } catch (e) {
+          return HOME;
+        }
+      }
+
+      // Preferences থেকে শেষ দেখা পেজ পড়ে; না পেলে বা দেরি হলে হোম
+      function getLastUrl() {
+        return new Promise(function (resolve) {
+          var done = false;
+          function finish(u) {
+            if (!done) { done = true; resolve(u || HOME); }
+          }
+          setTimeout(function () { finish(HOME); }, 1500);
+          try {
+            var P = getPlugin('Preferences');
+            if (!P) { finish(HOME); return; }
+            P.get({ key: KEY })
+              .then(function (r) { finish(r && r.value ? safe(r.value) : HOME); })
+              .catch(function () { finish(HOME); });
+          } catch (e) {
+            finish(HOME);
+          }
+        });
+      }
+
+      function go(url) {
+        if (going) return;
+        going = true;
+        window.location.replace(url);
+      }
+
+      function tryOpen(getUrl) {
+        if (going) return;
         if (!navigator.onLine) {
-          descEl.textContent = 'এখনো ইন্টারনেট সংযোগ পাওয়া যায়নি। মোবাইল ডেটা বা ওয়াই-ফাই চালু করুন।';
+          show('offline');
+          nudge();
           return;
         }
         retryBtn.disabled = true;
-        retryBtn.textContent = 'চেষ্টা করছি...';
-        window.location.reload();
+        retryBtn.textContent = 'চেষ্টা করছি…';
+        getUrl().then(go);
       }
 
-      retryBtn.addEventListener('click', tryReload);
+      retryBtn.addEventListener('click', function () { tryOpen(getLastUrl); });
+      homeBtn.addEventListener('click', function () {
+        tryOpen(function () { return Promise.resolve(HOME); });
+      });
 
-      // নেট ফিরলে নিজে থেকেই আবার লোড করার চেষ্টা
-      window.addEventListener('online', tryReload);
+      // নেট ফিরলে নিজে থেকেই আবার খুলবে
+      window.addEventListener('online', function () {
+        if (going) return;
+        show('back');
+        getLastUrl().then(go);
+      });
+
+      window.addEventListener('offline', function () {
+        if (going) return;
+        show('offline');
+      });
+
+      // পেজ আবার দেখা গেলে (back চাপার পর) বাটন ঠিক করে দেয়
+      window.addEventListener('pageshow', function () {
+        going = false;
+        retryBtn.disabled = false;
+        retryBtn.textContent = 'আবার চেষ্টা করুন';
+        show(navigator.onLine ? 'server' : 'offline');
+      });
+
+      show(navigator.onLine ? 'server' : 'offline');
+
+      // Splash সরাও (Capacitor bridge তৈরি হতে দেরি হলে ০.৩ সেকেন্ড পরে আবার চেষ্টা)
+      hideSplash();
+      setTimeout(hideSplash, 300);
     })();
   </script>
 </body>
