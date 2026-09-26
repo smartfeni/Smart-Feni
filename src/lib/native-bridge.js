@@ -166,6 +166,7 @@ export async function initBackButtonHandler() {
   hideSplashWhenReady();
   initNotificationHandlers();
   initOfflineBanner();
+  initOfflineWriteGuard();
 
   const { App } = await import('@capacitor/app');
 
@@ -376,5 +377,51 @@ function initOfflineBanner() {
     window.addEventListener('offline', () => setOfflineBannerVisible(true));
   } catch (err) {
     // ব্যানার দেখানো না গেলেও সাইট স্বাভাবিক চলবে
+  }
+}
+
+// ---------------- Offline Write Guard ----------------
+// অফলাইনে "লেখা"-জাতীয় রিকোয়েস্ট (পোস্ট, লাইক, চ্যাট, চেকআউট, স্ট্যাটাস
+// বদল ইত্যাদি) fetch()-এর স্তরেই আটকে দেয়, যাতে নেটওয়ার্ক টাইমআউটের জন্য
+// অপেক্ষা করতে না হয় এবং ইউজার সাথে সাথে বুঝতে পারে কেন কাজ হলো না।
+// শুধু GET ছাড়া অন্য মেথড, আর নিজের সাইট/Supabase-এর দিকে যাওয়া রিকোয়েস্ট
+// আটকায় — অন্য কোনো থার্ড-পার্টি (ফন্ট, স্ক্রিপ্ট) কল অপ্রভাবিত।
+// একবারই চালু হয় — দ্বিতীয়বার initOfflineWriteGuard() ডাকা হলেও fetch
+// দ্বিতীয়বার wrap হবে না।
+let offlineWriteGuardInstalled = false;
+
+function isWriteGuardedUrl(url) {
+  try {
+    const target = new URL(url, window.location.origin);
+    return target.origin === window.location.origin || target.hostname.endsWith('.supabase.co');
+  } catch (err) {
+    return false;
+  }
+}
+
+function initOfflineWriteGuard() {
+  if (offlineWriteGuardInstalled) return;
+  offlineWriteGuardInstalled = true;
+
+  try {
+    const originalFetch = window.fetch.bind(window);
+
+    window.fetch = function guardedFetch(input, init) {
+      const method = (init?.method || (typeof input === 'object' && input?.method) || 'GET').toUpperCase();
+      const url = typeof input === 'string' ? input : input?.url || '';
+
+      if (method !== 'GET' && !navigator.onLine && isWriteGuardedUrl(url)) {
+        try {
+          window.showToast?.('ইন্টারনেট নেই — একটু পরে আবার চেষ্টা করুন', 'error');
+        } catch (err) {
+          // টোস্ট দেখানো না গেলেও রিকোয়েস্ট আটকাতে সমস্যা নেই
+        }
+        return Promise.reject(new Error('অফলাইন — রিকোয়েস্ট পাঠানো হয়নি'));
+      }
+
+      return originalFetch(input, init);
+    };
+  } catch (err) {
+    // fetch wrap করা না গেলে সাইট স্বাভাবিক চলবে, শুধু guard ছাড়া
   }
 }
