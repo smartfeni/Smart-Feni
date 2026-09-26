@@ -16,6 +16,8 @@
 //            → ইউজার বদলালে/টোকেন বদলালে ঠিক থাকে
 //         ২) লগআউটে ফোনের FCM টোকেন মুছে ফেলা (unregister) → আগের ইউজারের
 //            নোটিফিকেশন আর এই ফোনে আসে না
+//         ৩) লগআউটে offline ক্যাশ পরিষ্কার (O7) — শেয়ার্ড ফোনে আগের
+//            ইউজারের সংরক্ষিত পেজ/ছবি পরের ইউজারের কাছে থেকে না যায়
 //
 // ব্যবহার (অন্য কম্পোনেন্ট থেকে, আগের মতোই অপরিবর্তিত):
 //   import { subscribeToPush, getPushPermissionState, isPushSupported } from '../../lib/push.js';
@@ -240,6 +242,22 @@ async function syncNativeToken(session) {
   }
 }
 
+// O7: লগআউটে ক্যাশ করা পেজ/ছবি মুছে ফেলা — শেয়ার্ড ফোনে আগের ইউজারের
+// সংরক্ষিত (অফলাইন) তথ্য পরের ইউজারের কাছে থেকে না যায়। sw.js এর
+// CACHE_NAME/IMAGE_CACHE_NAME এর সাথে নাম মিলিয়ে রাখা জরুরি (ভার্সন
+// বদলালে দুই জায়গাতেই বদলাতে হবে)।
+async function clearOfflineCachesOnLogout() {
+  try {
+    if (typeof caches === 'undefined') return;
+    await Promise.all([
+      caches.delete('smartfeni-v2'),
+      caches.delete('smartfeni-images-v1'),
+    ]);
+  } catch (err) {
+    // ক্যাশ মুছতে না পারলেও লগআউট স্বাভাবিকভাবে সম্পন্ন হবে
+  }
+}
+
 async function handleNativeSignedOut() {
   try {
     localStorage.removeItem(SYNC_KEY);
@@ -252,6 +270,8 @@ async function handleNativeSignedOut() {
   } catch (err) {
     // ফেইল করলে পরের লগইনে টোকেন নতুন ইউজারের নামে সরে যাবে
   }
+
+  clearOfflineCachesOnLogout(); // এটার সফলতা/ব্যর্থতা লগআউটের বাকি ধাপকে প্রভাবিত করবে না
 }
 
 export function initNativePushLifecycle() {
