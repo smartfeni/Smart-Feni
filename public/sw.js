@@ -20,8 +20,10 @@
 //   ৫) কখনো ক্যাশ নয়: /api/, /admin, /cart, /checkout, /my-, /profile,
 //      /reset-password, GET ছাড়া অন্য মেথড, Supabase-এর ডাটাবেস/auth কল
 //   ৬) কিছুই না পেলে (প্রথমবার অফলাইনে) → offline.html (O2)
-//   ৭) install এ আগে থেকে ক্যাশ (O3): emergency, doctor-directory, blood —
-//      অফলাইনে সবচেয়ে বেশি দরকার, tel: লিংক নেট ছাড়াও কাজ করে
+//   ৭) install এ আগে থেকে ক্যাশ (O3+O5): emergency, doctor-directory,
+//      blood ল্যান্ডিং + ৮টা ব্লাড গ্রুপের ডোনার তালিকা পেজ (সার্ভার-রেন্ডার,
+//      তাই HTML ক্যাশ করাই যথেষ্ট — আলাদা ডেটা-ক্যাশ লাগে না) — অফলাইনে
+//      সবচেয়ে বেশি দরকার, tel: লিংক নেট ছাড়াও কাজ করে
 // ============================================================
 const CACHE_NAME = "smartfeni-v2";
 const IMAGE_CACHE_NAME = "smartfeni-images-v1";
@@ -125,7 +127,17 @@ async function networkFirstWithTimeout(request) {
 // (ইমার্জেন্সি নম্বর, ডাক্তার/হাসপাতাল তালিকা, ব্লাড ডোনার — tel: লিংক নেট
 // ছাড়াও কাজ করে)। প্রতিটা আলাদাভাবে try করা হয়, একটা ব্যর্থ হলেও বাকিগুলো
 // ও install থেমে যাবে না।
-const PRECACHE_PAGES = ["/services/emergency", "/services/doctor-directory", "/services/blood"];
+const BLOOD_GROUP_SLUGS = [
+  "a-positive", "a-negative", "b-positive", "b-negative",
+  "ab-positive", "ab-negative", "o-positive", "o-negative",
+];
+
+const PRECACHE_PAGES = [
+  "/services/emergency",
+  "/services/doctor-directory",
+  "/services/blood",
+  ...BLOOD_GROUP_SLUGS.map((slug) => `/services/blood/${slug}`),
+];
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
