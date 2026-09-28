@@ -25,6 +25,13 @@
 //   ৩) লগইন/লগআউটে FCM টোকেন সিঙ্ক ও মোছা (push.js এর initNativePushLifecycle)
 //   ৪) অফলাইন ব্যানার (O4) — নেট নেই বোঝা গেলে ওপরে পাতলা বার;
 //      এটা ওয়েব ও অ্যাপ দুই জায়গাতেই কাজ করে (isNativeApp() গার্ড ছাড়া)
+//   ৫) অফলাইন write গার্ড (O6) — অফলাইনে POST/PUT/PATCH/DELETE (পোস্ট,
+//      লাইক, চ্যাট, চেকআউট) fetch()-এর স্তরেই আটকে বন্ধুত্বপূর্ণ বার্তা
+//      দেখায়, প্রতিটা পেজ/বাটন আলাদা করে ছুঁতে হয় না
+//   ৬) Deep link (D3) — smartfeni.com এর লিংকে ট্যাপ করলে (WhatsApp/SMS/
+//      Facebook থেকে) সরাসরি অ্যাপের সঠিক পেজে যাওয়া। অ্যাপ চালু থাকা
+//      অবস্থায় (appUrlOpen) ও বন্ধ অবস্থা থেকে খোলা হলে (getLaunchUrl)
+//      দুটোই ধরে। assetlinks.json ইতিমধ্যে সাইটে আছে (D1)।
 // ============================================================
 
 import { Capacitor } from '@capacitor/core';
@@ -163,12 +170,23 @@ export async function initBackButtonHandler() {
 
   // BaseLayout প্রতিটা পেজ লোডে এই ফাংশন চালায় — তাই শেষ পেজ মনে রাখার কাজও এখানেই
   rememberLastUrl();
+
+  const { App } = await import('@capacitor/app');
+
+  // Deep link (cold start): অ্যাপ বন্ধ অবস্থা থেকে লিংক দিয়ে খোলা হলে —
+  // splash সরানোর আগেই চেক করা হয়, যাতে হোমপেজ এক মুহূর্তের জন্যও না দেখিয়ে
+  // সরাসরি লিংকের পেজে যাওয়া যায়
+  await handleDeepLink(await App.getLaunchUrl().catch(() => null));
+
   hideSplashWhenReady();
   initNotificationHandlers();
   initOfflineBanner();
   initOfflineWriteGuard();
 
-  const { App } = await import('@capacitor/app');
+  // Deep link (অ্যাপ চালু থাকা অবস্থায়): WhatsApp/SMS/Facebook থেকে লিংকে ট্যাপ
+  App.addListener('appUrlOpen', (data) => {
+    handleDeepLink(data);
+  });
 
   App.addListener('backButton', ({ canGoBack }) => {
     if (closeTopOverlay()) return;
@@ -179,6 +197,26 @@ export async function initBackButtonHandler() {
       App.minimizeApp();
     }
   });
+}
+
+// ---------------- Deep Link Handling (D3) ----------------
+// getLaunchUrl() এর রেজাল্ট { url } আকারে, appUrlOpen ইভেন্টও { url } আকারে —
+// তাই দুই জায়গা থেকেই একই ফাংশনে পাঠানো যায়।
+function handleDeepLink(data) {
+  try {
+    if (!data?.url) return;
+
+    const url = new URL(data.url);
+    if (url.hostname !== 'smartfeni.com' && url.hostname !== 'www.smartfeni.com') return;
+    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/admin')) return;
+
+    const target = url.pathname + url.search;
+    if (target === window.location.pathname + window.location.search) return; // একই পেজ, কিছু করার নেই
+
+    window.location.href = target;
+  } catch (err) {
+    // ভুল/অসম্পূর্ণ লিংক হলে অ্যাপ স্বাভাবিক (হোমপেজ) খুলবে
+  }
 }
 
 // ---------------- Last Visited Page (Error Page Retry) ----------------
