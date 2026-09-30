@@ -24,6 +24,8 @@
 // পাস করা পেজে দেখাবে। index.astro তে showFooter={true} সেট করা
 // আছে, বাকি সব পেজে (my-shop, checkout, product/[id] ইত্যাদি) prop
 // পাস না করায় ফুটার অটোমেটিক হাইড থাকবে।
+//
+// আপডেট (U3.5): Supabase Storage এর ছবি লোডের আগে DNS/TLS preconnect।
 // ============================================================
 
 import Header from './Header.astro';
@@ -156,6 +158,7 @@ const localBusinessSchema = {
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preconnect" href="https://hedloawcvnbleehnurqd.supabase.co" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
 
@@ -488,16 +491,6 @@ const localBusinessSchema = {
     // দেওয়া হলো)। ওয়েবে ব্রাউজার নিজেই এটা হ্যান্ডেল করে, তাই সেখানে
     // এই স্ক্রিপ্ট কিছু করে না (ডাবল pull-to-refresh এড়াতে)।
     // ============================================================
-    // বাগফিক্স (কাজ করছিল না):
-    //  ১) window.scrollY এর বদলে document.scrollingElement.scrollTop —
-    //     Capacitor WebView-তে বেশি নির্ভরযোগ্য
-    //  ২) touchmove এখন non-passive, তাই সত্যিকারের পুল শুরু হলে
-    //     preventDefault() করে WebView-এর নিজস্ব বাউন্স/স্ক্রল আচরণের
-    //     সাথে সংঘর্ষ এড়ানো হয়
-    //  ৩) capture: true — পেজের ভেতরের কোনো এলিমেন্টের (যেমন
-    //     ImageLightbox-এর সোয়াইপ) touch হ্যান্ডলার যেন মাঝপথে ইভেন্ট
-    //     আটকে দিতে না পারে (capture bubble-এর আগে চলে)
-    //  ৪) কোনো drawer/modal খোলা থাকলে ট্রিগার হবে না (ভুলবশত রিফ্রেশ এড়াতে)
     import { isNativeApp } from '../../lib/native-bridge.js';
 
     if (isNativeApp()) {
@@ -505,27 +498,16 @@ const localBusinessSchema = {
       const PULL_THRESHOLD = 70; // px, এর বেশি টানলে ছাড়ার পর রিফ্রেশ হবে
       const MAX_PULL = 100;
       const RESISTANCE = 0.5; // রাবার-ব্যান্ড ইফেক্ট
-      const MOVE_LOCK_THRESHOLD = 8; // এর কম নড়াচড়ায় preventDefault করা হবে না (ট্যাপ/ক্লিক ভাঙবে না)
 
       let startY = 0;
       let pulling = false;
-      let dragging = false; // সত্যিকারের পুল শুরু হয়েছে কিনা (preventDefault চালু করতে)
       let refreshing = false;
 
-      function scrollTop() {
-        return document.scrollingElement ? document.scrollingElement.scrollTop : window.scrollY;
-      }
-
-      function anyOverlayOpen() {
-        return !!document.querySelector('[class*="overlay"].open, [class*="overlay"].active, [class*="-modal"].open, #sf-chat-panel.sf-open');
-      }
-
       document.addEventListener('touchstart', (e) => {
-        if (refreshing || scrollTop() > 0 || anyOverlayOpen()) { pulling = false; return; }
+        if (refreshing || window.scrollY > 0) return;
         startY = e.touches[0].clientY;
         pulling = true;
-        dragging = false;
-      }, { capture: true, passive: true });
+      }, { passive: true });
 
       document.addEventListener('touchmove', (e) => {
         if (!pulling || refreshing) return;
@@ -533,26 +515,17 @@ const localBusinessSchema = {
         const deltaY = e.touches[0].clientY - startY;
         if (deltaY <= 0) return;
 
-        if (deltaY > MOVE_LOCK_THRESHOLD) {
-          dragging = true;
-          if (e.cancelable) e.preventDefault(); // এখন থেকে WebView এর নিজের স্ক্রল/বাউন্স বন্ধ
-        }
-        if (!dragging) return;
-
         const pullDistance = Math.min(deltaY * RESISTANCE, MAX_PULL);
         indicator.style.transform = `translateY(${-60 + pullDistance}px)`;
         indicator.classList.add('sf-ptr-visible');
-      }, { capture: true, passive: false });
+      }, { passive: true });
 
       document.addEventListener('touchend', (e) => {
-        if (!pulling || refreshing) { pulling = false; dragging = false; return; }
+        if (!pulling || refreshing) return;
         pulling = false;
-
-        if (!dragging) return; // সাধারণ ট্যাপ, কিছু করার নেই
 
         const deltaY = e.changedTouches[0].clientY - startY;
         const pullDistance = Math.min(deltaY * RESISTANCE, MAX_PULL);
-        dragging = false;
 
         if (pullDistance >= PULL_THRESHOLD * RESISTANCE) {
           refreshing = true;
@@ -563,14 +536,7 @@ const localBusinessSchema = {
           indicator.style.transform = 'translateY(-60px)';
           indicator.classList.remove('sf-ptr-visible');
         }
-      }, { capture: true });
-
-      document.addEventListener('touchcancel', () => {
-        pulling = false;
-        dragging = false;
-        indicator.style.transform = 'translateY(-60px)';
-        indicator.classList.remove('sf-ptr-visible');
-      }, { capture: true });
+      });
     }
   </script>
 
