@@ -3,25 +3,24 @@
 // ============================================================
 // পেজ: পাবলিক ডাক্তার ডিরেক্টরি (/services/doctor-directory)
 //
+// v2 — ভিজিটিং-কার্ড ডিজাইন + দিনভিত্তিক ফিল্টার
+//
 // কী আছে:
 //   • সবার উপরে "AI সহকারী" বাটন — smartfeni:open-doctor-chat ইভেন্ট ছোঁড়ে
 //     (চ্যাট কম্পোনেন্ট বসানোর পর window.__sfDoctorChatReady = true করবে;
-//      তার আগে বাটন চাপলে "শীঘ্রই আসছে" টোস্ট দেখায়)
+//      তার আগে বাটন চাপলে "শীঘ্রই চালু হচ্ছে" টোস্ট দেখায়)
 //   • ডাক্তার | হসপিটাল ট্যাব বার — হসপিটাল (১খ) যোগ না হওয়া পর্যন্ত
-//     পুরো ট্যাব বার লুকানো (#dirTabs)। হসপিটাল চালু হলে শুধু
-//     style="display:none" সরালেই হবে
-//   • সার্চ (নাম/ডিগ্রি/স্পেশালিটি/চেম্বারের নাম) + স্পেশালিটি ড্রপডাউন
-//     + উপজেলা ড্রপডাউন + "আজ বসছেন" টগল
-//   • কার্ডে আজকের বসার সময় ("এখন বসছেন" ব্যাজ, ঢাকার সময় ধরে) ও
-//     শুধু একটা কল বাটন (সিরিয়ালের নম্বরে)
+//     লুকানো (#dirTabs)। চালু করতে শুধু style="display:none" সরান
+//   • সার্চ (নাম/ডিগ্রি/স্পেশালিটি/চেম্বারের নাম) + স্পেশালিটি + উপজেলা
+//   • দিনভিত্তিক ফিল্টার: সব দিন | আজ | আগামীকাল | পরশু + "অন্য বার" ড্রপডাউন
+//     (মানুষ ১-২ দিন আগে সিরিয়াল দেয় বলে)
+//   • কার্ড: ভিজিটিং-কার্ড স্টাইল — নাম, স্পেশালিটি, ডিগ্রি,
+//     BMDC, উপজেলা, চেম্বার সংখ্যা + ছবির কোণে "কবে বসছেন" ব্যাজ।
+//     চেম্বারের সময়/নম্বর/কল বাটন কার্ডে নেই — সব /doctor/[id] পেজের ভেতরে
 //   • ডাটা: শুধু published ডাক্তার + published চেম্বার (RLS-এও আটকানো)
-//   • URL প্যারামিটার: ?spec=<slug> বা ?q=<লেখা> (AI চ্যাট থেকে লিংকের জন্য)
+//   • URL প্যারামিটার: ?spec=<slug> বা ?q=<লেখা>
 //
-// কল ক্লিক ট্র্যাকিং: BaseLayout-এর গ্লোবাল tel: লিসেনারই কাজ করে,
-// আলাদা কোড লাগেনি (data-shop-name এ ডাক্তারের নাম যায়)
-//
-// ⚠️ এই ফাইল বসালে src/pages/services/[slug].astro-র customPageSlugs-এ
-// 'doctor-directory' যোগ করতে হবে (নইলে রুট কনফ্লিক্ট)
+// ⚠️ [slug].astro-র customPageSlugs-এ 'doctor-directory' থাকতে হবে
 // ============================================================
 
 export const prerender = false;
@@ -77,9 +76,24 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           </select>
         </div>
 
-        <button type="button" class="today-toggle" id="todayToggle" aria-pressed="false">
-          <i class="fas fa-calendar-day"></i> আজ বসছেন এমন ডাক্তার
-        </button>
+        <!-- ===== দিন বেছে নেওয়া ===== -->
+        <p class="day-label"><i class="fas fa-calendar-day"></i> কবে দেখাতে চান?</p>
+        <div class="day-row" id="dayRow">
+          <button type="button" class="day-chip active" data-offset="all">সব দিন</button>
+          <button type="button" class="day-chip" data-offset="0">আজ<small id="dayName0"></small></button>
+          <button type="button" class="day-chip" data-offset="1">আগামীকাল<small id="dayName1"></small></button>
+          <button type="button" class="day-chip" data-offset="2">পরশু<small id="dayName2"></small></button>
+        </div>
+        <select id="dayOther" class="day-other" aria-label="অন্য বার">
+          <option value="">অন্য বার বেছে নিন</option>
+          <option value="6">শনিবার</option>
+          <option value="0">রবিবার</option>
+          <option value="1">সোমবার</option>
+          <option value="2">মঙ্গলবার</option>
+          <option value="3">বুধবার</option>
+          <option value="4">বৃহস্পতিবার</option>
+          <option value="5">শুক্রবার</option>
+        </select>
 
         <p class="result-count" id="resultCount"></p>
 
@@ -130,15 +144,19 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .dir-search input { width: 100%; padding: 14px 18px 14px 46px; border-radius: 40px; border: 1.5px solid #E5EAF0; background: #fff; font-size: 0.92rem; font-family: inherit; color: #1B2A4A; transition: all 0.2s ease; }
     .dir-search input:focus { outline: none; border-color: #FF6B35; box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1); }
 
-    .dir-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-    .dir-filters select { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1.5px solid #E5EAF0; background: #fff; font-size: 0.88rem; font-family: inherit; color: #1B2A4A; }
-    .dir-filters select:focus { outline: none; border-color: #FF6B35; }
+    .dir-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .dir-filters select, .day-other { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1.5px solid #E5EAF0; background: #fff; font-size: 0.88rem; font-family: inherit; color: #1B2A4A; }
+    .dir-filters select:focus, .day-other:focus { outline: none; border-color: #FF6B35; }
 
-    .today-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 40px; border: 1.5px solid #E5EAF0; background: #fff; color: #5A6E85; font-weight: 700; font-size: 0.84rem; cursor: pointer; font-family: inherit; margin-bottom: 8px; }
-    .today-toggle.on { background: #EAFBF0; border-color: #A7E3BB; color: #1B7A3C; }
+    .day-label { font-size: 0.84rem; font-weight: 700; color: #1B2A4A; margin: 4px 2px 8px; display: flex; align-items: center; gap: 6px; }
+    .day-label i { color: #FF6B35; }
+    .day-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+    .day-chip { border: 1.5px solid #E5EAF0; background: #fff; color: #5A6E85; border-radius: 14px; padding: 9px 4px; font-weight: 700; font-size: 0.8rem; cursor: pointer; font-family: inherit; display: flex; flex-direction: column; align-items: center; gap: 2px; line-height: 1.25; }
+    .day-chip small { font-size: 0.68rem; font-weight: 600; opacity: 0.85; min-height: 0.9em; }
+    .day-chip.active { background: #FF6B35; border-color: #FF6B35; color: #fff; }
 
-    .result-count { font-size: 0.82rem; color: #8FA0BC; font-weight: 600; margin: 8px 2px 14px; min-height: 1.2em; }
-    .doctor-list { display: flex; flex-direction: column; gap: 14px; }
+    .result-count { font-size: 0.82rem; color: #8FA0BC; font-weight: 600; margin: 12px 2px 14px; min-height: 1.2em; }
+    .doctor-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
 
     .state-msg { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 50px 0; color: #B0BCCB; text-align: center; }
     .state-msg i { font-size: 2.2rem; }
@@ -153,33 +171,32 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
   <!-- ডাইনামিক কার্ডের স্টাইল (scoped CSS ডাইনামিক HTML-এ কাজ করে না, তাই global) -->
   <style is:global>
-    .sfd-card { background: #fff; border-radius: 20px; padding: 16px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); }
-    .sfd-top { display: flex; gap: 14px; text-decoration: none; color: inherit; }
-    .sfd-photo { width: 64px; height: 64px; border-radius: 18px; background: #FFF0EA; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; overflow: hidden; flex-shrink: 0; }
-    .sfd-photo img { width: 100%; height: 100%; object-fit: cover; }
-    .sfd-info { flex: 1; min-width: 0; }
-    .sfd-name { font-size: 1.02rem; font-weight: 700; color: #1B2A4A; line-height: 1.35; }
-    .sfd-degrees { font-size: 0.8rem; color: #5A6E85; margin-top: 2px; }
-    .sfd-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .sfd-chip { background: #EAF2FF; color: #2563EB; padding: 3px 10px; border-radius: 20px; font-size: 0.74rem; font-weight: 700; }
-    .sfd-exp { font-size: 0.76rem; color: #8FA0BC; margin-top: 6px; }
+    .sfd-card { position: relative; display: block; background: #fff; border-radius: 18px; overflow: hidden; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); text-decoration: none; color: #1B2A4A; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+    .sfd-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1); }
+    .sfd-body { position: relative; display: flex; min-height: 204px; }
+    .sfd-text { position: relative; z-index: 2; width: 62%; flex: none; padding: 16px 6px 14px 16px; }
+    .sfd-name { font-size: 1.1rem; font-weight: 700; line-height: 1.35; color: #1B2A4A; }
+    .sfd-spec { font-size: 0.86rem; font-weight: 700; color: #FF6B35; margin-top: 2px; }
+    .sfd-degrees { font-size: 0.78rem; color: #5A6E85; margin-top: 3px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .sfd-rows { border-top: 1px solid #E5EAF0; margin-top: 10px; padding-top: 3px; }
+    .sfd-row { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #44506B; margin-top: 7px; }
+    .sfd-ico { width: 22px; height: 22px; border-radius: 50%; background: #FFF0EA; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 0.68rem; flex-shrink: 0; }
 
-    .sfd-sched { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: #F8FAFC; }
-    .sfd-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 20px; font-size: 0.74rem; font-weight: 700; }
+    .sfd-photo { position: absolute; top: 0; right: 0; bottom: 0; width: 42%; }
+    .sfd-l1, .sfd-l2, .sfd-l3 { position: absolute; inset: 0; }
+    .sfd-l1 { background: #FF6B35; clip-path: polygon(30% 0, 100% 0, 100% 100%, 2% 100%); }
+    .sfd-l2 { background: #1B2A4A; clip-path: polygon(35% 0, 100% 0, 100% 100%, 7% 100%); }
+    .sfd-l3 { background: #FFE3D6; clip-path: polygon(39% 0, 100% 0, 100% 100%, 11% 100%); overflow: hidden; display: flex; align-items: center; justify-content: center; padding-left: 28%; color: #FF6B35; font-size: 3.2rem; }
+    .sfd-l3 img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+    .sfd-badge { position: absolute; top: 10px; right: 10px; z-index: 3; display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; background: #fff; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12); }
     .sfd-badge.now { background: #EAFBF0; color: #1B7A3C; }
-    .sfd-badge.later { background: #FFF4D6; color: #B7791F; }
-    .sfd-badge.off { background: #F1F4F9; color: #5A6E85; }
+    .sfd-badge.today { background: #EAFBF0; color: #1B7A3C; }
+    .sfd-badge.soon { background: #FFF4D6; color: #9A6412; }
+    .sfd-badge.off { background: #F1F4F9; color: #44506B; }
     .sfd-dot { width: 7px; height: 7px; border-radius: 50%; background: #1FB35A; }
-    .sfd-line { font-size: 0.84rem; color: #1B2A4A; margin-top: 8px; line-height: 1.5; }
-    .sfd-line span { color: #5A6E85; }
-    .sfd-note { font-size: 0.78rem; color: #8FA0BC; margin-top: 8px; }
 
-    .sfd-actions { display: flex; gap: 10px; margin-top: 14px; align-items: stretch; }
-    .sfd-call { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; background: #FF6B35; color: #fff; text-decoration: none; padding: 11px 14px; border-radius: 14px; font-weight: 700; font-size: 0.92rem; }
-    .sfd-call-main { display: flex; align-items: center; gap: 8px; }
-    .sfd-call-sub { font-size: 0.7rem; font-weight: 600; opacity: 0.92; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sfd-nocall { flex: 1; display: flex; align-items: center; justify-content: center; background: #F1F4F9; color: #8FA0BC; border-radius: 14px; font-size: 0.82rem; font-weight: 600; padding: 11px 14px; text-align: center; }
-    .sfd-detail { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 11px 16px; border-radius: 14px; background: #FFF0EA; color: #FF6B35; text-decoration: none; font-weight: 700; font-size: 0.86rem; white-space: nowrap; }
+    .sfd-foot { display: flex; justify-content: space-between; align-items: center; background: #FFF0EA; color: #C2491B; font-size: 0.8rem; font-weight: 700; padding: 10px 16px; }
   </style>
 
   <script>
@@ -190,14 +207,69 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       'feni-sadar': 'ফেনী সদর', 'chhagalnaiya': 'ছাগলনাইয়া', 'daganbhuiyan': 'দাগনভূঞা',
       'parshuram': 'পরশুরাম', 'fulgazi': 'ফুলগাজী', 'sonagazi': 'সোনাগাজী',
     };
-    const WEEKDAYS = { 0: 'রবি', 1: 'সোম', 2: 'মঙ্গল', 3: 'বুধ', 4: 'বৃহস্পতি', 5: 'শুক্র', 6: 'শনি' };
+    const WEEKDAY_FULL = { 0: 'রবিবার', 1: 'সোমবার', 2: 'মঙ্গলবার', 3: 'বুধবার', 4: 'বৃহস্পতিবার', 5: 'শুক্রবার', 6: 'শনিবার' };
     const PAGE_SIZE = 20;
+
+    // <<PURE (এই অংশের ফাংশনগুলো DOM ছাড়া — আলাদা টেস্ট করা যায়)
+    const BN_DIGITS = '০১২৩৪৫৬৭৮৯';
+    const toBn = (n) => String(n).replace(/\d/g, (d) => BN_DIGITS[d]);
+    const toMin = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + m; };
+
+    function dayLabel(offset, weekday) {
+      if (offset === 0) return 'আজ';
+      if (offset === 1) return 'আগামীকাল';
+      if (offset === 2) return 'পরশু';
+      return WEEKDAY_FULL[weekday];
+    }
+
+    function flattenSlots(d) {
+      const out = [];
+      (d.doctor_chambers || []).forEach((c) => (c.chamber_slots || []).forEach((s) => out.push(s)));
+      return out;
+    }
+
+    // dayFilter: null = সব দিন, নয়তো 0..6 (বার)। ফেরত: { kind, label, sortKey } বা { kind:'none' }
+    function statusFor(d, now, dayFilter) {
+      const slots = flattenSlots(d);
+      if (slots.length === 0) return dayFilter != null ? { kind: 'none' } : { kind: 'nosched', sortKey: 9999 };
+
+      if (dayFilter != null) {
+        const ds = slots.filter((s) => s.weekday === dayFilter);
+        if (ds.length === 0) return { kind: 'none' };
+        const offset = (dayFilter - now.weekday + 7) % 7;
+        if (offset === 0) {
+          const sitting = ds.some((s) => toMin(s.start_time) <= now.minutes && now.minutes < toMin(s.end_time));
+          if (sitting) return { kind: 'now', label: 'এখন বসছেন', sortKey: 0 };
+          const later = ds.filter((s) => toMin(s.start_time) > now.minutes);
+          if (later.length === 0) return { kind: 'none' };
+          return { kind: 'today', label: 'আজ বসছেন', sortKey: Math.min(...later.map((s) => toMin(s.start_time))) };
+        }
+        return { kind: offset <= 2 ? 'soon' : 'off', label: `${dayLabel(offset, dayFilter)} বসছেন`, sortKey: Math.min(...ds.map((s) => toMin(s.start_time))) };
+      }
+
+      const today = slots.filter((s) => s.weekday === now.weekday);
+      if (today.some((s) => toMin(s.start_time) <= now.minutes && now.minutes < toMin(s.end_time))) {
+        return { kind: 'now', label: 'এখন বসছেন', sortKey: 0 };
+      }
+      if (today.some((s) => toMin(s.start_time) > now.minutes)) {
+        return { kind: 'today', label: 'আজ বসছেন', sortKey: 1 };
+      }
+      for (let i = 1; i <= 7; i++) {
+        const wd = (now.weekday + i) % 7;
+        if (slots.some((s) => s.weekday === wd)) {
+          const label = i === 7 ? `আগামী ${WEEKDAY_FULL[wd]}` : dayLabel(i, wd);
+          return { kind: i <= 2 ? 'soon' : 'off', label: `${label} বসছেন`, sortKey: 1 + i };
+        }
+      }
+      return { kind: 'nosched', sortKey: 9999 };
+    }
+    // PURE>>
 
     // ===== স্টেট =====
     let allDoctors = [];
     let specMap = {};
     let shown = PAGE_SIZE;
-    let todayOnly = false;
+    let dayFilter = null;
     let savedUpazila = null;
 
     // ===== DOM =====
@@ -206,11 +278,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     const searchInput = $('dirSearchInput');
     const specFilter = $('specFilter');
     const upazilaFilter = $('upazilaFilter');
+    const dayOther = $('dayOther');
 
-    // ===== হেল্পার =====
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const BN_DIGITS = '০১২৩৪৫৬৭৮৯';
-    const toBn = (n) => String(n).replace(/\d/g, (d) => BN_DIGITS[d]);
 
     function norm(s) {
       return String(s || '').toLowerCase()
@@ -235,65 +305,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       return { weekday, minutes: (Number(get('hour')) % 24) * 60 + Number(get('minute')) };
     }
 
-    const toMin = (t) => {
-      const [h, m] = String(t).split(':').map(Number);
-      return h * 60 + m;
-    };
-
-    function fmtTime(t) {
-      const [h, m] = String(t).split(':').map(Number);
-      let period = 'রাত';
-      if (h >= 4 && h < 6) period = 'ভোর';
-      else if (h >= 6 && h < 12) period = 'সকাল';
-      else if (h >= 12 && h < 15) period = 'দুপুর';
-      else if (h >= 15 && h < 18) period = 'বিকাল';
-      else if (h >= 18 && h < 20) period = 'সন্ধ্যা';
-      return `${period} ${toBn(h % 12 || 12)}:${toBn(String(m).padStart(2, '0'))}`;
-    }
-
-    const fmtRange = (s) => `${fmtTime(s.start_time)} – ${fmtTime(s.end_time)}`;
-    const cleanPhone = (p) => String(p || '').replace(/[^\d+]/g, '');
     const specNames = (slugs) => (slugs || []).map((s) => specMap[s]?.name_bn || s);
 
-    // ============================================================
-    // ডাক্তারের আজকের অবস্থা হিসাব
-    // ============================================================
-    function computeStatus(d, now) {
-      const slots = [];
-      (d.doctor_chambers || []).forEach((c) => {
-        (c.chamber_slots || []).forEach((s) => slots.push({ ...s, chamber: c }));
-      });
-
-      if (slots.length === 0) return { kind: 'nosched', todaySlots: [] };
-
-      const today = slots
-        .filter((s) => s.weekday === now.weekday)
-        .sort((a, b) => toMin(a.start_time) - toMin(b.start_time));
-
-      const sitting = today.find((s) => toMin(s.start_time) <= now.minutes && now.minutes < toMin(s.end_time));
-      if (sitting) return { kind: 'now', sitting, todaySlots: today };
-
-      const later = today.filter((s) => toMin(s.start_time) > now.minutes);
-      if (later.length) return { kind: 'later', todaySlots: today, laterSlots: later };
-
-      // আজ আর বসছেন না — পরবর্তী দিন খুঁজি
-      let next = null;
-      for (let i = 1; i <= 7; i++) {
-        const wd = (now.weekday + i) % 7;
-        const daySlots = slots.filter((s) => s.weekday === wd).sort((a, b) => toMin(a.start_time) - toMin(b.start_time));
-        if (daySlots.length) { next = { weekday: wd, slot: daySlots[0] }; break; }
+    function updateDayChipNames(now) {
+      for (let i = 0; i < 3; i++) {
+        const el = $('dayName' + i);
+        if (el) el.textContent = WEEKDAY_FULL[(now.weekday + i) % 7];
       }
-      return { kind: today.length ? 'done' : 'off', todaySlots: today, next };
-    }
-
-    // কল বাটনের জন্য কোন চেম্বার
-    function pickCallChamber(d, st) {
-      const chambers = d.doctor_chambers || [];
-      const withPhone = (c) => c && cleanPhone(c.serial_phone);
-      if (st.sitting && withPhone(st.sitting.chamber)) return st.sitting.chamber;
-      const todayFirst = (st.laterSlots || st.todaySlots || []).find((s) => withPhone(s.chamber));
-      if (todayFirst) return todayFirst.chamber;
-      return chambers.find(withPhone) || null;
     }
 
     // ============================================================
@@ -315,6 +333,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     function render() {
       const now = dhakaNow();
+      updateDayChipNames(now);
+
       const raw = searchInput.value.trim().toLowerCase();
       const q = norm(searchInput.value);
       const sp = specFilter.value;
@@ -325,14 +345,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         if (sp && !(d.specialties || []).includes(sp)) return;
         if (up && !doctorUpazilas(d).includes(up)) return;
         if (!matchesQuery(d, q, raw)) return;
-        const st = computeStatus(d, now);
-        if (todayOnly && st.kind !== 'now' && st.kind !== 'later') return;
+        const st = statusFor(d, now, dayFilter);
+        if (st.kind === 'none') return;
         rows.push({ d, st });
       });
 
-      const rank = { now: 0, later: 1, done: 2, off: 2, nosched: 3 };
       rows.sort((a, b) => {
-        if (rank[a.st.kind] !== rank[b.st.kind]) return rank[a.st.kind] - rank[b.st.kind];
+        if (a.st.sortKey !== b.st.sortKey) return a.st.sortKey - b.st.sortKey;
         const aLocal = savedUpazila && doctorUpazilas(a.d).includes(savedUpazila) ? 0 : 1;
         const bLocal = savedUpazila && doctorUpazilas(b.d).includes(savedUpazila) ? 0 : 1;
         if (aLocal !== bLocal) return aLocal - bLocal;
@@ -344,9 +363,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
       const empty = $('emptyState');
       if (rows.length === 0) {
-        $('emptyText').textContent = allDoctors.length === 0
-          ? 'ডাক্তারের তালিকা শীঘ্রই যুক্ত হচ্ছে'
-          : (todayOnly ? 'এই ফিল্টারে আজ বসছেন এমন ডাক্তার পাওয়া যায়নি' : 'এই ফিল্টারে কোনো ডাক্তার পাওয়া যায়নি');
+        let msg = 'এই ফিল্টারে কোনো ডাক্তার পাওয়া যায়নি';
+        if (allDoctors.length === 0) msg = 'ডাক্তারের তালিকা শীঘ্রই যুক্ত হচ্ছে';
+        else if (dayFilter != null) msg = `${dayLabel((dayFilter - now.weekday + 7) % 7, dayFilter)} বসছেন এমন কোনো ডাক্তার পাওয়া যায়নি`;
+        $('emptyText').textContent = msg;
         empty.style.display = 'flex';
         $('moreBtn').style.display = 'none';
         return;
@@ -357,68 +377,50 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('moreBtn').style.display = rows.length > shown ? 'block' : 'none';
     }
 
-    function scheduleHtml(st) {
-      if (st.kind === 'nosched') {
-        return `<span class="sfd-badge off">সময়সূচি জানা নেই</span><p class="sfd-note">বসার সময় জানতে সিরিয়ালের নম্বরে ফোন করুন।</p>`;
-      }
-      if (st.kind === 'now') {
-        const s = st.sitting;
-        const rest = st.todaySlots.filter((x) => x !== s);
-        return `<span class="sfd-badge now"><span class="sfd-dot"></span> এখন বসছেন</span>
-          <p class="sfd-line"><strong>${esc(s.chamber.place_name)}</strong> <span>· ${fmtRange(s)}</span></p>
-          ${rest.map((x) => `<p class="sfd-line"><span>আজ আরও:</span> ${esc(x.chamber.place_name)} <span>· ${fmtRange(x)}</span></p>`).join('')}`;
-      }
-      if (st.kind === 'later') {
-        return `<span class="sfd-badge later">আজ বসছেন</span>
-          ${st.todaySlots.map((x) => `<p class="sfd-line"><strong>${esc(x.chamber.place_name)}</strong> <span>· ${fmtRange(x)}</span></p>`).join('')}`;
-      }
-      const nextLine = st.next
-        ? `<p class="sfd-line"><span>পরবর্তী:</span> ${WEEKDAYS[st.next.weekday]} · ${esc(st.next.slot.chamber.place_name)} <span>· ${fmtRange(st.next.slot)}</span></p>`
-        : '';
-      return `<span class="sfd-badge off">${st.kind === 'done' ? 'আজকের সময় শেষ' : 'আজ বসছেন না'}</span>${nextLine}`;
-    }
-
     function renderCard(d, st) {
-      const card = document.createElement('div');
+      const card = document.createElement('a');
       card.className = 'sfd-card';
+      card.href = `/doctor/${encodeURIComponent(d.id)}`;
 
-      const photo = d.photo_url
+      const photoInner = d.photo_url
         ? `<img src="${esc(d.photo_url)}" alt="${esc(d.name_bn)}" loading="lazy" decoding="async" />`
         : '<i class="fas fa-user-doctor"></i>';
-      const chips = specNames(d.specialties).map((n) => `<span class="sfd-chip">${esc(n)}</span>`).join('');
-      const exp = d.experience_years ? `${toBn(d.experience_years)} বছরের অভিজ্ঞতা` : '';
 
-      const callChamber = pickCallChamber(d, st);
-      const fee = callChamber && callChamber.fee != null ? callChamber.fee : d.default_fee;
-      const multi = (d.doctor_chambers || []).length > 1;
-
-      let actionHtml;
-      if (callChamber) {
-        const phone = cleanPhone(callChamber.serial_phone);
-        actionHtml = `
-          <a class="sfd-call" href="tel:${esc(phone)}" data-shop-name="${esc(d.name_bn)}">
-            <span class="sfd-call-main"><i class="fas fa-phone"></i> সিরিয়ালের জন্য কল করুন</span>
-            ${multi ? `<span class="sfd-call-sub">${esc(callChamber.place_name)}</span>` : ''}
-          </a>`;
-      } else {
-        actionHtml = `<div class="sfd-nocall">সিরিয়ালের নম্বর দেওয়া নেই</div>`;
+      let badge = '';
+      if (st.label) {
+        const dot = st.kind === 'now' ? '<span class="sfd-dot"></span>' : '';
+        badge = `<span class="sfd-badge ${esc(st.kind)}">${dot}${esc(st.label)}</span>`;
+      } else if (st.kind === 'nosched') {
+        badge = '<span class="sfd-badge off">সময় জানা নেই</span>';
       }
 
+      const specs = specNames(d.specialties).slice(0, 2).join(' · ');
+      const pubChambers = (d.doctor_chambers || []).length;
+      const upLabel = d.upazila ? (UPAZILA_LABELS[d.upazila] || d.upazila) : '';
+
+      const rowHtml = (icon, text) => `<div class="sfd-row"><span class="sfd-ico"><i class="fas ${icon}"></i></span><span>${text}</span></div>`;
+      const rows = [
+        d.bmdc_no ? rowHtml('fa-id-card', `BMDC: ${esc(d.bmdc_no)}`) : '',
+        upLabel ? rowHtml('fa-location-dot', esc(upLabel)) : '',
+        pubChambers ? rowHtml('fa-hospital', `${toBn(pubChambers)}টি চেম্বারে বসেন`) : '',
+      ].join('');
+
       card.innerHTML = `
-        <a class="sfd-top" href="/doctor/${esc(d.id)}">
-          <div class="sfd-photo">${photo}</div>
-          <div class="sfd-info">
-            <p class="sfd-name">${esc(d.name_bn)}</p>
-            ${d.degrees ? `<p class="sfd-degrees">${esc(d.degrees)}</p>` : ''}
-            <div class="sfd-chips">${chips}</div>
-            ${exp || fee != null ? `<p class="sfd-exp">${[exp, fee != null ? `ভিজিট ৳${toBn(fee)}` : ''].filter(Boolean).join(' · ')}</p>` : ''}
+        <div class="sfd-body">
+          <div class="sfd-photo">
+            <div class="sfd-l1"></div>
+            <div class="sfd-l2"></div>
+            <div class="sfd-l3">${photoInner}</div>
+            ${badge}
           </div>
-        </a>
-        <div class="sfd-sched">${scheduleHtml(st)}</div>
-        <div class="sfd-actions">
-          ${actionHtml}
-          <a class="sfd-detail" href="/doctor/${esc(d.id)}">বিস্তারিত <i class="fas fa-chevron-right" style="font-size:0.7rem;"></i></a>
-        </div>`;
+          <div class="sfd-text">
+            <p class="sfd-name">${esc(d.name_bn)}</p>
+            ${specs ? `<p class="sfd-spec">${esc(specs)}</p>` : ''}
+            ${d.degrees ? `<p class="sfd-degrees">${esc(d.degrees)}</p>` : ''}
+            ${rows ? `<div class="sfd-rows">${rows}</div>` : ''}
+          </div>
+        </div>
+        <div class="sfd-foot"><span>চেম্বার, সময় ও সিরিয়ালের নম্বর</span><i class="fas fa-arrow-right"></i></div>`;
       return card;
     }
 
@@ -443,7 +445,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const [docRes, specRes] = await Promise.all([
         supabase
           .from('doctors')
-          .select('id, name_bn, name_en, photo_url, specialties, degrees, experience_years, default_fee, upazila, doctor_chambers(id, place_name, upazila, serial_phone, fee, status, chamber_slots(weekday, start_time, end_time))')
+          .select('id, name_bn, name_en, photo_url, specialties, degrees, bmdc_no, upazila, doctor_chambers(id, place_name, upazila, status, chamber_slots(weekday, start_time, end_time))')
           .eq('status', 'published')
           .eq('doctor_chambers.status', 'published')
           .order('name_bn'),
@@ -489,10 +491,28 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     specFilter.addEventListener('change', () => { shown = PAGE_SIZE; render(); });
     upazilaFilter.addEventListener('change', () => { shown = PAGE_SIZE; render(); });
 
-    $('todayToggle').addEventListener('click', () => {
-      todayOnly = !todayOnly;
-      $('todayToggle').classList.toggle('on', todayOnly);
-      $('todayToggle').setAttribute('aria-pressed', String(todayOnly));
+    // দিন চিপ
+    document.querySelectorAll('.day-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        document.querySelectorAll('.day-chip').forEach((c) => c.classList.remove('active'));
+        chip.classList.add('active');
+        dayOther.value = '';
+        const off = chip.dataset.offset;
+        dayFilter = off === 'all' ? null : (dhakaNow().weekday + Number(off)) % 7;
+        shown = PAGE_SIZE;
+        render();
+      });
+    });
+
+    // অন্য বার ড্রপডাউন
+    dayOther.addEventListener('change', () => {
+      document.querySelectorAll('.day-chip').forEach((c) => c.classList.remove('active'));
+      if (dayOther.value === '') {
+        document.querySelector('.day-chip[data-offset="all"]').classList.add('active');
+        dayFilter = null;
+      } else {
+        dayFilter = Number(dayOther.value);
+      }
       shown = PAGE_SIZE;
       render();
     });
@@ -509,6 +529,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     setInterval(() => { if (allDoctors.length) render(); }, 60000);
 
     savedUpazila = resolveUpazilaSlug(localStorage.getItem('smartfeni_upazila'));
+    updateDayChipNames(dhakaNow());
     load();
   </script>
 </BaseLayout>
