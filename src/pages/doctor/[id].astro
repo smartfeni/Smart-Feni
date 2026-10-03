@@ -1,0 +1,464 @@
+<!-- path: src/pages/doctor/[id].astro -->
+---
+// ============================================================
+// পেজ: ডাক্তারের বিস্তারিত পেজ (/doctor/[id])
+//
+// ডাটা সার্ভার-সাইডে আসে (product/[id] পেজের মতো) — তাই ট্যাব টাইটেল ও
+// শেয়ার প্রিভিউতে (WhatsApp/Facebook) ডাক্তারের নাম ও ছবি আসে।
+// শুধু published ডাক্তার + published চেম্বার (RLS-এও আটকানো) — ড্রাফট বা
+// ভুল ID হলে ৪০৪ বার্তা।
+//
+// কী আছে:
+//   • হিরো: ভিজিটিং-কার্ড ডিজাইন (ডিরেক্টরির কার্ডের মতো) — ছবি (ট্যাপ করলে
+//     লাইটবক্স), নাম, ডিগ্রি, স্পেশালিটি, BMDC, উপজেলা, ভিজিট ফি
+//   • বিবরণ (ফাঁকা হলে সেকশন নেই)
+//   • আগামী ৭ দিনের সূচি — ক্লায়েন্ট-সাইডে ঢাকার সময় ধরে (আগাম সিরিয়ালের জন্য)
+//   • প্রতিটা চেম্বারের আলাদা কার্ড: জায়গা, ঠিকানা, বারভিত্তিক সময় (একদিনে
+//     একাধিক শিফট), ফি, নোট, "এখন/আজ বসছেন" ব্যাজ, সর্বশেষ আপডেট, কল বাটন
+//   • কল ক্লিক ট্র্যাকিং: BaseLayout-এর গ্লোবাল tel: লিসেনার (data-shop-name)
+//   • শেয়ার বাটন (মোবাইল শেয়ার শিট, না থাকলে লিংক কপি)
+//
+// ইচ্ছাকৃতভাবে নেই: রেটিং/রিভিউ (আলাদা প্রজেক্ট), ভুল-তথ্য রিপোর্ট
+// (content_reports টেবিল এখনো 'doctor' টাইপ নেয় না — সাজেশন সিস্টেমে আসবে)
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import ImageLightbox from '../../components/ImageLightbox.astro';
+import { supabase } from '../../lib/supabase.js';
+
+const { id } = Astro.params;
+
+const UPAZILA_LABELS = {
+  'feni-sadar': 'ফেনী সদর', 'chhagalnaiya': 'ছাগলনাইয়া', 'daganbhuiyan': 'দাগনভূঞা',
+  'parshuram': 'পরশুরাম', 'fulgazi': 'ফুলগাজী', 'sonagazi': 'সোনাগাজী',
+};
+const WEEKDAY_FULL = { 0: 'রবিবার', 1: 'সোমবার', 2: 'মঙ্গলবার', 3: 'বুধবার', 4: 'বৃহস্পতিবার', 5: 'শুক্রবার', 6: 'শনিবার' };
+const WEEKDAY_ORDER = [6, 0, 1, 2, 3, 4, 5];
+
+const BN = '০১২৩৪৫৬৭৮৯';
+const toBn = (n) => String(n).replace(/\d/g, (d) => BN[d]);
+const cleanPhone = (p) => String(p || '').replace(/[^\d+]/g, '');
+const toMin = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + m; };
+
+function fmtTime(t) {
+  const [h, m] = String(t).split(':').map(Number);
+  let period = 'রাত';
+  if (h >= 4 && h < 6) period = 'ভোর';
+  else if (h >= 6 && h < 12) period = 'সকাল';
+  else if (h >= 12 && h < 15) period = 'দুপুর';
+  else if (h >= 15 && h < 18) period = 'বিকাল';
+  else if (h >= 18 && h < 20) period = 'সন্ধ্যা';
+  return `${period} ${toBn(h % 12 || 12)}:${toBn(String(m).padStart(2, '0'))}`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(new Date(iso).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }));
+  return toBn(`${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`);
+}
+
+const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id || '');
+
+let doctor = null;
+let specNames = [];
+
+if (isUuid) {
+  const { data, error } = await supabase
+    .from('doctors')
+    .select('id, name_bn, name_en, photo_url, specialties, degrees, bmdc_no, bio, default_fee, upazila, updated_at, doctor_chambers(id, place_name, address, upazila, serial_phone, fee, note, status, created_at, updated_at, chamber_slots(weekday, start_time, end_time))')
+    .eq('id', id)
+    .eq('status', 'published')
+    .eq('doctor_chambers.status', 'published')
+    .maybeSingle();
+
+  if (error) console.error('doctor fetch error:', error.message);
+  doctor = data || null;
+
+  if (doctor && doctor.specialties && doctor.specialties.length) {
+    const { data: specRows } = await supabase
+      .from('specialties')
+      .select('slug, name_bn, sort_order')
+      .in('slug', doctor.specialties)
+      .order('sort_order');
+    specNames = (specRows || []).map((s) => s.name_bn);
+  }
+}
+
+if (!doctor) {
+  Astro.response.status = 404;
+}
+
+// চেম্বার প্রস্তুত (সর্টেড স্লট, ফরম্যাটেড লাইন)
+const chambers = doctor
+  ? (doctor.doctor_chambers || [])
+      .slice()
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+      .map((c) => {
+        const slots = (c.chamber_slots || [])
+          .slice()
+          .sort((a, b) => toMin(a.start_time) - toMin(b.start_time));
+        const days = WEEKDAY_ORDER
+          .map((wd) => {
+            const ds = slots.filter((s) => s.weekday === wd);
+            return ds.length
+              ? { name: WEEKDAY_FULL[wd], times: ds.map((s) => `${fmtTime(s.start_time)} – ${fmtTime(s.end_time)}`) }
+              : null;
+          })
+          .filter(Boolean);
+        const phone = cleanPhone(c.serial_phone);
+        const fee = c.fee != null ? c.fee : doctor.default_fee;
+        return { ...c, slots, days, phone, fee };
+      })
+  : [];
+
+const lastUpdated = doctor
+  ? [doctor.updated_at, ...chambers.map((c) => c.updated_at)].filter(Boolean).sort().slice(-1)[0]
+  : null;
+
+// ক্লায়েন্ট-সাইড সূচির জন্য JSON
+const schedJson = JSON.stringify({
+  chambers: chambers.map((c) => ({
+    id: c.id,
+    name: c.place_name,
+    slots: c.slots.map((s) => ({ weekday: s.weekday, start: s.start_time, end: s.end_time })),
+  })),
+}).replace(/</g, '\\u003c');
+
+const title = doctor
+  ? `${doctor.name_bn}${specNames.length ? ' — ' + specNames[0] : ''} | স্মার্ট ফেনী`
+  : 'ডাক্তার পাওয়া যায়নি | স্মার্ট ফেনী';
+const description = doctor
+  ? `${doctor.name_bn}${doctor.degrees ? ', ' + doctor.degrees : ''}${specNames.length ? ' — ' + specNames.join(', ') : ''}। চেম্বার, বসার সময় ও সিরিয়ালের নম্বর স্মার্ট ফেনীর ডাক্তার ডিরেক্টরিতে।`
+  : undefined;
+const upLabel = doctor?.upazila ? (UPAZILA_LABELS[doctor.upazila] || doctor.upazila) : '';
+---
+
+<BaseLayout title={title} description={description} ogImage={doctor?.photo_url || null}>
+  <div class="dd-page">
+    <div class="container">
+
+      <a href="/services/doctor-directory" class="dd-back"><i class="fas fa-arrow-left"></i> ডাক্তার তালিকা</a>
+
+      {!doctor && (
+        <div class="dd-notfound">
+          <i class="fas fa-user-doctor"></i>
+          <h1>ডাক্তার পাওয়া যায়নি</h1>
+          <p>এই ডাক্তারের পেজটি নেই, বা এখনো প্রকাশ করা হয়নি।</p>
+          <a href="/services/doctor-directory" class="dd-primary-btn">সব ডাক্তার দেখুন</a>
+        </div>
+      )}
+
+      {doctor && (
+        <>
+          <!-- ===== হিরো কার্ড ===== -->
+          <div class="dd-hero">
+            <div class="dd-hero-text">
+              <h1 class="dd-name">{doctor.name_bn}</h1>
+              {doctor.name_en && <p class="dd-name-en">{doctor.name_en}</p>}
+              {specNames.length > 0 && (
+                <div class="dd-chips">
+                  {specNames.map((n) => <span class="dd-chip">{n}</span>)}
+                </div>
+              )}
+              {doctor.degrees && <p class="dd-degrees">{doctor.degrees}</p>}
+              <div class="dd-rows">
+                {doctor.bmdc_no && (
+                  <div class="dd-row"><span class="dd-ico"><i class="fas fa-id-card"></i></span><span>BMDC: {doctor.bmdc_no}</span></div>
+                )}
+                {upLabel && (
+                  <div class="dd-row"><span class="dd-ico"><i class="fas fa-location-dot"></i></span><span>{upLabel}</span></div>
+                )}
+                {doctor.default_fee != null && (
+                  <div class="dd-row"><span class="dd-ico"><i class="fas fa-bangladeshi-taka-sign"></i></span><span>সাধারণ ভিজিট ফি ৳{toBn(doctor.default_fee)}</span></div>
+                )}
+              </div>
+            </div>
+
+            <div class="dd-photo" id="ddPhoto" data-photo={doctor.photo_url || ''} role={doctor.photo_url ? 'button' : undefined} aria-label={doctor.photo_url ? 'ছবি বড় করে দেখুন' : undefined}>
+              <div class="dd-l1"></div>
+              <div class="dd-l2"></div>
+              <div class="dd-l3">
+                {doctor.photo_url
+                  ? <img src={doctor.photo_url} alt={doctor.name_bn} decoding="async" />
+                  : <i class="fas fa-user-doctor"></i>}
+              </div>
+            </div>
+          </div>
+
+          <button type="button" class="dd-share" id="ddShare"><i class="fas fa-share-nodes"></i> শেয়ার করুন</button>
+
+          {doctor.bio && (
+            <section class="dd-section">
+              <h2 class="dd-h2"><i class="fas fa-circle-info"></i> বিবরণ</h2>
+              <p class="dd-bio">{doctor.bio}</p>
+            </section>
+          )}
+
+          <!-- ===== আগামী ৭ দিনের সূচি (ক্লায়েন্ট-সাইডে) ===== -->
+          {chambers.some((c) => c.slots.length > 0) && (
+            <section class="dd-section">
+              <h2 class="dd-h2"><i class="fas fa-calendar-days"></i> আগামী ৭ দিনে কবে বসছেন</h2>
+              <div id="ddWeek" class="dd-week"></div>
+            </section>
+          )}
+
+          <!-- ===== চেম্বার তালিকা ===== -->
+          <section class="dd-section">
+            <h2 class="dd-h2"><i class="fas fa-hospital"></i> চেম্বার ও সিরিয়াল</h2>
+
+            {chambers.length === 0 && (
+              <div class="dd-empty">এই ডাক্তারের চেম্বারের তথ্য এখনো যুক্ত হয়নি।</div>
+            )}
+
+            <div class="dd-chambers">
+              {chambers.map((c) => (
+                <div class="dd-chamber">
+                  <div class="dd-ch-top">
+                    <h3 class="dd-ch-name">{c.place_name}</h3>
+                    <span class="dd-badge" data-badge={c.id} style="display:none;"></span>
+                  </div>
+                  {(c.address || c.upazila) && (
+                    <p class="dd-ch-addr"><i class="fas fa-location-dot"></i> {[c.address, c.upazila ? (UPAZILA_LABELS[c.upazila] || c.upazila) : ''].filter(Boolean).join(', ')}</p>
+                  )}
+
+                  {c.days.length > 0 ? (
+                    <div class="dd-days">
+                      {c.days.map((d) => (
+                        <div class="dd-day">
+                          <span class="dd-day-name">{d.name}</span>
+                          <span class="dd-day-times">{d.times.map((t) => <span>{t}</span>)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p class="dd-note">বসার সময় জানা নেই — সিরিয়ালের নম্বরে ফোন করে জেনে নিন।</p>
+                  )}
+
+                  {c.fee != null && <p class="dd-fee">ভিজিট ফি: <strong>৳{toBn(c.fee)}</strong></p>}
+                  {c.note && <p class="dd-note"><i class="fas fa-circle-info"></i> {c.note}</p>}
+
+                  {c.phone
+                    ? (
+                      <a class="dd-call" href={`tel:${c.phone}`} data-shop-name={doctor.name_bn}>
+                        <i class="fas fa-phone"></i>
+                        <span>সিরিয়ালের জন্য কল করুন</span>
+                        <strong>{c.serial_phone}</strong>
+                      </a>
+                    )
+                    : <div class="dd-nocall">সিরিয়ালের নম্বর দেওয়া নেই</div>}
+
+                  <p class="dd-updated">সর্বশেষ আপডেট: {fmtDate(c.updated_at)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <p class="dd-disclaimer">
+            <i class="fas fa-triangle-exclamation"></i>
+            বসার সময় বদলাতে পারে, ডাক্তার ছুটিতেও থাকতে পারেন। সিরিয়াল নেওয়ার আগে ফোন করে নিশ্চিত হয়ে নিন।
+            {lastUpdated && <span> প্রোফাইলের সর্বশেষ আপডেট: {fmtDate(lastUpdated)}</span>}
+          </p>
+        </>
+      )}
+
+    </div>
+  </div>
+
+  <ImageLightbox />
+
+  <style is:global>
+    .dd-page { min-height: 70vh; padding: 28px 0 90px; }
+    .dd-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: 0.88rem; margin-bottom: 16px; }
+    .dd-back:hover { color: #FF6B35; }
+
+    .dd-notfound { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; padding: 70px 10px; color: #8FA0BC; }
+    .dd-notfound i { font-size: 2.6rem; color: #B0BCCB; }
+    .dd-notfound h1 { font-size: 1.3rem; color: #1B2A4A; }
+    .dd-primary-btn { display: inline-block; margin-top: 8px; background: #FF6B35; color: #fff; text-decoration: none; font-weight: 700; padding: 12px 22px; border-radius: 14px; }
+
+    .dd-hero { position: relative; display: flex; min-height: 250px; background: #fff; border-radius: 22px; overflow: hidden; box-shadow: 0 6px 22px rgba(15, 23, 42, 0.08); }
+    .dd-hero-text { position: relative; z-index: 2; width: 62%; flex: none; padding: 20px 6px 18px 18px; }
+    .dd-name { font-size: 1.35rem; font-weight: 700; color: #1B2A4A; line-height: 1.35; }
+    .dd-name-en { font-size: 0.8rem; color: #8FA0BC; margin-top: 2px; }
+    .dd-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .dd-chip { background: #FFF0EA; color: #FF6B35; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; }
+    .dd-degrees { font-size: 0.82rem; color: #5A6E85; margin-top: 8px; line-height: 1.5; }
+    .dd-rows { border-top: 1px solid #E5EAF0; margin-top: 12px; padding-top: 3px; }
+    .dd-row { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #44506B; margin-top: 8px; }
+    .dd-ico { width: 24px; height: 24px; border-radius: 50%; background: #FFF0EA; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; flex-shrink: 0; }
+
+    .dd-photo { position: absolute; top: 0; right: 0; bottom: 0; width: 42%; }
+    .dd-photo[role="button"] { cursor: zoom-in; }
+    .dd-l1, .dd-l2, .dd-l3 { position: absolute; inset: 0; }
+    .dd-l1 { background: #FF6B35; clip-path: polygon(30% 0, 100% 0, 100% 100%, 2% 100%); }
+    .dd-l2 { background: #1B2A4A; clip-path: polygon(35% 0, 100% 0, 100% 100%, 7% 100%); }
+    .dd-l3 { background: #FFE3D6; clip-path: polygon(39% 0, 100% 0, 100% 100%, 11% 100%); overflow: hidden; display: flex; align-items: center; justify-content: center; padding-left: 28%; color: #FF6B35; font-size: 3.6rem; }
+    .dd-l3 img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+    .dd-share { margin: 12px 0 0 auto; display: flex; align-items: center; gap: 8px; background: #fff; border: 1.5px solid #E5EAF0; color: #5A6E85; padding: 9px 16px; border-radius: 40px; font-weight: 700; font-size: 0.82rem; cursor: pointer; font-family: inherit; }
+
+    .dd-section { margin-top: 24px; }
+    .dd-h2 { font-size: 1.05rem; font-weight: 700; color: #1B2A4A; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .dd-h2 i { color: #FF6B35; }
+    .dd-bio { font-size: 0.92rem; color: #44506B; line-height: 1.75; background: #fff; border-radius: 16px; padding: 14px 16px; white-space: pre-line; }
+
+    .dd-week { background: #fff; border-radius: 16px; overflow: hidden; }
+    .dd-wk-row { display: flex; gap: 12px; padding: 11px 14px; border-bottom: 1px solid #F1F4F9; align-items: flex-start; }
+    .dd-wk-row:last-child { border-bottom: none; }
+    .dd-wk-row.today { background: #EAFBF0; }
+    .dd-wk-day { width: 96px; flex-shrink: 0; }
+    .dd-wk-day strong { display: block; font-size: 0.86rem; color: #1B2A4A; }
+    .dd-wk-day small { font-size: 0.72rem; color: #8FA0BC; }
+    .dd-wk-body { flex: 1; min-width: 0; font-size: 0.82rem; color: #1B2A4A; line-height: 1.55; }
+    .dd-wk-item span { color: #5A6E85; }
+    .dd-wk-none { color: #B0BCCB; }
+
+    .dd-chambers { display: flex; flex-direction: column; gap: 14px; }
+    .dd-chamber { background: #fff; border-radius: 18px; padding: 16px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); }
+    .dd-ch-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .dd-ch-name { font-size: 1rem; font-weight: 700; color: #1B2A4A; line-height: 1.4; }
+    .dd-ch-addr { font-size: 0.8rem; color: #8FA0BC; margin-top: 4px; display: flex; gap: 6px; }
+    .dd-ch-addr i { margin-top: 3px; }
+    .dd-badge { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; }
+    .dd-badge.now, .dd-badge.today { background: #EAFBF0; color: #1B7A3C; }
+    .dd-dot { width: 7px; height: 7px; border-radius: 50%; background: #1FB35A; }
+    .dd-days { margin-top: 12px; background: #F8FAFC; border-radius: 14px; padding: 4px 14px; }
+    .dd-day { display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid #EEF2F7; font-size: 0.84rem; }
+    .dd-day:last-child { border-bottom: none; }
+    .dd-day-name { width: 92px; flex-shrink: 0; font-weight: 700; color: #1B2A4A; }
+    .dd-day-times { display: flex; flex-direction: column; gap: 2px; color: #44506B; }
+    .dd-fee { font-size: 0.86rem; color: #44506B; margin-top: 12px; }
+    .dd-fee strong { color: #1B2A4A; }
+    .dd-note { font-size: 0.8rem; color: #8FA0BC; margin-top: 8px; display: flex; gap: 6px; line-height: 1.5; }
+    .dd-note i { margin-top: 3px; }
+    .dd-call { margin-top: 14px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 10px; background: #FF6B35; color: #fff; text-decoration: none; padding: 13px 14px; border-radius: 14px; font-size: 0.9rem; font-weight: 700; }
+    .dd-nocall { margin-top: 14px; background: #F1F4F9; color: #8FA0BC; border-radius: 14px; padding: 13px; text-align: center; font-size: 0.84rem; font-weight: 600; }
+    .dd-updated { font-size: 0.72rem; color: #B0BCCB; margin-top: 10px; text-align: right; }
+    .dd-empty { background: #fff; border-radius: 16px; padding: 22px; text-align: center; color: #8FA0BC; font-size: 0.88rem; }
+    .dd-disclaimer { margin-top: 24px; font-size: 0.78rem; color: #8FA0BC; line-height: 1.7; display: flex; gap: 8px; }
+    .dd-disclaimer i { margin-top: 4px; color: #D69E2E; }
+
+    @media (max-width: 380px) {
+      .dd-wk-day { width: 84px; }
+      .dd-day-name { width: 80px; }
+    }
+  </style>
+
+  <script is:inline type="application/json" id="schedData" set:html={schedJson}></script>
+
+  <script>
+    const dataEl = document.getElementById('schedData');
+    const sched = dataEl ? JSON.parse(dataEl.textContent || '{}') : { chambers: [] };
+
+    const WEEKDAY_FULL = { 0: 'রবিবার', 1: 'সোমবার', 2: 'মঙ্গলবার', 3: 'বুধবার', 4: 'বৃহস্পতিবার', 5: 'শুক্রবার', 6: 'শনিবার' };
+    const BN_DIGITS = '০১২৩৪৫৬৭৮৯';
+    const toBn = (n) => String(n).replace(/\d/g, (d) => BN_DIGITS[d]);
+    const toMin = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + m; };
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function fmtTime(t) {
+      const [h, m] = String(t).split(':').map(Number);
+      let period = 'রাত';
+      if (h >= 4 && h < 6) period = 'ভোর';
+      else if (h >= 6 && h < 12) period = 'সকাল';
+      else if (h >= 12 && h < 15) period = 'দুপুর';
+      else if (h >= 15 && h < 18) period = 'বিকাল';
+      else if (h >= 18 && h < 20) period = 'সন্ধ্যা';
+      return `${period} ${toBn(h % 12 || 12)}:${toBn(String(m).padStart(2, '0'))}`;
+    }
+
+    // ঢাকার বর্তমান বার ও মিনিট
+    function dhakaNow() {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Dhaka', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).formatToParts(new Date());
+      const get = (t) => parts.find((p) => p.type === t)?.value;
+      const weekday = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[get('weekday')];
+      return { weekday, minutes: (Number(get('hour')) % 24) * 60 + Number(get('minute')) };
+    }
+
+    function dayLabel(i, wd) {
+      return i === 0 ? 'আজ' : i === 1 ? 'আগামীকাল' : i === 2 ? 'পরশু' : WEEKDAY_FULL[wd];
+    }
+
+    function render() {
+      const now = dhakaNow();
+
+      // প্রতিটা চেম্বারের আজকের ব্যাজ
+      sched.chambers.forEach((c) => {
+        const el = document.querySelector(`[data-badge="${c.id}"]`);
+        if (!el) return;
+        const today = c.slots.filter((s) => s.weekday === now.weekday);
+        const sitting = today.some((s) => toMin(s.start) <= now.minutes && now.minutes < toMin(s.end));
+        const later = today.some((s) => toMin(s.start) > now.minutes);
+        if (sitting) {
+          el.className = 'dd-badge now';
+          el.innerHTML = '<span class="dd-dot"></span> এখন বসছেন';
+          el.style.display = 'inline-flex';
+        } else if (later) {
+          el.className = 'dd-badge today';
+          el.textContent = 'আজ বসছেন';
+          el.style.display = 'inline-flex';
+        } else {
+          el.style.display = 'none';
+        }
+      });
+
+      // আগামী ৭ দিনের সূচি
+      const week = document.getElementById('ddWeek');
+      if (!week) return;
+      let html = '';
+      for (let i = 0; i < 7; i++) {
+        const wd = (now.weekday + i) % 7;
+        const items = [];
+        sched.chambers.forEach((c) => {
+          c.slots
+            .filter((s) => s.weekday === wd)
+            .sort((a, b) => toMin(a.start) - toMin(b.start))
+            .forEach((s) => items.push({ name: c.name, start: s.start, end: s.end }));
+        });
+        items.sort((a, b) => toMin(a.start) - toMin(b.start));
+        const body = items.length
+          ? items.map((x) => `<div class="dd-wk-item"><strong>${esc(x.name)}</strong> <span>· ${fmtTime(x.start)} – ${fmtTime(x.end)}</span></div>`).join('')
+          : '<span class="dd-wk-none">বসেন না</span>';
+        html += `<div class="dd-wk-row${i === 0 ? ' today' : ''}">
+          <div class="dd-wk-day"><strong>${dayLabel(i, wd)}</strong>${i < 3 ? `<small>${WEEKDAY_FULL[wd]}</small>` : ''}</div>
+          <div class="dd-wk-body">${body}</div>
+        </div>`;
+      }
+      week.innerHTML = html;
+    }
+
+    render();
+    setInterval(render, 60000);
+
+    // ছবিতে ট্যাপ → লাইটবক্স
+    const photo = document.getElementById('ddPhoto');
+    if (photo && photo.dataset.photo) {
+      photo.addEventListener('click', () => {
+        if (window.openImageLightbox) window.openImageLightbox(photo.dataset.photo);
+      });
+    }
+
+    // শেয়ার
+    const shareBtn = document.getElementById('ddShare');
+    if (shareBtn) {
+      shareBtn.addEventListener('click', async () => {
+        const url = window.location.href;
+        const title = document.title;
+        if (navigator.share) {
+          try { await navigator.share({ title, url }); } catch (_) { /* ইউজার বাতিল করেছে */ }
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(url);
+          window.showToast('লিংক কপি হয়েছে ✓', 'success');
+        } catch (_) {
+          window.showToast('লিংক কপি করা যায়নি', 'error');
+        }
+      });
+    }
+  </script>
+</BaseLayout>
