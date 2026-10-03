@@ -1,0 +1,351 @@
+<!-- path: src/components/doctor/DoctorChat.astro -->
+---
+// ============================================================
+// কম্পোনেন্ট: ডাক্তার ডিরেক্টরির AI সহকারী (চ্যাট প্যানেল)
+//
+// • window-এ smartfeni:open-doctor-chat ইভেন্ট শুনে খোলে (ডিরেক্টরির
+//   "AI সহকারী" বাটন এই ইভেন্ট ছোঁড়ে)। লোড হলে window.__sfDoctorChatReady = true
+// • /api/doctor-chat এ POST করে। উত্তরের type:
+//     recommend → উত্তর + স্পেশালিটি কার্ড (ট্যাপে ডিরেক্টরি ফিল্টার)
+//     clarify / out_of_scope → সাধারণ বাবল
+//     emergency / crisis → লাল/কমলা বক্স + বড় "৯৯৯ কল" বাটন
+//     limit / error → বক্স + ৯৯৯ বাটন + সাপোর্ট নম্বরে কল বাটন
+// • স্পেশালিটি কার্ডে ট্যাপ: আগে smartfeni:doctor-chat-pick ইভেন্ট ছোঁড়ে;
+//   ডিরেক্টরি পেজ সেটা ধরে (preventDefault) রিলোড ছাড়াই ফিল্টার করতে পারে।
+//   কেউ না ধরলে সাধারণ লিংকে /services/doctor-directory?spec=<slug> এ যায়
+// • স্থায়ী সতর্কতা সবসময় ইনপুটের ঠিক উপরে, ৯৯৯ বার সবসময় হেডারের নিচে
+// • প্রাইভেসি: কথোপকথন শুধু ব্রাউজারের মেমরিতে (পেজ ছাড়লে মুছে যায়),
+//   কোথাও সেভ হয় না
+// ============================================================
+---
+
+<div class="sfc-overlay" id="sfcOverlay" aria-hidden="true">
+  <div class="sfc-sheet" id="sfcSheet" role="dialog" aria-modal="true" aria-labelledby="sfcTitle">
+
+    <div class="sfc-header">
+      <div class="sfc-title" id="sfcTitle">
+        <span class="sfc-title-icon"><i class="fas fa-robot"></i></span>
+        <div>
+          <strong>AI সহকারী</strong>
+          <small>কোন ডাক্তার দেখাবেন বুঝতে সাহায্য করে</small>
+        </div>
+      </div>
+      <div class="sfc-header-btns">
+        <button type="button" class="sfc-icon-btn" id="sfcReset" aria-label="নতুন করে শুরু করুন" title="নতুন করে শুরু করুন"><i class="fas fa-rotate-right"></i></button>
+        <button type="button" class="sfc-icon-btn" id="sfcClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      </div>
+    </div>
+
+    <div class="sfc-urgent">
+      <span><i class="fas fa-triangle-exclamation"></i> জরুরি অবস্থায় দেরি না করে ৯৯৯-এ কল করুন</span>
+      <a href="tel:999" data-shop-name="জরুরি ৯৯৯ (AI সহকারী)">৯৯৯</a>
+    </div>
+
+    <div class="sfc-messages" id="sfcMessages" aria-live="polite"></div>
+
+    <div class="sfc-disclaimer">
+      <i class="fas fa-circle-info"></i>
+      <span>এটা শুধু পরামর্শ, রোগ নির্ণয় নয়। সিরিয়ালের আগে ডাক্তার বা চেম্বারে ফোন করে নিশ্চিত হোন।</span>
+    </div>
+
+    <div class="sfc-inputbar">
+      <textarea id="sfcInput" rows="1" maxlength="500" placeholder="আপনার সমস্যা নিজের ভাষায় লিখুন..." aria-label="আপনার সমস্যা লিখুন"></textarea>
+      <button type="button" id="sfcSend" class="sfc-send" aria-label="পাঠান"><i class="fas fa-paper-plane"></i></button>
+    </div>
+    <div class="sfc-counter" id="sfcCounter"></div>
+
+  </div>
+</div>
+
+<style is:global>
+  .sfc-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(15, 23, 42, 0.5); display: none; align-items: flex-end; justify-content: center; }
+  .sfc-overlay.open { display: flex; }
+  .sfc-sheet { --sfc-vh: 100dvh; width: 100%; max-width: 520px; height: min(88dvh, calc(var(--sfc-vh) - 12px)); background: #F8FAFC; border-radius: 22px 22px 0 0; display: flex; flex-direction: column; overflow: hidden; animation: sfcUp 0.22s ease-out; }
+  @keyframes sfcUp { from { transform: translateY(40px); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
+  @media (min-width: 640px) {
+    .sfc-overlay { align-items: center; }
+    .sfc-sheet { height: min(680px, 88dvh); border-radius: 22px; }
+  }
+
+  .sfc-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 14px 12px 16px; background: #fff; border-bottom: 1px solid #E5EAF0; flex-shrink: 0; }
+  .sfc-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .sfc-title strong { display: block; font-size: 1rem; color: #1B2A4A; font-weight: 700; }
+  .sfc-title small { display: block; font-size: 0.74rem; color: #8FA0BC; }
+  .sfc-title-icon { width: 38px; height: 38px; border-radius: 12px; background: #FFF0EA; color: #FF6B35; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .sfc-header-btns { display: flex; gap: 6px; flex-shrink: 0; }
+  .sfc-icon-btn { width: 34px; height: 34px; border-radius: 50%; border: none; background: #F1F4F9; color: #5A6E85; cursor: pointer; }
+
+  .sfc-urgent { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #FFF0EA; color: #B42318; font-size: 0.78rem; font-weight: 700; padding: 8px 14px; flex-shrink: 0; }
+  .sfc-urgent a { background: #D14343; color: #fff; text-decoration: none; padding: 4px 14px; border-radius: 20px; font-size: 0.82rem; }
+
+  .sfc-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; overscroll-behavior: contain; }
+  .sfc-row { display: flex; }
+  .sfc-row.user { justify-content: flex-end; }
+  .sfc-bubble { max-width: 86%; padding: 10px 13px; border-radius: 16px; font-size: 0.9rem; line-height: 1.6; word-break: break-word; }
+  .sfc-row.bot .sfc-bubble { background: #fff; color: #1B2A4A; border-bottom-left-radius: 4px; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06); }
+  .sfc-row.user .sfc-bubble { background: #FF6B35; color: #fff; border-bottom-right-radius: 4px; }
+
+  .sfc-alert { max-width: 94%; border-radius: 16px; padding: 12px 14px; font-size: 0.9rem; line-height: 1.65; }
+  .sfc-alert.emergency { background: #FEF1F0; border: 1.5px solid #F4A39B; color: #7A1F17; }
+  .sfc-alert.crisis { background: #FFF6E5; border: 1.5px solid #F2C98A; color: #6B4310; }
+  .sfc-alert.limit { background: #FFF8E6; border: 1.5px solid #FFE2A8; color: #5C4310; }
+  .sfc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .sfc-call { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font-weight: 700; font-size: 0.9rem; padding: 10px 16px; border-radius: 14px; }
+  .sfc-call.red { background: #D14343; color: #fff; }
+  .sfc-call.orange { background: #FF6B35; color: #fff; }
+
+  .sfc-specs { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; width: 100%; max-width: 94%; }
+  .sfc-spec { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #fff; border: 1.5px solid #FFD3BC; color: #1B2A4A; text-decoration: none; padding: 11px 14px; border-radius: 14px; font-weight: 700; font-size: 0.9rem; }
+  .sfc-spec span { color: #FF6B35; display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; }
+
+  .sfc-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sfc-chip { border: 1.5px solid #FFD3BC; background: #FFF0EA; color: #FF6B35; padding: 7px 13px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+
+  .sfc-typing { display: inline-flex; gap: 5px; padding: 4px 2px; }
+  .sfc-typing i { width: 7px; height: 7px; border-radius: 50%; background: #B0BCCB; animation: sfcDot 1s infinite ease-in-out; }
+  .sfc-typing i:nth-child(2) { animation-delay: 0.15s; }
+  .sfc-typing i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes sfcDot { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+  .sfc-disclaimer { display: flex; gap: 8px; align-items: flex-start; background: #FFF8E6; color: #7A5A12; font-size: 0.74rem; line-height: 1.5; padding: 8px 14px; border-top: 1px solid #FFE9B8; flex-shrink: 0; }
+  .sfc-disclaimer i { margin-top: 3px; }
+
+  .sfc-inputbar { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); background: #fff; border-top: 1px solid #E5EAF0; flex-shrink: 0; }
+  .sfc-inputbar textarea { flex: 1; resize: none; max-height: 110px; padding: 11px 14px; border-radius: 18px; border: 1.5px solid #E5EAF0; background: #FBFCFE; font-family: inherit; font-size: 0.92rem; color: #1B2A4A; line-height: 1.45; }
+  .sfc-inputbar textarea:focus { outline: none; border-color: #FF6B35; background: #fff; }
+  .sfc-inputbar textarea:disabled { background: #F1F4F9; }
+  .sfc-send { width: 44px; height: 44px; border-radius: 50%; border: none; background: #FF6B35; color: #fff; cursor: pointer; flex-shrink: 0; }
+  .sfc-send:disabled { opacity: 0.5; cursor: not-allowed; }
+  .sfc-counter { display: none; background: #fff; text-align: right; font-size: 0.7rem; color: #D14343; padding: 0 16px 6px; margin-top: -4px; }
+</style>
+
+<script>
+  const overlay = document.getElementById('sfcOverlay');
+  const sheet = document.getElementById('sfcSheet');
+  const messagesEl = document.getElementById('sfcMessages');
+  const input = document.getElementById('sfcInput');
+  const sendBtn = document.getElementById('sfcSend');
+  const counter = document.getElementById('sfcCounter');
+
+  const MAX_CHARS = 500;
+  const MIN_INTERVAL_MS = 1500;
+  const SUGGESTIONS = ['জ্বর ও কাশি কয়েকদিন ধরে', 'পেটে ব্যথা ও গ্যাস্ট্রিক', 'বাচ্চার সর্দি-কাশি', 'চোখে ঝাপসা দেখি'];
+  const SUPPORT_PHONE = '+8801816355833';
+
+  let history = [];          // [{ role: 'user'|'model', text }]
+  let busy = false;
+  let blocked = false;       // limit শেষ হলে ইনপুট বন্ধ
+  let lastSendAt = 0;
+  let started = false;
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // নিরাপদ ফরম্যাট: আগে escape, তারপর শুধু **বোল্ড** ও নতুন লাইন
+  const fmt = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+
+  function scrollDown() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function addBubble(role, text) {
+    const row = document.createElement('div');
+    row.className = 'sfc-row ' + (role === 'user' ? 'user' : 'bot');
+    const b = document.createElement('div');
+    b.className = 'sfc-bubble';
+    b.innerHTML = role === 'user' ? esc(text).replace(/\n/g, '<br>') : fmt(text);
+    row.appendChild(b);
+    messagesEl.appendChild(row);
+    scrollDown();
+    return row;
+  }
+
+  function addAlert(kind, text, withCall, withSupport) {
+    const row = document.createElement('div');
+    row.className = 'sfc-row bot';
+    const box = document.createElement('div');
+    box.className = 'sfc-alert ' + kind;
+    let html = `<div>${fmt(text)}</div>`;
+    const actions = [];
+    if (withCall) {
+      actions.push('<a class="sfc-call red" href="tel:999" data-shop-name="জরুরি ৯৯৯ (AI সহকারী)"><i class="fas fa-phone"></i> ৯৯৯-এ কল করুন</a>');
+    }
+    if (withSupport) {
+      actions.push(`<a class="sfc-call orange" href="tel:${esc(withSupport)}" data-shop-name="স্মার্ট ফেনী সাপোর্ট (AI সহকারী)"><i class="fas fa-headset"></i> আমাদের নম্বরে কল</a>`);
+    }
+    if (actions.length) html += `<div class="sfc-actions">${actions.join('')}</div>`;
+    box.innerHTML = html;
+    row.appendChild(box);
+    messagesEl.appendChild(row);
+    scrollDown();
+  }
+
+  function addSpecs(list) {
+    if (!list || !list.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'sfc-specs';
+    list.forEach((s) => {
+      const a = document.createElement('a');
+      a.className = 'sfc-spec';
+      a.href = '/services/doctor-directory?spec=' + encodeURIComponent(s.slug);
+      a.innerHTML = `<strong>${esc(s.name_bn)} ডাক্তার দেখুন</strong><span>তালিকা <i class="fas fa-chevron-right"></i></span>`;
+      a.addEventListener('click', (e) => {
+        // ডিরেক্টরি পেজ ইভেন্ট ধরলে রিলোড ছাড়াই ফিল্টার হবে
+        const ev = new CustomEvent('smartfeni:doctor-chat-pick', { detail: { spec: s.slug }, cancelable: true });
+        const handled = !window.dispatchEvent(ev);
+        if (handled) {
+          e.preventDefault();
+          closeChat();
+        }
+      });
+      wrap.appendChild(a);
+    });
+    messagesEl.appendChild(wrap);
+    scrollDown();
+  }
+
+  function showTyping() {
+    const row = document.createElement('div');
+    row.className = 'sfc-row bot';
+    row.id = 'sfcTyping';
+    row.innerHTML = '<div class="sfc-bubble"><span class="sfc-typing"><i></i><i></i><i></i></span></div>';
+    messagesEl.appendChild(row);
+    scrollDown();
+  }
+  const hideTyping = () => document.getElementById('sfcTyping')?.remove();
+
+  function renderWelcome() {
+    messagesEl.innerHTML = '';
+    addBubble('bot', 'আসসালামু আলাইকুম। আপনার শারীরিক সমস্যাটা নিজের ভাষায় লিখুন। কোন ধরনের ডাক্তার দেখানো ভালো, আমি সেটা বুঝতে সাহায্য করব।\n\nআমি ডাক্তার নই, ওষুধ বা রোগের নাম বলতে পারি না।');
+    const row = document.createElement('div');
+    row.className = 'sfc-chips';
+    SUGGESTIONS.forEach((t) => {
+      const c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'sfc-chip';
+      c.textContent = t;
+      c.addEventListener('click', () => { input.value = t; send(); });
+      row.appendChild(c);
+    });
+    messagesEl.appendChild(row);
+  }
+
+  function setBusy(v) {
+    busy = v;
+    sendBtn.disabled = v || blocked;
+    input.disabled = blocked;
+  }
+
+  function autoGrow() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 110) + 'px';
+    const left = MAX_CHARS - input.value.length;
+    if (left <= 60) { counter.style.display = 'block'; counter.textContent = `আর ${left} অক্ষর লিখতে পারবেন`; }
+    else counter.style.display = 'none';
+  }
+
+  async function send() {
+    if (busy || blocked) return;
+    const text = input.value.trim();
+    if (!text) return;
+    const now = Date.now();
+    if (now - lastSendAt < MIN_INTERVAL_MS) return;
+    lastSendAt = now;
+
+    // স্বাগত চিপ সরিয়ে দিই
+    messagesEl.querySelector('.sfc-chips')?.remove();
+
+    addBubble('user', text);
+    input.value = '';
+    autoGrow();
+    setBusy(true);
+    showTyping();
+
+    try {
+      const res = await fetch('/api/doctor-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, history: history.slice(-6) }),
+      });
+      const data = await res.json().catch(() => null);
+      hideTyping();
+
+      if (!data || !data.reply) {
+        addAlert('limit', 'দুঃখিত, উত্তর পাওয়া যায়নি। একটু পরে আবার চেষ্টা করুন। **জরুরি হলে ৯৯৯-এ কল করুন।**', true, null);
+      } else if (data.type === 'emergency') {
+        addAlert('emergency', data.reply, true, null);
+      } else if (data.type === 'crisis') {
+        addAlert('crisis', data.reply, true, null);
+        addSpecs(data.specialties);
+      } else if (data.type === 'limit') {
+        addAlert('limit', data.reply, true, data.phone || SUPPORT_PHONE);
+        blocked = true;
+        input.placeholder = 'আজকের সীমা শেষ হয়েছে';
+      } else if (data.type === 'error') {
+        addAlert('limit', data.reply, true, data.phone || null);
+      } else {
+        addBubble('bot', data.reply);
+        if (data.type === 'recommend') addSpecs(data.specialties);
+      }
+
+      // ইতিহাসে শুধু সাধারণ আদান-প্রদান রাখি (জরুরি/লিমিট বার্তা নয়)
+      if (data && (data.type === 'recommend' || data.type === 'clarify' || data.type === 'out_of_scope')) {
+        history.push({ role: 'user', text });
+        history.push({ role: 'model', text: data.reply });
+        history = history.slice(-12);
+      }
+    } catch (err) {
+      hideTyping();
+      addAlert('limit', 'ইন্টারনেট সংযোগে সমস্যা হচ্ছে। সংযোগ দেখে আবার চেষ্টা করুন। **জরুরি হলে ৯৯৯-এ কল করুন।**', true, null);
+    }
+
+    setBusy(false);
+    if (!blocked && window.matchMedia('(pointer: fine)').matches) input.focus();
+  }
+
+  function openChat() {
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    if (!started) { renderWelcome(); started = true; }
+    if (window.matchMedia('(pointer: fine)').matches && !blocked) setTimeout(() => input.focus(), 120);
+  }
+
+  function closeChat() {
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  }
+
+  function resetChat() {
+    history = [];
+    blocked = false;
+    input.disabled = false;
+    input.placeholder = 'আপনার সমস্যা নিজের ভাষায় লিখুন...';
+    setBusy(false);
+    renderWelcome();
+  }
+
+  // কীবোর্ড খুললে প্যানেলের উচ্চতা ঠিক রাখা (মোবাইল)
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const sync = () => sheet.style.setProperty('--sfc-vh', vv.height + 'px');
+    vv.addEventListener('resize', sync);
+    sync();
+  }
+
+  input.addEventListener('input', autoGrow);
+  input.addEventListener('keydown', (e) => {
+    // ডেস্কটপে Enter = পাঠান (Shift+Enter = নতুন লাইন); টাচ ডিভাইসে Enter = নতুন লাইন
+    if (e.key === 'Enter' && !e.shiftKey && window.matchMedia('(pointer: fine)').matches) {
+      e.preventDefault();
+      send();
+    }
+  });
+  sendBtn.addEventListener('click', send);
+  document.getElementById('sfcClose').addEventListener('click', closeChat);
+  document.getElementById('sfcReset').addEventListener('click', resetChat);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeChat(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && overlay.classList.contains('open')) closeChat(); });
+
+  window.addEventListener('smartfeni:open-doctor-chat', openChat);
+  window.__sfDoctorChatReady = true;
+</script>
