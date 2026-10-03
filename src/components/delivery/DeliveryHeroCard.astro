@@ -1,9 +1,14 @@
+<!-- path: src/components/delivery/DeliveryHeroCard.astro -->
 ---
 // ============================================================
 // কম্পোনেন্ট: হোম ডেলিভারি কার্ড — CTA + ফর্ম একসাথে মার্জড,
 // আলাদা মডাল পপআপ না করে সরাসরি কার্ডের ভেতরে ইনলাইন ফর্ম
 // (আগের DeliveryRequestCTA + DeliveryRequestModal এর জায়গায়)
 // লগইন না থাকলে ফর্ম দেখানোর আগে AuthModal খুলবে।
+//
+// আপডেট (রাইডার অ্যাভেইলেবিলিটি): উপজেলা অনুযায়ী অনলাইন রাইডার না
+// থাকলে ফর্মের উপরে NoRiderNotice (WhatsApp সহ) দেখায় এবং সাবমিট বন্ধ
+// রাখে। পুরো ফেনীতে কেউ অনলাইনে না থাকলে ফর্মটাই লুকিয়ে যায়।
 // ============================================================
 
 const upazilaList = [
@@ -11,6 +16,7 @@ const upazilaList = [
 ];
 
 import LocationPicker from './LocationPicker.astro';
+import NoRiderNotice from './NoRiderNotice.astro';
 ---
 
 <section class="dh-section">
@@ -19,6 +25,8 @@ import LocationPicker from './LocationPicker.astro';
       <span class="dh-badge"><i class="fas fa-bolt"></i> নতুন</span>
       <h2 class="dh-title">হোম ডেলিভারি</h2>
       <p class="dh-subtitle">দাম বলুন, ভেরিফাইড ডেলিভারি হিরোরা অফার দিবে — সবচেয়ে ভালোটা বেছে নিন</p>
+
+      <NoRiderNotice id="dh" category="delivery" />
 
       <form id="dhForm" class="dh-form" novalidate>
         <div class="dh-field">
@@ -292,6 +300,7 @@ import LocationPicker from './LocationPicker.astro';
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { createServiceRequest } from '../../lib/deliveryClient.js';
+  import { initRiderAvailability } from '../../lib/riderAvailability.js';
 
   const form = document.getElementById('dhForm');
   const successEl = document.getElementById('dhSuccess');
@@ -308,6 +317,24 @@ import LocationPicker from './LocationPicker.astro';
     });
   });
 
+  // উপজেলা অনুযায়ী অনলাইন রাইডার চেক — রাইডার না থাকলে নোটিশ দেখায়
+  // ও সাবমিট বন্ধ রাখে (সার্ভারেও একই চেক আছে: create-request API)
+  const availability = initRiderAvailability({
+    category: 'delivery',
+    root: document.getElementById('dhNotice'),
+    form,
+    upazilaSelect: document.getElementById('dhUpazila'),
+    vehicleInput,
+    vehicleButtons,
+    submitBtn,
+  });
+
+  function releaseSubmit() {
+    delete submitBtn.dataset.busy;
+    submitBtn.disabled = false;
+    availability.apply();
+  }
+
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.style.display = 'none';
@@ -322,6 +349,7 @@ import LocationPicker from './LocationPicker.astro';
       return;
     }
 
+    submitBtn.dataset.busy = '1';
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> পাঠানো হচ্ছে...';
 
@@ -346,12 +374,12 @@ import LocationPicker from './LocationPicker.astro';
     if (!pickupAddress || !dropAddress) {
       errorEl.textContent = 'পিকআপ ও ডেলিভারি ঠিকানা দুটোই দিতে হবে';
       errorEl.style.display = 'block';
-      submitBtn.disabled = false;
+      releaseSubmit();
       submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান';
       return;
     }
 
-    const { error } = await createServiceRequest({
+    const { error, code } = await createServiceRequest({
       category: 'delivery',
       upazila,
       pickupAddress,
@@ -367,15 +395,17 @@ import LocationPicker from './LocationPicker.astro';
       askingPrice,
     });
 
-    submitBtn.disabled = false;
+    releaseSubmit();
     submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান';
 
     if (error) {
       errorEl.textContent = error;
       errorEl.style.display = 'block';
+      if (code === 'NO_RIDER_ONLINE') availability.refresh();
       return;
     }
 
+    form.dataset.done = '1';
     form.style.display = 'none';
     successEl.style.display = 'block';
   });
