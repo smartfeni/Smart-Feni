@@ -1,3 +1,4 @@
+<!-- path: src/components/delivery/RideHeroCard.astro -->
 ---
 // ============================================================
 // কম্পোনেন্ট: রাইড হিরো কার্ড — CTA + ফর্ম একসাথে মার্জড
@@ -6,6 +7,10 @@
 // আলাদা রাখা হয়েছে — Ride Hero স্বতন্ত্র ক্যাটাগরি, "Smart Hero"
 // নামের কোনো শেয়ার্ড ব্র্যান্ডিং নাই।
 // লগইন না থাকলে ফর্ম দেখানোর আগে AuthModal খুলবে।
+//
+// আপডেট (রাইডার অ্যাভেইলেবিলিটি): উপজেলা অনুযায়ী অনলাইন রাইডার না
+// থাকলে ফর্মের উপরে NoRiderNotice (WhatsApp সহ) দেখায় এবং সাবমিট বন্ধ
+// রাখে। পুরো ফেনীতে কেউ অনলাইনে না থাকলে ফর্মটাই লুকিয়ে যায়।
 // ============================================================
 
 const upazilaList = [
@@ -13,6 +18,7 @@ const upazilaList = [
 ];
 
 import LocationPicker from './LocationPicker.astro';
+import NoRiderNotice from './NoRiderNotice.astro';
 ---
 
 <section class="rh-section">
@@ -21,6 +27,8 @@ import LocationPicker from './LocationPicker.astro';
       <span class="rh-badge"><i class="fas fa-bolt"></i> নতুন</span>
       <h2 class="rh-title">রাইড হিরো</h2>
       <p class="rh-subtitle">দাম বলুন, ভেরিফাইড রাইড হিরোরা অফার দিবে — সবচেয়ে ভালোটা বেছে নিন</p>
+
+      <NoRiderNotice id="rh" category="ride" />
 
       <form id="rhForm" class="rh-form" novalidate>
         <div class="rh-field">
@@ -303,6 +311,7 @@ import LocationPicker from './LocationPicker.astro';
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { createServiceRequest } from '../../lib/deliveryClient.js';
+  import { initRiderAvailability } from '../../lib/riderAvailability.js';
 
   const form = document.getElementById('rhForm');
   const successEl = document.getElementById('rhSuccess');
@@ -319,6 +328,24 @@ import LocationPicker from './LocationPicker.astro';
     });
   });
 
+  // উপজেলা অনুযায়ী অনলাইন রাইডার চেক — রাইডার না থাকলে নোটিশ দেখায়
+  // ও সাবমিট বন্ধ রাখে (সার্ভারেও একই চেক আছে: create-request API)
+  const availability = initRiderAvailability({
+    category: 'ride',
+    root: document.getElementById('rhNotice'),
+    form,
+    upazilaSelect: document.getElementById('rhUpazila'),
+    vehicleInput,
+    vehicleButtons,
+    submitBtn,
+  });
+
+  function releaseSubmit() {
+    delete submitBtn.dataset.busy;
+    submitBtn.disabled = false;
+    availability.apply();
+  }
+
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.style.display = 'none';
@@ -333,6 +360,7 @@ import LocationPicker from './LocationPicker.astro';
       return;
     }
 
+    submitBtn.dataset.busy = '1';
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> পাঠানো হচ্ছে...';
 
@@ -359,12 +387,12 @@ import LocationPicker from './LocationPicker.astro';
     if (!pickupAddress || !dropAddress) {
       errorEl.textContent = 'পিকআপ ও গন্তব্য দুটোই দিতে হবে';
       errorEl.style.display = 'block';
-      submitBtn.disabled = false;
+      releaseSubmit();
       submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান';
       return;
     }
 
-    const { error } = await createServiceRequest({
+    const { error, code } = await createServiceRequest({
       category: 'ride',
       upazila,
       pickupAddress,
@@ -381,15 +409,17 @@ import LocationPicker from './LocationPicker.astro';
       askingPrice,
     });
 
-    submitBtn.disabled = false;
+    releaseSubmit();
     submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> রিকোয়েস্ট পাঠান';
 
     if (error) {
       errorEl.textContent = error;
       errorEl.style.display = 'block';
+      if (code === 'NO_RIDER_ONLINE') availability.refresh();
       return;
     }
 
+    form.dataset.done = '1';
     form.style.display = 'none';
     successEl.style.display = 'block';
   });
