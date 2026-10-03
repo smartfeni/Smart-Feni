@@ -1,3 +1,10 @@
+// path: src/pages/api/delivery/create-request.js
+//
+// আপডেট (রাইডার অ্যাভেইলেবিলিটি): রিকোয়েস্ট তৈরির আগে সার্ভারে চেক —
+// সিলেক্ট করা উপজেলায় (এবং নির্দিষ্ট বাহন চাইলে সেই বাহনের) কোনো
+// approved + অনলাইন (is_active) রাইডার না থাকলে 409 + code: 'NO_RIDER_ONLINE'
+// দিয়ে reject। ফ্রন্টএন্ডের নোটিশ বাইপাস করে সরাসরি API কল করলেও
+// অর্ডার তৈরি হবে না।
 //
 // আপডেট (N19): sendBulkNotifications এ priority: 'high' যোগ — নতুন রিকোয়েস্ট মিলে যাওয়া হিরোদের কাছে জরুরি হিসেবে যাওয়া দরকার।
 // ============================================================
@@ -75,6 +82,44 @@ export async function POST({ request }) {
       return new Response(
         JSON.stringify({ error: 'রাইড রিকোয়েস্টে সাইকেল সিলেক্ট করা যাবে না' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ===== অনলাইন রাইডার চেক (উপজেলা অনুযায়ী) =====
+    // service role client দিয়ে গুনছি, যেন RLS-এর কারণে ভুল শূন্য না আসে
+    const { client: availabilityAdmin } = getAdminClient();
+    const availabilityClient = availabilityAdmin || client;
+
+    let onlineQuery = availabilityClient
+      .from('delivery_riders')
+      .select('id', { count: 'exact', head: true })
+      .eq('verification_status', 'approved')
+      .eq('is_active', true)
+      .eq(finalCategory === 'ride' ? 'offers_ride' : 'offers_delivery', true)
+      .eq('upazila', upazila);
+
+    if (finalVehicleType !== 'any') {
+      onlineQuery = onlineQuery.eq('vehicle_type', finalVehicleType);
+    }
+
+    const { count: onlineRiderCount, error: onlineError } = await onlineQuery;
+
+    if (onlineError) {
+      return new Response(
+        JSON.stringify({ error: 'রাইডারদের স্ট্যাটাস যাচাই করা যায়নি, একটু পর আবার চেষ্টা করুন' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (!onlineRiderCount) {
+      const noRiderMessage =
+        finalVehicleType !== 'any'
+          ? `${upazila}-এ এই বাহনের কোনো রাইডার এই মুহূর্তে সক্রিয় নেই। "যেকোনো" বেছে নিন, অথবা কিছুক্ষণ পর চেষ্টা করুন।`
+          : `দুঃখিত, ${upazila}-এ এই মুহূর্তে কোনো রাইডার সক্রিয় নেই। অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন। জরুরি প্রয়োজনে WhatsApp করুন: +8801816355833`;
+
+      return new Response(
+        JSON.stringify({ error: noRiderMessage, code: 'NO_RIDER_ONLINE' }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
