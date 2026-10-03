@@ -6,9 +6,10 @@
 // v2 — ভিজিটিং-কার্ড ডিজাইন + দিনভিত্তিক ফিল্টার
 //
 // কী আছে:
-//   • সবার উপরে "AI সহকারী" বাটন — smartfeni:open-doctor-chat ইভেন্ট ছোঁড়ে
-//     (চ্যাট কম্পোনেন্ট বসানোর পর window.__sfDoctorChatReady = true করবে;
-//      তার আগে বাটন চাপলে "শীঘ্রই চালু হচ্ছে" টোস্ট দেখায়)
+//   • সবার উপরে "AI সহকারী" বাটন — smartfeni:open-doctor-chat ইভেন্ট ছোঁড়ে;
+//     <DoctorChat /> (নিচে বসানো) সেটা শুনে চ্যাট প্যানেল খোলে।
+//     চ্যাট থেকে স্পেশালিটি কার্ডে ট্যাপ করলে smartfeni:doctor-chat-pick
+//     ইভেন্টে এই পেজ রিলোড ছাড়াই ড্রপডাউন বদলে ফিল্টার করে
 //   • ডাক্তার | হসপিটাল ট্যাব বার — হসপিটাল (১খ) যোগ না হওয়া পর্যন্ত
 //     লুকানো (#dirTabs)। চালু করতে শুধু style="display:none" সরান
 //   • সার্চ (নাম/ডিগ্রি/স্পেশালিটি/চেম্বারের নাম) + স্পেশালিটি + উপজেলা
@@ -26,6 +27,7 @@
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
+import DoctorChat from '../../components/doctor/DoctorChat.astro';
 ---
 
 <BaseLayout title="ডাক্তার ও হাসপাতাল ডিরেক্টরি | স্মার্ট ফেনী">
@@ -119,6 +121,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     </div>
   </div>
+
+  <DoctorChat />
 
   <style>
     .dir-page { min-height: 70vh; padding: 40px 0 80px; }
@@ -430,10 +434,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     function buildSpecFilter(preselect) {
       const counts = {};
       allDoctors.forEach((d) => (d.specialties || []).forEach((s) => { counts[s] = (counts[s] || 0) + 1; }));
-      const slugs = Object.keys(specMap).filter((s) => counts[s]);
+      const slugs = Object.keys(specMap).filter((s) => counts[s] || s === preselect);
       specFilter.innerHTML = '<option value="">সব স্পেশালিটি</option>' + slugs
         .map((s) => `<option value="${esc(s)}">${esc(specMap[s].name_bn)} (${toBn(counts[s])})</option>`).join('');
-      if (preselect && counts[preselect]) specFilter.value = preselect;
+      if (preselect && specMap[preselect]) specFilter.value = preselect;
     }
 
     async function load() {
@@ -518,6 +522,26 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     });
 
     $('moreBtn').addEventListener('click', () => { shown += PAGE_SIZE; render(); });
+
+    // AI চ্যাটের স্পেশালিটি কার্ডে ট্যাপ → রিলোড ছাড়াই ফিল্টার
+    function selectSpec(slug) {
+      if (!specMap[slug]) return false;     // তালিকা এখনো লোড হয়নি — সাধারণ লিংকে যাবে
+      if (![...specFilter.options].some((o) => o.value === slug)) {
+        const opt = document.createElement('option');
+        opt.value = slug;
+        opt.textContent = `${specMap[slug].name_bn} (${toBn(0)})`;
+        specFilter.appendChild(opt);
+      }
+      specFilter.value = slug;
+      searchInput.value = '';
+      shown = PAGE_SIZE;
+      render();
+      $('dirSearchBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
+    }
+    window.addEventListener('smartfeni:doctor-chat-pick', (e) => {
+      if (selectSpec(e.detail?.spec)) e.preventDefault();
+    });
 
     // হেডারে উপজেলা বদলালে সর্টিং আপডেট (ফিল্টার নয়, শুধু আগে দেখানো)
     window.addEventListener('smartfeni:upazila-changed', (e) => {
