@@ -9,6 +9,8 @@
 //   • চেম্বার + দিনভিত্তিক একাধিক স্লট ম্যানেজমেন্ট
 //   • শুধু admin: publish/ড্রাফট, মার্জ (merge_doctors), ডিলিট
 //   • moderator শুধু draft/pending পর্যন্ত সেট করতে পারে
+//   • ছবি আপলোডে ক্রপ বক্স (৩:৪, ৬০০×৮০০): টেনে সরানো + জুম + কার্ডের
+//     তির্যক কাটার গাইড — যাতে সবার ছবি একই মাপে ঠিকমতো ফ্রেম হয়
 // ডাটা: doctors, doctor_chambers, chamber_slots, specialties
 // ============================================================
 export const prerender = false;
@@ -94,7 +96,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <div class="photo-preview" id="dPhotoPreview"><i class="fas fa-user-doctor"></i></div>
           <div class="photo-actions">
             <input type="file" id="dPhotoInput" accept="image/jpeg,image/png,image/webp" />
-            <button type="button" class="mini-btn" id="dPhotoRemove" style="display:none;">ছবি সরান</button>
+            <div class="photo-btns">
+              <button type="button" class="mini-btn" id="dPhotoEdit" style="display:none;"><i class="fas fa-crop-simple"></i> ছবি ঠিক করুন</button>
+              <button type="button" class="mini-btn" id="dPhotoRemove" style="display:none;">ছবি সরান</button>
+            </div>
           </div>
         </div>
 
@@ -233,6 +238,25 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     </div>
   </div>
 
+  <!-- ===== ছবি ক্রপ মোডাল ===== -->
+  <div class="modal-overlay" id="cropOverlay" style="z-index:120;">
+    <div class="modal-box">
+      <h2 class="modal-title"><i class="fas fa-crop-simple"></i> ছবি ঠিক করুন</h2>
+      <p class="modal-sub">আঙুল দিয়ে ছবি টানুন, নিচের স্লাইডারে জুম করুন। <b>ফাঁকা অংশে মুখ রাখুন</b> — ঝাপসা অংশটুকু কার্ডে কাটা পড়বে।</p>
+      <div class="crop-stage"><canvas id="cropCanvas" width="450" height="600"></canvas></div>
+      <div class="crop-zoom">
+        <i class="fas fa-magnifying-glass-minus"></i>
+        <input type="range" id="cropZoom" min="0" max="100" value="0" />
+        <i class="fas fa-magnifying-glass-plus"></i>
+      </div>
+      <p class="hint" style="text-align:center;">পুরো ছবি দেখাতে চাইলে স্লাইডার বাঁয়ে সবচেয়ে কমিয়ে দিন।</p>
+      <div class="btn-row">
+        <button class="cancel-btn" id="cropCancel" type="button">বাতিল</button>
+        <button class="create-btn" id="cropOk" type="button" style="margin-top:0;"><i class="fas fa-check"></i> ঠিক আছে</button>
+      </div>
+    </div>
+  </div>
+
   <style>
     .admin-page { min-height: 60vh; padding: 32px 0 80px; }
     .admin-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
@@ -283,9 +307,16 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .sub-title { font-size: 0.92rem; font-weight: 700; color: #1B2A4A; margin: 6px 0 8px; }
 
     .photo-row { display: flex; align-items: center; gap: 14px; }
-    .photo-preview { width: 64px; height: 64px; border-radius: 16px; background: #FFF0EA; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; overflow: hidden; flex-shrink: 0; }
+    .photo-preview { width: 72px; height: 96px; border-radius: 14px; background: #FFF0EA; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; overflow: hidden; flex-shrink: 0; }
     .photo-preview img { width: 100%; height: 100%; object-fit: cover; }
-    .photo-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; font-size: 0.8rem; }
+    .photo-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; font-size: 0.8rem; min-width: 0; }
+    .photo-actions input[type="file"] { max-width: 100%; }
+    .photo-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+    .crop-stage { display: flex; justify-content: center; margin-bottom: 12px; }
+    #cropCanvas { width: 100%; max-width: 300px; aspect-ratio: 3 / 4; border-radius: 14px; background: #FFE3D6; touch-action: none; cursor: grab; box-shadow: 0 0 0 1.5px #E5EAF0; }
+    #cropCanvas:active { cursor: grabbing; }
+    .crop-zoom { display: flex; align-items: center; gap: 10px; color: #8FA0BC; margin-bottom: 6px; }
+    .crop-zoom input[type="range"] { flex: 1; accent-color: #FF6B35; }
     .spec-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
     .dup-box { margin-top: 10px; background: #FFF8E6; border: 1.5px solid #FFE2A8; border-radius: 14px; padding: 12px; }
   </style>
@@ -293,7 +324,6 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
-    import { compressImage } from '../../lib/imageCompress.js';
 
     // ===== কনস্ট্যান্ট =====
     const UPAZILA_LABELS = {
@@ -316,8 +346,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     let specMap = {};
     let allDoctors = [];
     let editingDoctor = null;      // null = নতুন
-    let pendingPhotoFile = null;
+    let pendingPhotoFile = null;     // ক্রপ করা JPEG (File)
     let removePhoto = false;
+    let photoSource = null;          // পরে আবার ক্রপ করার জন্য উৎস: { url, remote }
+    let photoPreviewUrl = null;      // ObjectURL (মেমরি পরিষ্কারের জন্য)
     let chamberDoctor = null;
     let editingChamber = null;
     let editingChamberOldSlotIds = [];
@@ -600,12 +632,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const box = $('dPhotoPreview');
       box.innerHTML = url ? `<img src="${esc(url)}" alt="" />` : '<i class="fas fa-user-doctor"></i>';
       $('dPhotoRemove').style.display = url ? 'inline-block' : 'none';
+      $('dPhotoEdit').style.display = url && photoSource ? 'inline-block' : 'none';
     }
 
     function openDoctorForm(d) {
       editingDoctor = d || null;
       pendingPhotoFile = null;
       removePhoto = false;
+      photoSource = d?.photo_url ? { url: d.photo_url, remote: true } : null;
       setMsg($('doctorMessage'), '');
       $('dupBox').style.display = 'none';
       $('dupBox').innerHTML = '';
@@ -669,12 +703,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       });
     }
 
+    // file আগেই ক্রপ ও কম্প্রেস করা JPEG (৬০০×৮০০) — আবার কম্প্রেস লাগে না
     async function uploadPhoto(file) {
-      const compressed = await compressImage(file, { maxDimension: 800, quality: 0.82, skipIfSmallerThan: 150 * 1024 });
-      const ext = (compressed.type === 'image/png') ? 'png' : (compressed.type === 'image/webp' ? 'webp' : 'jpg');
-      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-      const { error } = await supabase.storage.from('doctor-photos').upload(path, compressed, {
-        contentType: compressed.type || 'image/jpeg',
+      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const { error } = await supabase.storage.from('doctor-photos').upload(path, file, {
+        contentType: 'image/jpeg',
         upsert: false,
       });
       if (error) throw new Error('ছবি আপলোড ব্যর্থ: ' + error.message);
@@ -1018,6 +1051,173 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     }
 
     // ============================================================
+    // ছবি ক্রপ (৩:৪, আউটপুট ৬০০×৮০০ JPEG)
+    // ============================================================
+    const CW = 450, CH = 600;              // ক্যানভাসের ভেতরের মাপ
+    const OUT_W = 600, OUT_H = 800;        // সেভ হওয়া ছবির মাপ
+    const FILL = '#FFE3D6';                // কার্ডের ছবির ব্যাকগ্রাউন্ডের রঙ — ফাঁকা অংশ মিশে যাবে
+    // কার্ডে ছবির যে অংশ দেখা যায় (ক্রপ ফ্রেমের ভগ্নাংশ) — মোটামুটি নির্দেশিকা
+    const GUIDE = [[0.416, 0], [0.88, 0], [0.88, 1], [0.20, 1]];
+
+    const cropCanvas = $('cropCanvas');
+    const cctx = cropCanvas.getContext('2d');
+    const cropZoom = $('cropZoom');
+    const cropPointers = new Map();
+    let crop = null;        // { img, s, minS, maxS, x, y }
+    let cropOpts = {};
+    let pinch = null;
+
+    function clampCrop() {
+      const w = crop.img.naturalWidth * crop.s;
+      const h = crop.img.naturalHeight * crop.s;
+      crop.x = w >= CW ? Math.min(0, Math.max(CW - w, crop.x)) : Math.min(CW - w, Math.max(0, crop.x));
+      crop.y = h >= CH ? Math.min(0, Math.max(CH - h, crop.y)) : Math.min(CH - h, Math.max(0, crop.y));
+    }
+
+    function paintImage(ctx, f) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.fillStyle = FILL;
+      ctx.fillRect(0, 0, CW * f, CH * f);
+      ctx.drawImage(crop.img, crop.x * f, crop.y * f, crop.img.naturalWidth * crop.s * f, crop.img.naturalHeight * crop.s * f);
+    }
+
+    function drawCrop() {
+      if (!crop) return;
+      paintImage(cctx, 1);
+      // গাইড: যে অংশ কার্ডে কাটা পড়বে সেটা ঝাপসা
+      cctx.save();
+      cctx.beginPath();
+      cctx.rect(0, 0, CW, CH);
+      GUIDE.forEach(([gx, gy], i) => (i === 0 ? cctx.moveTo(gx * CW, gy * CH) : cctx.lineTo(gx * CW, gy * CH)));
+      cctx.closePath();
+      cctx.fillStyle = 'rgba(27, 42, 74, 0.55)';
+      cctx.fill('evenodd');
+      cctx.beginPath();
+      GUIDE.forEach(([gx, gy], i) => (i === 0 ? cctx.moveTo(gx * CW, gy * CH) : cctx.lineTo(gx * CW, gy * CH)));
+      cctx.closePath();
+      cctx.setLineDash([10, 8]);
+      cctx.lineWidth = 3;
+      cctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      cctx.stroke();
+      cctx.restore();
+    }
+
+    function syncZoomSlider() {
+      const span = crop.maxS - crop.minS;
+      cropZoom.value = span > 0 ? String(Math.round(((crop.s - crop.minS) / span) * 100)) : '0';
+    }
+
+    function setCropScale(ns) {
+      ns = Math.min(crop.maxS, Math.max(crop.minS, ns));
+      const cx = CW / 2, cy = CH / 2;
+      crop.x = cx - (cx - crop.x) * (ns / crop.s);
+      crop.y = cy - (cy - crop.y) * (ns / crop.s);
+      crop.s = ns;
+      clampCrop();
+      syncZoomSlider();
+      drawCrop();
+    }
+
+    function openCrop(url, remote, opts) {
+      cropOpts = opts || {};
+      const img = new Image();
+      if (remote) img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const cover = Math.max(CW / img.naturalWidth, CH / img.naturalHeight);
+        const contain = Math.min(CW / img.naturalWidth, CH / img.naturalHeight);
+        crop = { img, s: cover, minS: Math.min(contain, cover), maxS: cover * 3, x: 0, y: 0 };
+        crop.x = (CW - img.naturalWidth * cover) / 2;   // আড়াআড়ি মাঝখানে
+        crop.y = 0;                                      // মাথা উপরে থাকে ধরে উপর থেকে শুরু
+        clampCrop();
+        syncZoomSlider();
+        drawCrop();
+        openOverlay($('cropOverlay'));
+      };
+      img.onerror = () => {
+        toast('এই ছবিটা খোলা যাচ্ছে না — JPG বা PNG ছবি দিন (ফোনের স্ক্রিনশটও চলবে)', 'error');
+        if (cropOpts.clearInputOnCancel) $('dPhotoInput').value = '';
+        if (cropOpts.newSource) URL.revokeObjectURL(cropOpts.newSource.url);
+      };
+      img.src = remote ? url + (url.includes('?') ? '&' : '?') + 'cb=' + Date.now() : url;
+    }
+
+    function closeCrop() {
+      closeOverlay($('cropOverlay'));
+      // নতুন ফাইল বেছে ক্রপ বাতিল করলে বাছাই বাতিল
+      if (cropOpts.clearInputOnCancel) {
+        $('dPhotoInput').value = '';
+        if (cropOpts.newSource) URL.revokeObjectURL(cropOpts.newSource.url);
+      }
+      cropOpts = {};
+      crop = null;
+    }
+
+    function confirmCrop() {
+      if (!crop) return;
+      const out = document.createElement('canvas');
+      out.width = OUT_W;
+      out.height = OUT_H;
+      try {
+        paintImage(out.getContext('2d'), OUT_W / CW);
+        out.toBlob((blob) => {
+          if (!blob) { toast('ছবি তৈরি করা যায়নি, আবার চেষ্টা করুন', 'error'); return; }
+          pendingPhotoFile = new File([blob], 'doctor.jpg', { type: 'image/jpeg' });
+          removePhoto = false;
+          if (cropOpts.newSource) photoSource = cropOpts.newSource;
+          if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+          photoPreviewUrl = URL.createObjectURL(blob);
+          setPhotoPreview(photoPreviewUrl);
+          cropOpts = {};
+          crop = null;
+          closeOverlay($('cropOverlay'));
+        }, 'image/jpeg', 0.86);
+      } catch (err) {
+        toast('এই ছবিটা এডিট করা যাচ্ছে না — নতুন ছবি বেছে নিন', 'error');
+      }
+    }
+
+    // টানা ও পিঞ্চ-জুম
+    cropCanvas.addEventListener('pointerdown', (e) => {
+      cropCanvas.setPointerCapture(e.pointerId);
+      cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (cropPointers.size === 2 && crop) {
+        const [a, b] = [...cropPointers.values()];
+        pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), s: crop.s };
+      }
+    });
+    cropCanvas.addEventListener('pointermove', (e) => {
+      if (!crop || !cropPointers.has(e.pointerId)) return;
+      const prev = cropPointers.get(e.pointerId);
+      const rect = cropCanvas.getBoundingClientRect();
+      const k = CW / rect.width;
+      if (cropPointers.size === 1) {
+        crop.x += (e.clientX - prev.x) * k;
+        crop.y += (e.clientY - prev.y) * k;
+        clampCrop();
+        drawCrop();
+      }
+      cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (cropPointers.size === 2 && pinch) {
+        const [a, b] = [...cropPointers.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinch.dist > 0) setCropScale(pinch.s * (d / pinch.dist));
+      }
+    });
+    const endPointer = (e) => { cropPointers.delete(e.pointerId); pinch = null; };
+    cropCanvas.addEventListener('pointerup', endPointer);
+    cropCanvas.addEventListener('pointercancel', endPointer);
+    cropCanvas.addEventListener('wheel', (e) => {
+      if (!crop) return;
+      e.preventDefault();
+      setCropScale(crop.s * (e.deltaY < 0 ? 1.08 : 0.92));
+    }, { passive: false });
+    cropZoom.addEventListener('input', () => {
+      if (!crop) return;
+      setCropScale(crop.minS + (crop.maxS - crop.minS) * (Number(cropZoom.value) / 100));
+    });
+
+    // ============================================================
     // ইভেন্ট বাইন্ডিং
     // ============================================================
     $('newDoctorBtn').addEventListener('click', () => openDoctorForm(null));
@@ -1028,7 +1228,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $(id).addEventListener('click', (e) => { if (e.target === $(id)) closeOverlay($(id)); });
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') ['doctorOverlay', 'chamberOverlay', 'mergeOverlay'].forEach((id) => closeOverlay($(id)));
+      if (e.key === 'Escape') ['cropOverlay', 'doctorOverlay', 'chamberOverlay', 'mergeOverlay'].forEach((id) => closeOverlay($(id)));
     });
 
     let searchTimer = null;
@@ -1043,16 +1243,26 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     $('dPhotoInput').addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0];
       if (!f) return;
-      pendingPhotoFile = f;
-      removePhoto = false;
-      setPhotoPreview(URL.createObjectURL(f));
+      if (!/^image\//.test(f.type)) {
+        toast('শুধু ছবি ফাইল দিন (JPG/PNG)', 'error');
+        e.target.value = '';
+        return;
+      }
+      const url = URL.createObjectURL(f);
+      openCrop(url, false, { clearInputOnCancel: true, newSource: { url, remote: false } });
+    });
+    $('dPhotoEdit').addEventListener('click', () => {
+      if (photoSource) openCrop(photoSource.url, photoSource.remote, {});
     });
     $('dPhotoRemove').addEventListener('click', () => {
       pendingPhotoFile = null;
       removePhoto = true;
+      photoSource = null;
       $('dPhotoInput').value = '';
       setPhotoPreview('');
     });
+    $('cropCancel').addEventListener('click', closeCrop);
+    $('cropOk').addEventListener('click', confirmCrop);
 
     $('cmAddBtn').addEventListener('click', () => openChamberForm(null));
     $('cCancelBtn').addEventListener('click', showChamberList);
