@@ -1,72 +1,438 @@
 ---
+// ============================================================
+// পেজ: অ্যাডমিন ড্যাশবোর্ড (/admin)
+// শুধু admin/moderator role অ্যাক্সেস করতে পারবে — adminGuard.js দিয়ে
+// ক্লায়েন্ট-সাইডে চেক হয়, আসল নিরাপত্তা Supabase RLS policy-তে
+// আপডেট: নেভিগেশন গ্রিডে "অ্যানালিটিক্স", "আইনি অনুরোধ" ও
+//         "স্বাস্থ্য অনুরোধ" কার্ড যোগ করা হয়েছে
+// আপডেট ২: "ফিচার্ড ফটো" কার্ড → "ছবি ম্যানেজমেন্ট" কার্ডে বদলানো
+//           হলো (/admin/images)
+// আপডেট ৩: "শপ ম্যানেজমেন্ট" কার্ড পুনরায় যোগ করা হলো (/admin/shops)
+// আপডেট ৪: "ক্লাব ম্যানেজমেন্ট" কার্ড যোগ করা হলো (/admin/clubs)
+// আপডেট ৫: ক্লাব কার্ড এখন শুধু admin role দেখতে পাবে
+// আপডেট ৬: "ডেলিভারি হিরো ভেরিফিকেশন" কার্ড যোগ করা হলো
+// আপডেট ৭: "Bot Chats" কার্ড যোগ করা হলো
+//           (/admin/bot-chats) — pending চ্যাট রিকোয়েস্টের কাউন্ট
+//           ব্যাজ সহ (rider badge এর মতোই লজিক)
+// আপডেট ৮ (এই সেশন): "ডাক্তার ম্যানেজমেন্ট" কার্ড যোগ করা হলো
+//           (/admin/doctors) — admin ও moderator দুজনেই দেখতে পাবে।
+//           'pending' (রিভিউয়ের অপেক্ষায়) ডাক্তারের কাউন্ট ব্যাজ সহ
+// ============================================================
+
 export const prerender = false;
 
-import BaseLayout from '../components/layout/BaseLayout.astro';
-import Hero from '../components/ui/Hero.astro';
-import FeaturedPhotos from '../components/ui/FeaturedPhotos.astro';
-import CategoryGrid from '../components/ui/CategoryGrid.astro';
-import { supabase } from '../lib/supabase.js';
-
-// ============================================================
-// আপডেট: no-store বদলে stale-while-revalidate ব্যবহার করা হলো —
-// CDN ৬০ সেকেন্ড পর্যন্ত পেজ cache রাখবে (দ্রুত লোডিং), তারপর
-// background-এ ফ্রেশ ভার্সন fetch করবে। ফলে সব ভিজিটর দ্রুত পেজ
-// পাবে, আর ক্যাটাগরি/কনটেন্ট আপডেট সর্বোচ্চ ~৬০-৯০ সেকেন্ডে
-// রিফ্লেক্ট হবে (আগের no-store এ প্রতিটা ভিজিটে সার্ভার লোড হতো,
-// যেটা ট্রাফিক বাড়লে খরচ/স্পিডে প্রভাব ফেলতো)।
-// ============================================================
-Astro.response.headers.set(
-  'Cache-Control',
-  'public, max-age=0, s-maxage=60, stale-while-revalidate=30'
-);
-
-// আপডেট (হোমপেজ সেকশন অর্ডার — ৩ অপশন): site_settings টেবিলের
-// 'homepage_section_order' কী দিয়ে ঠিক হয় Featured Photos কোথায়
-// বসবে — Popular ও General ক্যাটাগরি গ্রিডের উপরে, মাঝখানে, নাকি
-// নিচে। Popular সবসময় General-এর আগে থাকে (fix), শুধু Photos-এর
-// পজিশন বদলায়। অ্যাডমিন প্যানেল /admin/categories থেকে নিয়ন্ত্রিত।
-// fetch ব্যর্থ হলে ডিফল্ট 'photos_first' (আগের আচরণ) হিসেবে থাকবে।
-let sectionOrder = 'photos_first';
-try {
-  const { data, error } = await supabase
-    .from('site_settings')
-    .select('value')
-    .eq('key', 'homepage_section_order')
-    .maybeSingle();
-  if (!error && data?.value) {
-    // পুরনো ২-অপশন ভ্যালু থাকলে নতুন সিস্টেমে ম্যাপ করা হচ্ছে
-    if (data.value === 'category_first') {
-      sectionOrder = 'photos_last';
-    } else if (['photos_first', 'photos_middle', 'photos_last'].includes(data.value)) {
-      sectionOrder = data.value;
-    }
-  }
-} catch (e) {
-  // fallback: photos_first
-}
+import BaseLayout from '../../components/layout/BaseLayout.astro';
 ---
 
-<BaseLayout title="স্মার্ট ফেনী - আপনার শহরের ডিজিটাল সেবা" showChatWidget={true} showFooter={true}>
-  <Hero />
-  {sectionOrder === 'photos_first' && (
-    <>
-      <FeaturedPhotos />
-      <CategoryGrid part="popular" />
-      <CategoryGrid part="general" />
-    </>
-  )}
-  {sectionOrder === 'photos_middle' && (
-    <>
-      <CategoryGrid part="popular" />
-      <FeaturedPhotos />
-      <CategoryGrid part="general" />
-    </>
-  )}
-  {sectionOrder === 'photos_last' && (
-    <>
-      <CategoryGrid part="popular" />
-      <CategoryGrid part="general" />
-      <FeaturedPhotos />
-    </>
-  )}
+<BaseLayout title="অ্যাডমিন ড্যাশবোর্ড | স্মার্ট ফেনী">
+  <div class="admin-page">
+    <div class="container">
+
+      <!-- ===== লোডিং স্টেট (গার্ড চেক চলাকালীন) ===== -->
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <!-- ===== আসল কন্টেন্ট (গার্ড পাস হলে দেখা যাবে) ===== -->
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <div class="admin-header">
+          <div>
+            <h1>অ্যাডমিন ড্যাশবোর্ড</h1>
+            <p class="admin-role-badge" id="roleBadge"></p>
+          </div>
+        </div>
+
+        <!-- ===== স্ট্যাটস কার্ড ===== -->
+        <div class="admin-stats">
+          <div class="stat-card">
+            <i class="fas fa-users"></i>
+            <div>
+              <span class="stat-number" id="statUsers">—</span>
+              <span class="stat-label">মোট ইউজার</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <i class="fas fa-list-check"></i>
+            <div>
+              <span class="stat-number" id="statListings">—</span>
+              <span class="stat-label">মোট লিস্টিং</span>
+            </div>
+          </div>
+          <div class="stat-card highlight">
+            <i class="fas fa-hourglass-half"></i>
+            <div>
+              <span class="stat-number" id="statPending">—</span>
+              <span class="stat-label">রিভিউ বাকি</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== নেভিগেশন কার্ড ===== -->
+        <div class="admin-nav-grid">
+          <a href="/admin/listings" class="admin-nav-card">
+            <i class="fas fa-list-check"></i>
+            <h3>লিস্টিং ম্যানেজমেন্ট</h3>
+            <p>সব ক্যাটাগরির লিস্টিং দেখুন, approve/reject/delete করুন</p>
+          </a>
+
+          <a href="/admin/users" class="admin-nav-card">
+            <i class="fas fa-users"></i>
+            <h3>ইউজার ম্যানেজমেন্ট</h3>
+            <p>প্রোফাইল দেখুন, প্রয়োজনে ব্লক/আনব্লক করুন</p>
+          </a>
+
+          <a href="/admin/shops" class="admin-nav-card">
+            <i class="fas fa-store"></i>
+            <h3>শপ ম্যানেজমেন্ট</h3>
+            <p>নতুন শপ তৈরি করুন, active/deactivate ও সিরিয়াল সাজান</p>
+          </a>
+
+          <a href="/admin/doctors" class="admin-nav-card admin-nav-card-badge-wrap">
+            <span class="admin-nav-badge" id="doctorPendingBadge" style="display:none;">0</span>
+            <i class="fas fa-user-doctor"></i>
+            <h3>ডাক্তার ম্যানেজমেন্ট</h3>
+            <p>ডাক্তার ও চেম্বারের সময়সূচি যোগ/এডিট করুন, রিভিউ করে পাবলিশ ও ডুপ্লিকেট মার্জ করুন</p>
+          </a>
+
+          <a href="/admin/delivery-riders" class="admin-nav-card admin-nav-card-badge-wrap">
+            <span class="admin-nav-badge" id="riderPendingBadge" style="display:none;">0</span>
+            <i class="fas fa-motorcycle"></i>
+            <h3>ডেলিভারি হিরো ভেরিফিকেশন</h3>
+            <p>রাইডার আবেদন যাচাই করুন, ছবি/আইডি কার্ড দেখে approve/reject করুন</p>
+          </a>
+
+          <a href="/admin/delivery-disputes" class="admin-nav-card admin-nav-card-badge-wrap">
+            <span class="admin-nav-badge" id="disputePendingBadge" style="display:none;">0</span>
+            <i class="fas fa-flag"></i>
+            <h3>ডেলিভারি ডিসপিউট</h3>
+            <p>কাস্টমার/রাইডারের রিপোর্ট করা সমস্যা দেখুন ও রিজলভ করুন</p>
+          </a>
+
+          <a href="/admin/clubs" class="admin-nav-card" id="clubNavCard" style="display:none;">
+            <i class="fas fa-users"></i>
+            <h3>ক্লাব ম্যানেজমেন্ট</h3>
+            <p>নতুন ক্লাব তৈরি করুন, ভেরিফাই ও active/deactivate করুন</p>
+          </a>
+
+          <a href="/admin/images" class="admin-nav-card">
+            <i class="fas fa-image"></i>
+            <h3>ছবি ম্যানেজমেন্ট</h3>
+            <p>ফিচার্ড ফটো, হেডার ব্যাকগ্রাউন্ড, লোগো — সব এখান থেকে</p>
+          </a>
+
+          <a href="/admin/categories" class="admin-nav-card">
+            <i class="fas fa-layer-group"></i>
+            <h3>ক্যাটাগরি ম্যানেজমেন্ট</h3>
+            <p>হোমপেজ সেকশন অর্ডার ও ক্যাটাগরি সিরিয়াল সাজান</p>
+          </a>
+
+          <a href="/admin/analytics" class="admin-nav-card">
+            <i class="fas fa-chart-line"></i>
+            <h3>অ্যানালিটিক্স</h3>
+            <p>উপজেলা, ক্যাটাগরি, কল ক্লিক ও সাইনআপ ট্রেন্ড দেখুন</p>
+          </a>
+
+          <a href="/admin/legal-requests" class="admin-nav-card">
+            <i class="fas fa-scale-balanced"></i>
+            <h3>আইনি অনুরোধ</h3>
+            <p> </p>
+          </a>
+
+          <a href="/admin/health-requests" class="admin-nav-card">
+            <i class="fas fa-stethoscope"></i>
+            <h3>স্বাস্থ্য অনুরোধ</h3>
+            <p> </p>
+          </a>
+
+          <a href="/admin/bot-chats" class="admin-nav-card admin-nav-card-badge-wrap">
+            <span class="admin-nav-badge" id="botChatPendingBadge" style="display:none;">0</span>
+            <i class="fas fa-robot"></i>
+            <h3>Bot Chats</h3>
+            <p>Telegram স্ক্রিনশট-ইম্পোর্ট বটের moderator/ক্যাটাগরি চ্যাট ম্যানেজ</p>
+          </a>
+
+          <a href="/admin/moderators" class="admin-nav-card" id="moderatorNavCard" style="display:none;">
+            <i class="fas fa-user-shield"></i>
+            <h3>মডারেটর ম্যানেজমেন্ট</h3>
+            <p>নতুন মডারেটর যোগ করুন বা সরানো</p>
+          </a>
+
+          <a href="/admin/notifications" class="admin-nav-card">
+            <i class="fas fa-bell"></i>
+            <h3>নোটিফিকেশন</h3>
+            <p>কাস্টম নোটিফিকেশন</p>
+          </a>
+
+          <a href="/admin/seed-locations" class="admin-nav-card">
+            <i class="fas fa-map-location-dot"></i>
+            <h3>লোকেশন ইম্পোর্ট</h3>
+            <p>OSM থেকে ফেনীর রেস্টুরেন্ট/হোটেল Delivery Hero সাজেশনে যোগ করুন</p>
+          </a>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 48px 0 80px;
+    }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .admin-header {
+      margin-bottom: 32px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-role-badge {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #FF6B35;
+      background: #FFF0EA;
+      padding: 4px 14px;
+      border-radius: 40px;
+      text-transform: capitalize;
+    }
+
+    .admin-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+
+    .stat-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    .stat-card i {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+
+    .stat-card.highlight i {
+      background: #FFE9DC;
+    }
+
+    .stat-number {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      line-height: 1.2;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.78rem;
+      color: #8FA0BC;
+      font-weight: 600;
+    }
+
+    .admin-nav-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+    }
+
+    .admin-nav-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 26px;
+      text-decoration: none;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .admin-nav-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+    }
+
+    .admin-nav-card i {
+      font-size: 1.6rem;
+      color: #FF6B35;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .admin-nav-card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 6px;
+    }
+
+    .admin-nav-card p {
+      font-size: 0.85rem;
+      color: #5A6E85;
+    }
+
+    .admin-nav-badge {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: #D14343;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 800;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 0 2px #fff;
+    }
+
+    @media (max-width: 768px) {
+      .admin-stats {
+        grid-template-columns: 1fr;
+      }
+      .admin-nav-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    async function loadStats() {
+      const [
+        { count: userCount },
+        { count: listingCount },
+        { count: pendingCount },
+        { count: riderPendingCount },
+        { count: botChatPendingCount },
+        { count: disputePendingCount },
+        { count: doctorPendingCount },
+      ] = await Promise.all([
+        supabase.from('profiles').select('*', { count: 'exact', head: true }),
+        supabase.from('listings').select('*', { count: 'exact', head: true }),
+        supabase.from('listings').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        supabase.from('delivery_riders').select('*', { count: 'exact', head: true }).eq('verification_status', 'pending'),
+        supabase.from('telegram_bot_chats').select('*', { count: 'exact', head: true }).eq('is_active', false),
+        supabase.from('delivery_requests').select('*', { count: 'exact', head: true }).eq('status', 'disputed'),
+        supabase.from('doctors').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      ]);
+
+      const statUsers = document.getElementById('statUsers');
+      const statListings = document.getElementById('statListings');
+      const statPending = document.getElementById('statPending');
+      const riderBadge = document.getElementById('riderPendingBadge');
+      const botChatBadge = document.getElementById('botChatPendingBadge');
+      const disputeBadge = document.getElementById('disputePendingBadge');
+      const doctorBadge = document.getElementById('doctorPendingBadge');
+
+      if (statUsers) statUsers.textContent = userCount ?? '0';
+      if (statListings) statListings.textContent = listingCount ?? '0';
+      if (statPending) statPending.textContent = pendingCount ?? '0';
+
+      if (riderBadge) {
+        if (riderPendingCount && riderPendingCount > 0) {
+          riderBadge.textContent = riderPendingCount > 99 ? '৯৯+' : riderPendingCount;
+          riderBadge.style.display = 'flex';
+        } else {
+          riderBadge.style.display = 'none';
+        }
+      }
+
+      if (botChatBadge) {
+        if (botChatPendingCount && botChatPendingCount > 0) {
+          botChatBadge.textContent = botChatPendingCount > 99 ? '৯৯+' : botChatPendingCount;
+          botChatBadge.style.display = 'flex';
+        } else {
+          botChatBadge.style.display = 'none';
+        }
+      }
+
+      if (disputeBadge) {
+        if (disputePendingCount && disputePendingCount > 0) {
+          disputeBadge.textContent = disputePendingCount > 99 ? '৯৯+' : disputePendingCount;
+          disputeBadge.style.display = 'flex';
+        } else {
+          disputeBadge.style.display = 'none';
+        }
+      }
+
+      if (doctorBadge) {
+        if (doctorPendingCount && doctorPendingCount > 0) {
+          doctorBadge.textContent = doctorPendingCount > 99 ? '৯৯+' : doctorPendingCount;
+          doctorBadge.style.display = 'flex';
+        } else {
+          doctorBadge.style.display = 'none';
+        }
+      }
+    }
+
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      const { role } = e.detail;
+
+      const roleBadge = document.getElementById('roleBadge');
+      if (roleBadge) roleBadge.textContent = role === 'admin' ? 'অ্যাডমিন' : 'মডারেটর';
+
+      if (role === 'admin') {
+        const modCard = document.getElementById('moderatorNavCard');
+        if (modCard) modCard.style.display = '';
+        const clubCard = document.getElementById('clubNavCard');
+        if (clubCard) clubCard.style.display = '';
+      }
+
+      loadStats();
+    });
+
+    initAdminGuard();
+  </script>
 </BaseLayout>
