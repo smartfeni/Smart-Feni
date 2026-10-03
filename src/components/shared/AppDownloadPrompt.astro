@@ -1,27 +1,78 @@
 <!-- path: src/components/shared/AppDownloadPrompt.astro -->
 ---
 // ============================================================
-// কম্পোনেন্ট: Android অ্যাপ ডাউনলোড প্রম্পট
+// কম্পোনেন্ট: Android অ্যাপ ডাউনলোড গেট (স্ট্রিক্ট ভার্সন)
 //
-// কখন দেখাবে:
-//   ✅ শুধু Android ফোনের ব্রাউজারে
-//   ❌ iPhone/iPad, ডেস্কটপ, ল্যাপটপ — কিছুই দেখাবে না, সরাসরি ওয়েবসাইট
-//   ❌ নেটিভ Capacitor অ্যাপের ভেতরে (isNativeApp())
-//   ❌ হোম-স্ক্রিনে ইনস্টল করা PWA (standalone মোড)
-//   ❌ /admin ও /api পেজে
+// নিয়ম:
+//   ✅ Android ব্রাউজারে প্রতিবার ওয়েবসাইট ভিজিটে দেখায় — কোনো cooldown
+//      নেই, কিছুই localStorage/cookie-তে সেভ হয় না
+//   ✅ রিফ্রেশ দিলে আবার আসবে
+//   ❌ iPhone, ডেস্কটপ ও অন্য ডিভাইসে কিছুই দেখায় না
+//   ❌ নেটিভ Capacitor অ্যাপের ভেতরে কখনো না
+//   ❌ /admin, /api, /.well-known পেজে না
+//   ❌ সার্চ ইঞ্জিন/প্রিভিউ বটে না (SEO বাঁচাতে)
 //
-// ইউজার "ব্রাউজারে চালিয়ে যান" চাপলে বা Play Store বাটনে ক্লিক
-// করলে ৭ দিন আর দেখাবে না (localStorage: sf_app_prompt_dismissed_at)।
+// হোমপেজ-গ্লিচ ফিক্স (গুরুত্বপূর্ণ):
+//   আগে JS লোড হওয়ার পর প্রম্পট দেখাত, তাই তার আগে এক ঝলক হোমপেজ
+//   দেখা যেত। এখন কম্পোনেন্টটা <body>-র একদম শুরুতে বসে এবং একটা
+//   সিঙ্ক্রোনাস inline স্ক্রিপ্ট সবকিছু রেন্ডারের আগেই <html>-এ
+//   `sf-app-gate` ক্লাস বসায়। CSS সেই ক্লাস দেখে বাকি সব কনটেন্ট
+//   লুকিয়ে শুধু প্রম্পট দেখায় — কোনো ফেড/ডিলে নেই, তাই কোনো ফ্ল্যাশ নেই।
 //
-// ফোকাস: বড় Play Store বাটন প্রধান, "ব্রাউজারে চালিয়ে যান"
-// ছোট ও হালকা ধূসর — যেন নজর ডাউনলোডে থাকে।
+// "ব্রাউজারে চালিয়ে যান":
+//   শুধু এই পেজ ভিউয়ের জন্য গেট সরায় (মেমোরিতে, কিছু সেভ হয় না)।
+//   REPROMPT_ON_INTERNAL_NAV = false থাকলে সাইটের ভেতরে এক পেজ থেকে
+//   আরেক পেজে গেলে আবার আসে না; true করলে প্রতিটা পেজেই আসবে।
 //
-// গুরুত্বপূর্ণ: Play Store লিংক তখনই কাজ করবে যখন অ্যাপ রিভিউ
-// পেরিয়ে লাইভ হবে।
+// Play Store লিংক কাজ করবে শুধু অ্যাপ লাইভ হওয়ার পর।
 // ============================================================
 
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.smartfeni.app';
 ---
+
+<script is:inline>
+  (function () {
+    // ⚙️ true করলে সাইটের ভেতরের প্রতিটা পেজ-চেঞ্জেও প্রম্পট আসবে
+    var REPROMPT_ON_INTERNAL_NAV = false;
+
+    try {
+      var ua = navigator.userAgent || '';
+
+      // শুধু Android
+      if (!/Android/i.test(ua)) return;
+
+      // সার্চ ইঞ্জিন / প্রিভিউ বট — কনটেন্ট লুকানো যাবে না
+      if (/bot|crawl|spider|slurp|lighthouse|facebookexternalhit|whatsapp|telegram|preview/i.test(ua)) return;
+
+      // নেটিভ Capacitor অ্যাপ — অ্যাপের ভেতরে কখনোই না
+      var cap = window.Capacitor;
+      if (
+        window.androidBridge ||
+        window.CapacitorAndroid ||
+        (cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform())
+      ) return;
+
+      // অ্যাডমিন/এপিআই/ভেরিফিকেশন পাথ
+      if (/^\/(admin|api|\.well-known)(\/|$)/.test(location.pathname)) return;
+
+      // সাইটের ভেতরের নেভিগেশন (রিলোড বাদে) হলে আবার দেখাবে না
+      if (!REPROMPT_ON_INTERNAL_NAV) {
+        var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+        var navType = nav ? nav.type : 'navigate';
+        var internal = document.referrer && document.referrer.indexOf(location.origin) === 0;
+        if (internal && navType !== 'reload') return;
+      }
+
+      document.documentElement.classList.add('sf-app-gate');
+    } catch (e) {}
+
+    // "ব্রাউজারে চালিয়ে যান" — শুধু এই ভিউয়ের জন্য গেট সরায় (কিছু সেভ হয় না)
+    document.addEventListener('click', function (e) {
+      var t = e.target && e.target.closest ? e.target.closest('#sfAppPromptContinue') : null;
+      if (t) document.documentElement.classList.remove('sf-app-gate');
+    });
+  })();
+</script>
 
 <div
   id="sfAppPrompt"
@@ -29,46 +80,46 @@ const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.smartf
   role="dialog"
   aria-modal="true"
   aria-labelledby="sfAppPromptTitle"
-  hidden
 >
-  <div class="sf-app-prompt-bg-glow"></div>
+  <div class="sf-app-prompt-glow"></div>
 
   <div class="sf-app-prompt-inner">
-    <div class="sf-app-prompt-logo-wrap">
-      <img src="/logo.png" alt="স্মার্ট ফেনী" class="sf-app-prompt-logo" width="84" height="84" />
-    </div>
+    <img src="/logo.png" alt="স্মার্ট ফেনী" class="sf-app-prompt-logo" width="76" height="76" />
 
-    <h2 id="sfAppPromptTitle" class="sf-app-prompt-title">স্মার্ট ফেনী অ্যাপ</h2>
-    <p class="sf-app-prompt-sub">প্রয়োজন আপনার, দায়িত্ব আমাদের</p>
+    <h2 id="sfAppPromptTitle" class="sf-app-prompt-title">স্মার্ট ফেনী অ্যাপ ডাউনলোড করুন</h2>
+    <p class="sf-app-prompt-sub">ফেনীর সব সেবা, আপনার ফোনের হোম স্ক্রিনেই</p>
 
-    <ul class="sf-app-prompt-features">
-      <li>
-        <span class="sf-app-prompt-ico"><i class="fas fa-bolt"></i></span>
-        <span>আরও দ্রুত ও স্মুথ অভিজ্ঞতা</span>
-      </li>
-      <li>
-        <span class="sf-app-prompt-ico"><i class="fas fa-bell"></i></span>
-        <span>অর্ডার, রাইড ও রক্তের জরুরি নোটিফিকেশন</span>
-      </li>
-      <li>
-        <span class="sf-app-prompt-ico"><i class="fas fa-location-dot"></i></span>
-        <span>সঠিক লোকেশনে সহজ সার্ভিস</span>
-      </li>
-    </ul>
-
-    <a
-      id="sfAppPromptDownload"
-      class="sf-app-prompt-download"
-      href={PLAY_STORE_URL}
-      target="_blank"
-      rel="noopener"
-    >
+    <a id="sfAppPromptDownload" class="sf-app-prompt-download" href={PLAY_STORE_URL}>
       <i class="fab fa-google-play"></i>
       <span class="sf-app-prompt-download-text">
         <small>এখনই পান</small>
-        <strong>Google Play থেকে ডাউনলোড</strong>
+        <strong>Google Play থেকে ডাউনলোড করুন</strong>
       </span>
     </a>
+
+    <ul class="sf-app-prompt-benefits">
+      <li>
+        <span class="sf-app-prompt-ico"><i class="fas fa-bell"></i></span>
+        <span class="sf-app-prompt-copy">
+          <strong>জরুরি নোটিফিকেশন সাথে সাথে</strong>
+          <span>রক্তের অনুরোধ, অর্ডারের আপডেট আর রাইডারের অফার ফোনে চলে আসবে, ব্রাউজার বন্ধ থাকলেও।</span>
+        </span>
+      </li>
+      <li>
+        <span class="sf-app-prompt-ico"><i class="fas fa-hand-pointer"></i></span>
+        <span class="sf-app-prompt-copy">
+          <strong>এক ট্যাপে সরাসরি খোলে</strong>
+          <span>হোম স্ক্রিনের আইকন থেকে খুললেই আগের পেজ থেকে শুরু, বারবার লিংক খুঁজতে হবে না।</span>
+        </span>
+      </li>
+      <li>
+        <span class="sf-app-prompt-ico"><i class="fas fa-location-dot"></i></span>
+        <span class="sf-app-prompt-copy">
+          <strong>লোকেশন ও ছবি আরও সহজ</strong>
+          <span>রাইড বা ডেলিভারিতে পিকআপ লোকেশন ধরতে এবং বিজ্ঞাপনে ছবি দিতে কম ঝামেলা।</span>
+        </span>
+      </li>
+    </ul>
 
     <button id="sfAppPromptContinue" class="sf-app-prompt-continue" type="button">
       ব্রাউজারে চালিয়ে যান
@@ -77,38 +128,48 @@ const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.smartf
 </div>
 
 <style is:global>
+  /* ---------- গেট লজিক: শুধু CSS, তাই রেন্ডারের আগেই কাজ করে ---------- */
+  .sf-app-prompt {
+    display: none;
+  }
+
+  html.sf-app-gate,
+  html.sf-app-gate body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  html.sf-app-gate body > *:not(#sfAppPrompt) {
+    visibility: hidden !important;
+  }
+
+  html.sf-app-gate .sf-app-prompt {
+    display: flex;
+  }
+
+  /* ---------- ডিজাইন ---------- */
   .sf-app-prompt {
     position: fixed;
     inset: 0;
     z-index: 100000;
-    background: linear-gradient(180deg, #FFFFFF 0%, #FFF6F1 100%);
-    display: flex;
+    background: linear-gradient(180deg, #FFFFFF 0%, #FFF4EE 100%);
     align-items: center;
     justify-content: center;
-    padding: 24px;
-    padding-top: calc(24px + env(safe-area-inset-top));
-    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    padding: 20px;
+    padding-top: calc(20px + env(safe-area-inset-top));
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
     overflow-y: auto;
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    visibility: visible;
   }
 
-  .sf-app-prompt[hidden] {
-    display: none;
-  }
-
-  .sf-app-prompt.sf-app-prompt-show {
-    opacity: 1;
-  }
-
-  .sf-app-prompt-bg-glow {
+  .sf-app-prompt-glow {
     position: absolute;
-    top: -120px;
+    top: -140px;
     right: -120px;
-    width: 340px;
-    height: 340px;
+    width: 360px;
+    height: 360px;
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(255, 107, 53, 0.18) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(255, 107, 53, 0.2) 0%, transparent 70%);
     pointer-events: none;
   }
 
@@ -116,79 +177,118 @@ const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.smartf
     position: relative;
     width: 100%;
     max-width: 380px;
+    margin: auto;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
-    transform: translateY(14px);
-    transition: transform 0.35s ease;
-  }
-
-  .sf-app-prompt.sf-app-prompt-show .sf-app-prompt-inner {
-    transform: translateY(0);
-  }
-
-  .sf-app-prompt-logo-wrap {
-    width: 108px;
-    height: 108px;
-    border-radius: 30px;
-    background: #FFFFFF;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 18px 44px rgba(255, 107, 53, 0.22), 0 4px 12px rgba(27, 42, 74, 0.08);
-    margin-bottom: 22px;
   }
 
   .sf-app-prompt-logo {
-    width: 84px;
-    height: 84px;
+    width: 76px;
+    height: 76px;
     object-fit: contain;
-    border-radius: 20px;
+    border-radius: 22px;
+    background: #FFFFFF;
+    padding: 6px;
+    box-shadow: 0 14px 34px rgba(255, 107, 53, 0.22), 0 3px 10px rgba(27, 42, 74, 0.08);
+    margin-bottom: 16px;
   }
 
   .sf-app-prompt-title {
-    font-size: 1.65rem;
+    font-size: 1.5rem;
     font-weight: 800;
     color: #1B2A4A;
-    line-height: 1.25;
+    line-height: 1.3;
   }
 
   .sf-app-prompt-sub {
     margin-top: 6px;
-    font-size: 0.92rem;
+    font-size: 0.9rem;
     color: #5A6E85;
     font-weight: 500;
+    line-height: 1.5;
   }
 
-  .sf-app-prompt-features {
-    list-style: none;
+  /* প্রধান CTA — স্ক্রিনের সবচেয়ে বড় ও উজ্জ্বল জিনিস */
+  .sf-app-prompt-download {
+    position: relative;
     width: 100%;
-    margin: 26px 0 30px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .sf-app-prompt-features li {
+    margin-top: 22px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    justify-content: center;
+    gap: 14px;
+    background: #FF6B35;
+    color: #FFFFFF;
+    text-decoration: none;
+    padding: 18px 20px;
+    border-radius: 20px;
+    box-shadow: 0 14px 32px rgba(255, 107, 53, 0.4);
+    animation: sf-app-pulse 2.2s ease-out infinite;
+  }
+
+  .sf-app-prompt-download:active {
+    transform: scale(0.98);
+  }
+
+  .sf-app-prompt-download > i {
+    font-size: 1.9rem;
+  }
+
+  .sf-app-prompt-download-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 1.25;
+    text-align: left;
+  }
+
+  .sf-app-prompt-download-text small {
+    font-size: 0.72rem;
+    font-weight: 600;
+    opacity: 0.92;
+  }
+
+  .sf-app-prompt-download-text strong {
+    font-size: 1.05rem;
+    font-weight: 800;
+  }
+
+  @keyframes sf-app-pulse {
+    0% { box-shadow: 0 14px 32px rgba(255, 107, 53, 0.4), 0 0 0 0 rgba(255, 107, 53, 0.45); }
+    70% { box-shadow: 0 14px 32px rgba(255, 107, 53, 0.4), 0 0 0 16px rgba(255, 107, 53, 0); }
+    100% { box-shadow: 0 14px 32px rgba(255, 107, 53, 0.4), 0 0 0 0 rgba(255, 107, 53, 0); }
+  }
+
+  /* সুবিধা — একটা কার্ডে ৩ সারি */
+  .sf-app-prompt-benefits {
+    list-style: none;
+    width: 100%;
+    margin-top: 22px;
     background: #FFFFFF;
     border: 1px solid #EEF3F9;
-    border-radius: 16px;
-    padding: 12px 14px;
+    border-radius: 20px;
+    box-shadow: 0 6px 20px rgba(27, 42, 74, 0.05);
+    overflow: hidden;
+  }
+
+  .sf-app-prompt-benefits li {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 14px;
     text-align: left;
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: #1B2A4A;
-    box-shadow: 0 4px 14px rgba(27, 42, 74, 0.04);
+  }
+
+  .sf-app-prompt-benefits li + li {
+    border-top: 1px solid #EEF3F9;
   }
 
   .sf-app-prompt-ico {
     width: 36px;
     height: 36px;
-    border-radius: 50%;
+    border-radius: 12px;
     background: #FFF0EA;
     color: #FF6B35;
     display: flex;
@@ -198,147 +298,58 @@ const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.smartf
     flex-shrink: 0;
   }
 
-  .sf-app-prompt-download {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    background: #FF6B35;
-    color: #FFFFFF;
-    text-decoration: none;
-    padding: 16px 22px;
-    border-radius: 18px;
-    box-shadow: 0 12px 30px rgba(255, 107, 53, 0.35);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-  }
-
-  .sf-app-prompt-download:active {
-    transform: scale(0.98);
-  }
-
-  .sf-app-prompt-download > i {
-    font-size: 1.7rem;
-  }
-
-  .sf-app-prompt-download-text {
+  .sf-app-prompt-copy {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    line-height: 1.2;
+    gap: 2px;
+    min-width: 0;
   }
 
-  .sf-app-prompt-download-text small {
-    font-size: 0.7rem;
-    font-weight: 600;
-    opacity: 0.9;
-  }
-
-  .sf-app-prompt-download-text strong {
-    font-size: 1.02rem;
+  .sf-app-prompt-copy strong {
+    font-size: 0.88rem;
     font-weight: 800;
+    color: #1B2A4A;
+    line-height: 1.35;
   }
 
+  .sf-app-prompt-copy span {
+    font-size: 0.78rem;
+    color: #5A6E85;
+    line-height: 1.5;
+  }
+
+  /* ছোট ও হালকা — যেন নজর ডাউনলোডেই থাকে */
   .sf-app-prompt-continue {
-    margin-top: 22px;
+    margin-top: 18px;
     background: none;
     border: none;
-    color: #9AA8BC;
-    font-size: 0.78rem;
+    color: #A3AFC0;
+    font-size: 0.74rem;
     font-weight: 600;
     text-decoration: underline;
     cursor: pointer;
     padding: 8px 12px;
+  }
+
+  @media (max-height: 640px) {
+    .sf-app-prompt-logo { width: 60px; height: 60px; margin-bottom: 10px; }
+    .sf-app-prompt-title { font-size: 1.3rem; }
+    .sf-app-prompt-download { margin-top: 16px; padding: 14px 18px; }
+    .sf-app-prompt-benefits { margin-top: 16px; }
+    .sf-app-prompt-benefits li { padding: 10px 12px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sf-app-prompt-download { animation: none; }
   }
 </style>
 
 <script>
   import { isNativeApp } from '../../lib/native-bridge.js';
 
-  const DISMISS_KEY = 'sf_app_prompt_dismissed_at';
-  const DISMISS_DAYS = 7;
-
-  function isAndroidBrowser() {
-    return /Android/i.test(navigator.userAgent || '');
+  // দ্বিতীয় সুরক্ষা: inline চেক কোনোভাবে মিস করলেও নেটিভ অ্যাপের
+  // ভেতরে গেট থাকবে না — লোড হওয়া মাত্র সরিয়ে দেবে
+  if (isNativeApp()) {
+    document.documentElement.classList.remove('sf-app-gate');
   }
-
-  function isStandalonePwa() {
-    try {
-      return (
-        window.matchMedia('(display-mode: standalone)').matches ||
-        window.navigator.standalone === true
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  function isExcludedPath() {
-    const p = window.location.pathname;
-    return p.startsWith('/admin') || p.startsWith('/api') || p.startsWith('/.well-known');
-  }
-
-  function recentlyDismissed() {
-    try {
-      const raw = localStorage.getItem(DISMISS_KEY);
-      if (!raw) return false;
-      const ts = Number(raw);
-      if (!Number.isFinite(ts)) return false;
-      return Date.now() - ts < DISMISS_DAYS * 24 * 60 * 60 * 1000;
-    } catch {
-      return false;
-    }
-  }
-
-  function markDismissed() {
-    try {
-      localStorage.setItem(DISMISS_KEY, String(Date.now()));
-    } catch {
-      // localStorage বন্ধ থাকলে সমস্যা নেই — শুধু এই সেশনে হাইড হবে
-    }
-  }
-
-  function init() {
-    const el = document.getElementById('sfAppPrompt');
-    if (!el) return;
-
-    // শুধু Android ব্রাউজারে — বাকি সব ডিভাইসে কিছুই হবে না
-    if (!isAndroidBrowser()) return;
-    if (isNativeApp()) return;
-    if (isStandalonePwa()) return;
-    if (isExcludedPath()) return;
-    if (recentlyDismissed()) return;
-
-    const downloadBtn = document.getElementById('sfAppPromptDownload');
-    const continueBtn = document.getElementById('sfAppPromptContinue');
-
-    function close() {
-      el.classList.remove('sf-app-prompt-show');
-      document.body.style.overflow = '';
-      setTimeout(() => {
-        el.hidden = true;
-      }, 300);
-    }
-
-    continueBtn?.addEventListener('click', () => {
-      markDismissed();
-      close();
-    });
-
-    // ডাউনলোডে ক্লিক করলেও ৭ দিন আর বিরক্ত করবে না
-    downloadBtn?.addEventListener('click', () => {
-      markDismissed();
-    });
-
-    el.hidden = false;
-    document.body.style.overflow = 'hidden';
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        el.classList.add('sf-app-prompt-show');
-        downloadBtn?.focus({ preventScroll: true });
-      });
-    });
-  }
-
-  init();
 </script>
