@@ -4,9 +4,18 @@
 // ট্যাব ১: সব ক্যাটাগরির লিস্টিং (listings টেবিল)
 // ট্যাব ২: ম্যানুয়াল ব্লাড ডোনার রিভিউ + বাল্ক ক্লাব-লিংক (manual_blood_donors টেবিল)
 // ট্যাব ৩: অভিযোগ/রিপোর্ট (content_reports টেবিল)
+// ট্যাব ৪: এডিট রিভিউ (listing_edits টেবিল) — নতুন
 // আপডেট: cnglagbe সোর্সের লিস্টিং ডিলিট/Approve/Reject/Edit করলে ফোন নম্বর
 //         scraper_blocklist এ যোগ হয়, যাতে পরের দিন স্ক্র্যাপার আবার একই
 //         এন্ট্রি ওভাররাইট/পুনরায় তৈরি না করে
+//
+// আপডেট (এই সেশন — এডিট রিভিউ সিস্টেম):
+// - ইউজার নিজের অনুমোদিত লিস্টিং এডিট করলে নতুন তথ্য listing_edits এ
+//   pending হিসেবে জমা হয়; আগের ভার্সন পাবলিকে থাকে। এই ট্যাবে পুরোনো বনাম
+//   নতুন তথ্য পাশাপাশি দেখে Approve (approve_listing_edit RPC → listings
+//   আপডেট + মালিককে নোটিফিকেশন) বা Reject (reject_listing_edit RPC →
+//   কারণসহ মালিককে নোটিফিকেশন) করা যায়
+// - ট্যাবে pending সংখ্যার ব্যাজ
 // ============================================================
 
 export const prerender = false;
@@ -38,6 +47,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         <!-- ===== ট্যাব সুইচার ===== -->
         <div class="tab-switcher">
           <button class="tab-btn active" data-tab="listings">লিস্টিং</button>
+          <button class="tab-btn" data-tab="edits">এডিট রিভিউ <span id="editsBadge" class="tab-badge" style="display:none;"></span></button>
           <button class="tab-btn" data-tab="blood">ব্লাড ডোনার (ম্যানুয়াল)</button>
           <button class="tab-btn" data-tab="reports">রিপোর্ট <span id="reportsBadge" class="tab-badge" style="display:none;"></span></button>
         </div>
@@ -74,7 +84,30 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
           </div>
         </div>
 
-        <!-- ===== ট্যাব ২: ব্লাড ডোনার ===== -->
+        <!-- ===== ট্যাব ২ (নতুন): এডিট রিভিউ ===== -->
+        <div id="editsTab" class="tab-panel" style="display:none;">
+          <p class="edits-hint">
+            ইউজার অনুমোদিত লিস্টিং এডিট করলে নতুন তথ্য এখানে আসে। Approve না করা পর্যন্ত পাবলিকে আগের তথ্যই দেখা যায়।
+          </p>
+
+          <div class="filter-bar">
+            <select id="editStatusFilter" class="filter-select">
+              <option value="pending">রিভিউ বাকি</option>
+              <option value="approved">অনুমোদিত</option>
+              <option value="rejected">প্রত্যাখ্যাত</option>
+              <option value="all">সব স্ট্যাটাস</option>
+            </select>
+          </div>
+
+          <div id="editsContainer" class="listings-container"></div>
+
+          <div id="editsEmptyState" class="empty-state" style="display:none;">
+            <i class="fas fa-pen-to-square"></i>
+            <p>কোনো এডিট রিকোয়েস্ট নেই</p>
+          </div>
+        </div>
+
+        <!-- ===== ট্যাব ৩: ব্লাড ডোনার ===== -->
         <div id="bloodTab" class="tab-panel" style="display:none;">
 
           <!-- ===== বাল্ক ক্লাব-লিংক সেকশন ===== -->
@@ -114,7 +147,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
           </div>
         </div>
 
-        <!-- ===== ট্যাব ৩: রিপোর্ট/অভিযোগ ===== -->
+        <!-- ===== ট্যাব ৪: রিপোর্ট/অভিযোগ ===== -->
         <div id="reportsTab" class="tab-panel" style="display:none;">
           <div class="filter-bar">
             <select id="reportStatusFilter" class="filter-select">
@@ -211,6 +244,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       gap: 8px;
       margin-bottom: 20px;
       border-bottom: 1.5px solid #E5EAF0;
+      overflow-x: auto;
     }
 
     .tab-btn {
@@ -226,6 +260,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       cursor: pointer;
       border-bottom: 3px solid transparent;
       margin-bottom: -1.5px;
+      white-space: nowrap;
     }
 
     .tab-btn.active {
@@ -279,6 +314,16 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
 
     .empty-state i {
       font-size: 2.4rem;
+    }
+
+    .edits-hint {
+      font-size: 0.8rem;
+      color: #5A6E85;
+      background: #F4F7FC;
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      line-height: 1.6;
     }
 
     .bulk-bar {
@@ -440,6 +485,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     // ============================================================
     const tabButtons = document.querySelectorAll('.tab-btn');
     const listingsTab = document.getElementById('listingsTab');
+    const editsTab = document.getElementById('editsTab');
     const bloodTab = document.getElementById('bloodTab');
     const reportsTab = document.getElementById('reportsTab');
 
@@ -449,12 +495,16 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         btn.classList.add('active');
 
         listingsTab.style.display = 'none';
+        editsTab.style.display = 'none';
         bloodTab.style.display = 'none';
         reportsTab.style.display = 'none';
 
         if (btn.dataset.tab === 'listings') {
           listingsTab.style.display = 'block';
           loadListings();
+        } else if (btn.dataset.tab === 'edits') {
+          editsTab.style.display = 'block';
+          loadEdits();
         } else if (btn.dataset.tab === 'blood') {
           bloodTab.style.display = 'block';
           loadClubLinkSuggestions();
@@ -809,6 +859,232 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     sourceFilter.addEventListener('change', loadListings);
 
     // ============================================================
+    // ট্যাব ২ (নতুন): এডিট রিভিউ (listing_edits)
+    // ============================================================
+    const editsContainer = document.getElementById('editsContainer');
+    const editsEmptyState = document.getElementById('editsEmptyState');
+    const editStatusFilter = document.getElementById('editStatusFilter');
+    const editsBadge = document.getElementById('editsBadge');
+
+    const editStatusLabels = {
+      pending: { text: 'রিভিউ বাকি', bg: '#FFF3E0', color: '#B36B00' },
+      approved: { text: 'অনুমোদিত', bg: '#EAFBF0', color: '#1B7A3C' },
+      rejected: { text: 'প্রত্যাখ্যাত', bg: '#FFF0EA', color: '#D14343' },
+    };
+
+    // তুলনার ফিল্ডগুলো (ছবি আলাদাভাবে তুলনা হয়)
+    const editFields = [
+      ['title', 'শিরোনাম'],
+      ['description', 'বিবরণ'],
+      ['price', 'দাম'],
+      ['upazila', 'উপজেলা'],
+      ['contact_phone', 'ফোন নম্বর'],
+      ['type', 'ধরন'],
+    ];
+
+    async function refreshEditsBadge() {
+      const { count } = await supabase
+        .from('listing_edits')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      if (count && count > 0) {
+        editsBadge.textContent = count;
+        editsBadge.style.display = 'inline-block';
+      } else {
+        editsBadge.style.display = 'none';
+      }
+    }
+
+    function renderEditRequestCard(edit, listing, owner) {
+      const status = editStatusLabels[edit.status] || editStatusLabels.pending;
+      const categoryName = listing ? (categoryNameMap[listing.category] || listing.category) : '';
+
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;flex-direction:column;gap:12px;';
+
+      // কোন কোন ফিল্ড বদলেছে (পুরোনো বনাম নতুন)
+      const changedRows = [];
+      const unchangedLabels = [];
+
+      editFields.forEach(([key, label]) => {
+        const oldVal = String(listing?.[key] ?? '').trim();
+        const newVal = String(edit[key] ?? '').trim();
+
+        if (oldVal === newVal) {
+          unchangedLabels.push(label);
+          return;
+        }
+
+        changedRows.push(`
+          <div style="padding:10px 12px;background:#F8FAFC;border-radius:12px;font-size:0.83rem;">
+            <div style="font-size:0.72rem;font-weight:700;color:#8FA0BC;margin-bottom:4px;">${label}</div>
+            <div style="color:#8FA0BC;text-decoration:line-through;word-break:break-word;">${oldVal ? escapeHtml(oldVal) : '(খালি)'}</div>
+            <div style="color:#1B7A3C;font-weight:700;margin-top:3px;word-break:break-word;">${newVal ? escapeHtml(newVal) : '(খালি)'}</div>
+          </div>
+        `);
+      });
+
+      const oldImages = Array.isArray(listing?.images) ? listing.images : [];
+      const newImages = Array.isArray(edit.images) ? edit.images : [];
+      if (JSON.stringify(oldImages) !== JSON.stringify(newImages)) {
+        const thumbs = newImages
+          .map((u) => `<img src="${escapeHtml(u)}" style="width:56px;height:56px;border-radius:10px;object-fit:cover;" />`)
+          .join('');
+        changedRows.push(`
+          <div style="padding:10px 12px;background:#F8FAFC;border-radius:12px;font-size:0.83rem;">
+            <div style="font-size:0.72rem;font-weight:700;color:#8FA0BC;margin-bottom:6px;">ছবি (নতুন ${newImages.length} টি, আগে ${oldImages.length} টি)</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">${thumbs || '<span style="color:#8FA0BC;">(কোনো ছবি নেই)</span>'}</div>
+          </div>
+        `);
+      } else {
+        unchangedLabels.push('ছবি');
+      }
+
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          <div style="min-width:0;">
+            <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:#F4F7FC;color:#5A6E85;">${escapeHtml(categoryName)}</span>
+            <h3 style="font-size:1rem;font-weight:700;color:#1B2A4A;margin-top:6px;word-break:break-word;">${escapeHtml(listing?.title || edit.title || '(শিরোনামহীন)')}</h3>
+            <p style="font-size:0.8rem;color:#8FA0BC;margin-top:2px;">
+              ${escapeHtml(owner?.full_name || 'অজানা ইউজার')}${owner?.phone ? ' · ' + escapeHtml(owner.phone) : ''} · ${formatDate(edit.updated_at || edit.created_at)}
+            </p>
+          </div>
+          <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${status.bg};color:${status.color};">${status.text}</span>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${changedRows.length ? changedRows.join('') : '<p style="font-size:0.82rem;color:#8FA0BC;">কোনো ফিল্ড বদলায়নি (আগের তথ্যের সাথে হুবহু এক)।</p>'}
+        </div>
+
+        ${unchangedLabels.length ? `<p style="font-size:0.75rem;color:#8FA0BC;">অপরিবর্তিত: ${unchangedLabels.join(', ')}</p>` : ''}
+
+        ${edit.status === 'rejected' && edit.rejection_reason ? `<p style="font-size:0.8rem;color:#D14343;font-weight:700;">প্রত্যাখ্যানের কারণ: ${escapeHtml(edit.rejection_reason)}</p>` : ''}
+
+        <div class="edit-actions" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+      `;
+
+      const actionsWrap = card.querySelector('.edit-actions');
+
+      if (listing) {
+        const viewLink = document.createElement('a');
+        viewLink.href = `/listing/${listing.id}`;
+        viewLink.target = '_blank';
+        viewLink.rel = 'noopener';
+        viewLink.textContent = 'বর্তমান লিস্টিং দেখুন';
+        viewLink.style.cssText = 'background:#F4F7FC;color:#1B2A4A;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;text-decoration:none;';
+        actionsWrap.appendChild(viewLink);
+      }
+
+      if (edit.status === 'pending') {
+        const approveBtn = document.createElement('button');
+        approveBtn.textContent = 'Approve করুন';
+        approveBtn.style.cssText = 'background:#1B7A3C;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        approveBtn.addEventListener('click', () => approveEdit(edit.id, approveBtn));
+        actionsWrap.appendChild(approveBtn);
+
+        const rejectBtn = document.createElement('button');
+        rejectBtn.textContent = 'Reject করুন';
+        rejectBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        rejectBtn.addEventListener('click', () => rejectEdit(edit.id, rejectBtn));
+        actionsWrap.appendChild(rejectBtn);
+      }
+
+      return card;
+    }
+
+    async function approveEdit(editId, btn) {
+      if (!confirm('এই এডিট অনুমোদন করবেন? নতুন তথ্য এখনই পাবলিকে আপডেট হবে।')) return;
+
+      btn.disabled = true;
+      btn.textContent = 'অনুমোদন হচ্ছে...';
+
+      const { error } = await supabase.rpc('approve_listing_edit', { p_edit_id: editId });
+      if (error) {
+        alert('Approve ব্যর্থ: ' + error.message);
+        btn.disabled = false;
+        btn.textContent = 'Approve করুন';
+        return;
+      }
+
+      loadEdits();
+    }
+
+    async function rejectEdit(editId, btn) {
+      const reason = prompt('প্রত্যাখ্যানের কারণ লিখুন (ঐচ্ছিক — মালিক নোটিফিকেশনে দেখবেন):', '');
+      if (reason === null) return; // বাতিল
+
+      btn.disabled = true;
+      btn.textContent = 'প্রত্যাখ্যান হচ্ছে...';
+
+      const { error } = await supabase.rpc('reject_listing_edit', {
+        p_edit_id: editId,
+        p_reason: reason.trim() || null,
+      });
+      if (error) {
+        alert('Reject ব্যর্থ: ' + error.message);
+        btn.disabled = false;
+        btn.textContent = 'Reject করুন';
+        return;
+      }
+
+      loadEdits();
+    }
+
+    async function loadEdits() {
+      editsContainer.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
+
+      let query = supabase
+        .from('listing_edits')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      const status = editStatusFilter.value;
+      if (status !== 'all') query = query.eq('status', status);
+
+      const { data: edits, error } = await query;
+
+      if (error) {
+        editsContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${escapeHtml(error.message)}</p>`;
+        return;
+      }
+
+      refreshEditsBadge();
+
+      if (!edits || edits.length === 0) {
+        editsContainer.innerHTML = '';
+        editsEmptyState.style.display = 'flex';
+        return;
+      }
+
+      editsEmptyState.style.display = 'none';
+
+      const listingIds = [...new Set(edits.map((e) => e.listing_id))];
+      const ownerIds = [...new Set(edits.map((e) => e.user_id))];
+
+      const [listingsRes, ownersRes] = await Promise.all([
+        supabase
+          .from('listings')
+          .select('id, title, description, price, upazila, type, contact_phone, images, category')
+          .in('id', listingIds),
+        supabase.from('profiles').select('id, full_name, phone').in('id', ownerIds),
+      ]);
+
+      const listingMap = Object.fromEntries((listingsRes.data || []).map((l) => [l.id, l]));
+      const ownerMap = Object.fromEntries((ownersRes.data || []).map((p) => [p.id, p]));
+
+      editsContainer.innerHTML = '';
+      edits.forEach((edit) => {
+        editsContainer.appendChild(
+          renderEditRequestCard(edit, listingMap[edit.listing_id], ownerMap[edit.user_id])
+        );
+      });
+    }
+
+    editStatusFilter.addEventListener('change', loadEdits);
+
+    // ============================================================
     // বাল্ক ক্লাব-লিংক (club_name_raw -> clubs.id)
     // ============================================================
     let clubsList = [];
@@ -895,7 +1171,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     }
 
     // ============================================================
-    // ট্যাব ২: ব্লাড ডোনার (manual_blood_donors)
+    // ট্যাব ৩: ব্লাড ডোনার (manual_blood_donors)
     // ============================================================
     const bloodContainer = document.getElementById('bloodContainer');
     const bloodEmptyState = document.getElementById('bloodEmptyState');
@@ -1132,7 +1408,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     bloodUpazilaFilter.addEventListener('change', loadBloodDonors);
 
     // ============================================================
-    // ট্যাব ৩: রিপোর্ট/অভিযোগ (content_reports)
+    // ট্যাব ৪: রিপোর্ট/অভিযোগ (content_reports)
     // ============================================================
     const reportsContainer = document.getElementById('reportsContainer');
     const reportsEmptyState = document.getElementById('reportsEmptyState');
@@ -1425,6 +1701,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       loadListings();
       loadClubsList();
       refreshReportsBadge();
+      refreshEditsBadge();
     });
 
     initAdminGuard();
