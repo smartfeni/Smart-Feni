@@ -1,4 +1,3 @@
-<!-- path: src/pages/admin/notifications.astro -->
 ---
 // ============================================================
 // পেজ: অ্যাডমিন — কাস্টম নোটিফিকেশন পাঠানো (/admin/notifications)
@@ -7,30 +6,28 @@
 // লগ admin_notification_log এ থাকে (কতজনকে, কী মেসেজ, কবে)।
 //
 // আপডেট (Phase 5 — Push সিস্টেম ইন্টিগ্রেশন):
-// - Category selector যোগ (সাধারণ মেসেজ / অফার-প্রমো) — এর আগে
-//   category সেট হতো না (ডিফল্ট 'system' বসে যেত), ফলে ইউজারের
-//   notification_preferences টগল respect হতো না। এখন সঠিক category
-//   সেট হওয়ায় ইউজার প্রোফাইল সেটিংস থেকে অফ করলে push স্কিপ হবে।
-// - sender_type: 'admin', sender_id: adminUser.id যোগ — কে পাঠালো
-//   এখন ট্র্যাক হবে।
-// - Broadcast এ ৫০০ জন করে ব্যাচে insert (আগে একবারে সব, বড়
-//   ইউজারবেসে Supabase connection limit এ সমস্যা হতে পারত)
-// - admin_notification_log এ category কলাম যোগ হয়েছে (migration)
+// - Category selector (সাধারণ মেসেজ / অফার-প্রমো)
+// - sender_type: 'admin', sender_id: adminUser.id — কে পাঠালো ট্র্যাক হয়
+// - Broadcast এ ৫০০ জন করে ব্যাচে insert
+// - admin_notification_log এ category কলাম আছে (migration)
 //
-// নোট: push পাঠানো dispatch_pending_push_notifications() cron
-// (প্রতি মিনিটে) নিজে থেকেই handle করে — এখানে আলাদা কিছু করা
-// লাগে না, শুধু সঠিক category সহ user_notifications এ insert
-// করলেই যথেষ্ট।
+// নোট: push পাঠানো trg_notify_push_on_insert ট্রিগার (আর ব্যর্থ হলে
+// cron) নিজে handle করে — এখানে শুধু সঠিক category + priority সহ
+// user_notifications এ insert করলেই যথেষ্ট।
+//
+// আপডেট: "লিংক করা আইটেম" সার্চ (শপ/ক্লাব/লিস্টিং) — সিলেক্ট করলে
+// link_label + action_url সেভ হয়।
 //
 // আপডেট (এই সেশন):
-// - "লিংক করা আইটেম" সার্চ যোগ (শপ/ক্লাব/লিস্টিং, নাম দিয়ে) —
-//   সিলেক্ট করলে link_label + action_url সেভ হয়, নোটিফিকেশনে
-//   সেই নামটাই ক্লিকযোগ্য বাটন হয়ে সরাসরি সেই পেজে নিয়ে যায়
-// - admin_notification_log এ link_label/action_url কলাম যোগ
-//   (migration) — হিস্ট্রি লগেও কোন আইটেম লিংক করা ছিল দেখা যায়
-// - .log-item-image ফিক্সড height + প্লেসহোল্ডার bg (আগে max-height
-//   ছিল, স্লো নেটওয়ার্কে ছবি লোড হওয়ার সময় কার্ডের এলাইনমেন্ট
-//   জাম্প করত)
+// - অ্যাডমিনের পাঠানো সব নোটিফিকেশন (সাধারণ মেসেজ ও অফার-প্রমো দুটোই)
+//   এখন priority: 'high' — ফলে পুশ সবসময় যায় (priority 'low' হলে
+//   পুশ যায় না, শুধু বেলে থাকে)। প্রমো পাঠানো হয় শুধু অ্যাডমিন
+//   নিজে পাঠালে, তাই সবসময় high রাখা হয়েছে।
+// - ব্রডকাস্টে profiles আগে একবারে select করায় Supabase এর ডিফল্ট
+//   ১০০০ সারির সীমায় আটকে যেত → এখন পাতা করে (pagination) সব
+//   ইউজারের id আনা হয়, যাতে সত্যিই সবাই পায়।
+// - ক্যাটাগরির হিন্ট লেখা ঠিক করা: প্রোফাইলের টগল বাদ দেওয়া হয়েছে,
+//   এখন ফোনের নোটিফিকেশন চ্যানেল দিয়ে নিয়ন্ত্রণ হয়।
 // ============================================================
 
 export const prerender = false;
@@ -76,11 +73,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <div id="broadcastTargetPanel" class="target-panel" style="display:none;">
             <p class="broadcast-note">
               <i class="fas fa-triangle-exclamation"></i>
-              এই মেসেজ <strong>সব রেজিস্টার্ড ইউজারের</strong> কাছে যাবে। সতর্কতার সাথে ব্যবহার করুন।
+              এই মেসেজ <strong>সব রেজিস্টার্ড ইউজারের</strong> কাছে যাবে এবং পুশ নোটিফিকেশনও যাবে। সতর্কতার সাথে ব্যবহার করুন।
             </p>
           </div>
 
-          <!-- ক্যাটাগরি সিলেক্টর (নতুন) -->
+          <!-- ক্যাটাগরি সিলেক্টর -->
           <label class="field-label">নোটিফিকেশনের ধরন</label>
           <div class="category-tabs">
             <button class="category-tab active" data-category="message" type="button">
@@ -90,12 +87,12 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
               <i class="fas fa-tags"></i> অফার-প্রমো
             </button>
           </div>
-          <p class="category-hint" id="categoryHint">ইউজার প্রোফাইল সেটিংসে "মেসেজ" নোটিফিকেশন অফ করলে এটা পাবে না</p>
+          <p class="category-hint" id="categoryHint">উচ্চ গুরুত্বে (high) পাঠানো হবে। ইউজার ফোনের সেটিংসে "মেসেজ" চ্যানেল বন্ধ করলে ফোনে পুশ আসবে না, তবে অ্যাপের বেলে থাকবে</p>
 
           <label class="field-label" style="margin-top: 14px;">মেসেজ</label>
           <textarea id="messageInput" rows="4" placeholder="মেসেজ লিখুন..."></textarea>
 
-          <!-- ছবি আপলোড (ঐচ্ছিক, নতুন — Phase 2) -->
+          <!-- ছবি আপলোড (ঐচ্ছিক) -->
           <label class="field-label" style="margin-top: 14px;">ছবি (ঐচ্ছিক)</label>
           <label for="imageInput" class="image-upload-box" id="imageUploadBox">
             <img id="imagePreview" src="" alt="প্রিভিউ" style="display:none;" />
@@ -107,7 +104,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" style="display:none;" />
           <p class="send-feedback" id="imageFeedback"></p>
 
-          <!-- লিংক করা আইটেম (ঐচ্ছিক, নতুন) — নির্দিষ্ট শপ/ক্লাব/
+          <!-- লিংক করা আইটেম (ঐচ্ছিক) — নির্দিষ্ট শপ/ক্লাব/
                লিস্টিং সার্চ করে সিলেক্ট করলে সেই নামটাই নোটিফিকেশনে
                ক্লিকযোগ্য বাটন হয়ে যাবে, সরাসরি সেই পেজে নিয়ে যাবে -->
           <label class="field-label" style="margin-top: 14px;">লিংক করা আইটেম (ঐচ্ছিক)</label>
@@ -241,7 +238,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       margin-bottom: 16px;
     }
 
-    /* ===== ক্যাটাগরি ট্যাব (নতুন) ===== */
+    /* ===== ক্যাটাগরি ট্যাব ===== */
     .category-tabs {
       display: flex;
       gap: 8px;
@@ -371,7 +368,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       margin-bottom: 6px;
     }
 
-    /* ===== ছবি আপলোড বক্স (নতুন) ===== */
+    /* ===== ছবি আপলোড বক্স ===== */
     .image-upload-box {
       position: relative;
       display: flex;
@@ -536,10 +533,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       white-space: pre-line;
     }
 
-    /* নোট: max-height এর বদলে ফিক্সড height + হালকা প্লেসহোল্ডার
-       ব্যাকগ্রাউন্ড — ছবি লোড হওয়ার আগেই জায়গা রিজার্ভ থাকে, স্লো
-       নেটওয়ার্কে ছবি লোড হওয়ার সময় কার্ডের এলাইনমেন্ট/লেআউট আর
-       জাম্প করবে না */
+    /* ফিক্সড height + প্লেসহোল্ডার ব্যাকগ্রাউন্ড — স্লো নেটওয়ার্কে
+       ছবি লোড হওয়ার সময় কার্ডের লেআউট জাম্প করবে না */
     .log-item-image {
       display: block;
       width: 100%;
@@ -550,7 +545,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       background: #F1F4F8;
     }
 
-    /* ===== লিংক করা আইটেম (নতুন — শপ/ক্লাব/লিস্টিং সার্চ) ===== */
+    /* ===== লিংক করা আইটেম ===== */
     .link-search-result {
       margin-top: 10px;
       max-height: 260px;
@@ -686,6 +681,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     import { supabase } from '../../lib/supabase.js';
     import { compressImage } from '../../lib/imageCompress.js';
 
+    // অ্যাডমিনের পাঠানো সব নোটিফিকেশনের priority — 'high' মানে পুশ সবসময় যাবে
+    // (FCM high, ৬ ঘণ্টা মেয়াদ)। 'low' দিলে পুশ যেত না, তাই ব্যবহার করা হচ্ছে না।
+    const ADMIN_PRIORITY = 'high';
+
     function escapeHtml(str) {
       const div = document.createElement('div');
       div.textContent = str ?? '';
@@ -719,15 +718,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     });
 
     // ============================================================
-    // ক্যাটাগরি ট্যাব সুইচিং (নতুন)
+    // ক্যাটাগরি ট্যাব সুইচিং
     // ============================================================
     const categoryTabs = document.querySelectorAll('.category-tab');
     const categoryHint = document.getElementById('categoryHint');
     let currentCategory = 'message';
 
     const categoryHints = {
-      message: 'ইউজার প্রোফাইল সেটিংসে "মেসেজ" নোটিফিকেশন অফ করলে এটা পাবে না',
-      promo: 'ইউজার প্রোফাইল সেটিংসে "অফার ও প্রমো" নোটিফিকেশন অফ করলে এটা পাবে না',
+      message: 'উচ্চ গুরুত্বে (high) পাঠানো হবে। ইউজার ফোনের সেটিংসে "মেসেজ" চ্যানেল বন্ধ করলে ফোনে পুশ আসবে না, তবে অ্যাপের বেলে থাকবে',
+      promo: 'উচ্চ গুরুত্বে (high) সবার কাছে পুশ যাবে (নিঃশব্দ "অফার" চ্যানেলে)। ইউজার ফোনের সেটিংসে "অফার" চ্যানেল বন্ধ করলে ফোনে পুশ আসবে না, তবে অ্যাপের বেলে থাকবে',
     };
 
     categoryTabs.forEach((tab) => {
@@ -792,9 +791,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     });
 
     // ============================================================
-    // লিংক করা আইটেম সার্চ (নতুন) — শপ/ক্লাব/লিস্টিং, একসাথে
-    // নাম দিয়ে সার্চ করে ক্লিকযোগ্য বাটনের জন্য নির্দিষ্ট আইটেম
-    // সিলেক্ট করা যায়
+    // লিংক করা আইটেম সার্চ — শপ/ক্লাব/লিস্টিং, একসাথে নাম দিয়ে সার্চ
     // ============================================================
     const linkSearchInput = document.getElementById('linkSearchInput');
     const linkSearchBtn = document.getElementById('linkSearchBtn');
@@ -913,7 +910,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     }
 
     // ============================================================
-    // ছবি আপলোড হ্যান্ডলিং (নতুন — Phase 2)
+    // ছবি আপলোড হ্যান্ডলিং
     // ============================================================
     const imageInput = document.getElementById('imageInput');
     const imagePreview = document.getElementById('imagePreview');
@@ -989,6 +986,28 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     }
 
     // ============================================================
+    // সব ইউজারের id আনা — Supabase একবারে সর্বোচ্চ ১০০০ সারি দেয়,
+    // তাই পাতা করে (১০০০ করে) আনা হয় যাতে সত্যিই সবাই পায়
+    // ============================================================
+    const PROFILE_PAGE_SIZE = 1000;
+
+    async function fetchAllProfileIds() {
+      const all = [];
+      for (let from = 0; ; from += PROFILE_PAGE_SIZE) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id')
+          .order('id', { ascending: true })
+          .range(from, from + PROFILE_PAGE_SIZE - 1);
+        if (error) throw error;
+        const rows = data || [];
+        all.push(...rows);
+        if (rows.length < PROFILE_PAGE_SIZE) break;
+      }
+      return all;
+    }
+
+    // ============================================================
     // ব্যাচে insert করার হেল্পার (broadcast এর জন্য, ৫০০ জন করে)
     // ============================================================
     const BATCH_SIZE = 500;
@@ -1027,6 +1046,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             user_id: selectedUser.id,
             message,
             category: currentCategory,
+            priority: ADMIN_PRIORITY,
             image_url: imageUrl,
             link_label: selectedLink?.label || null,
             action_url: selectedLink?.url || null,
@@ -1047,15 +1067,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             sent_by: adminUser?.id,
           });
         } else {
-          const { data: allProfiles, error: profileError } = await supabase
-            .from('profiles')
-            .select('id');
-          if (profileError) throw profileError;
+          const allProfiles = await fetchAllProfileIds();
 
-          const rows = (allProfiles || []).map((p) => ({
+          const rows = allProfiles.map((p) => ({
             user_id: p.id,
             message,
             category: currentCategory,
+            priority: ADMIN_PRIORITY,
             image_url: imageUrl,
             link_label: selectedLink?.label || null,
             action_url: selectedLink?.url || null,
