@@ -1,3 +1,4 @@
+<!-- path: src/pages/admin/notifications.astro -->
 ---
 // ============================================================
 // পেজ: অ্যাডমিন — কাস্টম নোটিফিকেশন পাঠানো (/admin/notifications)
@@ -28,6 +29,19 @@
 //   ইউজারের id আনা হয়, যাতে সত্যিই সবাই পায়।
 // - ক্যাটাগরির হিন্ট লেখা ঠিক করা: প্রোফাইলের টগল বাদ দেওয়া হয়েছে,
 //   এখন ফোনের নোটিফিকেশন চ্যানেল দিয়ে নিয়ন্ত্রণ হয়।
+//
+// আপডেট (পড়ার ট্র্যাকিং — কে কে পড়েছে):
+// - প্রতিটা পাঠানোর জন্য একটা campaign_id (UUID) আগে থেকে তৈরি হয়ে
+//   সব user_notifications রো-তে বসে এবং একই আইডি admin_notification_log.id
+//   হিসেবে সেভ হয় — এভাবেই লগ আর নোটিফিকেশন জোড়া লাগে।
+// - হিস্ট্রি কার্ডে "পড়েছে X / Y (Z%)" প্রগ্রেস বার (RPC:
+//   admin_notification_stats, শুধু admin)।
+// - কার্ডের বাটনে চাপলে বটম-শিট: সব/পড়েছে/পড়েনি ট্যাব, নাম-ফোন সার্চ,
+//   ৫০ জন করে "আরও দেখুন" (RPC: admin_notification_readers, শুধু admin)।
+// - ব্রডকাস্টের মাঝপথে ব্যর্থ হলে যতজনের কাছে গেছে ততজনের আংশিক লগ
+//   সেভ হয়, যেন তাদের পড়া ট্র্যাক করা যায়।
+// - ট্র্যাকিং চালুর আগের পুরনো লগে campaign_id নেই, তাই সেগুলোতে
+//   পড়ার তথ্য দেখায় না।
 // ============================================================
 
 export const prerender = false;
@@ -131,6 +145,33 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <div id="logEmptyState" class="empty-state" style="display:none;">
             <i class="fas fa-inbox"></i>
             <p>এখনো কোনো নোটিফিকেশন পাঠানো হয়নি</p>
+          </div>
+        </div>
+
+        <!-- ===== "কে কে পড়েছে" বটম-শিট ===== -->
+        <div id="readersOverlay" class="readers-overlay" style="display:none;">
+          <div class="readers-sheet" role="dialog" aria-modal="true" aria-labelledby="readersTitle">
+            <div class="readers-head">
+              <div class="readers-head-text">
+                <h3 id="readersTitle">কে কে পড়েছে</h3>
+                <p id="readersMsg" class="readers-msg"></p>
+              </div>
+              <div class="readers-head-actions">
+                <button id="readersRefresh" type="button" aria-label="রিফ্রেশ"><i class="fas fa-rotate"></i></button>
+                <button id="readersClose" type="button" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+              </div>
+            </div>
+
+            <div class="readers-tabs">
+              <button type="button" class="readers-tab active" data-filter="all">সব <span id="rcAll"></span></button>
+              <button type="button" class="readers-tab" data-filter="read">পড়েছে <span id="rcRead"></span></button>
+              <button type="button" class="readers-tab" data-filter="unread">পড়েনি <span id="rcUnread"></span></button>
+            </div>
+
+            <input type="text" id="readersSearch" class="readers-search" placeholder="নাম বা ফোন দিয়ে খুঁজুন..." />
+
+            <div id="readersList" class="readers-list"></div>
+            <button id="readersMore" class="readers-more" type="button" style="display:none;">আরও দেখুন</button>
           </div>
         </div>
 
@@ -674,6 +715,297 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .empty-state i {
       font-size: 2rem;
     }
+
+    /* ===== পড়ার স্ট্যাটাস (হিস্ট্রি কার্ডের ভেতরে) ===== */
+    .log-stats {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #EEF3F9;
+    }
+
+    .log-stats-muted {
+      font-size: 0.74rem;
+      color: #A3AFC0;
+      font-weight: 600;
+    }
+
+    .log-stats-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+    }
+
+    .log-stats-read {
+      font-size: 0.82rem;
+      font-weight: 800;
+      color: #1B2A4A;
+    }
+
+    .log-stats-read em {
+      font-style: normal;
+      color: #1B9E52;
+    }
+
+    .log-stats-push {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #8FA0BC;
+      white-space: nowrap;
+    }
+
+    .log-stats-bar {
+      height: 7px;
+      border-radius: 7px;
+      background: #EEF3F9;
+      overflow: hidden;
+    }
+
+    .log-stats-bar-fill {
+      height: 100%;
+      border-radius: 7px;
+      background: linear-gradient(90deg, #2ECC71, #1B9E52);
+      transition: width 0.5s ease;
+    }
+
+    .log-stats-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      background: #F4F7FC;
+      color: #1B2A4A;
+      border: none;
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .log-stats-btn:hover {
+      background: #E8EEF8;
+    }
+
+    /* ===== "কে কে পড়েছে" বটম-শিট ===== */
+    .readers-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9000;
+      background: rgba(15, 23, 42, 0.55);
+      align-items: flex-end;
+      justify-content: center;
+    }
+
+    .readers-sheet {
+      width: 100%;
+      max-width: 520px;
+      max-height: 88vh;
+      background: #fff;
+      border-radius: 22px 22px 0 0;
+      padding: 18px 16px;
+      padding-bottom: calc(18px + env(safe-area-inset-bottom));
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 -10px 40px rgba(15, 23, 42, 0.2);
+    }
+
+    @media (min-width: 768px) {
+      .readers-overlay {
+        align-items: center;
+      }
+      .readers-sheet {
+        border-radius: 22px;
+        max-height: 80vh;
+      }
+    }
+
+    .readers-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .readers-head-text {
+      min-width: 0;
+    }
+
+    .readers-head h3 {
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: #1B2A4A;
+    }
+
+    .readers-msg {
+      font-size: 0.74rem;
+      color: #8FA0BC;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 62vw;
+    }
+
+    .readers-head-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .readers-head-actions button {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: none;
+      background: #F1F4F8;
+      color: #5A6E85;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .readers-head-actions button.spinning i {
+      animation: spin 0.7s linear infinite;
+    }
+
+    .readers-tabs {
+      display: flex;
+      gap: 6px;
+      background: #F4F7FC;
+      border-radius: 40px;
+      padding: 4px;
+      margin-bottom: 10px;
+    }
+
+    .readers-tab {
+      flex: 1;
+      border: none;
+      background: transparent;
+      padding: 8px 6px;
+      border-radius: 40px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      font-family: inherit;
+      color: #5A6E85;
+      cursor: pointer;
+    }
+
+    .readers-tab span {
+      font-weight: 600;
+      opacity: 0.8;
+    }
+
+    .readers-tab.active {
+      background: #1B2A4A;
+      color: #fff;
+    }
+
+    .readers-search {
+      width: 100%;
+      padding: 11px 14px;
+      border-radius: 12px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.86rem;
+      font-family: inherit;
+      margin-bottom: 10px;
+    }
+
+    .readers-list {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 120px;
+    }
+
+    .readers-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 4px;
+      border-bottom: 1px solid #F1F4F8;
+    }
+
+    .readers-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #FFF0EA;
+      color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .readers-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .readers-name {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .readers-phone {
+      font-size: 0.75rem;
+      color: #8FA0BC;
+    }
+
+    .readers-chip {
+      font-size: 0.68rem;
+      font-weight: 800;
+      padding: 4px 10px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+
+    .readers-chip.read {
+      background: #E6F7ED;
+      color: #1B9E52;
+    }
+
+    .readers-chip.unread {
+      background: #F1F4F8;
+      color: #8FA0BC;
+    }
+
+    .readers-state {
+      text-align: center;
+      padding: 36px 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #A3AFC0;
+    }
+
+    .readers-state.error {
+      color: #D14343;
+    }
+
+    .readers-more {
+      margin-top: 10px;
+      background: #F4F7FC;
+      color: #1B2A4A;
+      border: none;
+      border-radius: 12px;
+      padding: 11px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .log-stats-bar-fill { transition: none; }
+    }
   </style>
 
   <script>
@@ -1009,19 +1341,26 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     // ============================================================
     // ব্যাচে insert করার হেল্পার (broadcast এর জন্য, ৫০০ জন করে)
+    // broadcastInserted — এ পর্যন্ত কতজনের কাছে সত্যিই গেছে (মাঝপথে
+    // ব্যর্থ হলে আংশিক লগ সেভ করার জন্য)
     // ============================================================
     const BATCH_SIZE = 500;
+    let broadcastInserted = 0;
 
     async function insertInBatches(rows) {
       for (let i = 0; i < rows.length; i += BATCH_SIZE) {
         const batch = rows.slice(i, i + BATCH_SIZE);
         const { error } = await supabase.from('user_notifications').insert(batch);
         if (error) throw error;
+        broadcastInserted += batch.length;
       }
     }
 
     // ============================================================
     // পাঠানো
+    // campaignId: আগে থেকে তৈরি UUID — সব user_notifications রো-তে
+    // campaign_id হিসেবে এবং লগ রো-র id হিসেবে বসে, এভাবেই "কে পড়েছে"
+    // ট্র্যাকিং কাজ করে।
     // ============================================================
     sendBtn.addEventListener('click', async () => {
       const message = messageInput.value.trim();
@@ -1032,6 +1371,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       showFeedback('', '');
 
       const { data: { user: adminUser } } = await supabase.auth.getUser();
+
+      const campaignId = crypto.randomUUID();
+      let isBroadcast = false;
+      let logWarning = '';
+      broadcastInserted = 0;
 
       try {
         let imageUrl = null;
@@ -1052,10 +1396,12 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             action_url: selectedLink?.url || null,
             sender_type: 'admin',
             sender_id: adminUser?.id || null,
+            campaign_id: campaignId,
           });
           if (error) throw error;
 
-          await supabase.from('admin_notification_log').insert({
+          const { error: logError } = await supabase.from('admin_notification_log').insert({
+            id: campaignId,
             message,
             category: currentCategory,
             image_url: imageUrl,
@@ -1066,7 +1412,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             recipient_count: 1,
             sent_by: adminUser?.id,
           });
+          if (logError) logWarning = logError.message;
         } else {
+          isBroadcast = true;
           const allProfiles = await fetchAllProfileIds();
 
           const rows = allProfiles.map((p) => ({
@@ -1079,12 +1427,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             action_url: selectedLink?.url || null,
             sender_type: 'admin',
             sender_id: adminUser?.id || null,
+            campaign_id: campaignId,
           }));
           if (rows.length === 0) throw new Error('কোনো ইউজার পাওয়া যায়নি');
 
           await insertInBatches(rows);
 
-          await supabase.from('admin_notification_log').insert({
+          const { error: logError } = await supabase.from('admin_notification_log').insert({
+            id: campaignId,
             message,
             category: currentCategory,
             image_url: imageUrl,
@@ -1095,9 +1445,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             recipient_count: rows.length,
             sent_by: adminUser?.id,
           });
+          if (logError) logWarning = logError.message;
         }
 
-        showFeedback('সফলভাবে পাঠানো হয়েছে ✓', 'success');
+        if (logWarning) {
+          showFeedback('পাঠানো হয়েছে, কিন্তু হিস্ট্রি লগ সেভ হয়নি: ' + logWarning, 'error');
+        } else {
+          showFeedback('সফলভাবে পাঠানো হয়েছে ✓', 'success');
+        }
         messageInput.value = '';
         selectedUser = null;
         userSearchResult.innerHTML = '';
@@ -1109,7 +1464,28 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         linkSearchInput.value = '';
         loadLog();
       } catch (err) {
-        showFeedback('পাঠানো ব্যর্থ: ' + err.message, 'error');
+        let failMsg = 'পাঠানো ব্যর্থ: ' + err.message;
+
+        // ব্রডকাস্ট মাঝপথে থেমে গেলে — যতজনের কাছে গেছে ততজনের আংশিক
+        // লগ সেভ করি, যেন তাদের পড়া ট্র্যাক করা যায়
+        if (isBroadcast && broadcastInserted > 0) {
+          const { error: partialLogError } = await supabase.from('admin_notification_log').insert({
+            id: campaignId,
+            message,
+            category: currentCategory,
+            image_url: null,
+            link_label: selectedLink?.label || null,
+            action_url: selectedLink?.url || null,
+            target_type: 'broadcast',
+            target_label: 'সবাইকে (আংশিক — মাঝপথে ব্যর্থ)',
+            recipient_count: broadcastInserted,
+            sent_by: adminUser?.id,
+          });
+          failMsg += ` — ${broadcastInserted} জনের কাছে গেছে`;
+          if (!partialLogError) loadLog();
+        }
+
+        showFeedback(failMsg, 'error');
       }
 
       sendBtn.disabled = false;
@@ -1118,7 +1494,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     });
 
     // ============================================================
-    // হিস্ট্রি লগ
+    // হিস্ট্রি লগ + পড়ার স্ট্যাটাস
     // ============================================================
     const logContainer = document.getElementById('logContainer');
     const logEmptyState = document.getElementById('logEmptyState');
@@ -1127,6 +1503,46 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       message: 'সাধারণ মেসেজ',
       promo: 'অফার-প্রমো',
     };
+
+    // কার্ডের "পড়ার স্ট্যাটাস" অংশ আঁকে
+    function renderStats(container, log, stats, errorText) {
+      if (errorText) {
+        container.innerHTML = `<div class="log-stats-muted">পড়ার তথ্য আনা যায়নি</div>`;
+        return;
+      }
+
+      const total = Number(stats?.total_count || 0);
+      if (total === 0) {
+        container.innerHTML = `<div class="log-stats-muted">পড়ার তথ্য নেই (ট্র্যাকিং চালুর আগের মেসেজ)</div>`;
+        return;
+      }
+
+      const read = Number(stats.read_count || 0);
+      const push = Number(stats.push_count || 0);
+      const pct = Math.round((read / total) * 100);
+
+      container.innerHTML = `
+        <div class="log-stats-row">
+          <span class="log-stats-read">পড়েছে <em>${read}</em> / ${total} (${pct}%)</span>
+          <span class="log-stats-push"><i class="fas fa-bell"></i> Push ${push}</span>
+        </div>
+        <div class="log-stats-bar"><div class="log-stats-bar-fill" style="width:${pct}%;"></div></div>
+        <button type="button" class="log-stats-btn">
+          <i class="fas fa-users"></i> কে কে পড়েছে দেখুন
+        </button>
+      `;
+
+      container.querySelector('.log-stats-btn').addEventListener('click', () => openReaders(log));
+    }
+
+    async function loadStatsFor(log, container) {
+      const { data, error } = await supabase.rpc('admin_notification_stats', { p_log_id: log.id });
+      if (error) {
+        renderStats(container, log, null, error.message);
+        return;
+      }
+      renderStats(container, log, Array.isArray(data) ? data[0] : data, null);
+    }
 
     async function loadLog() {
       const { data, error } = await supabase
@@ -1151,7 +1567,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <div class="log-item-top">
             <div class="log-item-badges">
               <span class="log-item-badge ${log.target_type}">
-                ${log.target_type === 'broadcast' ? 'সবাইকে' : escapeHtml(log.target_label || 'নির্দিষ্ট ইউজার')}
+                ${log.target_type === 'broadcast' ? escapeHtml(log.target_label || 'সবাইকে') : escapeHtml(log.target_label || 'নির্দিষ্ট ইউজার')}
               </span>
               <span class="log-item-badge category-${log.category || 'message'}">
                 ${categoryLabels[log.category] || 'সাধারণ মেসেজ'}
@@ -1163,10 +1579,175 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <div class="log-item-msg">${escapeHtml(log.message)}</div>
           ${log.link_label ? `<div class="log-item-link-tag"><i class="fas fa-link"></i> ${escapeHtml(log.link_label)}</div>` : ''}
           <div class="log-item-meta">${formatDate(log.created_at)}</div>
+          <div class="log-stats"><div class="log-stats-muted">পড়ার তথ্য লোড হচ্ছে...</div></div>
         `;
         logContainer.appendChild(item);
+
+        loadStatsFor(log, item.querySelector('.log-stats'));
       });
     }
+
+    // ============================================================
+    // "কে কে পড়েছে" বটম-শিট
+    // ============================================================
+    const READERS_PAGE_SIZE = 50;
+
+    const readersOverlay = document.getElementById('readersOverlay');
+    const readersMsg = document.getElementById('readersMsg');
+    const readersList = document.getElementById('readersList');
+    const readersMore = document.getElementById('readersMore');
+    const readersSearch = document.getElementById('readersSearch');
+    const readersClose = document.getElementById('readersClose');
+    const readersRefresh = document.getElementById('readersRefresh');
+    const readersTabs = document.querySelectorAll('.readers-tab');
+    const rcAll = document.getElementById('rcAll');
+    const rcRead = document.getElementById('rcRead');
+    const rcUnread = document.getElementById('rcUnread');
+
+    const readersState = {
+      logId: null,
+      filter: 'all',
+      search: '',
+      offset: 0,
+      requestSeq: 0, // পুরনো রেসপন্স নতুনটাকে ওভাররাইট করা আটকায়
+    };
+
+    function setReadersCounts(stats) {
+      const total = Number(stats?.total_count || 0);
+      const read = Number(stats?.read_count || 0);
+      const unread = Number(stats?.unread_count || 0);
+      rcAll.textContent = `(${total})`;
+      rcRead.textContent = `(${read})`;
+      rcUnread.textContent = `(${unread})`;
+    }
+
+    function readerRowHtml(r) {
+      const name = r.r_name || '(নাম নাই)';
+      const initial = escapeHtml(Array.from(name.trim())[0] || '?');
+      return `
+        <div class="readers-row">
+          <div class="readers-avatar">${initial}</div>
+          <div class="readers-info">
+            <div class="readers-name">${escapeHtml(name)}</div>
+            <div class="readers-phone">${escapeHtml(r.r_phone || '—')}</div>
+          </div>
+          <span class="readers-chip ${r.r_is_read ? 'read' : 'unread'}">
+            ${r.r_is_read ? '<i class="fas fa-check"></i> পড়েছে' : 'পড়েনি'}
+          </span>
+        </div>
+      `;
+    }
+
+    async function loadReaders(reset) {
+      if (!readersState.logId) return;
+
+      const seq = ++readersState.requestSeq;
+
+      if (reset) {
+        readersState.offset = 0;
+        readersList.innerHTML = '<div class="readers-state">লোড হচ্ছে...</div>';
+        readersMore.style.display = 'none';
+      } else {
+        readersMore.disabled = true;
+        readersMore.textContent = 'লোড হচ্ছে...';
+      }
+
+      const { data, error } = await supabase.rpc('admin_notification_readers', {
+        p_log_id: readersState.logId,
+        p_filter: readersState.filter,
+        p_search: readersState.search,
+        p_limit: READERS_PAGE_SIZE,
+        p_offset: readersState.offset,
+      });
+
+      if (seq !== readersState.requestSeq) return; // এর মধ্যে নতুন রিকোয়েস্ট হয়ে গেছে
+
+      readersMore.disabled = false;
+      readersMore.textContent = 'আরও দেখুন';
+
+      if (error) {
+        if (reset) readersList.innerHTML = `<div class="readers-state error">তালিকা আনা যায়নি: ${escapeHtml(error.message)}</div>`;
+        return;
+      }
+
+      const rows = data || [];
+
+      if (reset) {
+        readersList.innerHTML = '';
+        if (rows.length === 0) {
+          readersList.innerHTML = '<div class="readers-state">কাউকে পাওয়া যায়নি</div>';
+        }
+      }
+
+      readersList.insertAdjacentHTML('beforeend', rows.map(readerRowHtml).join(''));
+      readersState.offset += rows.length;
+      readersMore.style.display = rows.length === READERS_PAGE_SIZE ? 'block' : 'none';
+    }
+
+    async function refreshReadersAll() {
+      if (!readersState.logId) return;
+
+      readersRefresh.classList.add('spinning');
+
+      const { data } = await supabase.rpc('admin_notification_stats', { p_log_id: readersState.logId });
+      setReadersCounts(Array.isArray(data) ? data[0] : data);
+
+      await loadReaders(true);
+      readersRefresh.classList.remove('spinning');
+    }
+
+    function openReaders(log) {
+      readersState.logId = log.id;
+      readersState.filter = 'all';
+      readersState.search = '';
+      readersSearch.value = '';
+      readersTabs.forEach((t) => t.classList.toggle('active', t.dataset.filter === 'all'));
+      readersMsg.textContent = log.message || '';
+      setReadersCounts(null);
+
+      readersOverlay.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+
+      refreshReadersAll();
+    }
+
+    function closeReaders() {
+      readersOverlay.style.display = 'none';
+      document.body.style.overflow = '';
+      readersState.logId = null;
+      readersState.requestSeq++;
+      loadLog(); // কার্ডের সংখ্যা সতেজ রাখতে
+    }
+
+    readersTabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        readersTabs.forEach((t) => t.classList.remove('active'));
+        tab.classList.add('active');
+        readersState.filter = tab.dataset.filter;
+        loadReaders(true);
+      });
+    });
+
+    let readersSearchTimer = null;
+    readersSearch.addEventListener('input', () => {
+      clearTimeout(readersSearchTimer);
+      readersSearchTimer = setTimeout(() => {
+        readersState.search = readersSearch.value.trim();
+        loadReaders(true);
+      }, 350);
+    });
+
+    readersMore.addEventListener('click', () => loadReaders(false));
+    readersRefresh.addEventListener('click', refreshReadersAll);
+    readersClose.addEventListener('click', closeReaders);
+
+    readersOverlay.addEventListener('click', (e) => {
+      if (e.target === readersOverlay) closeReaders();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && readersOverlay.style.display !== 'none') closeReaders();
+    });
 
     window.addEventListener('smartfeni:admin-ready', () => {
       loadLog();
