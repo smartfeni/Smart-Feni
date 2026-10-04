@@ -7,26 +7,32 @@
 // চাপলে ইউজার সহজে আর re-enable করতে পারে না, তাই আগে থেকেই
 // প্রসঙ্গ বুঝিয়ে জিজ্ঞেস করা ভালো।
 //
-// দেখানোর শর্ত (client-side script এ চেক হয়):
+// দেখানোর শর্ত — ওয়েব ব্রাউজার (client-side script এ চেক হয়):
 //  - ইউজার লগইন করা আছে
 //  - ব্রাউজার push সাপোর্ট করে
 //  - Notification.permission === 'default' (আগে কখনো জিজ্ঞেস করা হয়নি)
 //  - গত ৭ দিনে "পরে করব" চাপা হয়নি (localStorage cooldown)
 //
 // BaseLayout.astro এ গ্লোবালি মাউন্ট করা হবে (NotificationDrawer
-// এর মতো), যেকোনো পেজে লগইন থাকলে অটো-দেখাবে।
+// এর মতো), যেকোনো পেজে অটো-দেখাবে।
 //
 // আপডেট (Android অ্যাপ): অ্যাপে কোনো নিজস্ব মোডাল/popup দেখানো হয় না —
 // শুধু Android এর নিজের নোটিফিকেশন ডায়ালগ। অনুমতির আসল অবস্থা
 // (checkPermissions) দেখে:
-//   granted → কোনো ডায়ালগ ছাড়াই চুপচাপ সিঙ্ক (যেমন রিইনস্টলের পর)
+//   granted → লগইন থাকলে চুপচাপ সিঙ্ক (যেমন রিইনস্টলের পর); না থাকলে কিছু না
+//             (লগইনের পর push.js নিজেই সিঙ্ক করে)
 //   denied  → কিছুই দেখায় না (Android তখন ডায়ালগ দেখায়ই না;
 //             প্রোফাইলের নোটিফিকেশন কার্ডে নির্দেশনা আছে)
-//   prompt  → ২.৫ সেকেন্ড পরে Android এর ডায়ালগ (৭ দিনের cooldown সহ)
+//   prompt  → অ্যাপ চালুর ২.৫ সেকেন্ড পরে Android এর ডায়ালগ (৭ দিনের cooldown সহ)
+//
+// আপডেট (এই সেশন): অ্যাপে এখন লগইন ছাড়াই চালুর ২.৫ সেকেন্ড পর
+// ডায়ালগ আসে। লগইন না থাকলে শুধু ফোনের অনুমতি নেওয়া হয়; FCM টোকেন
+// সার্ভারে সেভ হয় ইউজার লগইন করার পর (push.js এর initNativePushLifecycle)।
+// ওয়েব ব্রাউজারের আচরণ একদম অপরিবর্তিত।
+//
 // নির্দিষ্ট মুহূর্তে (ডোনার টগল, হিরো নিবন্ধন, প্রথম অর্ডার) অপেক্ষা ছাড়াই
 // চাইতে যেকোনো পেজ থেকে ইভেন্ট পাঠান:
 //   window.dispatchEvent(new CustomEvent('smartfeni:ask-push'))
-// ওয়েব ব্রাউজারের soft-ask মোডাল যেমন ছিল তেমনই।
 // ============================================================
 ---
 
@@ -180,6 +186,7 @@
   const COOLDOWN_KEY = 'smartfeni_push_prompt_dismissed_at';
   const COOLDOWN_DAYS = 7;
   const ASK_SESSION_KEY = 'smartfeni_push_ask_event_done';
+  const NATIVE_ASK_DELAY_MS = 2500;
 
   // ফোনের নোটিফিকেশন অনুমতির আসল অবস্থা (Android):
   // 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale' | 'unknown'
@@ -190,6 +197,18 @@
       return perm.receive;
     } catch (err) {
       return 'unknown';
+    }
+  }
+
+  // লগইন ছাড়া শুধু ফোনের অনুমতি চাওয়া (Android এর নিজের ডায়ালগ)।
+  // টোকেন সার্ভারে সেভ হবে না — লগইনের পর push.js সিঙ্ক করবে।
+  async function requestNativePermissionOnly() {
+    try {
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+      const perm = await PushNotifications.requestPermissions();
+      return perm.receive === 'granted';
+    } catch (err) {
+      return false;
     }
   }
 
@@ -205,7 +224,48 @@
     return true;
   }
 
+  async function initNativePrompt() {
+    const status = await getNativePermissionStatus();
+
+    if (status === 'granted') {
+      // আগে থেকেই অনুমতি আছে (যেমন রিইনস্টলের পর) — লগইন থাকলে ডায়ালগ ছাড়াই সিঙ্ক
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) subscribeToPush();
+      return;
+    }
+    if (status === 'denied') {
+      // স্থায়ীভাবে ব্লক — Android আর ডায়ালগ দেখায় না, তাই কিছু করার নেই
+      return;
+    }
+
+    if (!shouldShowPrompt()) return; // ৭ দিনের cooldown
+
+    setTimeout(async () => {
+      // ২.৫ সেকেন্ডের মধ্যে ইউজার লগইন করে ফেললে সেটাও ধরার জন্য এখানে আবার চেক
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session) {
+        const result = await subscribeToPush(); // Android এর নিজের ডায়ালগ + টোকেন সেভ
+        if (!result.success && result.permission === 'denied') {
+          localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
+        }
+      } else {
+        const granted = await requestNativePermissionOnly(); // শুধু অনুমতি
+        if (!granted) {
+          localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
+        }
+      }
+    }, NATIVE_ASK_DELAY_MS);
+  }
+
   async function initPrompt() {
+    // অ্যাপ: লগইন লাগবে না, কোনো কাস্টম মোডালও নেই
+    if (isNativeApp()) {
+      await initNativePrompt();
+      return;
+    }
+
+    // ---------- ওয়েব ব্রাউজার (আগের মতোই অপরিবর্তিত) ----------
     const overlay = document.getElementById('npOverlay');
     const skipBtn = document.getElementById('npSkipBtn');
     const allowBtn = document.getElementById('npAllowBtn');
@@ -214,32 +274,6 @@
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return; // লগইন করা না থাকলে প্রম্পট দেখানো হবে না
-
-    if (isNativeApp()) {
-      // অ্যাপে কোনো কাস্টম মোডাল নেই — শুধু Android এর নিজের ডায়ালগ, ফোনের
-      // আসল অনুমতির অবস্থা দেখে
-      const status = await getNativePermissionStatus();
-
-      if (status === 'granted') {
-        // আগে থেকেই অনুমতি আছে (যেমন রিইনস্টলের পর) — ডায়ালগ ছাড়াই সিঙ্ক
-        subscribeToPush();
-        return;
-      }
-      if (status === 'denied') {
-        // স্থায়ীভাবে ব্লক — Android আর ডায়ালগ দেখায় না, তাই কিছু করার নেই
-        return;
-      }
-
-      if (!shouldShowPrompt()) return; // ৭ দিনের cooldown / আগে জিজ্ঞেস করা হয়েছে
-
-      setTimeout(async () => {
-        const result = await subscribeToPush(); // Android এর নিজের ডায়ালগ
-        if (!result.success && result.permission === 'denied') {
-          localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
-        }
-      }, 2500);
-      return;
-    }
 
     if (!shouldShowPrompt()) return;
 
