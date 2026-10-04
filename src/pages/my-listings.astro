@@ -1,12 +1,26 @@
-<!-- path: src/pages/my-listings.astro -->
 ---
 // ============================================================
 // পেজ: /my-listings — "আমার পোস্ট" — ইউজারের নিজের করা সব
 // ক্যাটাগরির লিস্টিং এক জায়গায় (দেখুন + এডিট + ডিলিট)।
-// আপডেট: জেনেরিক এডিট মোডাল যোগ করা হয়েছে — টাইটেল, বিবরণ, দাম,
-// উপজেলা, যোগাযোগ নম্বর এডিট করা যায় (এগুলো সব ক্যাটাগরিতে কমন
-// কলাম)। type/category/ছবি এডিটেবল না — ক্যাটাগরি-ভিত্তিক টাইপ
-// লিস্ট আলাদা ফাইলে থাকায় জেনেরিকভাবে আনা স্কোপের বাইরে রাখা হলো।
+// আপডেট: জেনেরিক এডিট মোডাল — টাইটেল, বিবরণ, দাম, উপজেলা, যোগাযোগ
+// নম্বর এডিট করা যায় (এগুলো সব ক্যাটাগরিতে কমন কলাম)। type/category/
+// ছবি এডিটেবল না — ক্যাটাগরি-ভিত্তিক টাইপ লিস্ট আলাদা ফাইলে থাকায়
+// জেনেরিকভাবে আনা স্কোপের বাইরে রাখা হলো।
+//
+// আপডেট (এই সেশন — এডিট রিভিউ সিস্টেম):
+// - এডিট সেভ এখন listings টেবিলে সরাসরি UPDATE নয়; submit_listing_edit
+//   RPC কল হয়:
+//     • লিস্টিং আগেই অনুমোদিত (পাবলিক) হলে → নতুন তথ্য listing_edits এ
+//       pending হিসেবে যায়, আগের ভার্সন পাবলিকে থাকে, অ্যাডমিন/মডারেটর
+//       অনুমোদন করলে তবেই আপডেট হয়
+//     • লিস্টিং এখনো প্রথমবার রিভিউই হয়নি (পাবলিক না) হলে → সরাসরি আপডেট
+// - কার্ডে "এডিট রিভিউতে আছে" নোটিশ + "এডিট বাতিল" বাটন; এডিট
+//   প্রত্যাখ্যাত হলে (৩০ দিন পর্যন্ত) কারণসহ নোটিশ
+// - pending এডিট থাকলে এডিট মোডালে সেই pending তথ্যই খোলে (যাতে মালিক
+//   নিজের জমা দেওয়া ভার্সনেই আবার কাজ করতে পারে)
+// - কার্ডের টাইটেল/ক্যাটাগরি/ছবি escape করা হয়েছে (innerHTML এ সরাসরি
+//   ইউজারের লেখা বসত)
+//
 // my-orders.astro এর একই প্যাটার্ন: loading/login-required/content
 // states, style is:global (কার্ড JS দিয়ে dynamically তৈরি হয় বলে
 // Astro এর scoped CSS এতে কাজ করে না)।
@@ -59,6 +73,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       </button>
 
       <h2 class="ml-edit-title"><i class="fas fa-pen"></i> লিস্টিং এডিট করুন</h2>
+
+      <p class="ml-edit-info" id="mlEditInfo">
+        অনুমোদিত লিস্টিং এডিট করলে নতুন তথ্য রিভিউয়ের জন্য যাবে। অনুমোদনের আগ পর্যন্ত আগের তথ্যই সবাই দেখবে।
+      </p>
 
       <p class="ml-form-msg" id="mlEditMessage"></p>
 
@@ -257,6 +275,47 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       margin-bottom: 8px;
     }
 
+    /* ===== এডিট রিভিউ নোটিশ (pending / প্রত্যাখ্যাত) ===== */
+    .ml-note {
+      display: none;
+      font-size: 0.68rem;
+      font-weight: 600;
+      line-height: 1.5;
+      padding: 8px 10px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+    }
+
+    .ml-note-pending {
+      display: block;
+      background: #FFF3E0;
+      color: #B36B00;
+    }
+
+    .ml-note-rejected {
+      display: block;
+      background: #FFF0EA;
+      color: #D14343;
+    }
+
+    .ml-note-cancel {
+      display: inline-block;
+      margin-top: 6px;
+      background: transparent;
+      border: 1.5px solid currentColor;
+      color: inherit;
+      font-size: 0.66rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+      cursor: pointer;
+    }
+
+    .ml-note-cancel:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
     .ml-actions {
       display: flex;
       gap: 6px;
@@ -353,7 +412,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     .ml-edit-title {
       font-size: 1.15rem;
       color: #1B2A4A;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -361,6 +420,16 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     .ml-edit-title i {
       color: #FF6B35;
+    }
+
+    .ml-edit-info {
+      font-size: 0.78rem;
+      color: #5A6E85;
+      background: #F4F7FC;
+      border-radius: 12px;
+      padding: 10px 12px;
+      line-height: 1.6;
+      margin-bottom: 14px;
     }
 
     .ml-form-msg {
@@ -458,11 +527,26 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     rejected: { text: 'বাতিল', color: '#D14343', bg: '#FFF0EA' },
   };
 
+  // প্রত্যাখ্যাত এডিটের নোটিশ কত দিন পর্যন্ত দেখাবে
+  const REJECTED_NOTE_DAYS = 30;
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
   let currentUserId = null;
+
+  // listing_id -> সর্বশেষ pending / (সাম্প্রতিক) rejected এডিট
+  let pendingByListing = {};
+  let rejectedByListing = {};
+  const cardsById = {};
 
   // ===== এডিট মোডাল এলিমেন্ট =====
   const editOverlay = document.getElementById('mlEditOverlay');
   const editClose = document.getElementById('mlEditClose');
+  const editInfo = document.getElementById('mlEditInfo');
   const editMessage = document.getElementById('mlEditMessage');
   const editTitleInput = document.getElementById('mlEditTitle');
   const editDescInput = document.getElementById('mlEditDescription');
@@ -474,17 +558,108 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
   let editingCard = null;
   let editingItem = null;
 
+  // ===== এডিট রিভিউ অবস্থা লোড (pending / rejected) =====
+  async function loadEditStates() {
+    pendingByListing = {};
+    rejectedByListing = {};
+
+    const { data, error } = await supabase
+      .from('listing_edits')
+      .select('*')
+      .eq('user_id', currentUserId)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error || !data) return;
+
+    // প্রতিটা লিস্টিংয়ের সবচেয়ে নতুন এডিটই অবস্থা ঠিক করে:
+    // pending → pending নোটিশ; rejected (সাম্প্রতিক) → কারণসহ নোটিশ;
+    // approved → কিছু না
+    const seen = new Set();
+    data.forEach((row) => {
+      if (seen.has(row.listing_id)) return;
+      seen.add(row.listing_id);
+
+      if (row.status === 'pending') {
+        pendingByListing[row.listing_id] = row;
+      } else if (row.status === 'rejected') {
+        const when = new Date(row.reviewed_at || row.created_at).getTime();
+        const ageDays = (Date.now() - when) / (1000 * 60 * 60 * 24);
+        if (ageDays <= REJECTED_NOTE_DAYS) rejectedByListing[row.listing_id] = row;
+      }
+    });
+  }
+
+  function refreshNote(listingId) {
+    const card = cardsById[listingId];
+    if (!card) return;
+    const slot = card.querySelector('.ml-note');
+    if (!slot) return;
+
+    const pending = pendingByListing[listingId];
+    const rejected = rejectedByListing[listingId];
+
+    slot.className = 'ml-note';
+    slot.innerHTML = '';
+
+    if (pending) {
+      slot.className = 'ml-note ml-note-pending';
+      slot.innerHTML = `
+        <span>⏳ এডিট রিভিউতে আছে। অনুমোদনের আগে আগের তথ্যই সবাই দেখবে।</span><br />
+        <button type="button" class="ml-note-cancel">এডিট বাতিল</button>
+      `;
+
+      const cancelBtn = slot.querySelector('.ml-note-cancel');
+      cancelBtn?.addEventListener('click', async () => {
+        if (!window.confirm('জমা দেওয়া এডিটটা বাতিল করবেন? আগের তথ্য যেমন আছে তেমনই থাকবে।')) return;
+
+        cancelBtn.disabled = true;
+        const { error } = await supabase
+          .from('listing_edits')
+          .delete()
+          .eq('id', pending.id)
+          .eq('status', 'pending');
+
+        if (error) {
+          alert('বাতিল করা যায়নি: ' + error.message);
+          cancelBtn.disabled = false;
+          return;
+        }
+
+        delete pendingByListing[listingId];
+        refreshNote(listingId);
+      });
+    } else if (rejected) {
+      slot.className = 'ml-note ml-note-rejected';
+      slot.textContent = rejected.rejection_reason
+        ? `❌ আপনার সর্বশেষ এডিট প্রত্যাখ্যাত হয়েছে (কারণ: ${rejected.rejection_reason}). আগের তথ্য চালু আছে।`
+        : '❌ আপনার সর্বশেষ এডিট প্রত্যাখ্যাত হয়েছে। আগের তথ্য চালু আছে।';
+    }
+  }
+
+  function refreshAllNotes() {
+    Object.keys(cardsById).forEach(refreshNote);
+  }
+
   function openEdit(item, card) {
     editingId = item.id;
     editingCard = card;
     editingItem = item;
-    editTitleInput.value = item.title || '';
-    editDescInput.value = item.description || '';
-    editPriceInput.value = item.price || '';
-    editUpazilaInput.value = item.upazila || 'ফেনী সদর';
-    editPhoneInput.value = item.contact_phone || '';
+
+    // pending এডিট থাকলে সেই তথ্যই খোলে, নইলে বর্তমান পাবলিক তথ্য
+    const src = pendingByListing[item.id] || item;
+
+    editTitleInput.value = src.title || '';
+    editDescInput.value = src.description || '';
+    editPriceInput.value = src.price || '';
+    editUpazilaInput.value = src.upazila || 'ফেনী সদর';
+    editPhoneInput.value = src.contact_phone || '';
     editMessage.className = 'ml-form-msg';
     editMessage.textContent = '';
+
+    // প্রথমবার রিভিউই হয়নি এমন লিস্টিংয়ে সরাসরি আপডেট হয়, তাই রিভিউয়ের নোট দেখানো হয় না
+    editInfo.style.display = item.is_reviewed ? 'block' : 'none';
+
     editOverlay.classList.add('open');
     document.body.style.overflow = 'hidden';
   }
@@ -517,11 +692,18 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       contact_phone: editPhoneInput.value.trim(),
     };
 
-    const { error } = await supabase
-      .from('listings')
-      .update(updates)
-      .eq('id', editingId)
-      .eq('user_id', currentUserId);
+    // সার্ভারে (RPC) মালিকানা ও শপ-প্রোডাক্ট চেক হয়। type ও ছবি এই মোডালে
+    // এডিট হয় না, তাই বর্তমান মান যেমন আছে তেমনই পাঠানো হচ্ছে
+    const { data, error } = await supabase.rpc('submit_listing_edit', {
+      p_listing_id: editingId,
+      p_title: updates.title,
+      p_description: updates.description,
+      p_price: updates.price,
+      p_upazila: updates.upazila,
+      p_type: editingItem.type || null,
+      p_contact_phone: updates.contact_phone,
+      p_images: editingItem.images || [],
+    });
 
     editSaveBtn.disabled = false;
 
@@ -531,6 +713,20 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       return;
     }
 
+    const mode = data?.mode;
+
+    if (mode === 'pending') {
+      // পাবলিক তথ্য বদলায়নি — কার্ডে আগের তথ্যই থাকবে, শুধু নোটিশ আসবে
+      await loadEditStates();
+      refreshNote(editingId);
+
+      editMessage.textContent = 'এডিট রিভিউয়ের জন্য পাঠানো হয়েছে ✓ অনুমোদনের পর আপডেট হবে';
+      editMessage.className = 'ml-form-msg show-success';
+      setTimeout(closeEdit, 1500);
+      return;
+    }
+
+    // mode === 'applied' — লিস্টিং এখনো পাবলিক হয়নি, সরাসরি আপডেট হয়েছে।
     // কার্ডে আপডেটেড ভ্যালু সাথে সাথে বসিয়ে দেওয়া হচ্ছে
     Object.assign(editingItem, updates);
     if (editingCard) {
@@ -564,16 +760,17 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     card.dataset.id = item.id;
 
     const photoHtml = item.images && item.images.length > 0
-      ? `<img src="${item.images[0]}" alt="${item.title || ''}" class="ml-photo" />`
+      ? `<img src="${escapeHtml(item.images[0])}" alt="${escapeHtml(item.title || '')}" class="ml-photo" />`
       : `<div class="ml-icon-fallback"><i class="fas fa-image"></i></div>`;
 
     card.innerHTML = `
       <span class="ml-status-badge" style="background:${status.bg};color:${status.color};">${status.text}</span>
       ${photoHtml}
       <div class="ml-body">
-        <span class="ml-category">${categoryNameMap[item.category] || item.category}</span>
-        <p class="ml-title">${item.title || ''}</p>
-        ${item.price ? `<p class="ml-price">৳${item.price}</p>` : ''}
+        <span class="ml-category">${escapeHtml(categoryNameMap[item.category] || item.category)}</span>
+        <p class="ml-title">${escapeHtml(item.title || '')}</p>
+        ${item.price ? `<p class="ml-price">৳${escapeHtml(item.price)}</p>` : ''}
+        <div class="ml-note"></div>
         <div class="ml-actions">
           <a href="/listing/${item.id}" class="ml-btn ml-btn-view"><i class="fas fa-eye"></i> দেখুন</a>
           <button type="button" class="ml-btn ml-btn-edit" data-edit-id="${item.id}"><i class="fas fa-pen"></i> এডিট</button>
@@ -581,6 +778,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         </div>
       </div>
     `;
+
+    cardsById[item.id] = card;
 
     const editBtn = card.querySelector('[data-edit-id]');
     editBtn?.addEventListener('click', () => openEdit(item, card));
@@ -603,6 +802,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       }
 
       card.remove();
+      delete cardsById[item.id];
+      delete pendingByListing[item.id];
+      delete rejectedByListing[item.id];
+
       if (!container.children.length) {
         emptyListings.style.display = 'flex';
       }
@@ -636,7 +839,11 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       return;
     }
 
+    // এডিট রিভিউয়ের অবস্থা আগে আনা হয় (ফেইল করলেও কার্ড দেখাবে)
+    await loadEditStates();
+
     data.forEach(renderCard);
+    refreshAllNotes();
   }
 
   loadMyListings();
