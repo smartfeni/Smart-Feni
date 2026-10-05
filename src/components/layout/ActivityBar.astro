@@ -1,0 +1,464 @@
+---
+// ============================================================
+// গ্লোবাল কম্পোনেন্ট: ফ্লোটিং অ্যাক্টিভিটি বার (ActivityBar)
+// ফাংশন: হোম পেজের নিচে (BottomNav এর ঠিক উপরে) ইউজারের চলমান কাজ দেখায়:
+//   - কাস্টমার: নিজের রাইড/ডেলিভারি রিকোয়েস্ট ও শপ অর্ডারের বর্তমান অবস্থা
+//   - রাইডার: নতুন রিকোয়েস্ট ও নিজের চলমান জব
+//   - শপ মালিক/মডারেটর: পেন্ডিং অর্ডার
+//   - ক্লাব মালিক: পেন্ডিং জয়েন রিকোয়েস্ট
+// সব তথ্য একটাই RPC থেকে আসে: get_my_active_work() (শুধু auth.uid() অনুযায়ী)।
+//
+// আচরণ:
+//  - শুধু হোম পেজে ('/') দেখায়; লগইন না থাকলে কিছু দেখায় না
+//  - একটা আইটেম থাকলে বারে ট্যাপ করলে সরাসরি সেই পেজে যায়; একাধিক থাকলে
+//    বটম শিটে সব তালিকা, তালিকা থেকে বেছে নেওয়া যায়
+//  - ✕ চাপলে বর্তমান সব আইটেম বন্ধ (এই সেশনে); আইটেমের অবস্থা বদলালে
+//    বা নতুন আইটেম এলে আবার দেখায়
+//  - প্রতি ২০ সেকেন্ডে ও অ্যাপ/ট্যাবে ফিরলে রিফ্রেশ
+//  - অন্য কোনো পেজ থেকে সাথে সাথে রিফ্রেশ চাইলে:
+//      window.dispatchEvent(new CustomEvent('smartfeni:activity-refresh'))
+//
+// নোট: বারটা JS দিয়ে তৈরি হয় বলে স্টাইল is:global (Astro scoped CSS এখানে
+// কাজ করে না); ক্লাস নাম sf-act- দিয়ে শুরু, অন্য কিছুর সাথে মিলবে না।
+// ChatWidget এর বাবল বারের সাথে যেন না লাগে, তাই বার দেখালে বাবল উপরে সরে যায়।
+// ============================================================
+---
+
+<div id="sfActBar" class="sf-act" hidden></div>
+
+<div id="sfActSheet" class="sf-act-sheet" hidden>
+  <div class="sf-act-panel" role="dialog" aria-label="আপনার চলমান কাজ">
+    <div class="sf-act-grip"></div>
+    <h3>আপনার চলমান কাজ</h3>
+    <p>সবগুলো এক জায়গায়। ট্যাপ করলে বিস্তারিত দেখবেন।</p>
+    <div id="sfActList"></div>
+  </div>
+</div>
+
+<style is:global>
+  .sf-act {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    max-width: 520px;
+    margin: 0 auto;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 11px 12px 11px 14px;
+    background: #1B2A4A;
+    color: #fff;
+    border-radius: 20px;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.38);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .sf-act[hidden],
+  .sf-act-sheet[hidden] {
+    display: none;
+  }
+
+  .sf-act-dot {
+    flex: none;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #FF6B35;
+    box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.6);
+    animation: sfActPulse 1.8s infinite;
+  }
+
+  @keyframes sfActPulse {
+    70% { box-shadow: 0 0 0 9px rgba(255, 107, 53, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sf-act-dot { animation: none; }
+  }
+
+  .sf-act-emoji {
+    flex: none;
+    font-size: 1.35rem;
+    line-height: 1;
+  }
+
+  .sf-act-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sf-act-title {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sf-act-sub {
+    display: block;
+    font-size: 0.76rem;
+    opacity: 0.78;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+  }
+
+  .sf-act-badge {
+    flex: none;
+    background: #FF6B35;
+    border-radius: 99px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 8px;
+  }
+
+  .sf-act-x {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    font-size: 0.95rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* বার দেখালে চ্যাট বাবল উপরে সরে যায় */
+  body.sf-has-activity #sf-chat-root {
+    bottom: calc(152px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .sf-act-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 2050;
+    background: rgba(15, 23, 42, 0.5);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .sf-act-panel {
+    width: 100%;
+    max-width: 520px;
+    max-height: 80vh;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 26px 26px 0 0;
+    padding: 10px 18px calc(20px + env(safe-area-inset-bottom));
+  }
+
+  .sf-act-grip {
+    width: 42px;
+    height: 5px;
+    border-radius: 5px;
+    background: #E5EAF0;
+    margin: 0 auto 14px;
+  }
+
+  .sf-act-panel h3 {
+    font-size: 1.15rem;
+    color: #1B2A4A;
+    margin: 0 0 4px;
+  }
+
+  .sf-act-panel p {
+    font-size: 0.85rem;
+    color: #8FA0BC;
+    margin: 0 0 10px;
+  }
+
+  .sf-act-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 13px 0;
+    border: none;
+    border-top: 1px solid #EEF3F9;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .sf-act-row-icon {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    background: #FFF0EA;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+  }
+
+  .sf-act-row-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sf-act-row-text b {
+    display: block;
+    font-size: 0.92rem;
+    color: #1B2A4A;
+  }
+
+  .sf-act-row-text small {
+    display: block;
+    font-size: 0.78rem;
+    color: #8FA0BC;
+    margin-top: 2px;
+  }
+
+  .sf-act-row-price {
+    flex: none;
+    font-weight: 700;
+    color: #FF6B35;
+    font-size: 0.9rem;
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const bar = document.getElementById('sfActBar');
+  const sheet = document.getElementById('sfActSheet');
+  const list = document.getElementById('sfActList');
+
+  const DISMISS_KEY = 'sf_act_dismissed';
+  const POLL_MS = 20000;
+
+  // শুধু হোম পেজে (ক্লাব সাবডোমেইনের '/' এ নয়)
+  const isHome =
+    window.location.pathname === '/' && !window.location.hostname.startsWith('club.');
+
+  let items = [];
+  let timer = null;
+  let loading = false;
+
+  const emojiByKind = {
+    shop_order: '🛍️',
+    rider_job: '🛵',
+    new_request: '🆕',
+    shop_pending: '🔔',
+    club_pending: '🏅',
+  };
+
+  function toBn(value) {
+    return String(value).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+  }
+
+  function emojiFor(item) {
+    if (item.kind === 'request' || item.kind === 'new_request') {
+      return item.title.includes('রাইড') ? '🏍️' : item.kind === 'new_request' ? '🆕' : '📦';
+    }
+    if (item.kind === 'rider_job') {
+      return item.title.includes('রাইড') ? '🏍️' : '🛵';
+    }
+    return emojiByKind[item.kind] || '📌';
+  }
+
+  // আইটেমের অবস্থার স্বাক্ষর — অবস্থা বদলালে বন্ধ করা আইটেম আবার আসবে
+  function signature(item) {
+    return `${item.kind}:${item.id}:${item.status}`;
+  }
+
+  function getDismissed() {
+    try {
+      return new Set(JSON.parse(sessionStorage.getItem(DISMISS_KEY) || '[]'));
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function saveDismissed(set) {
+    try {
+      sessionStorage.setItem(DISMISS_KEY, JSON.stringify([...set]));
+    } catch (e) {
+      // স্টোরেজ না থাকলে সমস্যা নেই
+    }
+  }
+
+  function visibleItems() {
+    const dismissed = getDismissed();
+    return items.filter((it) => !dismissed.has(signature(it)));
+  }
+
+  function setBarVisible(show) {
+    bar.hidden = !show;
+    document.body.classList.toggle('sf-has-activity', show);
+  }
+
+  function goTo(url) {
+    // শুধু একই সাইটের পথ
+    if (typeof url === 'string' && url.startsWith('/')) {
+      window.location.href = url;
+    }
+  }
+
+  function priceText(item) {
+    return item.price ? `৳${toBn(item.price)}` : '';
+  }
+
+  function subText(item) {
+    const parts = [item.subtitle, priceText(item)].filter(Boolean);
+    return toBn(parts.join(' · '));
+  }
+
+  function makeEl(tag, className, text) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+
+  function renderBar() {
+    const visible = visibleItems();
+    if (!isHome || visible.length === 0) {
+      setBarVisible(false);
+      return;
+    }
+
+    const top = visible[0];
+    bar.innerHTML = '';
+    bar.appendChild(makeEl('span', 'sf-act-dot'));
+    bar.appendChild(makeEl('span', 'sf-act-emoji', emojiFor(top)));
+
+    const text = makeEl('span', 'sf-act-text');
+    text.appendChild(makeEl('span', 'sf-act-title', top.title));
+    text.appendChild(makeEl('span', 'sf-act-sub', subText(top)));
+    bar.appendChild(text);
+
+    if (visible.length > 1) {
+      bar.appendChild(makeEl('span', 'sf-act-badge', `+${toBn(visible.length - 1)}`));
+    }
+
+    const closeBtn = makeEl('button', 'sf-act-x', '✕');
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'বন্ধ করুন');
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const dismissed = getDismissed();
+      visible.forEach((it) => dismissed.add(signature(it)));
+      saveDismissed(dismissed);
+      renderBar();
+    });
+    bar.appendChild(closeBtn);
+
+    setBarVisible(true);
+  }
+
+  function renderSheet() {
+    const visible = visibleItems();
+    list.innerHTML = '';
+
+    visible.forEach((item) => {
+      const row = makeEl('button', 'sf-act-row');
+      row.type = 'button';
+      row.appendChild(makeEl('span', 'sf-act-row-icon', emojiFor(item)));
+
+      const text = makeEl('span', 'sf-act-row-text');
+      text.appendChild(makeEl('b', '', item.title));
+      text.appendChild(makeEl('small', '', toBn(item.subtitle || '')));
+      row.appendChild(text);
+
+      const price = priceText(item);
+      if (price) row.appendChild(makeEl('span', 'sf-act-row-price', toBn(price)));
+
+      row.addEventListener('click', () => goTo(item.url));
+      list.appendChild(row);
+    });
+  }
+
+  function openSheet() {
+    renderSheet();
+    sheet.hidden = false;
+  }
+
+  function closeSheet() {
+    sheet.hidden = true;
+  }
+
+  bar.addEventListener('click', () => {
+    const visible = visibleItems();
+    if (visible.length === 0) return;
+    if (visible.length === 1) {
+      goTo(visible[0].url);
+    } else {
+      openSheet();
+    }
+  });
+
+  sheet.addEventListener('click', (e) => {
+    if (e.target === sheet) closeSheet();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSheet();
+  });
+
+  async function refresh() {
+    if (!isHome || loading) return;
+    loading = true;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        items = [];
+        renderBar();
+        return;
+      }
+
+      const { data, error } = await supabase.rpc('get_my_active_work');
+      if (error) return; // নেটওয়ার্ক/অন্য সমস্যায় আগের অবস্থাই থাকবে
+
+      items = Array.isArray(data?.items) ? data.items : [];
+      renderBar();
+      if (!sheet.hidden) renderSheet();
+    } catch (e) {
+      // ব্যর্থ হলে পরের পোলিংয়ে আবার চেষ্টা
+    } finally {
+      loading = false;
+    }
+  }
+
+  function startPolling() {
+    if (timer) return;
+    timer = setInterval(() => {
+      if (document.visibilityState === 'visible') refresh();
+    }, POLL_MS);
+  }
+
+  if (isHome) {
+    refresh();
+    startPolling();
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') refresh();
+    });
+
+    window.addEventListener('smartfeni:activity-refresh', refresh);
+
+    supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        items = [];
+        closeSheet();
+        renderBar();
+      } else if (event === 'SIGNED_IN') {
+        // setTimeout: onAuthStateChange এর ভেতরে সরাসরি async কাজ না করাই নিরাপদ
+        setTimeout(refresh, 0);
+      }
+    });
+  }
+</script>
