@@ -32,6 +32,12 @@
 //      Facebook থেকে) সরাসরি অ্যাপের সঠিক পেজে যাওয়া। অ্যাপ চালু থাকা
 //      অবস্থায় (appUrlOpen) ও বন্ধ অবস্থা থেকে খোলা হলে (getLaunchUrl)
 //      দুটোই ধরে। assetlinks.json ইতিমধ্যে সাইটে আছে (D1)।
+//   ৭) ড্যাশবোর্ড রিডাইরেক্ট — অ্যাপ চালুর পর (শুধু হোম থেকে, শুধু প্রতি
+//      অ্যাপ সেশনে একবার) get_my_active_work() এর redirect দেখে: রাইডারের
+//      চলমান জব থাকলে হিরো পেজে, শপ মালিক/মডারেটরের পেন্ডিং অর্ডার থাকলে
+//      /my-shop এ পাঠায়। নোটিফিকেশনে ট্যাপ বা লিংক থেকে খোলা হলে করে না।
+//      splash সরানোর আগে সর্বোচ্চ ১.২ সেকেন্ড অপেক্ষা করে (হোমের ঝলক এড়াতে)।
+//   ৮) Back বাটন এখন ফ্লোটিং অ্যাক্টিভিটি বারের বটম শিটও বন্ধ করে।
 // ============================================================
 
 import { Capacitor } from '@capacitor/core';
@@ -112,6 +118,7 @@ const OPEN_OVERLAY_SELECTOR = [
   '[class*="overlay"].active',
   '[class*="-modal"].open',
   '#sf-chat-panel.sf-open',
+  '.sf-act-sheet:not([hidden])',
 ].join(',');
 
 const CLOSE_BUTTON_SELECTOR = [
@@ -178,6 +185,10 @@ export async function initBackButtonHandler() {
   // সরাসরি লিংকের পেজে যাওয়া যায়
   await handleDeepLink(await App.getLaunchUrl().catch(() => null));
 
+  // ড্যাশবোর্ড রিডাইরেক্ট (শপ মালিক/রাইডারের কাজ থাকলে) — splash সরানোর আগে,
+  // যাতে হোম পেজের ঝলক না দেখা যায়
+  await maybeRedirectToDashboard();
+
   hideSplashWhenReady();
   initNotificationHandlers();
   initOfflineBanner();
@@ -199,6 +210,48 @@ export async function initBackButtonHandler() {
   });
 }
 
+// ---------------- Dashboard Redirect on App Open ----------------
+// রাইডারের চলমান জব / শপ মালিকের পেন্ডিং অর্ডার থাকলে অ্যাপ খুলতেই ওই ড্যাশবোর্ডে।
+// সিদ্ধান্ত নেয় ডাটাবেস (get_my_active_work → redirect), এখানে শুধু নেভিগেট।
+// নিয়ম: প্রতি অ্যাপ সেশনে একবার (sessionStorage; অ্যাপ প্রসেস মারা গেলে রিসেট),
+// শুধু হোম ('/') থেকে, নোটিফিকেশন ট্যাপ/ডিপ লিংক থাকলে করে না।
+// replace() ব্যবহার — যাতে ড্যাশবোর্ড থেকে Back চাপলে হোমে ফিরে আবার
+// রিডাইরেক্টের চক্র না হয় (Back তখন অ্যাপ minimize করে)।
+const LAUNCH_REDIRECT_FLAG = 'sf_launch_redirect_done';
+const LAUNCH_REDIRECT_TIMEOUT_MS = 1200;
+let navigatingAway = false;
+
+async function maybeRedirectToDashboard() {
+  try {
+    if (!isNativeApp() || navigatingAway) return;
+    if (sessionStorage.getItem(LAUNCH_REDIRECT_FLAG) === '1') return;
+    sessionStorage.setItem(LAUNCH_REDIRECT_FLAG, '1'); // এই সেশনে আর নয়
+
+    if (window.location.pathname !== '/' || window.location.search) return;
+
+    const lookup = (async () => {
+      const { supabase } = await import('./supabase.js');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return null;
+
+      const { data, error } = await supabase.rpc('get_my_active_work');
+      if (error) return null;
+      return data?.redirect || null;
+    })().catch(() => null);
+
+    // splash বেশি সময় আটকে না রাখতে সর্বোচ্চ ১.২ সেকেন্ড অপেক্ষা
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), LAUNCH_REDIRECT_TIMEOUT_MS));
+    const target = await Promise.race([lookup, timeout]);
+
+    if (typeof target !== 'string' || !target.startsWith('/') || target.startsWith('//')) return;
+    if (navigatingAway || window.location.pathname !== '/') return; // ইতিমধ্যে অন্য পেজে যাচ্ছে
+
+    window.location.replace(target);
+  } catch (err) {
+    // ফেইল করলে অ্যাপ স্বাভাবিক হোম খুলবে
+  }
+}
+
 // ---------------- Deep Link Handling (D3) ----------------
 // getLaunchUrl() এর রেজাল্ট { url } আকারে, appUrlOpen ইভেন্টও { url } আকারে —
 // তাই দুই জায়গা থেকেই একই ফাংশনে পাঠানো যায়।
@@ -213,6 +266,7 @@ function handleDeepLink(data) {
     const target = url.pathname + url.search;
     if (target === window.location.pathname + window.location.search) return; // একই পেজ, কিছু করার নেই
 
+    navigatingAway = true; // ড্যাশবোর্ড রিডাইরেক্ট যেন লিংকের পেজ নষ্ট না করে
     window.location.href = target;
   } catch (err) {
     // ভুল/অসম্পূর্ণ লিংক হলে অ্যাপ স্বাভাবিক (হোমপেজ) খুলবে
@@ -313,6 +367,7 @@ function handleNotificationTap(event) {
     // শুধু নিজের সাইটের লিংক
     if (url.origin !== window.location.origin) return;
 
+    navigatingAway = true; // ড্যাশবোর্ড রিডাইরেক্ট যেন ট্যাপের পেজ নষ্ট না করে
     const notifId = data.notification_id;
     const target = notifId
       ? `${url.pathname}?notif=${encodeURIComponent(notifId)}`
