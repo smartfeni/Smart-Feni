@@ -9,6 +9,19 @@
 // গোপন থাকে। "নিশ্চিত করুন" চাপলে confirm-best-price.js এন্ডপয়েন্ট
 // (confirm_customer_deal RPC) কল হয় — এটা হিরোর নিজস্ব
 // accept-best-price.js এন্ডপয়েন্ট থেকে আলাদা।
+//
+// আপডেট (নতুন UI — প্রথম ধাপ):
+// - "দাম বাড়ান" ও "নিশ্চিত করুন" এখন পাশাপাশি দুটো বড় (৫৪px) বাটন;
+//   বাড়ানোর জন্য +৫/+১০/+২০ দ্রুত বাটন
+// - "নিশ্চিত করুন" চাপলে সরাসরি কনফার্ম হয় না — আগে বটম শিটে হালনাগাদ সেরা
+//   দাম দেখিয়ে জিজ্ঞেস করে ("৳X-এ নিশ্চিত করবেন? পরে বদলানো যাবে না"),
+//   ভুল চাপে ডিল ঠিক হয়ে যাওয়া আটকাতে। দাম ডাটাবেস থেকে নতুন করে আনা হয়
+//   (১৫ সেকেন্ডের পুরোনো রেন্ডারের দাম নয়)
+// - "চলমান / সম্পন্ন" দুটো ট্যাব
+// - ?req=<delivery_request_id> বা ?order=<shop_order_id> দিয়ে এলে (ফ্লোটিং
+//   অ্যাক্টিভিটি বার থেকে) সংশ্লিষ্ট কার্ডের ট্যাব খুলে স্ক্রল ও হাইলাইট
+// - ১৫ সেকেন্ডের অটো-রিফ্রেশ এখন বন্ধ থাকে যখন ইউজার কিছু টাইপ করছে বা
+//   কনফার্ম শিট খোলা (আগে রিফ্রেশে টাইপ করা দাম মুছে যেত)
 // ============================================================
 
 export const prerender = false;
@@ -47,9 +60,24 @@ import ChatModal from '../components/delivery/ChatModal.astro';
           <a href="/shop" class="primary-link-btn">শপ দেখুন</a>
         </div>
 
+        <div id="ordersTabs" class="mo-tabs" style="display:none;">
+          <button type="button" class="mo-tab active" data-tab="ongoing">চলমান <span id="tabCountOngoing"></span></button>
+          <button type="button" class="mo-tab" data-tab="done">সম্পন্ন</button>
+        </div>
+
         <div id="ordersContainer" class="orders-list"></div>
       </div>
 
+    </div>
+  </div>
+
+  <div class="deal-sheet-overlay" id="dealSheet">
+    <div class="deal-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="dealSheetTitle">
+      <div class="deal-sheet-grip"></div>
+      <h3 id="dealSheetTitle"></h3>
+      <p id="dealSheetText"></p>
+      <button type="button" class="deal-sheet-ok" id="dealSheetOk"></button>
+      <button type="button" class="deal-sheet-cancel" id="dealSheetClose">না, ফিরে যান</button>
     </div>
   </div>
 
@@ -749,6 +777,181 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       color: #1B7A3C;
       margin-top: 10px;
     }
+
+    /* ===== নতুন UI: ট্যাব, বড় বাটন, কনফার্ম শিট ===== */
+    .mo-tabs {
+      display: flex;
+      background: #E9EEF5;
+      padding: 4px;
+      border-radius: 14px;
+      margin: 0 0 16px;
+    }
+
+    .mo-tab {
+      flex: 1;
+      border: none;
+      background: transparent;
+      padding: 11px 8px;
+      border-radius: 11px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      font-family: inherit;
+      color: #6C7A93;
+      cursor: pointer;
+    }
+
+    .mo-tab.active {
+      background: #fff;
+      color: #1B2A4A;
+      box-shadow: 0 2px 8px rgba(27, 42, 74, 0.1);
+    }
+
+    .tab-empty {
+      text-align: center;
+      color: #9AA8BC;
+      font-size: 0.88rem;
+      padding: 40px 0;
+    }
+
+    .deal-actions {
+      display: grid;
+      grid-template-columns: 1fr 1.4fr;
+      gap: 10px;
+      margin: 4px 0 8px;
+    }
+
+    .deal-actions .btn-increase-price {
+      background: #fff;
+      color: #1B2A4A;
+      border: 2px solid #1B2A4A;
+      min-height: 54px;
+      padding: 0 10px;
+      border-radius: 16px;
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    .deal-actions .btn-confirm-best-price {
+      min-height: 54px;
+      margin: 0;
+      padding: 0 10px;
+      border-radius: 16px;
+      font-size: 0.95rem;
+    }
+
+    .increase-price-row {
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .inc-chips {
+      display: flex;
+      gap: 8px;
+    }
+
+    .inc-chips button {
+      flex: 1;
+      min-height: 46px;
+      border: none;
+      border-radius: 13px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      font-size: 0.95rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .inc-input-line {
+      display: flex;
+      gap: 8px;
+    }
+
+    .increase-price-row input {
+      min-height: 48px;
+      border-radius: 13px;
+      font-size: 0.95rem;
+    }
+
+    .increase-price-row .inc-input-line button {
+      min-height: 48px;
+      padding: 0 18px;
+      border-radius: 13px;
+    }
+
+    .order-card-highlight {
+      outline: 2px solid #FF6B35;
+      outline-offset: 3px;
+    }
+
+    .deal-sheet-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 2200;
+      background: rgba(15, 23, 42, 0.55);
+      align-items: flex-end;
+      justify-content: center;
+    }
+
+    .deal-sheet-overlay.open {
+      display: flex;
+    }
+
+    .deal-sheet-panel {
+      width: 100%;
+      max-width: 520px;
+      background: #fff;
+      border-radius: 26px 26px 0 0;
+      padding: 10px 20px calc(22px + env(safe-area-inset-bottom));
+    }
+
+    .deal-sheet-grip {
+      width: 42px;
+      height: 5px;
+      border-radius: 5px;
+      background: #E5EAF0;
+      margin: 0 auto 16px;
+    }
+
+    .deal-sheet-panel h3 {
+      font-size: 1.25rem;
+      color: #1B2A4A;
+      margin: 0 0 8px;
+    }
+
+    .deal-sheet-panel p {
+      font-size: 0.92rem;
+      color: #6C7A93;
+      line-height: 1.6;
+      margin: 0 0 18px;
+    }
+
+    .deal-sheet-ok {
+      width: 100%;
+      min-height: 54px;
+      border: none;
+      border-radius: 16px;
+      background: #FF6B35;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .deal-sheet-cancel {
+      width: 100%;
+      min-height: 48px;
+      margin-top: 8px;
+      border: none;
+      background: transparent;
+      color: #6C7A93;
+      font-size: 0.92rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
   </style>
 
   <script>
@@ -770,6 +973,74 @@ import ChatModal from '../components/delivery/ChatModal.astro';
 
     let currentUserId = null;
     let refreshTimer = null;
+
+    // ট্যাব + ডিপ-লিংক স্টেট
+    let activeTab = 'ongoing';
+    let deepLinkHandled = false;
+    let lastData = null;
+    const deepLinkParams = new URLSearchParams(window.location.search);
+    const ordersTabs = document.getElementById('ordersTabs');
+    const tabCountOngoing = document.getElementById('tabCountOngoing');
+
+    // ============ কনফার্ম বটম শিট ============
+    // শিটটা পেজের কার্ড-কনটেইনারের বাইরে, তাই ১৫ সেকেন্ডের রিফ্রেশে বন্ধ হয় না
+    const dealSheet = document.getElementById('dealSheet');
+    const dealSheetTitle = document.getElementById('dealSheetTitle');
+    const dealSheetText = document.getElementById('dealSheetText');
+    const dealSheetOk = document.getElementById('dealSheetOk');
+    const dealSheetClose = document.getElementById('dealSheetClose');
+    let dealResolve = null;
+
+    function toBn(value) {
+      return String(value).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+    }
+
+    function askConfirm({ title, text, okLabel }) {
+      return new Promise((resolve) => {
+        dealSheetTitle.textContent = title;
+        dealSheetText.textContent = text;
+        dealSheetOk.textContent = okLabel;
+        dealResolve = resolve;
+        dealSheet.classList.add('open');
+      });
+    }
+
+    function closeDealSheet(result) {
+      dealSheet.classList.remove('open');
+      if (dealResolve) {
+        const resolve = dealResolve;
+        dealResolve = null;
+        resolve(result);
+      }
+    }
+
+    dealSheetOk.addEventListener('click', () => closeDealSheet(true));
+    dealSheetClose.addEventListener('click', () => closeDealSheet(false));
+    dealSheet.addEventListener('click', (e) => {
+      if (e.target === dealSheet) closeDealSheet(false);
+    });
+
+    // কনফার্মের ঠিক আগে ডাটাবেস থেকে হালনাগাদ সেরা (সর্বনিম্ন active) অফার আনা —
+    // কার্ডে দেখানো দাম ১৫ সেকেন্ড পর্যন্ত পুরোনো হতে পারে
+    async function fetchCurrentBestPrice(req) {
+      const { data, error } = await supabase
+        .from('delivery_offers')
+        .select('offer_price')
+        .eq('request_id', req.id)
+        .eq('status', 'active')
+        .order('offer_price', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (error || !data) return null;
+      return Number(data.offer_price);
+    }
+
+    // ইউজার কিছু টাইপ করছে বা শিট খোলা থাকলে অটো-রিফ্রেশে কার্ড নতুন করে আঁকা হবে না
+    function isUserInteracting() {
+      if (dealSheet.classList.contains('open')) return true;
+      const fields = ordersContainer.querySelectorAll('input, textarea');
+      return Array.from(fields).some((el) => el === document.activeElement || (el.value && el.value.trim() !== ''));
+    }
 
     function formatDate(iso) {
       return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -838,6 +1109,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     function renderShopOrderCard(order) {
       const card = document.createElement('div');
       card.className = 'order-card';
+      card.dataset.orderId = order.id;
 
       const shop = order.shops;
       const itemsHtml = (order.order_items || [])
@@ -872,6 +1144,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     function renderDeliveryCard(req) {
       const card = document.createElement('div');
       card.className = 'order-card';
+      card.dataset.reqId = req.id;
 
       const offers = req.delivery_offers || [];
       const acceptedRiderProfile = req.accepted_rider?.profiles;
@@ -917,13 +1190,22 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         bodyHtml += `
           <div class="asking-price-row">
             <span>আপনার প্রস্তাবিত মূল্য: ৳${askingPrice}</span>
-            <button type="button" class="btn-increase-price" data-action="show-increase">বাড়ান</button>
           </div>
           <div class="increase-price-row">
-            <input type="number" placeholder="৳${askingPrice + 1} বা বেশি" min="${askingPrice + 1}" />
-            <button type="button" data-action="submit-increase"><i class="fas fa-paper-plane"></i></button>
+            <div class="inc-chips">
+              <button type="button" data-inc="5">+৫</button>
+              <button type="button" data-inc="10">+১০</button>
+              <button type="button" data-inc="20">+২০</button>
+            </div>
+            <div class="inc-input-line">
+              <input type="number" placeholder="৳${askingPrice + 1} বা বেশি" min="${askingPrice + 1}" />
+              <button type="button" data-action="submit-increase"><i class="fas fa-paper-plane"></i> পাঠান</button>
+            </div>
           </div>
-          <button class="btn-confirm-best-price" data-action="confirm-best" ${offers.length === 0 ? 'disabled' : ''}><i class="fas fa-check-circle"></i> এই মূল্যে নিশ্চিত করুন</button>
+          <div class="deal-actions">
+            <button type="button" class="btn-increase-price" data-action="show-increase">দাম বাড়ান</button>
+            <button type="button" class="btn-confirm-best-price" data-action="confirm-best" ${offers.length === 0 ? 'disabled' : ''}><i class="fas fa-check-circle"></i> নিশ্চিত করুন</button>
+          </div>
         `;
 
         bodyHtml += `<button class="btn-cancel-request" data-request-id="${req.id}"><i class="fas fa-ban"></i> রিকোয়েস্ট বাতিল করুন</button>`;
@@ -1009,13 +1291,35 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       // বর্তমান সেরা মূল্যে নিশ্চিত করা
       card.querySelector('[data-action="confirm-best"]')?.addEventListener('click', async (e) => {
         const btn = e.currentTarget;
+        if (btn.disabled) return;
+
+        // ১) হালনাগাদ সেরা দাম আনা
+        btn.disabled = true;
+        const freshPrice = await fetchCurrentBestPrice(req);
+        btn.disabled = false;
+
+        if (freshPrice === null) {
+          alert('এখন কোনো হিরোর অফার নেই। একটু অপেক্ষা করুন।');
+          refreshOrders();
+          return;
+        }
+
+        // ২) ভুল চাপ ঠেকাতে আগে জিজ্ঞেস করা
+        const ok = await askConfirm({
+          title: `৳${toBn(freshPrice)}-এ নিশ্চিত করবেন?`,
+          text: 'নিশ্চিত করলে এই হিরোর সাথে দাম ঠিক হয়ে যাবে এবং আর বদলানো যাবে না।',
+          okLabel: `হ্যাঁ, ৳${toBn(freshPrice)}-এ নিশ্চিত করুন`,
+        });
+        if (!ok) return;
+
+        // ৩) নিশ্চিত করা
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> নিশ্চিত করা হচ্ছে...';
         const { error } = await confirmBestPrice({ requestId: req.id });
         if (error) {
           alert(error);
           btn.disabled = false;
-          btn.innerHTML = '<i class="fas fa-check-circle"></i> এই মূল্যে নিশ্চিত করুন';
+          btn.innerHTML = '<i class="fas fa-check-circle"></i> নিশ্চিত করুন';
           return;
         }
         refreshOrders();
@@ -1026,6 +1330,15 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       card.querySelector('[data-action="show-increase"]')?.addEventListener('click', () => {
         increaseRow.classList.toggle('active');
         if (increaseRow.classList.contains('active')) increaseRow.querySelector('input')?.focus();
+      });
+
+      increaseRow?.querySelectorAll('[data-inc]').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const base = Number(req.customer_asking_price ?? req.initial_price);
+          const input = increaseRow.querySelector('input');
+          input.value = String(base + Number(chip.dataset.inc));
+          input.focus();
+        });
       });
 
       card.querySelector('[data-action="submit-increase"]')?.addEventListener('click', async () => {
@@ -1154,7 +1467,39 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     }
 
     // ============ মার্জ ও রেন্ডার ============
-    function renderAll(shopOrders, deliveryRequests, reviewedRequestIds) {
+    function isOngoingItem(item) {
+      if (item.__type === 'shop_order') return item.status === 'pending' || item.status === 'confirmed';
+      return ['open', 'negotiating', 'confirmed', 'delivered', 'disputed'].includes(item.status);
+    }
+
+    function syncTabButtons() {
+      ordersTabs.querySelectorAll('.mo-tab').forEach((b) => {
+        b.classList.toggle('active', b.dataset.tab === activeTab);
+      });
+    }
+
+    // ?req=<id> / ?order=<id> থেকে আসা কার্ডে স্ক্রল ও হাইলাইট (শুধু প্রথমবার)
+    function findDeepLinkTarget(combined) {
+      const reqId = deepLinkParams.get('req');
+      const orderId = deepLinkParams.get('order');
+      if (reqId) return combined.find((i) => i.__type === 'delivery' && i.id === reqId) || null;
+      if (orderId) return combined.find((i) => i.__type === 'shop_order' && i.id === orderId) || null;
+      return null;
+    }
+
+    function scrollToDeepLinkCard(target) {
+      const selector = target.__type === 'delivery'
+        ? `[data-req-id="${target.id}"]`
+        : `[data-order-id="${target.id}"]`;
+      const card = ordersContainer.querySelector(selector);
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('order-card-highlight');
+      setTimeout(() => card.classList.remove('order-card-highlight'), 2600);
+    }
+
+    function paint() {
+      const { shopOrders, deliveryRequests, reviewedRequestIds } = lastData;
       ordersContainer.innerHTML = '';
 
       const combined = [
@@ -1163,16 +1508,51 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       if (combined.length === 0) {
+        ordersTabs.style.display = 'none';
         emptyOrders.style.display = 'block';
         return;
       }
       emptyOrders.style.display = 'none';
+      ordersTabs.style.display = 'flex';
 
-      combined.forEach((item) => {
+      let deepTarget = null;
+      if (!deepLinkHandled) {
+        deepLinkHandled = true;
+        deepTarget = findDeepLinkTarget(combined);
+        if (deepTarget) activeTab = isOngoingItem(deepTarget) ? 'ongoing' : 'done';
+      }
+
+      const ongoingCount = combined.filter(isOngoingItem).length;
+      tabCountOngoing.textContent = ongoingCount > 0 ? toBn(ongoingCount) : '';
+      syncTabButtons();
+
+      const visible = combined.filter((item) => (activeTab === 'ongoing') === isOngoingItem(item));
+
+      if (visible.length === 0) {
+        const msg = activeTab === 'ongoing' ? 'এখন কোনো চলমান অর্ডার নেই' : 'এখনো কোনো সম্পন্ন অর্ডার নেই';
+        ordersContainer.innerHTML = `<p class="tab-empty">${msg}</p>`;
+        return;
+      }
+
+      visible.forEach((item) => {
         const card = item.__type === 'shop_order' ? renderShopOrderCard(item) : renderDeliveryCard(item);
         ordersContainer.appendChild(card);
       });
+
+      if (deepTarget) setTimeout(() => scrollToDeepLinkCard(deepTarget), 80);
     }
+
+    function renderAll(shopOrders, deliveryRequests, reviewedRequestIds) {
+      lastData = { shopOrders, deliveryRequests, reviewedRequestIds };
+      paint();
+    }
+
+    ordersTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.mo-tab');
+      if (!btn || !lastData) return;
+      activeTab = btn.dataset.tab;
+      paint();
+    });
 
     async function loadOrders(userId, { silent = false } = {}) {
       const [ordersRes, deliveryRes, reviewsRes] = await Promise.all([
@@ -1212,6 +1592,9 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         ...req,
         delivery_offers: (req.delivery_offers || []).filter((o) => o.status === 'active'),
       }));
+
+      // ইউজার কিছু টাইপ করছে বা কনফার্ম শিট খোলা থাকলে অটো-রিফ্রেশে কার্ড নতুন করে আঁকব না
+      if (silent && isUserInteracting()) return;
 
       renderAll(ordersRes.data || [], deliveryRequests, reviewedRequestIds);
     }
