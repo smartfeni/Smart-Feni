@@ -992,6 +992,12 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         border-radius: 16px;
       }
     }
+
+    /* ফ্লোটিং অ্যাক্টিভিটি বার/নোটিফিকেশন থেকে ?req= দিয়ে এলে কার্ড হাইলাইট */
+    .dh-card-highlight {
+      outline: 2px solid #FF6B35;
+      outline-offset: 3px;
+    }
   </style>
 
   <script>
@@ -1278,6 +1284,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       activeRequests.forEach((req) => {
         const card = document.createElement('div');
         card.className = 'dh-active-card';
+        card.dataset.reqId = req.id;
 
         const statusLabel = req.status === 'confirmed'
           ? 'কনফার্মড — রাইড চলছে'
@@ -1441,6 +1448,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
 
         const card = document.createElement('div');
         card.className = 'dh-req-card';
+        card.dataset.reqId = req.id;
 
         const vehicleIcon = req.vehicle_type === 'bike' ? 'fa-motorcycle' : req.vehicle_type === 'cycle' ? 'fa-bicycle' : req.vehicle_type === 'cng' ? 'fa-taxi' : 'fa-shuffle';
         const vehicleLabel = req.vehicle_type === 'bike' ? 'বাইক' : req.vehicle_type === 'cycle' ? 'সাইকেল' : req.vehicle_type === 'cng' ? 'সিএনজি' : 'যেকোনো';
@@ -1583,6 +1591,31 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     }
 
     // ===== পেজ লোড হলে সেশন চেক =====
+    // ============================================================
+    // ?req=<delivery_request_id> দিয়ে এলে (ফ্লোটিং অ্যাক্টিভিটি বার/অ্যাপ খোলার
+    // রিডাইরেক্ট থেকে) ওই কার্ডে স্ক্রল ও কমলা বর্ডারে হাইলাইট (শুধু প্রথমবার)
+    // ============================================================
+    const focusReqId = new URLSearchParams(window.location.search).get('req');
+
+    function focusRequestFromUrl() {
+      if (!focusReqId) return;
+      const card = document.querySelector(`[data-req-id="${CSS.escape(focusReqId)}"]`);
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('dh-card-highlight');
+      setTimeout(() => card.classList.remove('dh-card-highlight'), 2600);
+    }
+
+    // রাইডার অফার/দাম টাইপ করছে কিনা — করলে ১৫ সেকেন্ডের অটো-রিফ্রেশ কার্ড নতুন
+    // করে আঁকবে না (নইলে টাইপ করা দাম মুছে যেত)
+    function isRiderInteracting() {
+      const fields = [
+        ...riderOpenRequestsList.querySelectorAll('input, textarea'),
+        ...riderActiveDeliveryList.querySelectorAll('input, textarea'),
+      ];
+      return fields.some((el) => el === document.activeElement || (el.value && el.value.trim() !== ''));
+    }
+
     async function init() {
       const { data: { session } } = await supabase.auth.getSession();
 
@@ -1596,10 +1629,11 @@ import ChatModal from '../components/delivery/ChatModal.astro';
 
       await expireRequests();
       await loadRiderSection();
+      setTimeout(focusRequestFromUrl, 100);
 
       // প্রতি ১৫ সেকেন্ডে silent auto-refresh (শুধু approved রাইডারের ক্ষেত্রে কার্যকর হবে)
       refreshTimer = setInterval(async () => {
-        if (currentRiderRow?.verification_status === 'approved') {
+        if (currentRiderRow?.verification_status === 'approved' && !isRiderInteracting()) {
           await loadRiderSection({ silent: true });
         }
       }, 15000);
