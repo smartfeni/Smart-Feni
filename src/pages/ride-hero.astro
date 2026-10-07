@@ -12,6 +12,7 @@
 // ============================================================
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
+import '../styles/hero-ui.css';
 import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro';
 import ChatModal from '../components/delivery/ChatModal.astro';
 ---
@@ -59,7 +60,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
             <p class="edit-message" id="riderMessage"></p>
             <div class="dh-status-row">
               <div>
-                <p class="dh-status-label">আপনার স্ট্যাটাস</p>
+                <p class="dh-status-label">আপনার স্ট্যাটাস <span class="hu-rating"><i class="fas fa-star"></i> <span id="riderStatRating">—</span></span></p>
                 <p class="dh-status-text" id="riderStatusText">
                   <i class="fas fa-circle"></i> <span>লোড হচ্ছে...</span>
                 </p>
@@ -71,28 +72,11 @@ import ChatModal from '../components/delivery/ChatModal.astro';
             </div>
           </div>
 
-          <!-- স্ট্যাটস -->
-          <div class="dh-stats-grid">
-            <div class="dh-stat-box">
-              <span class="dh-stat-icon"><i class="fas fa-flag-checkered"></i></span>
-              <span class="dh-stat-value" id="riderStatCompleted">0</span>
-              <span class="dh-stat-label">সম্পন্ন রাইড</span>
-            </div>
-            <div class="dh-stat-box">
-              <span class="dh-stat-icon"><i class="fas fa-sack-dollar"></i></span>
-              <span class="dh-stat-value" id="riderStatEarned">৳0</span>
-              <span class="dh-stat-label">মোট আয়</span>
-            </div>
-            <div class="dh-stat-box">
-              <span class="dh-stat-icon"><i class="fas fa-calendar-week"></i></span>
-              <span class="dh-stat-value" id="riderStatWeekly">৳0</span>
-              <span class="dh-stat-label">এই সপ্তাহের আয়</span>
-            </div>
-            <div class="dh-stat-box">
-              <span class="dh-stat-icon"><i class="fas fa-star"></i></span>
-              <span class="dh-stat-value" id="riderStatRating">—</span>
-              <span class="dh-stat-label">রেটিং</span>
-            </div>
+          <!-- স্ট্যাটস (রেটিং এখন স্ট্যাটাস লাইনে ছোট ★ হিসেবে) -->
+          <div class="hu-stats three">
+            <div class="hu-stat"><b id="riderStatCompleted">0</b><small>সম্পন্ন রাইড</small></div>
+            <div class="hu-stat"><b id="riderStatWeekly">৳0</b><small>এই সপ্তাহের আয়</small></div>
+            <div class="hu-stat"><b id="riderStatEarned">৳0</b><small>মোট আয়</small></div>
           </div>
 
           <!-- Telegram নোটিফিকেশন -->
@@ -1222,7 +1206,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       loadTelegramStatus();
       riderStatEarned.textContent = `৳${riderRow.total_earned || 0}`;
       loadWeeklyEarnings(riderRow.id);
-      riderStatRating.textContent = riderRow.avg_rating ? `${riderRow.avg_rating} ★` : '—';
+      riderStatRating.textContent = riderRow.avg_rating ? `${riderRow.avg_rating}` : '—';
 
       await loadActiveDeliveries(riderRow.id);
       await loadOpenRequests(riderRow);
@@ -1326,7 +1310,10 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         card.innerHTML = `
           <p class="dh-active-status"><i class="fas fa-circle"></i> ${statusLabel}</p>
           <p class="dh-req-desc">${req.description || ''}</p>
-          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.pickup_address || req.area_detail || ''} → ${req.drop_address || ''}</p>
+          <div class="hu-trip">
+            <div class="hu-trip-stop">${huEsc(req.pickup_address || req.area_detail || '') || '—'}<small>পিকআপ</small></div>
+            <div class="hu-trip-stop">${huEsc(req.drop_address || '') || '—'}<small>গন্তব্য</small></div>
+          </div>
           ${stageHtml}
           <p class="dh-active-price">৳${req.final_price || 0}</p>
           <div class="dh-customer-info">
@@ -1502,7 +1489,10 @@ import ChatModal from '../components/delivery/ChatModal.astro';
           </div>
           ${req.seat_count ? `<p class="dh-req-seats"><i class="fas fa-user-group"></i> ${req.seat_count} জন যাত্রী</p>` : ''}
           <p class="dh-req-desc">${req.description || ''}</p>
-          <p class="dh-req-area"><i class="fas fa-location-dot"></i> ${req.pickup_address || req.area_detail || ''} → ${req.drop_address || ''}</p>
+          <div class="hu-trip">
+            <div class="hu-trip-stop">${huEsc(req.pickup_address || req.area_detail || '') || '—'}<small>পিকআপ</small></div>
+            <div class="hu-trip-stop">${huEsc(req.drop_address || '') || '—'}<small>গন্তব্য</small></div>
+          </div>
           ${buildInstructionsHtml(req.pickup_instructions, req.drop_instructions)}
           ${distanceRowsHtml}
           <div class="dh-hero-best-row">
@@ -1599,6 +1589,13 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     // ?req=<delivery_request_id> দিয়ে এলে (ফ্লোটিং অ্যাক্টিভিটি বার/অ্যাপ খোলার
     // রিডাইরেক্ট থেকে) ওই কার্ডে স্ক্রল ও কমলা বর্ডারে হাইলাইট (শুধু প্রথমবার)
     // ============================================================
+    // ডাটাবেসের লেখা (ঠিকানা) নিরাপদে innerHTML এ বসানোর জন্য
+    function huEsc(value) {
+      const div = document.createElement('div');
+      div.textContent = value ?? '';
+      return div.innerHTML;
+    }
+
     const focusReqId = new URLSearchParams(window.location.search).get('req');
 
     function focusRequestFromUrl() {
