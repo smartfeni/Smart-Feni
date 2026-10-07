@@ -1,0 +1,804 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — রেফার & রিওয়ার্ড (/admin/referrals)
+// শুধু role === 'admin' (moderator ব্লকড — টাকার হিসাব) — adminGuard.js দিয়ে
+// সাধারণ admin+moderator গার্ড পাস করার পর extra role চেক (lucky-draw এর মতো)।
+//
+// তিনটা ট্যাব:
+//   ১) উইথড্র আবেদন — ইউজারের বিকাশ নম্বর, পোস্ট লিংক (খুলে দেখা যায়), "পোস্ট ভেরিফাই"
+//      টগল; ম্যানুয়ালি টাকা পাঠানোর পর "পেইড মার্ক করুন" (পেমেন্ট নোট বাধ্যতামূলক,
+//      পোস্ট ভেরিফাই না হলে বাটন লকড) বা "রিজেক্ট" (কারণ বাধ্যতামূলক, পয়েন্ট ফেরত যায়)।
+//      ঐচ্ছিক পেমেন্ট ডকুমেন্ট (স্ক্রিনশট/PDF) আপলোড — প্রাইভেট বাকেট payment-docs
+//   ২) ইউজার তালিকা — রেফার কাউন্ট, ব্যালেন্স, মোট আয়, পাওয়া টাকা; ১০০ অতিক্রম
+//      করা ইউজার হাইলাইট (ইউজার এটা জানে না — শুধু অ্যাডমিন দেখে)
+//   ৩) রেফার লগ — শেষ ১০০ রেফার, কাউন্ট হয়েছে/হয়নি ও কারণ (ফ্রড রিভিউ)
+//
+// সব লেখা (পেইড/রিজেক্ট/ভেরিফাই) সার্ভারের SECURITY DEFINER RPC দিয়ে:
+//   admin_set_withdraw_post_verified, admin_mark_withdraw_paid, admin_reject_withdraw
+// সামারি/ইউজার তালিকা: admin_referral_summary(), admin_referral_users()
+// ডকুমেন্ট টেবিল withdraw_documents ও বাকেট payment-docs — শুধু admin (RLS)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="রেফার & রিওয়ার্ড | অ্যাডমিন | স্মার্ট ফেনী">
+  <div class="rfa-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="rfa-loading">
+        <div class="rfa-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" style="display:none;">
+
+        <a href="/admin" class="rfa-back"><i class="fas fa-arrow-left"></i> অ্যাডমিন ড্যাশবোর্ডে ফিরুন</a>
+
+        <div class="rfa-header">
+          <h1><i class="fas fa-coins"></i> রেফার &amp; রিওয়ার্ড</h1>
+          <p>রেফার কাউন্ট, উইথড্র যাচাই ও পেমেন্ট, হিসাবের সামারি</p>
+        </div>
+
+        <div id="rfaCapAlert" class="rfa-alert" style="display:none;"></div>
+
+        <!-- সামারি -->
+        <div class="rfa-summary" id="rfaSummary"></div>
+
+        <!-- ট্যাব -->
+        <div class="rfa-tabs" role="tablist">
+          <button type="button" class="rfa-tab active" data-tab="withdraw" role="tab">উইথড্র আবেদন <span class="rfa-tab-count" id="rfaPendingCount" style="display:none;">0</span></button>
+          <button type="button" class="rfa-tab" data-tab="users" role="tab">ইউজার তালিকা</button>
+          <button type="button" class="rfa-tab" data-tab="log" role="tab">রেফার লগ</button>
+        </div>
+
+        <!-- উইথড্র -->
+        <div id="rfaPaneWithdraw">
+          <div class="rfa-chips" id="rfaFilterChips">
+            <button type="button" class="rfa-chip active" data-filter="pending">পেন্ডিং</button>
+            <button type="button" class="rfa-chip" data-filter="paid">পেইড</button>
+            <button type="button" class="rfa-chip" data-filter="rejected">বাতিল</button>
+            <button type="button" class="rfa-chip" data-filter="all">সব</button>
+          </div>
+          <div id="rfaWithdrawList"></div>
+        </div>
+
+        <!-- ইউজার -->
+        <div id="rfaPaneUsers" style="display:none;">
+          <input id="rfaUserSearch" class="rfa-search" type="search" placeholder="নাম বা ফোন নম্বর দিয়ে খুঁজুন" />
+          <div id="rfaUserList"></div>
+        </div>
+
+        <!-- লগ -->
+        <div id="rfaPaneLog" style="display:none;">
+          <div id="rfaLogList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- পেইড / রিজেক্ট কনফার্ম মডাল (Android back বাটনের জন্য ক্লাসে "overlay" + ".open") -->
+  <div class="rfa-modal-overlay" id="rfaModalOverlay">
+    <div class="rfa-modal-backdrop" id="rfaModalBackdrop"></div>
+    <div class="rfa-modal" role="dialog" aria-modal="true" aria-labelledby="rfaModalTitle">
+      <div class="rfa-modal-head">
+        <h3 id="rfaModalTitle"></h3>
+        <button type="button" class="rfa-modal-close" id="rfaModalClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      </div>
+      <p class="rfa-modal-info" id="rfaModalInfo"></p>
+      <label class="rfa-label" for="rfaModalText" id="rfaModalLabel"></label>
+      <textarea id="rfaModalText" class="rfa-textarea" rows="3" maxlength="300"></textarea>
+      <div class="rfa-modal-error" id="rfaModalError" style="display:none;"></div>
+      <button type="button" id="rfaModalSubmit" class="rfa-btn rfa-btn-primary rfa-btn-block"></button>
+    </div>
+  </div>
+
+  <!-- ডকুমেন্ট ছবি লাইটবক্স -->
+  <div class="rfa-lightbox-overlay" id="rfaLightbox">
+    <button type="button" class="rfa-lightbox-close" id="rfaLightboxClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+    <img id="rfaLightboxImg" src="" alt="পেমেন্ট ডকুমেন্ট" />
+  </div>
+
+  <style is:global>
+    .rfa-page { padding: 40px 0 90px; min-height: 60vh; }
+    .rfa-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .rfa-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: rfa-spin 0.8s linear infinite; }
+    @keyframes rfa-spin { to { transform: rotate(360deg); } }
+    .rfa-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: 0.88rem; margin-bottom: 18px; }
+    .rfa-header h1 { font-size: 1.5rem; font-weight: 800; color: #1B2A4A; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+    .rfa-header h1 i { color: #FF6B35; }
+    .rfa-header p { color: #5A6E85; margin: 0 0 18px; font-size: 0.92rem; }
+
+    .rfa-alert { background: #FFF0F0; border: 1px solid #F5C2C0; color: #B42318; border-radius: 14px; padding: 12px 14px; font-weight: 700; font-size: 0.9rem; margin-bottom: 14px; line-height: 1.55; }
+
+    .rfa-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 18px; }
+    .rfa-stat { background: #fff; border: 1px solid #E5EAF0; border-radius: 16px; padding: 14px; }
+    .rfa-stat strong { display: block; font-size: 1.35rem; font-weight: 800; color: #1B2A4A; line-height: 1.2; }
+    .rfa-stat span { display: block; font-size: 0.76rem; color: #64748B; margin-top: 4px; line-height: 1.4; }
+    .rfa-stat.warn strong { color: #B42318; }
+    .rfa-stat.accent strong { color: #FF6B35; }
+
+    .rfa-tabs { display: flex; gap: 6px; background: #F1F4F9; border-radius: 14px; padding: 4px; margin-bottom: 14px; overflow-x: auto; }
+    .rfa-tab { flex: 1; white-space: nowrap; border: none; background: transparent; padding: 10px 12px; border-radius: 10px; font-weight: 700; font-size: 0.86rem; color: #64748B; cursor: pointer; }
+    .rfa-tab.active { background: #fff; color: #1B2A4A; box-shadow: 0 1px 4px rgba(27, 42, 74, 0.1); }
+    .rfa-tab-count { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 99px; background: #FF6B35; color: #fff; font-size: 0.72rem; margin-left: 4px; }
+
+    .rfa-chips { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .rfa-chip { border: 1.5px solid #E5EAF0; background: #fff; border-radius: 99px; padding: 6px 14px; font-weight: 700; font-size: 0.8rem; color: #5A6E85; cursor: pointer; }
+    .rfa-chip.active { border-color: #FF6B35; color: #FF6B35; background: #FFF4EC; }
+
+    .rfa-search { width: 100%; border: 1.5px solid #E5EAF0; border-radius: 12px; padding: 11px 12px; font-size: 0.92rem; margin-bottom: 12px; background: #fff; }
+    .rfa-search:focus { outline: none; border-color: #FF6B35; }
+
+    .rfa-card { background: #fff; border: 1px solid #E5EAF0; border-radius: 18px; padding: 14px; margin-bottom: 12px; }
+    .rfa-card.over { border-color: #F5C2C0; background: #FFFAFA; }
+    .rfa-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .rfa-name { font-weight: 800; color: #1B2A4A; font-size: 0.98rem; }
+    .rfa-sub { font-size: 0.78rem; color: #64748B; margin-top: 2px; line-height: 1.5; word-break: break-word; }
+    .rfa-sub a { color: #2563EB; text-decoration: none; }
+    .rfa-amount { font-weight: 800; font-size: 1.15rem; color: #1B2A4A; white-space: nowrap; text-align: right; }
+    .rfa-amount small { display: block; font-size: 0.72rem; color: #64748B; font-weight: 600; }
+
+    .rfa-badge { display: inline-block; font-size: 0.7rem; font-weight: 800; padding: 2px 9px; border-radius: 99px; margin-left: 6px; vertical-align: middle; }
+    .rfa-badge-pending { background: #FFF2CC; color: #8A6500; }
+    .rfa-badge-paid { background: #DDF5E4; color: #1B7A3C; }
+    .rfa-badge-rejected { background: #FFE3E0; color: #B42318; }
+    .rfa-badge-over { background: #FFE3E0; color: #B42318; }
+    .rfa-badge-ok { background: #DDF5E4; color: #1B7A3C; }
+    .rfa-badge-no { background: #F1F4F9; color: #64748B; }
+
+    .rfa-box { background: #F8FAFC; border: 1px solid #EDF1F7; border-radius: 12px; padding: 10px 12px; margin-top: 10px; font-size: 0.84rem; color: #1B2A4A; }
+    .rfa-box-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .rfa-box-label { font-size: 0.72rem; color: #64748B; font-weight: 700; margin-bottom: 3px; }
+    .rfa-linkval { color: #2563EB; text-decoration: none; word-break: break-all; font-weight: 600; }
+    .rfa-note { margin-top: 8px; font-size: 0.8rem; color: #3C4C66; line-height: 1.5; word-break: break-word; }
+
+    .rfa-btn { border: none; border-radius: 10px; padding: 9px 14px; font-size: 0.84rem; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .rfa-btn-primary { background: #FF6B35; color: #fff; }
+    .rfa-btn-green { background: #1B7A3C; color: #fff; }
+    .rfa-btn-red { background: #fff; color: #B42318; border: 1.5px solid #F5C2C0; }
+    .rfa-btn-light { background: #EEF2F7; color: #1B2A4A; }
+    .rfa-btn-block { width: 100%; padding: 13px; font-size: 0.95rem; margin-top: 14px; }
+    .rfa-btn:disabled { background: #D5DCE6; color: #8FA0BC; border-color: transparent; cursor: not-allowed; }
+    .rfa-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .rfa-actions .rfa-btn { flex: 1; min-width: 130px; }
+    .rfa-lock-hint { font-size: 0.76rem; color: #8A6500; margin-top: 8px; }
+
+    .rfa-docs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+    .rfa-doc { position: relative; width: 64px; height: 64px; border-radius: 10px; overflow: hidden; border: 1px solid #E5EAF0; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none; color: #1B2A4A; font-weight: 800; font-size: 0.75rem; }
+    .rfa-doc img { width: 100%; height: 100%; object-fit: cover; }
+    .rfa-doc-del { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(15, 23, 42, 0.72); color: #fff; font-size: 0.65rem; cursor: pointer; padding: 0; }
+    .rfa-upload { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 700; color: #1B2A4A; background: #EEF2F7; border-radius: 10px; padding: 9px 12px; cursor: pointer; }
+    .rfa-upload input { display: none; }
+
+    .rfa-user-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .rfa-pill { background: #F1F4F9; border-radius: 99px; padding: 4px 10px; font-size: 0.76rem; font-weight: 700; color: #3C4C66; }
+
+    .rfa-empty { text-align: center; color: #8090A6; padding: 40px 10px; font-size: 0.92rem; }
+
+    .rfa-modal-overlay, .rfa-lightbox-overlay { position: fixed; inset: 0; z-index: 4000; display: none; }
+    .rfa-modal-overlay.open { display: block; }
+    .rfa-lightbox-overlay.open { display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.88); }
+    .rfa-lightbox-overlay img { max-width: 94vw; max-height: 86vh; border-radius: 12px; }
+    .rfa-lightbox-close { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 14px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.18); color: #fff; font-size: 1rem; cursor: pointer; }
+    .rfa-modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.55); }
+    .rfa-modal { position: absolute; left: 0; right: 0; bottom: 0; max-width: 520px; margin: 0 auto; background: #fff; border-radius: 22px 22px 0 0; padding: 18px 18px calc(22px + env(safe-area-inset-bottom, 0px)); }
+    .rfa-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .rfa-modal-head h3 { margin: 0; font-size: 1.05rem; font-weight: 800; color: #1B2A4A; }
+    .rfa-modal-close { border: none; background: #F1F4F9; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; color: #1B2A4A; }
+    .rfa-modal-info { font-size: 0.86rem; color: #3C4C66; margin: 0 0 6px; line-height: 1.6; }
+    .rfa-label { display: block; font-size: 0.84rem; font-weight: 700; color: #1B2A4A; margin: 10px 0 6px; }
+    .rfa-textarea { width: 100%; border: 1.5px solid #E5EAF0; border-radius: 12px; padding: 11px; font-size: 0.92rem; resize: vertical; font-family: inherit; }
+    .rfa-textarea:focus { outline: none; border-color: #FF6B35; }
+    .rfa-modal-error { background: #FFF0F0; color: #B42318; border-radius: 10px; padding: 9px 12px; font-size: 0.84rem; margin-top: 10px; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { compressImage } from '../../lib/imageCompress.js';
+
+    const BUCKET = 'payment-docs';
+    const MAX_DOC_BYTES = 8 * 1024 * 1024;
+    const REASON_LABEL = {
+      no_device: 'ডিভাইস আইডি পাওয়া যায়নি',
+      duplicate_device: 'একই ফোন আগেও কাউন্ট হয়েছে',
+      duplicate_phone: 'একই ফোন নম্বর আগেও কাউন্ট হয়েছে',
+      cap_reached: '১০০ লিমিট অতিক্রম',
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    let adminId = null;
+    let withdraws = [];
+    let signedUrls = {};
+    let currentFilter = 'pending';
+    let usersLoaded = false;
+    let usersData = [];
+    let logLoaded = false;
+    let modalState = null; // { mode: 'paid' | 'reject', w }
+
+    // ---------- সহায়ক ----------
+    function bn(n) {
+      return Number(n || 0).toLocaleString('bn-BD');
+    }
+
+    function fmtDate(iso) {
+      try {
+        return new Date(iso).toLocaleString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+      } catch (e) {
+        return '';
+      }
+    }
+
+    function toast(msg, type) {
+      if (typeof window.showToast === 'function') window.showToast(msg, type || 'success');
+    }
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function isHttpUrl(value) {
+      return /^https?:\/\/\S+$/i.test(String(value || ''));
+    }
+
+    function who(profile) {
+      return profile?.full_name || 'নাম নেই';
+    }
+
+    async function copyText(text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch (e) {
+        // নিচের ফলব্যাক
+      }
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // ---------- সামারি ----------
+    function stat(value, label, cls) {
+      const box = el('div', 'rfa-stat' + (cls ? ' ' + cls : ''));
+      box.appendChild(el('strong', '', value));
+      box.appendChild(el('span', '', label));
+      return box;
+    }
+
+    async function loadSummary() {
+      const { data, error } = await supabase.rpc('admin_referral_summary');
+      const wrap = $('rfaSummary');
+      wrap.innerHTML = '';
+      if (error || !data) {
+        wrap.appendChild(el('div', 'rfa-empty', 'সামারি লোড করা যায়নি'));
+        return;
+      }
+
+      const pendingTaka = Number(data.withdraw_pending_taka || 0);
+      const holdingTaka = Math.floor(Number(data.points_available_total || 0) / 10);
+
+      wrap.appendChild(stat(bn(data.referrals_counted), 'কাউন্ট হওয়া রেফার'));
+      wrap.appendChild(stat(bn(data.referrals_not_counted), 'কাউন্ট না হওয়া রেফার'));
+      wrap.appendChild(stat(bn(data.points_issued), `মোট দেওয়া পয়েন্ট (রেফার ${bn(data.points_from_referrals)} • লিস্টিং ${bn(data.points_from_listings)})`));
+      wrap.appendChild(stat(`৳${bn(holdingTaka)}`, 'ইউজারদের জমা পয়েন্টের মূল্য (ভবিষ্যৎ দেনা)'));
+      wrap.appendChild(stat(`${bn(data.withdraw_pending_count)} টি • ৳${bn(pendingTaka)}`, 'পেন্ডিং উইথড্র', data.withdraw_pending_count > 0 ? 'accent' : ''));
+      wrap.appendChild(stat(`${bn(data.withdraw_paid_count)} টি • ৳${bn(data.withdraw_paid_taka)}`, 'মোট পেইড'));
+      wrap.appendChild(stat(bn(data.withdraw_rejected_count), 'বাতিল আবেদন'));
+      wrap.appendChild(stat(bn(data.referrers_over_cap), '১০০ রেফার অতিক্রম করা ইউজার', data.referrers_over_cap > 0 ? 'warn' : ''));
+
+      const alertBox = $('rfaCapAlert');
+      if (data.referrers_over_cap > 0) {
+        alertBox.textContent = `⚠️ ${bn(data.referrers_over_cap)} জন ইউজার ১০০ রেফার অতিক্রম করেছেন। তাদের নতুন রেফার আর কাউন্ট হচ্ছে না (ইউজার জানে না)। "ইউজার তালিকা" ট্যাবে দেখুন।`;
+        alertBox.style.display = 'block';
+      } else {
+        alertBox.style.display = 'none';
+      }
+
+      const pendingCount = Number(data.withdraw_pending_count || 0);
+      const tabCount = $('rfaPendingCount');
+      tabCount.textContent = pendingCount > 99 ? '৯৯+' : String(pendingCount);
+      tabCount.style.display = pendingCount > 0 ? 'inline-block' : 'none';
+    }
+
+    // ---------- উইথড্র ----------
+    async function loadWithdraws() {
+      const { data, error } = await supabase
+        .from('withdraw_requests')
+        .select('id, user_id, points, amount_taka, method, account_number, post_link, post_verified, status, admin_note, paid_at, created_at, user:profiles!user_id(full_name, phone), withdraw_documents(id, file_path, file_name, created_at)')
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (error) {
+        $('rfaWithdrawList').innerHTML = '';
+        $('rfaWithdrawList').appendChild(el('div', 'rfa-empty', 'উইথড্র আবেদন লোড করা যায়নি'));
+        return;
+      }
+
+      withdraws = data || [];
+
+      // ডকুমেন্টের signed URL একসাথে (প্রাইভেট বাকেট, ১ ঘণ্টার লিংক)
+      signedUrls = {};
+      const paths = [];
+      withdraws.forEach((w) => (w.withdraw_documents || []).forEach((d) => paths.push(d.file_path)));
+      if (paths.length) {
+        const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrls(paths, 3600);
+        (signed || []).forEach((s) => {
+          if (s && s.path && s.signedUrl) signedUrls[s.path] = s.signedUrl;
+        });
+      }
+
+      renderWithdraws();
+    }
+
+    function isImagePath(path) {
+      return /\.(jpe?g|png|webp|gif)$/i.test(path || '');
+    }
+
+    function renderDocs(w) {
+      const row = el('div', 'rfa-docs');
+
+      (w.withdraw_documents || []).forEach((d) => {
+        const url = signedUrls[d.file_path];
+        let item;
+        if (url && isImagePath(d.file_path)) {
+          item = el('div', 'rfa-doc');
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = d.file_name || 'ডকুমেন্ট';
+          img.loading = 'lazy';
+          item.appendChild(img);
+          item.addEventListener('click', () => openLightbox(url));
+        } else if (url) {
+          item = el('a', 'rfa-doc', 'PDF');
+          item.href = url;
+          item.target = '_blank';
+          item.rel = 'noopener noreferrer';
+        } else {
+          item = el('div', 'rfa-doc', '—');
+        }
+
+        const del = el('button', 'rfa-doc-del');
+        del.type = 'button';
+        del.setAttribute('aria-label', 'ডকুমেন্ট মুছুন');
+        del.innerHTML = '<i class="fas fa-xmark"></i>';
+        del.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteDoc(d);
+        });
+        item.appendChild(del);
+        row.appendChild(item);
+      });
+
+      const label = el('label', 'rfa-upload');
+      label.innerHTML = '<i class="fas fa-paperclip"></i> ডকুমেন্ট যোগ করুন (ঐচ্ছিক)';
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*,application/pdf';
+      input.addEventListener('change', () => uploadDoc(w, input));
+      label.appendChild(input);
+      row.appendChild(label);
+
+      return row;
+    }
+
+    function renderWithdraws() {
+      const list = $('rfaWithdrawList');
+      list.innerHTML = '';
+
+      const rows = withdraws.filter((w) => currentFilter === 'all' || w.status === currentFilter);
+      if (!rows.length) {
+        list.appendChild(el('div', 'rfa-empty', 'এই ফিল্টারে কোনো আবেদন নেই'));
+        return;
+      }
+
+      rows.forEach((w) => {
+        const card = el('div', 'rfa-card');
+
+        // শীর্ষ: নাম/ফোন + পরিমাণ
+        const top = el('div', 'rfa-card-top');
+        const left = el('div');
+        const nameLine = el('div', 'rfa-name', who(w.user));
+        const st = { pending: ['যাচাই বাকি', 'rfa-badge-pending'], paid: ['পেইড', 'rfa-badge-paid'], rejected: ['বাতিল', 'rfa-badge-rejected'] }[w.status] || [w.status, ''];
+        nameLine.appendChild(el('span', `rfa-badge ${st[1]}`, st[0]));
+        left.appendChild(nameLine);
+
+        const phoneLine = el('div', 'rfa-sub');
+        if (w.user?.phone) {
+          const tel = el('a', '', w.user.phone);
+          tel.href = `tel:${w.user.phone}`;
+          phoneLine.appendChild(tel);
+          phoneLine.appendChild(document.createTextNode(' • '));
+        }
+        phoneLine.appendChild(document.createTextNode(fmtDate(w.created_at)));
+        left.appendChild(phoneLine);
+
+        const amount = el('div', 'rfa-amount', `৳${bn(w.amount_taka)}`);
+        amount.appendChild(el('small', '', `${bn(w.points)} পয়েন্ট`));
+        top.appendChild(left);
+        top.appendChild(amount);
+        card.appendChild(top);
+
+        // বিকাশ নম্বর
+        const bkashBox = el('div', 'rfa-box');
+        const bkashRow = el('div', 'rfa-box-row');
+        const bkashLeft = el('div');
+        bkashLeft.appendChild(el('div', 'rfa-box-label', 'বিকাশ নম্বর'));
+        bkashLeft.appendChild(el('div', '', w.account_number));
+        const copyBtn = el('button', 'rfa-btn rfa-btn-light', 'কপি');
+        copyBtn.type = 'button';
+        copyBtn.addEventListener('click', async () => {
+          const ok = await copyText(w.account_number);
+          toast(ok ? 'নম্বর কপি হয়েছে ✓' : 'কপি করা যায়নি', ok ? 'success' : 'error');
+        });
+        bkashRow.appendChild(bkashLeft);
+        bkashRow.appendChild(copyBtn);
+        bkashBox.appendChild(bkashRow);
+        card.appendChild(bkashBox);
+
+        // পোস্ট লিংক + ভেরিফাই
+        const postBox = el('div', 'rfa-box');
+        postBox.appendChild(el('div', 'rfa-box-label', 'সোশ্যাল মিডিয়া পোস্টের লিংক'));
+        if (isHttpUrl(w.post_link)) {
+          const a = el('a', 'rfa-linkval', w.post_link);
+          a.href = w.post_link;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer nofollow';
+          postBox.appendChild(a);
+        } else {
+          postBox.appendChild(el('div', '', w.post_link));
+        }
+
+        const verifyRow = el('div', 'rfa-box-row');
+        verifyRow.style.marginTop = '8px';
+        verifyRow.appendChild(el('span', `rfa-badge ${w.post_verified ? 'rfa-badge-ok' : 'rfa-badge-no'}`, w.post_verified ? '✓ পোস্ট ভেরিফাইড' : 'পোস্ট ভেরিফাই হয়নি'));
+        if (w.status === 'pending') {
+          const vbtn = el('button', 'rfa-btn rfa-btn-light', w.post_verified ? 'ভেরিফাই বাতিল' : 'ভেরিফাই করুন');
+          vbtn.type = 'button';
+          vbtn.addEventListener('click', () => toggleVerify(w, vbtn));
+          verifyRow.appendChild(vbtn);
+        }
+        postBox.appendChild(verifyRow);
+        card.appendChild(postBox);
+
+        if (w.admin_note) {
+          const label = w.status === 'rejected' ? 'বাতিলের কারণ' : 'পেমেন্ট নোট';
+          card.appendChild(el('div', 'rfa-note', `${label}: ${w.admin_note}`));
+        }
+        if (w.status === 'paid' && w.paid_at) {
+          card.appendChild(el('div', 'rfa-note', `পেইড হয়েছে: ${fmtDate(w.paid_at)}`));
+        }
+
+        card.appendChild(renderDocs(w));
+
+        if (w.status === 'pending') {
+          const actions = el('div', 'rfa-actions');
+          const paidBtn = el('button', 'rfa-btn rfa-btn-green');
+          paidBtn.type = 'button';
+          paidBtn.innerHTML = '<i class="fas fa-circle-check"></i> পেইড মার্ক করুন';
+          paidBtn.disabled = !w.post_verified;
+          paidBtn.addEventListener('click', () => openModal('paid', w));
+          const rejectBtn = el('button', 'rfa-btn rfa-btn-red');
+          rejectBtn.type = 'button';
+          rejectBtn.innerHTML = '<i class="fas fa-ban"></i> রিজেক্ট';
+          rejectBtn.addEventListener('click', () => openModal('reject', w));
+          actions.appendChild(paidBtn);
+          actions.appendChild(rejectBtn);
+          card.appendChild(actions);
+
+          if (!w.post_verified) {
+            card.appendChild(el('div', 'rfa-lock-hint', 'আগে পোস্ট লিংক খুলে যাচাই করে "ভেরিফাই করুন" চাপুন, তারপর পেইড মার্ক করা যাবে।'));
+          }
+        }
+
+        list.appendChild(card);
+      });
+    }
+
+    async function toggleVerify(w, btn) {
+      btn.disabled = true;
+      const { error } = await supabase.rpc('admin_set_withdraw_post_verified', {
+        p_id: w.id,
+        p_verified: !w.post_verified,
+      });
+      if (error) {
+        toast(error.message || 'আপডেট করা যায়নি', 'error');
+        btn.disabled = false;
+        return;
+      }
+      toast(w.post_verified ? 'ভেরিফাই বাতিল হয়েছে' : 'পোস্ট ভেরিফাইড ✓', 'success');
+      await loadWithdraws();
+    }
+
+    // ---------- পেইড / রিজেক্ট মডাল ----------
+    function openModal(mode, w) {
+      modalState = { mode, w };
+      const isPaid = mode === 'paid';
+      $('rfaModalTitle').textContent = isPaid ? 'পেইড মার্ক করুন' : 'আবেদন রিজেক্ট করুন';
+      $('rfaModalInfo').textContent = isPaid
+        ? `${who(w.user)} — ৳${bn(w.amount_taka)} — বিকাশ ${w.account_number}। টাকা পাঠানো হয়ে গেলেই কেবল নিশ্চিত করুন; ইউজার সাথে সাথে নোটিফিকেশন পাবে।`
+        : `${who(w.user)} এর ${bn(w.points)} পয়েন্ট ফেরত যাবে এবং ইউজার কারণসহ নোটিফিকেশন পাবে।`;
+      $('rfaModalLabel').textContent = isPaid ? 'পেমেন্ট নোট (বাধ্যতামূলক) — যেমন বিকাশ TrxID' : 'বাতিলের কারণ (বাধ্যতামূলক)';
+      $('rfaModalText').value = '';
+      $('rfaModalText').placeholder = isPaid ? 'TrxID / নোট লিখুন' : 'কেন বাতিল করছেন';
+      $('rfaModalError').style.display = 'none';
+      const submit = $('rfaModalSubmit');
+      submit.disabled = false;
+      submit.className = 'rfa-btn rfa-btn-block ' + (isPaid ? 'rfa-btn-green' : 'rfa-btn-red');
+      submit.textContent = isPaid ? 'পেমেন্ট হয়েছে — নিশ্চিত করুন' : 'রিজেক্ট করুন';
+      $('rfaModalOverlay').classList.add('open');
+    }
+
+    function closeModal() {
+      $('rfaModalOverlay').classList.remove('open');
+      modalState = null;
+    }
+
+    $('rfaModalClose')?.addEventListener('click', closeModal);
+    $('rfaModalBackdrop')?.addEventListener('click', closeModal);
+
+    $('rfaModalSubmit')?.addEventListener('click', async () => {
+      if (!modalState) return;
+      const text = $('rfaModalText').value.trim();
+      const errBox = $('rfaModalError');
+      if (!text) {
+        errBox.textContent = modalState.mode === 'paid' ? 'পেমেন্ট নোট লিখুন' : 'বাতিলের কারণ লিখুন';
+        errBox.style.display = 'block';
+        return;
+      }
+
+      const submit = $('rfaModalSubmit');
+      submit.disabled = true;
+
+      const { mode, w } = modalState;
+      const { error } = mode === 'paid'
+        ? await supabase.rpc('admin_mark_withdraw_paid', { p_id: w.id, p_note: text })
+        : await supabase.rpc('admin_reject_withdraw', { p_id: w.id, p_reason: text });
+
+      if (error) {
+        errBox.textContent = error.message || 'সম্পন্ন করা যায়নি';
+        errBox.style.display = 'block';
+        submit.disabled = false;
+        return;
+      }
+
+      closeModal();
+      toast(mode === 'paid' ? 'পেইড মার্ক হয়েছে ✓ ইউজারকে জানানো হয়েছে' : 'আবেদন বাতিল হয়েছে, পয়েন্ট ফেরত গেছে', 'success');
+      await Promise.all([loadSummary(), loadWithdraws()]);
+    });
+
+    // ---------- ডকুমেন্ট আপলোড / মুছা ----------
+    async function uploadDoc(w, input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      input.value = '';
+
+      const isPdf = file.type === 'application/pdf';
+      const isImage = file.type.startsWith('image/');
+      if (!isPdf && !isImage) {
+        toast('শুধু ছবি বা PDF দিন', 'error');
+        return;
+      }
+      if (file.size > MAX_DOC_BYTES * 2) {
+        toast('ফাইল অনেক বড় (সর্বোচ্চ ৮ MB)', 'error');
+        return;
+      }
+
+      toast('আপলোড হচ্ছে...', 'success', 1500);
+
+      let body = file;
+      let ext = 'pdf';
+      let contentType = 'application/pdf';
+      if (isImage) {
+        body = await compressImage(file);
+        contentType = body.type || 'image/jpeg';
+        ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+      }
+      if (body.size > MAX_DOC_BYTES) {
+        toast('ফাইল অনেক বড় (সর্বোচ্চ ৮ MB)', 'error');
+        return;
+      }
+
+      const path = `${w.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, body, { contentType, upsert: false });
+      if (upErr) {
+        toast('আপলোড ব্যর্থ: ' + (upErr.message || ''), 'error');
+        return;
+      }
+
+      const { error: rowErr } = await supabase.from('withdraw_documents').insert({
+        withdraw_id: w.id,
+        file_path: path,
+        file_name: (file.name || '').slice(0, 120),
+        uploaded_by: adminId,
+      });
+      if (rowErr) {
+        await supabase.storage.from(BUCKET).remove([path]);
+        toast('সেভ করা যায়নি: ' + (rowErr.message || ''), 'error');
+        return;
+      }
+
+      toast('ডকুমেন্ট যোগ হয়েছে ✓', 'success');
+      await loadWithdraws();
+    }
+
+    async function deleteDoc(d) {
+      if (!confirm('এই ডকুমেন্ট মুছে ফেলবেন?')) return;
+      await supabase.storage.from(BUCKET).remove([d.file_path]);
+      const { error } = await supabase.from('withdraw_documents').delete().eq('id', d.id);
+      if (error) {
+        toast('মুছা যায়নি', 'error');
+        return;
+      }
+      toast('মুছে ফেলা হয়েছে', 'success');
+      await loadWithdraws();
+    }
+
+    // ---------- লাইটবক্স ----------
+    const lightbox = $('rfaLightbox');
+    function openLightbox(url) {
+      $('rfaLightboxImg').src = url;
+      lightbox.classList.add('open');
+    }
+    function closeLightbox() {
+      lightbox.classList.remove('open');
+      $('rfaLightboxImg').src = '';
+    }
+    $('rfaLightboxClose')?.addEventListener('click', closeLightbox);
+    lightbox?.addEventListener('click', (e) => {
+      if (e.target === lightbox) closeLightbox();
+    });
+
+    // ---------- ইউজার তালিকা ----------
+    async function loadUsers() {
+      const list = $('rfaUserList');
+      list.innerHTML = '';
+      list.appendChild(el('div', 'rfa-empty', 'লোড হচ্ছে...'));
+      const { data, error } = await supabase.rpc('admin_referral_users');
+      if (error) {
+        list.innerHTML = '';
+        list.appendChild(el('div', 'rfa-empty', 'ইউজার তালিকা লোড করা যায়নি'));
+        return;
+      }
+      usersData = data || [];
+      usersLoaded = true;
+      renderUsers();
+    }
+
+    function renderUsers() {
+      const list = $('rfaUserList');
+      list.innerHTML = '';
+      const q = $('rfaUserSearch').value.trim().toLowerCase();
+      const rows = usersData.filter((u) => !q || (u.full_name || '').toLowerCase().includes(q) || (u.phone || '').includes(q));
+
+      if (!rows.length) {
+        list.appendChild(el('div', 'rfa-empty', 'কোনো ইউজার পাওয়া যায়নি'));
+        return;
+      }
+
+      rows.forEach((u) => {
+        const card = el('div', 'rfa-card' + (u.over_cap ? ' over' : ''));
+        const top = el('div', 'rfa-card-top');
+        const left = el('div');
+        const nameLine = el('div', 'rfa-name', who(u));
+        if (u.over_cap) nameLine.appendChild(el('span', 'rfa-badge rfa-badge-over', '১০০+ রেফার'));
+        left.appendChild(nameLine);
+        left.appendChild(el('div', 'rfa-sub', u.phone || ''));
+        top.appendChild(left);
+        card.appendChild(top);
+
+        const stats = el('div', 'rfa-user-stats');
+        stats.appendChild(el('span', 'rfa-pill', `কাউন্টেড রেফার: ${bn(u.counted)}`));
+        if (u.not_counted > 0) stats.appendChild(el('span', 'rfa-pill', `কাউন্ট হয়নি: ${bn(u.not_counted)}`));
+        stats.appendChild(el('span', 'rfa-pill', `ব্যালেন্স: ${bn(u.balance)} পয়েন্ট`));
+        stats.appendChild(el('span', 'rfa-pill', `মোট আয়: ${bn(u.total_earned)}`));
+        if (u.paid_taka > 0) stats.appendChild(el('span', 'rfa-pill', `পেয়েছেন: ৳${bn(u.paid_taka)}`));
+        card.appendChild(stats);
+        list.appendChild(card);
+      });
+    }
+
+    $('rfaUserSearch')?.addEventListener('input', renderUsers);
+
+    // ---------- রেফার লগ ----------
+    async function loadLog() {
+      const list = $('rfaLogList');
+      list.innerHTML = '';
+      list.appendChild(el('div', 'rfa-empty', 'লোড হচ্ছে...'));
+      const { data, error } = await supabase
+        .from('referrals')
+        .select('id, status, reason, device_id, created_at, referrer:profiles!referrer_id(full_name, phone), referred:profiles!referred_user_id(full_name, phone)')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      list.innerHTML = '';
+      if (error) {
+        list.appendChild(el('div', 'rfa-empty', 'রেফার লগ লোড করা যায়নি'));
+        return;
+      }
+      logLoaded = true;
+      if (!data || !data.length) {
+        list.appendChild(el('div', 'rfa-empty', 'এখনো কোনো রেফার নেই'));
+        return;
+      }
+
+      data.forEach((r) => {
+        const card = el('div', 'rfa-card');
+        const top = el('div', 'rfa-card-top');
+        const left = el('div');
+        const line = el('div', 'rfa-name', `${who(r.referrer)} → ${who(r.referred)}`);
+        line.appendChild(el('span', `rfa-badge ${r.status === 'counted' ? 'rfa-badge-ok' : 'rfa-badge-no'}`, r.status === 'counted' ? 'কাউন্ট হয়েছে' : 'কাউন্ট হয়নি'));
+        left.appendChild(line);
+        const details = [
+          r.reason ? (REASON_LABEL[r.reason] || r.reason) : null,
+          r.referred?.phone ? `নতুন ইউজার: ${r.referred.phone}` : null,
+          r.device_id ? `ডিভাইস: …${String(r.device_id).slice(-6)}` : null,
+          fmtDate(r.created_at),
+        ].filter(Boolean).join(' • ');
+        left.appendChild(el('div', 'rfa-sub', details));
+        top.appendChild(left);
+        card.appendChild(top);
+        list.appendChild(card);
+      });
+    }
+
+    // ---------- ট্যাব ও ফিল্টার ----------
+    document.querySelectorAll('.rfa-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.rfa-tab').forEach((t) => t.classList.remove('active'));
+        tab.classList.add('active');
+        const which = tab.getAttribute('data-tab');
+        $('rfaPaneWithdraw').style.display = which === 'withdraw' ? 'block' : 'none';
+        $('rfaPaneUsers').style.display = which === 'users' ? 'block' : 'none';
+        $('rfaPaneLog').style.display = which === 'log' ? 'block' : 'none';
+        if (which === 'users' && !usersLoaded) loadUsers();
+        if (which === 'log' && !logLoaded) loadLog();
+      });
+    });
+
+    document.querySelectorAll('.rfa-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        document.querySelectorAll('.rfa-chip').forEach((c) => c.classList.remove('active'));
+        chip.classList.add('active');
+        currentFilter = chip.getAttribute('data-filter');
+        renderWithdraws();
+      });
+    });
+
+    // ---------- শুরু ----------
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      const { role, session } = e.detail;
+
+      // টাকার হিসাব — শুধু admin, moderator হলে ফিরিয়ে দেওয়া
+      if (role !== 'admin') {
+        window.location.href = '/admin';
+        return;
+      }
+
+      adminId = session?.user?.id || null;
+      loadSummary();
+      loadWithdraws();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
