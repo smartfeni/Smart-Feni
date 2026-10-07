@@ -56,23 +56,18 @@
 //   শুধু বেলের সংখ্যা ও তালিকা
 // - অ্যাপে ঢোকার অটো-popup ও শুধু unread 'urgent' থাকলে
 // - নতুন ক্যাটাগরির লেবেল/রঙ: order_status, account_status, club_request, security
-//
-// আপডেট (N20 — অটো পপ-আপ বন্ধ): Realtime এ নতুন নোটিফিকেশন এলে এখন শুধু
-// priority='urgent' (ব্লাড/নিরাপত্তা) অটো-ওপেন মডাল। বাকি সব (order/offer/
-// message ইত্যাদি) এ আর ব্যানার/পপ-আপ আসে না — শুধু বেলের সংখ্যা ও তালিকা
-// আপডেট হয়, আর push ট্যাপ করলে/বেল থেকে খুললে আগের মতোই ভিউ মডাল খোলে।
-// ব্যানারের কোড (showNotifBanner) রেখে দেওয়া আছে — দরকার হলে
-// handleIncomingNotification এ এক লাইনে ফেরানো যাবে।
-//
-// আপডেট (N21): সব পেজে alert() এর বদলে টোস্ট (lib/softAlert.js; confirm() অপরিবর্তিত)
-// আর ডেলিভারি/রাইড চ্যাট বাটনে নতুন মেসেজের লাল ব্যাজ (lib/chatBadge.js) এখান থেকে চালু হয়।
 // ============================================================
+//
+// আপডেট (মেসেজ বক্স রিডিজাইন): শিরোনাম "মেসেজ" + অপঠিত কাউন্ট; ফিল্টার চিপ শুধু ৩টা — সব / সাধারণ /
+// অফার-প্রমো (+ "অ্যাডমিন" ট্যাব, যা শুধু admin/moderator দেখে); আজ/গতকাল/আগের গ্রুপ; ক্যাটাগরি
+// অনুযায়ী রঙিন আইকন, অপঠিতে ডট। ক্যাটাগরি ম্যাপিং: promo → অফার-প্রমো, system → (শুধু staff এর
+// জন্য) অ্যাডমিন, বাকি সব → সাধারণ। মডেল পপ-আপ, ব্যানার, রিয়েলটাইম, ব্লাড বাটন অপরিবর্তিত।
 ---
 
 <div class="nd-overlay" id="notificationDrawerOverlay">
   <aside class="nd-panel" id="notificationDrawerPanel">
     <div class="nd-header">
-      <h2><i class="fas fa-bell"></i> নোটিফিকেশন</h2>
+      <h2><i class="fas fa-bell"></i> মেসেজ <span class="nd-count" id="notifCount" style="display:none;">0</span></h2>
       <div class="nd-header-actions">
         <button id="notifMarkAllBtn" type="button">সব পড়া হয়েছে</button>
         <button class="nd-close" id="notificationDrawerClose" aria-label="বন্ধ করুন">
@@ -81,11 +76,13 @@
       </div>
     </div>
 
+    <div class="nd-filters" id="notifFilters"></div>
+
     <div class="nd-list" id="notifList"></div>
 
     <p class="nd-empty" id="notifEmpty" style="display:none;">
       <i class="fas fa-bell-slash"></i>
-      কোনো নোটিফিকেশন নেই
+      কোনো মেসেজ নেই
     </p>
   </aside>
 </div>
@@ -128,7 +125,7 @@
     right: 0;
     bottom: 0;
     width: min(380px, 88vw);
-    background: #fff;
+    background: #F8FAFC;
     box-shadow: -8px 0 30px rgba(15, 23, 42, 0.18);
     display: flex;
     flex-direction: column;
@@ -145,8 +142,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px 18px 16px 20px;
-    border-bottom: 1px solid #EEF3F9;
+    padding: 20px 18px 10px 20px;
     gap: 8px;
     flex-shrink: 0;
   }
@@ -210,7 +206,7 @@
   .nd-list {
     flex: 1;
     overflow-y: auto;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding: 0 10px calc(12px + env(safe-area-inset-bottom));
   }
 
   .nd-empty {
@@ -335,20 +331,6 @@
   বসে না।
 ============================================================ -->
 <style is:global>
-  .notif-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    border: none;
-    border-bottom: 1px solid #F4F7FC;
-    padding: 14px 20px;
-    cursor: pointer;
-    font-family: inherit;
-    transition: background 0.15s ease;
-  }
 
   /* নোট: এখন .notif-item একটা <div role="button"> (আগে <button> ছিল,
      ভেতরে স্কিপ/আগ্রহী বাটন বসানোর জন্য div করা হয়েছে) — ফোকাস রিং
@@ -358,85 +340,21 @@
     outline-offset: -2px;
   }
 
-  .notif-item:last-child {
-    border-bottom: none;
-  }
 
-  .notif-item:hover {
-    background: #F8FAFC;
-  }
 
-  .notif-item.unread {
-    background: #FFF8F5;
-  }
 
-  .notif-item.unread:hover {
-    background: #FFF0EA;
-  }
 
-  .notif-item-icon {
-    flex-shrink: 0;
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    background: #F4F7FC;
-    color: #8FA0BC;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.85rem;
-    position: relative;
-  }
 
-  .notif-item.unread .notif-item-icon {
-    background: #FFF0EA;
-    color: #FF6B35;
-  }
 
-  .notif-item.unread .notif-item-icon::after {
-    content: '';
-    position: absolute;
-    top: -1px;
-    right: -1px;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: #FF6B35;
-    border: 2px solid #fff;
-  }
 
   .notif-item-body {
     flex: 1;
     min-width: 0;
   }
 
-  .notif-item-msg {
-    font-size: 0.84rem;
-    color: #1B2A4A;
-    line-height: 1.5;
-    white-space: pre-line;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-  }
 
-  .notif-item.unread .notif-item-msg {
-    font-weight: 600;
-  }
 
-  .notif-item-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: 6px;
-  }
 
-  .notif-item-time {
-    font-size: 0.72rem;
-    color: #8FA0BC;
-  }
 
   .notif-item-link {
     font-size: 0.75rem;
@@ -660,12 +578,30 @@
     background: #FFF1E6;
     color: #B54708;
   }
+
+  /* ===== মেসেজ বক্স রিডিজাইন (JS দিয়ে বানানো এলিমেন্ট, তাই global) ===== */
+  .nd-count { background: #FF6B35; color: #fff; font-size: 0.72rem; font-weight: 800; min-width: 22px; height: 22px; border-radius: 99px; display: inline-grid; place-items: center; padding: 0 7px; }
+  .nd-filters { display: flex; gap: 6px; overflow-x: auto; padding: 4px 16px 10px; flex-shrink: 0; scrollbar-width: none; }
+  .nd-filters::-webkit-scrollbar { display: none; }
+  .nd-chip { flex: 0 0 auto; border: 1.5px solid #E5EAF0; background: #fff; color: #64748B; font: inherit; font-size: 0.78rem; font-weight: 700; padding: 7px 13px; border-radius: 99px; cursor: pointer; }
+  .nd-chip.on { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .nd-day { margin: 10px 6px 6px; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.04em; color: #64748B; }
+
+  .notif-item { --c: #FF6B35; display: flex; align-items: flex-start; gap: 11px; width: 100%; text-align: left; background: #fff; border: 1px solid #E5EAF0; border-radius: 18px; padding: 11px; margin-bottom: 8px; cursor: pointer; font-family: inherit; transition: transform 0.12s ease, box-shadow 0.12s ease; }
+  .notif-item:active { transform: scale(0.98); }
+  .notif-item.unread { border-color: #FFD3C0; border-color: color-mix(in srgb, var(--c) 40%, #E5EAF0); background: #FFFAF7; background: color-mix(in srgb, var(--c) 5%, #fff); }
+  .notif-item-icon { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; background: #FFF0EA; background: color-mix(in srgb, var(--c) 15%, #fff); }
+  .notif-item-head { display: flex; align-items: center; gap: 6px; }
+  .notif-item-title { flex: 1; min-width: 0; font-size: 0.86rem; font-weight: 700; color: #1B2A4A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .notif-item.unread .notif-item-title { font-weight: 800; }
+  .notif-item-dot { flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+  .notif-item-time { font-size: 0.66rem; color: #64748B; white-space: nowrap; }
+  .notif-item-msg { display: -webkit-box; margin-top: 2px; font-size: 0.78rem; color: #64748B; line-height: 1.5; white-space: pre-line; overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  .notif-item.unread .notif-item-msg { color: #3C4C66; }
 </style>
 
 <script>
   import { supabase } from '../../lib/supabase.js';
-  import { initChatBadges } from '../../lib/chatBadge.js';
-  import { installSoftAlert } from '../../lib/softAlert.js';
 
   const overlay = document.getElementById('notificationDrawerOverlay');
   const closeBtn = document.getElementById('notificationDrawerClose');
@@ -683,6 +619,33 @@
   let respondedSet = new Set();
   let skippedSet = new Set();
   let notifChannel = null;
+
+  // মেসেজ বক্স ফিল্টার: all | general | promo | admin (admin শুধু staff এর জন্য)
+  let currentFilter = 'all';
+  let viewerIsStaff = false;
+
+  const filterDefs = [
+    ['all', 'সব'],
+    ['general', 'সাধারণ'],
+    ['promo', 'অফার / প্রমো'],
+    ['admin', 'অ্যাডমিন'],
+  ];
+
+  const categoryColors = {
+    blood_request: '#EF4444',
+    blood_response: '#EF4444',
+    delivery_hero: '#FF6B35',
+    rider_offer: '#FF6B35',
+    shop_order: '#EC4899',
+    order_status: '#EC4899',
+    message: '#0EA5E9',
+    listing_status: '#3B82F6',
+    account_status: '#16A34A',
+    club_request: '#0EA5E9',
+    security: '#475569',
+    promo: '#EC4899',
+    system: '#6366F1',
+  };
 
   const categoryChipLabels = {
     listing_status: 'লিস্টিং স্ট্যাটাস',
@@ -924,16 +887,66 @@
   // ============================================================
   // লিস্ট ভিউ রেন্ডার
   // ============================================================
+  // তিনটা বাকেট: promo → অফার/প্রমো; system → (শুধু staff এর জন্য) অ্যাডমিন; বাকি সব → সাধারণ।
+  // সাধারণ ইউজারের কাছে অ্যাডমিন নোটিফিকেশন ডাটাবেজ লেভেলেই যায় না — এটা শুধু UI গ্রুপিং।
+  function bucketOf(n) {
+    if (n.category === 'promo') return 'promo';
+    if (viewerIsStaff && n.category === 'system') return 'admin';
+    return 'general';
+  }
+
+  function dayGroupBn(dateString) {
+    const t = new Date(dateString).getTime();
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (t >= startToday) return 'আজ';
+    if (t >= startToday - 86400000) return 'গতকাল';
+    return 'আগের';
+  }
+
+  function renderFilters() {
+    const wrap = document.getElementById('notifFilters');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    filterDefs.forEach(([key, label]) => {
+      if (key === 'admin' && !viewerIsStaff) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'nd-chip' + (currentFilter === key ? ' on' : '');
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        currentFilter = key;
+        renderNotifications(latestNotifications);
+      });
+      wrap.appendChild(btn);
+    });
+  }
+
   function renderNotifications(items) {
     notifList.innerHTML = '';
 
-    if (!items || items.length === 0) {
+    if (!viewerIsStaff && currentFilter === 'admin') currentFilter = 'all';
+    renderFilters();
+
+    const shown = (items || []).filter((n) => currentFilter === 'all' || bucketOf(n) === currentFilter);
+
+    if (shown.length === 0) {
       notifEmpty.style.display = 'flex';
       return;
     }
     notifEmpty.style.display = 'none';
 
-    items.forEach((n) => {
+    let lastGroup = '';
+    shown.forEach((n) => {
+      const group = dayGroupBn(n.created_at);
+      if (group !== lastGroup) {
+        const h = document.createElement('div');
+        h.className = 'nd-day';
+        h.textContent = group;
+        notifList.appendChild(h);
+        lastGroup = group;
+      }
+
       // নোট: আগে এটা <button> ছিল, এখন <div role="button"> —
       // ব্লাড রিকোয়েস্টের স্কিপ/আগ্রহী বাটন ভেতরে বসানোর জন্য
       // (HTML এ button এর ভেতর button বসানো যায় না, ব্রাউজার
@@ -942,15 +955,18 @@
       el.setAttribute('role', 'button');
       el.setAttribute('tabindex', '0');
       el.className = `notif-item ${n.is_read ? '' : 'unread'}`;
+      el.style.setProperty('--c', categoryColors[n.category] || '#FF6B35');
       el.innerHTML = `
-        <span class="notif-item-icon"><i class="fas fa-bell"></i></span>
+        <span class="notif-item-icon">${categoryEmoji[n.category] || '🔔'}</span>
         <span class="notif-item-body">
-          ${n.image_url ? `<img src="${n.image_url}" alt="" class="notif-item-image" />` : ''}
-          <span class="notif-item-msg">${escapeHtml(n.message)}</span>
-          <div data-blood-slot>${renderBloodActionHtml(n)}</div>
-          <span class="notif-item-footer">
+          <span class="notif-item-head">
+            <span class="notif-item-title">${escapeHtml(categoryChipLabels[n.category] || 'মেসেজ')}</span>
+            ${n.is_read ? '' : '<span class="notif-item-dot"></span>'}
             <span class="notif-item-time">${relativeTimeBn(n.created_at)}</span>
           </span>
+          <span class="notif-item-msg">${escapeHtml(n.message)}</span>
+          ${n.image_url ? `<img src="${n.image_url}" alt="" class="notif-item-image" style="margin-top:8px;margin-bottom:0;" />` : ''}
+          <div data-blood-slot>${renderBloodActionHtml(n)}</div>
         </span>
       `;
 
@@ -973,6 +989,11 @@
 
   function updateBadgeCount() {
     const unreadCount = latestNotifications.filter((n) => !n.is_read).length;
+    const headerCount = document.getElementById('notifCount');
+    if (headerCount) {
+      headerCount.textContent = unreadCount > 99 ? '৯৯+' : String(unreadCount);
+      headerCount.style.display = unreadCount > 0 ? 'inline-grid' : 'none';
+    }
     window.dispatchEvent(
       new CustomEvent('smartfeni:notification-count', { detail: { count: unreadCount } })
     );
@@ -984,8 +1005,9 @@
   // ============================================================
   // ============================================================
   // নতুন নোটিফিকেশন কীভাবে দেখানো হবে (priority অনুযায়ী)
-  //   urgent → পুরো পর্দার popup (ব্লাড, নিরাপত্তা) — অটো-ওপেন
-  //   বাকি সব → কিছু না (শুধু বেলের সংখ্যা ও তালিকা), অটো পপ-আপ/ব্যানার বন্ধ
+  //   urgent → পুরো পর্দার popup (ব্লাড, নিরাপত্তা)
+  //   low    → কিছু না (শুধু বেলের সংখ্যা ও তালিকা)
+  //   বাকি   → ছোট ব্যানার, ট্যাপ করলে নোটিফিকেশন খোলে
   // ============================================================
   const bannerEl = document.getElementById('ndBanner');
   const bannerIconEl = document.getElementById('ndBannerIcon');
@@ -1020,12 +1042,12 @@
 
   function handleIncomingNotification(n) {
     if (n.priority === 'urgent') {
-      // ব্লাড/নিরাপত্তা — জরুরি, তাই এখনো অটো-ওপেন মডাল
       openNotifModal(n);
+    } else if (n.priority === 'low') {
+      // শুধু বেলের সংখ্যা ও তালিকা (আগেই আপডেট হয়েছে)
+    } else {
+      showNotifBanner(n);
     }
-    // বাকি সব priority (high/normal/low): কোনো অটো পপ-আপ/ব্যানার নয় —
-    // বেলের সংখ্যা ও তালিকা আগেই আপডেট হয়েছে, ইউজার চাইলে বেল/push ট্যাপ
-    // করে খুলবে। (আগে এখানে else-এ showNotifBanner(n) চলত)
   }
 
   function subscribeRealtime() {
@@ -1079,11 +1101,19 @@
 
     currentUserId = session.user.id;
 
+    // অ্যাডমিন ট্যাব শুধু admin/moderator এর জন্য
+    const { data: profileRow } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', currentUserId)
+      .maybeSingle();
+    viewerIsStaff = profileRow?.role === 'admin' || profileRow?.role === 'moderator';
+
     const { data, error } = await supabase
       .from('user_notifications')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(20);
+      .limit(40);
 
     if (error) return;
 
@@ -1239,11 +1269,6 @@
       checkAutoPopupOnEntry();
     }
   }
-
-  // সব পেজে একবার: (১) alert() → টোস্ট (confirm() অপরিবর্তিত), (২) চ্যাট বাটনে
-  // নতুন মেসেজের ব্যাজ (data-chat-request-id থাকা বাটনে নিজে থেকে বসে)
-  installSoftAlert();
-  initChatBadges();
 
   init();
 
