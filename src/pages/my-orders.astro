@@ -28,11 +28,16 @@
 // হলে "রিপোর্ট করুন" চাপে (সম্পন্ন হওয়ার ১ ঘণ্টা পর্যন্ত)। পেমেন্ট প্রুফ
 // আপলোডের বক্স এখন পিকআপের পর (confirmed) আর সম্পন্ন হওয়ার ১ ঘণ্টার মধ্যে
 // (completed) দেখায়; পুরোনো 'delivered' রিকোয়েস্টে আগের মতোই থাকে।
+//
+// আপডেট (নতুন UI — কার্ডের চেহারা): রুট (পিকআপ → ড্রপ) ডটেড লাইনে, "সেরা হিরো
+// অফার / আপনার প্রস্তাব" দুই বক্স, ৪ ধাপের প্রগ্রেস বার। স্টাইল src/styles/
+// hero-ui.css এ (শেয়ার্ড)। লজিক/বাটন/শিট/ট্যাব অপরিবর্তিত।
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
+import '../styles/hero-ui.css';
 import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro';
 import ChatModal from '../components/delivery/ChatModal.astro';
 ---
@@ -1001,6 +1006,13 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       return String(value).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
     }
 
+    // ডাটাবেসের লেখা (ঠিকানা ইত্যাদি) নিরাপদে innerHTML এ বসানোর জন্য
+    function esc(value) {
+      const div = document.createElement('div');
+      div.textContent = value ?? '';
+      return div.innerHTML;
+    }
+
     function askConfirm({ title, text, okLabel }) {
       return new Promise((resolve) => {
         dealSheetTitle.textContent = title;
@@ -1095,20 +1107,15 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       if (status === 'confirmed' && req.pickup_done_at) mapped = 'picked_up';
       if (status === 'delivered') mapped = 'picked_up';
 
-      const currentIndex = DELIVERY_STEPS.indexOf(mapped === 'open' ? 'open' : mapped);
-      const pickedUpLabel = req.category === 'ride' ? 'যাত্রা শুরু' : 'পিকআপ সম্পন্ন';
-      let dotsHtml = '';
-      DELIVERY_STEPS.forEach((step, i) => {
-        const isDone = i <= currentIndex;
-        dotsHtml += `<div class="step-dot ${isDone ? 'done' : ''}"><i class="fas fa-check"></i></div>`;
-        if (i < DELIVERY_STEPS.length - 1) {
-          dotsHtml += `<div class="step-line ${i < currentIndex ? 'done' : ''}"></div>`;
-        }
-      });
-      const labelsHtml = DELIVERY_STEPS
-        .map((s) => `<span>${s === 'picked_up' ? pickedUpLabel : DELIVERY_STEP_LABELS[s]}</span>`)
-        .join('');
-      return `<div class="status-stepper">${dotsHtml}</div><div class="step-label-row">${labelsHtml}</div>`;
+      // ৪ ধাপের প্রগ্রেস বার: অফারের অপেক্ষা → হিরো আসছে → পথে → সম্পন্ন
+      const isRideReq = req.category === 'ride';
+      const huLabels = ['অফারের অপেক্ষা', 'হিরো আসছে', isRideReq ? 'যাত্রা চলছে' : 'ডেলিভারি পথে', 'সম্পন্ন'];
+      let filled = 1;
+      if (mapped === 'confirmed') filled = 2;
+      else if (mapped === 'picked_up') filled = 3;
+      else if (mapped === 'completed') filled = 4;
+      const bars = [1, 2, 3, 4].map((n) => `<i class="${n <= filled ? 'f' : ''}"></i>`).join('');
+      return `<p class="hu-steplabel">${huLabels[filled - 1]}</p><div class="hu-progress">${bars}</div>`;
     }
 
     // ============ SHOP ORDER কার্ড (অপরিবর্তিত) ============
@@ -1186,7 +1193,10 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         </div>
         ${renderDeliveryStepper(req)}
         <p class="delivery-desc">${req.description || ''}</p>
-        <p class="delivery-area"><i class="fas fa-location-dot"></i> ${pickupText}${dropText ? ` → ${dropText}` : ''}</p>
+        <div class="hu-trip">
+          <div class="hu-trip-stop">${esc(pickupText) || '—'}<small>পিকআপ</small></div>
+          <div class="hu-trip-stop">${esc(dropText) || '—'}<small>${req.category === 'ride' ? 'গন্তব্য' : 'ডেলিভারি'}</small></div>
+        </div>
       `;
 
       if (req.status === 'open' || req.status === 'negotiating') {
@@ -1196,9 +1206,15 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         }
 
         bodyHtml += `
-          <div class="best-price-box">
-            <span class="best-price-label">সেরা মূল্য (হিরো অফার)</span>
-            <span class="best-price-value">${lowestOffer !== null ? `৳${lowestOffer}` : '—'}</span>
+          <div class="hu-prices">
+            <div class="hu-price ${lowestOffer !== null ? 'best' : 'wait'}">
+              <small>সেরা হিরো অফার</small>
+              <b>${lowestOffer !== null ? `৳${toBn(lowestOffer)}` : 'অপেক্ষায়...'}</b>
+            </div>
+            <div class="hu-price">
+              <small>আপনার প্রস্তাব</small>
+              <b>৳${toBn(askingPrice)}</b>
+            </div>
           </div>
         `;
 
@@ -1207,9 +1223,6 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         }
 
         bodyHtml += `
-          <div class="asking-price-row">
-            <span>আপনার প্রস্তাবিত মূল্য: ৳${askingPrice}</span>
-          </div>
           <div class="increase-price-row">
             <div class="inc-chips">
               <button type="button" data-inc="5">+৫</button>
