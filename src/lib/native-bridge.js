@@ -38,12 +38,121 @@
 //      /my-shop এ পাঠায়। নোটিফিকেশনে ট্যাপ বা লিংক থেকে খোলা হলে করে না।
 //      splash সরানোর আগে সর্বোচ্চ ১.২ সেকেন্ড অপেক্ষা করে (হোমের ঝলক এড়াতে)।
 //   ৮) Back বাটন এখন ফ্লোটিং অ্যাক্টিভিটি বারের বটম শিটও বন্ধ করে।
+//   ৯) রেফার সিস্টেম — অ্যাপ প্রথমবার খুললে Google Play Install Referrer থেকে
+//      রেফার কোড (ref_XXXXXXXX) পড়ে নেটিভ Preferences-এ রাখে (sf_pending_ref),
+//      আর ডিভাইস আইডি (Android ID) দেয়। সাইন আপের সময় AuthModal এগুলো
+//      apply_referral() এ পাঠাবে। নেটিভ অংশ: InstallReferrerPlugin.java।
 // ============================================================
 
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 
 export function isNativeApp() {
   return Capacitor.isNativePlatform();
+}
+
+// ---------------- Referral: Install Referrer + Device ID ----------------
+// রেফার লিংক (smartfeni.com/r/<কোড>) Play Store-এ খোলে "&referrer=ref_<কোড>" সহ।
+// অ্যাপ ইনস্টল হয়ে প্রথমবার খুললে Play Install Referrer API সেই মান দেয়।
+// কোডটা Preferences-এ (sf_pending_ref) থাকে — সাইন আপ শেষে apply করে মুছে ফেলা হয়।
+// প্লাগিন না থাকলে (পুরোনো অ্যাপ ভার্সন) বা ওয়েবসাইটে সব ফাংশন চুপচাপ null দেয়।
+const InstallReferrer = registerPlugin('InstallReferrer');
+
+const REF_PENDING_KEY = 'sf_pending_ref';
+const REF_CHECKED_KEY = 'sf_ref_checked_v1';
+const REFERRER_TIMEOUT_MS = 4000;
+const DEVICE_ID_TIMEOUT_MS = 3000;
+
+let referrerCapturePromise = null;
+let cachedDeviceId = null;
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
+
+// "ref_ABCD2345" বা "utm_source=...&ref_ABCD2345" থেকে ৮ অক্ষরের কোড বের করে
+export function parseReferralCode(referrer) {
+  try {
+    if (!referrer) return null;
+    let text = String(referrer);
+    try {
+      text = decodeURIComponent(text);
+    } catch (err) {
+      // ডিকোড না হলে যেমন আছে তেমনই খোঁজা হবে
+    }
+    const match = text.match(/(?:^|[&?])ref_([A-Za-z0-9]{8})(?![A-Za-z0-9])/);
+    return match ? match[1].toUpperCase() : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function doCaptureInstallReferrer() {
+  try {
+    if (!isNativeApp()) return;
+
+    const { Preferences } = await import('@capacitor/preferences');
+    const checked = await Preferences.get({ key: REF_CHECKED_KEY });
+    if (checked.value === '1') return; // চূড়ান্ত উত্তর আগেই পাওয়া গেছে
+
+    const result = await withTimeout(InstallReferrer.getInstallReferrer(), REFERRER_TIMEOUT_MS);
+    const status = result?.status;
+
+    if (status === 'ok') {
+      const code = parseReferralCode(result.referrer);
+      if (code) await Preferences.set({ key: REF_PENDING_KEY, value: code });
+      await Preferences.set({ key: REF_CHECKED_KEY, value: '1' });
+    } else if (status === 'unsupported') {
+      await Preferences.set({ key: REF_CHECKED_KEY, value: '1' });
+    }
+    // 'unavailable' / 'error' হলে ফ্ল্যাগ বসাই না — পরের পেজ/অ্যাপ খোলায় আবার চেষ্টা হবে
+  } catch (err) {
+    // প্লাগিন নেই / টাইমআউট — অ্যাপ স্বাভাবিক চলবে, রেফার কাউন্ট হবে না
+  }
+}
+
+// প্রতি পেজে একবারের বেশি চলে না (একই promise ফেরত দেয়)
+export function captureInstallReferrer() {
+  if (!referrerCapturePromise) referrerCapturePromise = doCaptureInstallReferrer();
+  return referrerCapturePromise;
+}
+
+// সাইন আপের সময় ডাকা হয় — চেক শেষ না হলে অপেক্ষা করে, তারপর কোড পড়ে
+export async function getPendingReferralCode() {
+  try {
+    if (!isNativeApp()) return null;
+    await captureInstallReferrer();
+    const { Preferences } = await import('@capacitor/preferences');
+    const { value } = await Preferences.get({ key: REF_PENDING_KEY });
+    return value || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function clearPendingReferral() {
+  try {
+    if (!isNativeApp()) return;
+    const { Preferences } = await import('@capacitor/preferences');
+    await Preferences.remove({ key: REF_PENDING_KEY });
+  } catch (err) {
+    // মুছতে না পারলেও সার্ভার একই ইউজারের দ্বিতীয় রেফার গ্রহণ করে না
+  }
+}
+
+// "১ ফোন = ১ রেফার" চেকের জন্য ফোনের আইডি; না পেলে null (তখন রেফার কাউন্ট হবে না)
+export async function getNativeDeviceId() {
+  try {
+    if (!isNativeApp()) return null;
+    if (cachedDeviceId) return cachedDeviceId;
+    const result = await withTimeout(InstallReferrer.getDeviceId(), DEVICE_ID_TIMEOUT_MS);
+    cachedDeviceId = result?.id || null;
+    return cachedDeviceId;
+  } catch (err) {
+    return null;
+  }
 }
 
 // ---------------- Location ----------------
@@ -177,6 +286,9 @@ export async function initBackButtonHandler() {
 
   // BaseLayout প্রতিটা পেজ লোডে এই ফাংশন চালায় — তাই শেষ পেজ মনে রাখার কাজও এখানেই
   rememberLastUrl();
+
+  // রেফার: প্রথমবার খুললে Play Install Referrer থেকে কোড ধরে রাখে (পরে আর কিছু করে না)
+  captureInstallReferrer();
 
   const { App } = await import('@capacitor/app');
 
