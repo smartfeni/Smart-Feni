@@ -20,6 +20,8 @@
 // আপডেট ৯: "ক্লিনিক ও প্রতিনিধি" কার্ড যোগ (/admin/clinics) — শুধু admin।
 //           ডাক্তার কার্ডের ব্যাজ এখন pending + প্রতিনিধির যোগ/বদল করা
 //           "দেখা হয়নি" (admin_seen = false) ডাক্তারও গোনে
+// আপডেট ১০: "রেফার & রিওয়ার্ড" কার্ড যোগ (/admin/referrals) — শুধু admin।
+//           পেন্ডিং উইথড্র আবেদনের কাউন্ট ব্যাজ সহ (withdraw_requests, status='pending')
 // ============================================================
 
 export const prerender = false;
@@ -123,6 +125,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             <i class="fas fa-users"></i>
             <h3>ক্লাব ম্যানেজমেন্ট</h3>
             <p>নতুন ক্লাব তৈরি করুন, ভেরিফাই ও active/deactivate করুন</p>
+          </a>
+
+          <a href="/admin/referrals" class="admin-nav-card admin-nav-card-badge-wrap" id="referNavCard" style="display:none;">
+            <span class="admin-nav-badge" id="withdrawPendingBadge" style="display:none;">0</span>
+            <i class="fas fa-coins"></i>
+            <h3>রেফার &amp; রিওয়ার্ড</h3>
+            <p>রেফার কাউন্ট, উইথড্র আবেদন যাচাই ও পেমেন্ট, হিসাবের সামারি</p>
           </a>
 
           <a href="/admin/images" class="admin-nav-card">
@@ -367,6 +376,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         { count: botChatPendingCount },
         { count: disputePendingCount },
         { count: doctorPendingCount },
+        { count: withdrawPendingCount },
       ] = await Promise.all([
         supabase.from('profiles').select('*', { count: 'exact', head: true }),
         supabase.from('listings').select('*', { count: 'exact', head: true }),
@@ -375,6 +385,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         supabase.from('telegram_bot_chats').select('*', { count: 'exact', head: true }).eq('is_active', false),
         supabase.from('delivery_requests').select('*', { count: 'exact', head: true }).eq('status', 'disputed'),
         supabase.from('doctors').select('*', { count: 'exact', head: true }).or('status.eq.pending,admin_seen.eq.false'),
+        // শুধু admin দেখতে পায় (RLS) — moderator এর জন্য কাউন্ট null আসে, কার্ডও লুকানো থাকে
+        supabase.from('withdraw_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
       ]);
 
       const statUsers = document.getElementById('statUsers');
@@ -384,6 +396,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const botChatBadge = document.getElementById('botChatPendingBadge');
       const disputeBadge = document.getElementById('disputePendingBadge');
       const doctorBadge = document.getElementById('doctorPendingBadge');
+      const withdrawBadge = document.getElementById('withdrawPendingBadge');
 
       if (statUsers) statUsers.textContent = userCount ?? '0';
       if (statListings) statListings.textContent = listingCount ?? '0';
@@ -424,6 +437,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           doctorBadge.style.display = 'none';
         }
       }
+
+      if (withdrawBadge) {
+        if (withdrawPendingCount && withdrawPendingCount > 0) {
+          withdrawBadge.textContent = withdrawPendingCount > 99 ? '৯৯+' : withdrawPendingCount;
+          withdrawBadge.style.display = 'flex';
+        } else {
+          withdrawBadge.style.display = 'none';
+        }
+      }
     }
 
     window.addEventListener('smartfeni:admin-ready', (e) => {
@@ -439,6 +461,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         if (clubCard) clubCard.style.display = '';
         const clinicsCard = document.getElementById('clinicsNavCard');
         if (clinicsCard) clinicsCard.style.display = '';
+        const referCard = document.getElementById('referNavCard');
+        if (referCard) referCard.style.display = '';
       }
 
       loadStats();
