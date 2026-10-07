@@ -22,6 +22,10 @@
 //           "দেখা হয়নি" (admin_seen = false) ডাক্তারও গোনে
 // আপডেট ১০: "রেফার & রিওয়ার্ড" কার্ড যোগ (/admin/referrals) — শুধু admin।
 //           পেন্ডিং উইথড্র আবেদনের কাউন্ট ব্যাজ সহ (withdraw_requests, status='pending')
+// আপডেট ১১ (রিডিজাইন): গ্রুপ করা কার্ড (কনটেন্ট / ইউজার ও টিম / মার্কেটপ্লেস / ডেলিভারি /
+//           স্বাস্থ্য ও আইন / গ্রোথ ও টাকা), "এখনই দেখুন" পেন্ডিং-স্ট্রিপ, পেজ খুঁজুন সার্চ।
+//           সব কার্ড আইডি, ব্যাজ আইডি ও loadStats() কোয়েরি আগের মতোই; শুধু-admin কার্ডগুলো
+//           data-admin-only দিয়ে চিহ্নিত।
 // ============================================================
 
 export const prerender = false;
@@ -43,329 +47,274 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       <div id="adminGuardedContent" class="admin-content" style="display:none;">
 
         <div class="admin-header">
-          <div>
-            <h1>অ্যাডমিন ড্যাশবোর্ড</h1>
-            <p class="admin-role-badge" id="roleBadge"></p>
-          </div>
+          <h1>অ্যাডমিন ড্যাশবোর্ড</h1>
+          <p class="admin-role-badge" id="roleBadge"></p>
         </div>
 
-        <!-- ===== স্ট্যাটস কার্ড ===== -->
-        <div class="admin-stats">
-          <div class="stat-card">
-            <i class="fas fa-users"></i>
-            <div>
-              <span class="stat-number" id="statUsers">—</span>
-              <span class="stat-label">মোট ইউজার</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <i class="fas fa-list-check"></i>
-            <div>
-              <span class="stat-number" id="statListings">—</span>
-              <span class="stat-label">মোট লিস্টিং</span>
-            </div>
-          </div>
-          <div class="stat-card highlight">
-            <i class="fas fa-hourglass-half"></i>
-            <div>
-              <span class="stat-number" id="statPending">—</span>
-              <span class="stat-label">রিভিউ বাকি</span>
-            </div>
-          </div>
+        <!-- ===== স্ট্যাটস ===== -->
+        <div class="adm-stats">
+          <div class="adm-stat"><b id="statUsers">—</b><span>মোট ইউজার</span></div>
+          <div class="adm-stat"><b id="statListings">—</b><span>মোট লিস্টিং</span></div>
+          <div class="adm-stat hl"><b id="statPending">—</b><span>রিভিউ বাকি</span></div>
         </div>
 
-        <!-- ===== নেভিগেশন কার্ড ===== -->
-        <div class="admin-nav-grid">
-          <a href="/admin/listings" class="admin-nav-card">
-            <i class="fas fa-list-check"></i>
-            <h3>লিস্টিং ম্যানেজমেন্ট</h3>
-            <p>সব ক্যাটাগরির লিস্টিং দেখুন, approve/reject/delete করুন</p>
-          </a>
+        <!-- ===== এখনই দেখুন (শুধু পেন্ডিং > ০) ===== -->
+        <div class="adm-h">এখনই দেখুন</div>
+        <div class="adm-att" id="attentionStrip"><span class="adm-none">লোড হচ্ছে...</span></div>
 
-          <a href="/admin/users" class="admin-nav-card">
-            <i class="fas fa-users"></i>
-            <h3>ইউজার ম্যানেজমেন্ট</h3>
-            <p>প্রোফাইল দেখুন, প্রয়োজনে ব্লক/আনব্লক করুন</p>
-          </a>
+        <!-- ===== সার্চ ===== -->
+        <div class="adm-h">সব ফিচার</div>
+        <label class="adm-search">
+          <i class="fas fa-magnifying-glass"></i>
+          <input type="search" id="adminSearch" placeholder="পেজ খুঁজুন (যেমন: ডাক্তার, রেফার)" autocomplete="off" />
+        </label>
 
-          <a href="/admin/shops" class="admin-nav-card">
-            <i class="fas fa-store"></i>
-            <h3>শপ ম্যানেজমেন্ট</h3>
-            <p>নতুন শপ তৈরি করুন, active/deactivate ও সিরিয়াল সাজান</p>
-          </a>
-
-          <a href="/admin/doctors" class="admin-nav-card admin-nav-card-badge-wrap">
-            <span class="admin-nav-badge" id="doctorPendingBadge" style="display:none;">0</span>
-            <i class="fas fa-user-doctor"></i>
-            <h3>ডাক্তার ম্যানেজমেন্ট</h3>
-            <p>ডাক্তার ও চেম্বারের সময়সূচি যোগ/এডিট করুন, প্রতিনিধির যোগ করা নতুন ডাক্তার দেখুন, ডুপ্লিকেট মার্জ করুন</p>
-          </a>
-
-          <a href="/admin/clinics" class="admin-nav-card" id="clinicsNavCard" style="display:none;">
-            <i class="fas fa-hospital"></i>
-            <h3>ক্লিনিক ও প্রতিনিধি</h3>
-            <p>ক্লিনিক যোগ করুন, প্রতিনিধি নিয়োগ দিন, সিরিয়াল রিকোয়েস্টের দায়িত্ব ঠিক করুন</p>
-          </a>
-
-          <a href="/admin/delivery-riders" class="admin-nav-card admin-nav-card-badge-wrap">
-            <span class="admin-nav-badge" id="riderPendingBadge" style="display:none;">0</span>
-            <i class="fas fa-motorcycle"></i>
-            <h3>ডেলিভারি হিরো ভেরিফিকেশন</h3>
-            <p>রাইডার আবেদন যাচাই করুন, ছবি/আইডি কার্ড দেখে approve/reject করুন</p>
-          </a>
-
-          <a href="/admin/delivery-disputes" class="admin-nav-card admin-nav-card-badge-wrap">
-            <span class="admin-nav-badge" id="disputePendingBadge" style="display:none;">0</span>
-            <i class="fas fa-flag"></i>
-            <h3>ডেলিভারি ডিসপিউট</h3>
-            <p>কাস্টমার/রাইডারের রিপোর্ট করা সমস্যা দেখুন ও রিজলভ করুন</p>
-          </a>
-
-          <a href="/admin/clubs" class="admin-nav-card" id="clubNavCard" style="display:none;">
-            <i class="fas fa-users"></i>
-            <h3>ক্লাব ম্যানেজমেন্ট</h3>
-            <p>নতুন ক্লাব তৈরি করুন, ভেরিফাই ও active/deactivate করুন</p>
-          </a>
-
-          <a href="/admin/referrals" class="admin-nav-card admin-nav-card-badge-wrap" id="referNavCard" style="display:none;">
-            <span class="admin-nav-badge" id="withdrawPendingBadge" style="display:none;">0</span>
-            <i class="fas fa-coins"></i>
-            <h3>রেফার &amp; রিওয়ার্ড</h3>
-            <p>রেফার কাউন্ট, উইথড্র আবেদন যাচাই ও পেমেন্ট, হিসাবের সামারি</p>
-          </a>
-
-          <a href="/admin/images" class="admin-nav-card">
-            <i class="fas fa-image"></i>
-            <h3>ছবি ম্যানেজমেন্ট</h3>
-            <p>ফিচার্ড ফটো, হেডার ব্যাকগ্রাউন্ড, লোগো — সব এখান থেকে</p>
-          </a>
-
-          <a href="/admin/categories" class="admin-nav-card">
-            <i class="fas fa-layer-group"></i>
-            <h3>ক্যাটাগরি ম্যানেজমেন্ট</h3>
-            <p>হোমপেজ সেকশন অর্ডার ও ক্যাটাগরি সিরিয়াল সাজান</p>
-          </a>
-
-          <a href="/admin/analytics" class="admin-nav-card">
-            <i class="fas fa-chart-line"></i>
-            <h3>অ্যানালিটিক্স</h3>
-            <p>উপজেলা, ক্যাটাগরি, কল ক্লিক ও সাইনআপ ট্রেন্ড দেখুন</p>
-          </a>
-
-          <a href="/admin/legal-requests" class="admin-nav-card">
-            <i class="fas fa-scale-balanced"></i>
-            <h3>আইনি অনুরোধ</h3>
-            <p> </p>
-          </a>
-
-          <a href="/admin/health-requests" class="admin-nav-card">
-            <i class="fas fa-stethoscope"></i>
-            <h3>স্বাস্থ্য অনুরোধ</h3>
-            <p> </p>
-          </a>
-
-          <a href="/admin/bot-chats" class="admin-nav-card admin-nav-card-badge-wrap">
-            <span class="admin-nav-badge" id="botChatPendingBadge" style="display:none;">0</span>
-            <i class="fas fa-robot"></i>
-            <h3>Bot Chats</h3>
-            <p>Telegram স্ক্রিনশট-ইম্পোর্ট বটের moderator/ক্যাটাগরি চ্যাট ম্যানেজ</p>
-          </a>
-
-          <a href="/admin/moderators" class="admin-nav-card" id="moderatorNavCard" style="display:none;">
-            <i class="fas fa-user-shield"></i>
-            <h3>মডারেটর ম্যানেজমেন্ট</h3>
-            <p>নতুন মডারেটর যোগ করুন বা সরানো</p>
-          </a>
-
-          <a href="/admin/notifications" class="admin-nav-card">
-            <i class="fas fa-bell"></i>
-            <h3>নোটিফিকেশন</h3>
-            <p>কাস্টম নোটিফিকেশন</p>
-          </a>
-
-          <a href="/admin/seed-locations" class="admin-nav-card">
-            <i class="fas fa-map-location-dot"></i>
-            <h3>লোকেশন ইম্পোর্ট</h3>
-            <p>OSM থেকে ফেনীর রেস্টুরেন্ট/হোটেল Delivery Hero সাজেশনে যোগ করুন</p>
-          </a>
+      <section class="adm-group">
+        <div class="adm-h">কনটেন্ট</div>
+        <div class="adm-grid">
+        <a href="/admin/listings" class="adm-card" style="--c:#3B82F6;" data-search="লিস্টিং ম্যানেজমেন্ট সব ক্যাটাগরির লিস্টিং approve/reject/delete">
+          <span class="adm-ic"><i class="fas fa-list-check"></i></span>
+          <b>লিস্টিং ম্যানেজমেন্ট</b>
+          <small>সব ক্যাটাগরির লিস্টিং approve/reject/delete</small>
+        </a>
+        <a href="/admin/categories" class="adm-card" style="--c:#8B5CF6;" data-search="ক্যাটাগরি ম্যানেজমেন্ট হোমপেজ সেকশন অর্ডার ও ক্যাটাগরি সিরিয়াল">
+          <span class="adm-ic"><i class="fas fa-layer-group"></i></span>
+          <b>ক্যাটাগরি ম্যানেজমেন্ট</b>
+          <small>হোমপেজ সেকশন অর্ডার ও ক্যাটাগরি সিরিয়াল</small>
+        </a>
+        <a href="/admin/images" class="adm-card" style="--c:#EC4899;" data-search="ছবি ম্যানেজমেন্ট ফিচার্ড ফটো, হেডার, লোগো">
+          <span class="adm-ic"><i class="fas fa-image"></i></span>
+          <b>ছবি ম্যানেজমেন্ট</b>
+          <small>ফিচার্ড ফটো, হেডার, লোগো</small>
+        </a>
+        <a href="/admin/notifications" class="adm-card" style="--c:#F59E0B;" data-search="নোটিফিকেশন কাস্টম নোটিফিকেশন ও ক্যাম্পেইন">
+          <span class="adm-ic"><i class="fas fa-bell"></i></span>
+          <b>নোটিফিকেশন</b>
+          <small>কাস্টম নোটিফিকেশন ও ক্যাম্পেইন</small>
+        </a>
         </div>
+      </section>
+
+      <section class="adm-group">
+        <div class="adm-h">ইউজার ও টিম</div>
+        <div class="adm-grid">
+        <a href="/admin/users" class="adm-card" style="--c:#0EA5E9;" data-search="ইউজার ম্যানেজমেন্ট প্রোফাইল দেখুন, ব্লক/আনব্লক করুন">
+          <span class="adm-ic"><i class="fas fa-users"></i></span>
+          <b>ইউজার ম্যানেজমেন্ট</b>
+          <small>প্রোফাইল দেখুন, ব্লক/আনব্লক করুন</small>
+        </a>
+        <a href="/admin/moderators" class="adm-card" id="moderatorNavCard" data-admin-only="1" style="--c:#6366F1;display:none;" data-search="মডারেটর ম্যানেজমেন্ট নতুন মডারেটর যোগ করুন বা সরান">
+          <span class="adm-ic"><i class="fas fa-user-shield"></i></span>
+          <b>মডারেটর ম্যানেজমেন্ট</b>
+          <small>নতুন মডারেটর যোগ করুন বা সরান</small>
+        </a>
+        </div>
+      </section>
+
+      <section class="adm-group">
+        <div class="adm-h">মার্কেটপ্লেস</div>
+        <div class="adm-grid">
+        <a href="/admin/shops" class="adm-card" style="--c:#EC4899;" data-search="শপ ম্যানেজমেন্ট শপ তৈরি, active/deactivate ও সিরিয়াল">
+          <span class="adm-ic"><i class="fas fa-store"></i></span>
+          <b>শপ ম্যানেজমেন্ট</b>
+          <small>শপ তৈরি, active/deactivate ও সিরিয়াল</small>
+        </a>
+        <a href="/admin/clubs" class="adm-card" id="clubNavCard" data-admin-only="1" style="--c:#0EA5E9;display:none;" data-search="ক্লাব ম্যানেজমেন্ট ক্লাব তৈরি, ভেরিফাই ও active/deactivate">
+          <span class="adm-ic"><i class="fas fa-people-group"></i></span>
+          <b>ক্লাব ম্যানেজমেন্ট</b>
+          <small>ক্লাব তৈরি, ভেরিফাই ও active/deactivate</small>
+        </a>
+        </div>
+      </section>
+
+      <section class="adm-group">
+        <div class="adm-h">ডেলিভারি</div>
+        <div class="adm-grid">
+        <a href="/admin/delivery-riders" class="adm-card" style="--c:#FF6B35;" data-search="ডেলিভারি হিরো ভেরিফিকেশন রাইডার আবেদন যাচাই, approve/reject">
+          <span class="adm-badge" id="riderPendingBadge" style="display:none;">0</span>
+          <span class="adm-ic"><i class="fas fa-motorcycle"></i></span>
+          <b>ডেলিভারি হিরো ভেরিফিকেশন</b>
+          <small>রাইডার আবেদন যাচাই, approve/reject</small>
+        </a>
+        <a href="/admin/delivery-disputes" class="adm-card" style="--c:#EF4444;" data-search="ডেলিভারি ডিসপিউট রিপোর্ট করা সমস্যা দেখুন ও রিজলভ করুন">
+          <span class="adm-badge" id="disputePendingBadge" style="display:none;">0</span>
+          <span class="adm-ic"><i class="fas fa-flag"></i></span>
+          <b>ডেলিভারি ডিসপিউট</b>
+          <small>রিপোর্ট করা সমস্যা দেখুন ও রিজলভ করুন</small>
+        </a>
+        <a href="/admin/seed-locations" class="adm-card" style="--c:#14B8A6;" data-search="লোকেশন ইম্পোর্ট OSM থেকে Delivery Hero সাজেশন যোগ">
+          <span class="adm-ic"><i class="fas fa-map-location-dot"></i></span>
+          <b>লোকেশন ইম্পোর্ট</b>
+          <small>OSM থেকে Delivery Hero সাজেশন যোগ</small>
+        </a>
+        </div>
+      </section>
+
+      <section class="adm-group">
+        <div class="adm-h">স্বাস্থ্য ও আইন</div>
+        <div class="adm-grid">
+        <a href="/admin/doctors" class="adm-card" style="--c:#0D9488;" data-search="ডাক্তার ম্যানেজমেন্ট ডাক্তার, চেম্বার, প্রতিনিধির যোগ করা ডাক্তার, মার্জ">
+          <span class="adm-badge" id="doctorPendingBadge" style="display:none;">0</span>
+          <span class="adm-ic"><i class="fas fa-user-doctor"></i></span>
+          <b>ডাক্তার ম্যানেজমেন্ট</b>
+          <small>ডাক্তার, চেম্বার, প্রতিনিধির যোগ করা ডাক্তার, মার্জ</small>
+        </a>
+        <a href="/admin/clinics" class="adm-card" id="clinicsNavCard" data-admin-only="1" style="--c:#0891B2;display:none;" data-search="ক্লিনিক ও প্রতিনিধি ক্লিনিক যোগ, প্রতিনিধি নিয়োগ">
+          <span class="adm-ic"><i class="fas fa-hospital"></i></span>
+          <b>ক্লিনিক ও প্রতিনিধি</b>
+          <small>ক্লিনিক যোগ, প্রতিনিধি নিয়োগ</small>
+        </a>
+        <a href="/admin/health-requests" class="adm-card" style="--c:#10B981;" data-search="স্বাস্থ্য অনুরোধ স্বাস্থ্য পরামর্শের রিকোয়েস্ট">
+          <span class="adm-ic"><i class="fas fa-stethoscope"></i></span>
+          <b>স্বাস্থ্য অনুরোধ</b>
+          <small>স্বাস্থ্য পরামর্শের রিকোয়েস্ট</small>
+        </a>
+        <a href="/admin/legal-requests" class="adm-card" style="--c:#475569;" data-search="আইনি অনুরোধ আইনি পরামর্শের রিকোয়েস্ট">
+          <span class="adm-ic"><i class="fas fa-scale-balanced"></i></span>
+          <b>আইনি অনুরোধ</b>
+          <small>আইনি পরামর্শের রিকোয়েস্ট</small>
+        </a>
+        </div>
+      </section>
+
+      <section class="adm-group">
+        <div class="adm-h">গ্রোথ ও টাকা</div>
+        <div class="adm-grid">
+        <a href="/admin/referrals" class="adm-card" id="referNavCard" data-admin-only="1" style="--c:#FF6B35;display:none;" data-search="রেফার & রিওয়ার্ড উইথড্র যাচাই ও পেমেন্ট, রেফার কাউন্ট, সামারি">
+          <span class="adm-badge" id="withdrawPendingBadge" style="display:none;">0</span>
+          <span class="adm-ic"><i class="fas fa-coins"></i></span>
+          <b>রেফার & রিওয়ার্ড</b>
+          <small>উইথড্র যাচাই ও পেমেন্ট, রেফার কাউন্ট, সামারি</small>
+        </a>
+        <a href="/admin/analytics" class="adm-card" style="--c:#16A34A;" data-search="অ্যানালিটিক্স উপজেলা, ক্যাটাগরি, কল ক্লিক, সাইনআপ">
+          <span class="adm-ic"><i class="fas fa-chart-line"></i></span>
+          <b>অ্যানালিটিক্স</b>
+          <small>উপজেলা, ক্যাটাগরি, কল ক্লিক, সাইনআপ</small>
+        </a>
+        <a href="/admin/bot-chats" class="adm-card" style="--c:#6366F1;" data-search="Bot Chats Telegram স্ক্রিনশট-ইম্পোর্ট বট ম্যানেজ">
+          <span class="adm-badge" id="botChatPendingBadge" style="display:none;">0</span>
+          <span class="adm-ic"><i class="fas fa-robot"></i></span>
+          <b>Bot Chats</b>
+          <small>Telegram স্ক্রিনশট-ইম্পোর্ট বট ম্যানেজ</small>
+        </a>
+        </div>
+      </section>
+
+        <p class="adm-none" id="adminSearchEmpty" style="display:none;">কিছু পাওয়া যায়নি</p>
 
       </div>
     </div>
   </div>
 
-  <style>
-    .admin-page {
-      min-height: 60vh;
-      padding: 48px 0 80px;
-    }
+  <style is:global>
+    .admin-page { min-height: 60vh; padding: 36px 0 90px; }
 
-    .admin-loading {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      padding: 120px 0;
-      color: #5A6E85;
-      font-weight: 600;
-    }
+    .admin-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .admin-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-    .admin-spinner {
-      width: 36px;
-      height: 36px;
-      border: 3px solid #E5EAF0;
-      border-top-color: #FF6B35;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
+    .admin-header { margin-bottom: 18px; }
+    .admin-header h1 { font-size: 1.5rem; font-weight: 800; color: #1B2A4A; margin: 0; }
+    .admin-role-badge { display: inline-block; margin-top: 6px; font-size: 0.78rem; font-weight: 800; color: #FF6B35; background: #FFF0EA; padding: 4px 14px; border-radius: 40px; }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+    .adm-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .adm-stat { background: #fff; border: 1px solid #E5EAF0; border-radius: 16px; padding: 12px; }
+    .adm-stat b { display: block; font-size: 1.3rem; font-weight: 800; color: #1B2A4A; line-height: 1.2; }
+    .adm-stat span { font-size: 0.72rem; color: #64748B; font-weight: 600; }
+    .adm-stat.hl b { color: #FF6B35; }
 
-    .admin-header {
-      margin-bottom: 32px;
-    }
+    .adm-h { margin: 20px 2px 8px; font-size: 0.74rem; font-weight: 800; letter-spacing: 0.04em; color: #64748B; }
 
-    .admin-header h1 {
-      font-size: 1.8rem;
-      font-weight: 700;
-      color: #1B2A4A;
-    }
+    .adm-att { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+    .adm-att::-webkit-scrollbar { display: none; }
+    .adm-chip { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #E5EAF0; border-left: 4px solid var(--c); border-radius: 14px; padding: 9px 12px; font-size: 0.8rem; font-weight: 700; text-decoration: none; color: #1B2A4A; }
+    .adm-chip em { font-style: normal; background: var(--c); color: #fff; border-radius: 99px; min-width: 22px; height: 22px; display: grid; place-items: center; font-size: 0.72rem; padding: 0 6px; }
+    .adm-none { font-size: 0.84rem; color: #64748B; padding: 6px 2px; }
 
-    .admin-role-badge {
-      display: inline-block;
-      margin-top: 6px;
-      font-size: 0.8rem;
-      font-weight: 700;
-      color: #FF6B35;
-      background: #FFF0EA;
-      padding: 4px 14px;
-      border-radius: 40px;
-      text-transform: capitalize;
-    }
+    .adm-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1.5px solid #E5EAF0; border-radius: 14px; padding: 0 12px; color: #8FA0BC; margin-bottom: 4px; }
+    .adm-search:focus-within { border-color: #FF6B35; }
+    .adm-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: 0.9rem; color: #1B2A4A; padding: 12px 0; }
 
-    .admin-stats {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      margin-bottom: 36px;
-    }
+    .adm-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    @media (min-width: 700px) { .adm-grid { grid-template-columns: repeat(3, 1fr); } }
 
-    .stat-card {
-      background: #fff;
-      border-radius: 20px;
-      padding: 20px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
-    }
+    .adm-card { position: relative; display: flex; flex-direction: column; gap: 8px; background: #fff; border: 1px solid #E5EAF0; border-radius: 18px; padding: 12px; text-decoration: none; color: #1B2A4A; transition: transform 0.12s ease, box-shadow 0.12s ease; }
+    .adm-card:active { transform: scale(0.97); box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12); }
+    @media (hover: hover) { .adm-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1); } }
 
-    .stat-card i {
-      width: 44px;
-      height: 44px;
-      border-radius: 14px;
-      background: #FFF0EA;
-      color: #FF6B35;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.1rem;
-      flex-shrink: 0;
-    }
+    .adm-ic { width: 40px; height: 40px; border-radius: 13px; display: flex; align-items: center; justify-content: center; font-size: 1.05rem; color: var(--c); background: #FFF0EA; background: color-mix(in srgb, var(--c) 15%, #fff); }
+    .adm-card b { font-size: 0.86rem; line-height: 1.25; }
+    .adm-card small { font-size: 0.7rem; color: #64748B; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-    .stat-card.highlight i {
-      background: #FFE9DC;
-    }
-
-    .stat-number {
-      display: block;
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #1B2A4A;
-      line-height: 1.2;
-    }
-
-    .stat-label {
-      display: block;
-      font-size: 0.78rem;
-      color: #8FA0BC;
-      font-weight: 600;
-    }
-
-    .admin-nav-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 18px;
-    }
-
-    .admin-nav-card {
-      background: #fff;
-      border-radius: 20px;
-      padding: 26px;
-      text-decoration: none;
-      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
-      transition: all 0.2s ease;
-      position: relative;
-    }
-
-    .admin-nav-card:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
-    }
-
-    .admin-nav-card i {
-      font-size: 1.6rem;
-      color: #FF6B35;
-      margin-bottom: 12px;
-      display: block;
-    }
-
-    .admin-nav-card h3 {
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: #1B2A4A;
-      margin-bottom: 6px;
-    }
-
-    .admin-nav-card p {
-      font-size: 0.85rem;
-      color: #5A6E85;
-    }
-
-    .admin-nav-badge {
-      position: absolute;
-      top: 16px;
-      right: 16px;
-      background: #D14343;
-      color: #fff;
-      font-size: 0.7rem;
-      font-weight: 800;
-      min-width: 20px;
-      height: 20px;
-      padding: 0 6px;
-      border-radius: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 0 0 2px #fff;
-    }
-
-    @media (max-width: 768px) {
-      .admin-stats {
-        grid-template-columns: 1fr;
-      }
-      .admin-nav-grid {
-        grid-template-columns: 1fr;
-      }
-    }
+    .adm-badge { position: absolute; top: 10px; right: 10px; background: #D14343; color: #fff; font-size: 0.68rem; font-weight: 800; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #fff; }
   </style>
 
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
+
+    let isAdmin = false;
+
+    // কার্ড দেখানো/লুকানো: রোল (data-admin-only) + সার্চ — দুটো একসাথে হিসাব করে
+    function applyVisibility() {
+      const q = (document.getElementById('adminSearch')?.value || '').trim().toLowerCase();
+      let total = 0;
+
+      document.querySelectorAll('.adm-group').forEach((group) => {
+        let shown = 0;
+        group.querySelectorAll('.adm-card').forEach((card) => {
+          const roleOk = !card.hasAttribute('data-admin-only') || isAdmin;
+          const match = !q || (card.getAttribute('data-search') || '').toLowerCase().includes(q);
+          const visible = roleOk && match;
+          card.style.display = visible ? '' : 'none';
+          if (visible) shown += 1;
+        });
+        group.style.display = shown > 0 ? '' : 'none';
+        total += shown;
+      });
+
+      const empty = document.getElementById('adminSearchEmpty');
+      if (empty) empty.style.display = total === 0 ? 'block' : 'none';
+    }
+
+    function setBadge(id, count) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (count && count > 0) {
+        el.textContent = count > 99 ? '৯৯+' : String(count);
+        el.style.display = 'flex';
+      } else {
+        el.style.display = 'none';
+      }
+    }
+
+    // "এখনই দেখুন" স্ট্রিপ — শুধু যেগুলোর কাউন্ট > ০
+    function renderAttention(items) {
+      const strip = document.getElementById('attentionStrip');
+      if (!strip) return;
+      strip.innerHTML = '';
+
+      const active = items.filter((i) => i.count && i.count > 0);
+      if (!active.length) {
+        const none = document.createElement('span');
+        none.className = 'adm-none';
+        none.textContent = 'কোনো পেন্ডিং কাজ নেই 🎉';
+        strip.appendChild(none);
+        return;
+      }
+
+      active.forEach((i) => {
+        const a = document.createElement('a');
+        a.className = 'adm-chip';
+        a.href = i.href;
+        a.setAttribute('style', `--c:${i.color};`);
+        const num = document.createElement('em');
+        num.textContent = i.count > 99 ? '৯৯+' : String(i.count);
+        a.appendChild(num);
+        a.appendChild(document.createTextNode(i.label));
+        strip.appendChild(a);
+      });
+    }
 
     async function loadStats() {
       const [
@@ -392,79 +341,36 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const statUsers = document.getElementById('statUsers');
       const statListings = document.getElementById('statListings');
       const statPending = document.getElementById('statPending');
-      const riderBadge = document.getElementById('riderPendingBadge');
-      const botChatBadge = document.getElementById('botChatPendingBadge');
-      const disputeBadge = document.getElementById('disputePendingBadge');
-      const doctorBadge = document.getElementById('doctorPendingBadge');
-      const withdrawBadge = document.getElementById('withdrawPendingBadge');
-
       if (statUsers) statUsers.textContent = userCount ?? '0';
       if (statListings) statListings.textContent = listingCount ?? '0';
       if (statPending) statPending.textContent = pendingCount ?? '0';
 
-      if (riderBadge) {
-        if (riderPendingCount && riderPendingCount > 0) {
-          riderBadge.textContent = riderPendingCount > 99 ? '৯৯+' : riderPendingCount;
-          riderBadge.style.display = 'flex';
-        } else {
-          riderBadge.style.display = 'none';
-        }
-      }
+      setBadge('riderPendingBadge', riderPendingCount);
+      setBadge('botChatPendingBadge', botChatPendingCount);
+      setBadge('disputePendingBadge', disputePendingCount);
+      setBadge('doctorPendingBadge', doctorPendingCount);
+      setBadge('withdrawPendingBadge', withdrawPendingCount);
 
-      if (botChatBadge) {
-        if (botChatPendingCount && botChatPendingCount > 0) {
-          botChatBadge.textContent = botChatPendingCount > 99 ? '৯৯+' : botChatPendingCount;
-          botChatBadge.style.display = 'flex';
-        } else {
-          botChatBadge.style.display = 'none';
-        }
-      }
-
-      if (disputeBadge) {
-        if (disputePendingCount && disputePendingCount > 0) {
-          disputeBadge.textContent = disputePendingCount > 99 ? '৯৯+' : disputePendingCount;
-          disputeBadge.style.display = 'flex';
-        } else {
-          disputeBadge.style.display = 'none';
-        }
-      }
-
-      if (doctorBadge) {
-        if (doctorPendingCount && doctorPendingCount > 0) {
-          doctorBadge.textContent = doctorPendingCount > 99 ? '৯৯+' : doctorPendingCount;
-          doctorBadge.style.display = 'flex';
-        } else {
-          doctorBadge.style.display = 'none';
-        }
-      }
-
-      if (withdrawBadge) {
-        if (withdrawPendingCount && withdrawPendingCount > 0) {
-          withdrawBadge.textContent = withdrawPendingCount > 99 ? '৯৯+' : withdrawPendingCount;
-          withdrawBadge.style.display = 'flex';
-        } else {
-          withdrawBadge.style.display = 'none';
-        }
-      }
+      renderAttention([
+        { count: isAdmin ? withdrawPendingCount : 0, label: 'উইথড্র আবেদন', href: '/admin/referrals', color: '#FF6B35' },
+        { count: pendingCount, label: 'লিস্টিং রিভিউ বাকি', href: '/admin/listings', color: '#3B82F6' },
+        { count: riderPendingCount, label: 'রাইডার আবেদন', href: '/admin/delivery-riders', color: '#FF6B35' },
+        { count: disputePendingCount, label: 'ডিসপিউট', href: '/admin/delivery-disputes', color: '#EF4444' },
+        { count: doctorPendingCount, label: 'ডাক্তার রিভিউ', href: '/admin/doctors', color: '#0D9488' },
+        { count: botChatPendingCount, label: 'Bot Chat', href: '/admin/bot-chats', color: '#6366F1' },
+      ]);
     }
+
+    document.getElementById('adminSearch')?.addEventListener('input', applyVisibility);
 
     window.addEventListener('smartfeni:admin-ready', (e) => {
       const { role } = e.detail;
+      isAdmin = role === 'admin';
 
       const roleBadge = document.getElementById('roleBadge');
-      if (roleBadge) roleBadge.textContent = role === 'admin' ? 'অ্যাডমিন' : 'মডারেটর';
+      if (roleBadge) roleBadge.textContent = isAdmin ? 'অ্যাডমিন' : 'মডারেটর';
 
-      if (role === 'admin') {
-        const modCard = document.getElementById('moderatorNavCard');
-        if (modCard) modCard.style.display = '';
-        const clubCard = document.getElementById('clubNavCard');
-        if (clubCard) clubCard.style.display = '';
-        const clinicsCard = document.getElementById('clinicsNavCard');
-        if (clinicsCard) clinicsCard.style.display = '';
-        const referCard = document.getElementById('referNavCard');
-        if (referCard) referCard.style.display = '';
-      }
-
+      applyVisibility();
       loadStats();
     });
 
