@@ -1,7 +1,7 @@
 ---
 // ============================================================
-// পেজ: /my-orders — কাস্টমারের নিজের অর্ডার হিস্ট্রি ও স্ট্যাটাস
-// ট্র্যাকিং
+// পেজ: /my-orders — কাস্টমারের নিজের অর্ডার ও সিরিয়াল রিকোয়েস্ট
+// হিস্ট্রি ও স্ট্যাটাস ট্র্যাকিং
 //
 // বার্গেনিং মডেল: "সেরা মূল্য" (anonymous reverse-auction) —
 // কাস্টমার শুধু বর্তমান সেরা মূল্য দেখে (সব active হিরো অফারের
@@ -32,6 +32,17 @@
 // আপডেট (নতুন UI — কার্ডের চেহারা): রুট (পিকআপ → ড্রপ) ডটেড লাইনে, "সেরা হিরো
 // অফার / আপনার প্রস্তাব" দুই বক্স, ৪ ধাপের প্রগ্রেস বার। স্টাইল src/styles/
 // hero-ui.css এ (শেয়ার্ড)। লজিক/বাটন/শিট/ট্যাব অপরিবর্তিত।
+//
+// আপডেট (ডাক্তারের সিরিয়াল রিকোয়েস্ট): শপ অর্ডার ও ডেলিভারির পাশে তৃতীয়
+// ধরনের কার্ড হিসেবে serial_requests (RLS: শুধু নিজের) এখানেই দেখায় —
+// আলাদা পেজ বা মেনু নেই।
+// - ৩ ধাপ: জমা হয়েছে → প্রসেসিং চলছে → কনফার্মড (বড় করে সিরিয়াল নম্বর)
+// - অপেক্ষায়/প্রসেসিংয়ে "অনুরোধ বাতিল করুন" (serial_patient_cancel RPC)
+// - ফোন ধরেনি / বাতিল / মেয়াদ শেষ হলে ধূসর-লাল নোটসহ "সম্পন্ন" ট্যাবে
+// - কনফার্ম হওয়া সিরিয়াল ডাক্তারের দিন (ঢাকার তারিখ) পার না হওয়া পর্যন্ত "চলমান"
+//   ট্যাবে থাকে, যাতে রোগী খুলেই সিরিয়াল নম্বর দেখতে পান
+// - ?serial=<id> দিয়ে এলে (নোটিফিকেশন থেকে) সংশ্লিষ্ট কার্ডে স্ক্রল ও হাইলাইট
+// - পেজের শিরোনাম: "আমার অর্ডার ও সিরিয়াল"
 // ============================================================
 
 export const prerender = false;
@@ -42,7 +53,7 @@ import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro'
 import ChatModal from '../components/delivery/ChatModal.astro';
 ---
 
-<BaseLayout title="আমার অর্ডার | স্মার্ট ফেনী">
+<BaseLayout title="আমার অর্ডার ও সিরিয়াল | স্মার্ট ফেনী">
   <div class="my-orders-page">
     <div class="container">
 
@@ -54,12 +65,12 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       <div id="loginRequired" class="status-box" style="display:none;">
         <div class="status-icon-badge"><i class="fas fa-lock"></i></div>
         <h2>লগইন করুন</h2>
-        <p>অর্ডার দেখতে আগে লগইন করতে হবে</p>
+        <p>অর্ডার ও সিরিয়াল দেখতে আগে লগইন করতে হবে</p>
         <a href="/" class="primary-link-btn">হোমপেজে যান</a>
       </div>
 
       <div id="ordersContent" style="display:none;">
-        <h1 class="page-title"><i class="fas fa-receipt"></i> আমার অর্ডার</h1>
+        <h1 class="page-title"><i class="fas fa-receipt"></i> আমার অর্ডার ও সিরিয়াল</h1>
 
         <DisputeReasonModal />
         <ChatModal />
@@ -67,7 +78,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         <div id="emptyOrders" class="status-box" style="display:none;">
           <div class="status-icon-badge"><i class="fas fa-inbox"></i></div>
           <h2>কোনো অর্ডার নেই</h2>
-          <p>এখনো কোনো শপ থেকে অর্ডার বা ডেলিভারি রিকোয়েস্ট করেননি</p>
+          <p>এখনো কোনো শপ থেকে অর্ডার, ডেলিভারি রিকোয়েস্ট বা ডাক্তারের সিরিয়াল রিকোয়েস্ট করেননি</p>
           <a href="/shop" class="primary-link-btn">শপ দেখুন</a>
         </div>
 
@@ -254,6 +265,11 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     .shop-icon-badge.ride-icon {
       background: #E9ECF5;
       color: #1B2A4A;
+    }
+
+    .shop-icon-badge.serial-icon {
+      background: #E8F6EC;
+      color: #1B7A3C;
     }
 
     .order-date {
@@ -789,6 +805,103 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       margin-top: 10px;
     }
 
+    /* ===== ডাক্তারের সিরিয়াল রিকোয়েস্ট কার্ড ===== */
+    .sr-info {
+      background: #F8FAFC;
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin: 12px 0 4px;
+    }
+
+    .sr-doctor {
+      font-size: 0.96rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      line-height: 1.4;
+    }
+
+    .sr-meta {
+      font-size: 0.78rem;
+      color: #5A6E85;
+      margin-top: 3px;
+      line-height: 1.5;
+    }
+
+    .sr-day {
+      font-size: 0.84rem;
+      color: #FF6B35;
+      font-weight: 700;
+      margin-top: 6px;
+    }
+
+    .sr-patient {
+      font-size: 0.74rem;
+      color: #9AA8BC;
+      margin-top: 8px;
+    }
+
+    .sr-serial-box {
+      background: #E8F6EC;
+      border: 1.5px solid #1B7A3C;
+      border-radius: 16px;
+      padding: 16px;
+      text-align: center;
+      margin: 12px 0 4px;
+    }
+
+    .sr-serial-label {
+      display: block;
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: #1B7A3C;
+      margin-bottom: 2px;
+    }
+
+    .sr-serial-no {
+      display: block;
+      font-size: 2.3rem;
+      font-weight: 800;
+      color: #1B7A3C;
+      line-height: 1.2;
+    }
+
+    .sr-serial-sub {
+      display: block;
+      font-size: 0.8rem;
+      color: #3A4A60;
+      margin-top: 4px;
+    }
+
+    .sr-note-line {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      color: #1B2A4A;
+      background: #fff;
+      border-radius: 10px;
+      padding: 8px 10px;
+      line-height: 1.5;
+    }
+
+    .sr-processing-note {
+      text-align: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #1D4FA8;
+      background: #EAF2FF;
+      padding: 10px;
+      border-radius: 12px;
+      margin-top: 10px;
+      line-height: 1.55;
+    }
+
+    .sr-off-note {
+      font-size: 0.74rem;
+      color: #8FA0BC;
+      margin-top: 8px;
+      text-align: center;
+      line-height: 1.5;
+    }
+
     /* ===== নতুন UI: ট্যাব, বড় বাটন, কনফার্ম শিট ===== */
     .mo-tabs {
       display: flex;
@@ -982,6 +1095,12 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     const DELIVERY_STEPS = ['open', 'confirmed', 'picked_up', 'completed'];
     const DELIVERY_STEP_LABELS = { open: 'রিকোয়েস্ট', confirmed: 'কনফার্মড', picked_up: 'পিকআপ সম্পন্ন', completed: 'সম্পন্ন' };
 
+    // ডাক্তারের সিরিয়াল রিকোয়েস্টের ৩ ধাপ
+    const SERIAL_STEPS = ['pending', 'processing', 'confirmed'];
+    const SERIAL_STEP_LABELS = { pending: 'জমা হয়েছে', processing: 'প্রসেসিং চলছে', confirmed: 'কনফার্মড' };
+    const BN_WEEKDAYS = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+    const BN_MONTHS = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+
     let currentUserId = null;
     let refreshTimer = null;
 
@@ -1149,6 +1268,115 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         <div class="order-items-list">${itemsHtml}</div>
         ${contactHtml}
       `;
+
+      return card;
+    }
+
+    // ============ ডাক্তারের সিরিয়াল রিকোয়েস্ট ============
+    // আজকের তারিখ (ঢাকা), YYYY-MM-DD
+    function todayDhaka() {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka' }).format(new Date());
+    }
+
+    function dhakaHour() {
+      return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Dhaka', hour: '2-digit', hourCycle: 'h23' }).format(new Date())) % 24;
+    }
+
+    function serialDayLabel(dateStr) {
+      const [y, m, d] = String(dateStr).split('-').map(Number);
+      const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      return `${BN_WEEKDAYS[wd]}, ${toBn(d)} ${BN_MONTHS[m - 1]}`;
+    }
+
+    function renderSerialStepper(status) {
+      const currentIndex = SERIAL_STEPS.indexOf(status);
+      let dotsHtml = '';
+      SERIAL_STEPS.forEach((step, i) => {
+        const isDone = i <= currentIndex;
+        dotsHtml += `<div class="step-dot ${isDone ? 'done' : ''}"><i class="fas fa-check"></i></div>`;
+        if (i < SERIAL_STEPS.length - 1) {
+          dotsHtml += `<div class="step-line ${i < currentIndex ? 'done' : ''}"></div>`;
+        }
+      });
+      const labelsHtml = SERIAL_STEPS.map((s) => `<span>${SERIAL_STEP_LABELS[s]}</span>`).join('');
+      return `<div class="status-stepper">${dotsHtml}</div><div class="step-label-row">${labelsHtml}</div>`;
+    }
+
+    function renderSerialCard(sr) {
+      const card = document.createElement('div');
+      card.className = 'order-card';
+      card.dataset.serialId = sr.id;
+
+      const hasPersonal = !!sr.patient_name;
+      const isOpen = sr.status === 'pending' || sr.status === 'processing';
+
+      let body = `
+        <div class="order-top-row">
+          <div>
+            <p class="order-shop-name"><span class="shop-icon-badge serial-icon"><i class="fas fa-ticket"></i></span> ডাক্তারের সিরিয়াল রিকোয়েস্ট</p>
+            <p class="order-date">${formatDate(sr.created_at)}</p>
+          </div>
+        </div>
+      `;
+
+      // অবস্থা: ধাপ বা নোট
+      if (sr.status === 'unreachable') {
+        body += `<div class="cancelled-note"><i class="fas fa-phone-slash"></i> প্রতিনিধি ফোনে যোগাযোগ করতে পারেননি</div>`;
+      } else if (sr.status === 'cancelled') {
+        body += `<div class="cancelled-note"><i class="fas fa-xmark"></i> অনুরোধটি বাতিল হয়েছে</div>`;
+      } else if (sr.status === 'expired') {
+        body += `<div class="cancelled-note"><i class="fas fa-hourglass-end"></i> মেয়াদ শেষ হয়েছে</div>`;
+      } else {
+        body += renderSerialStepper(sr.status);
+      }
+
+      // ডাক্তার, ক্লিনিক, দিন
+      body += `
+        <div class="sr-info">
+          <p class="sr-doctor">${esc(sr.doctor_name)}</p>
+          <p class="sr-meta"><i class="fas fa-hospital"></i> ${esc(sr.clinic_name)}</p>
+          <p class="sr-day"><i class="fas fa-calendar-day"></i> ${serialDayLabel(sr.requested_date)}</p>
+          ${hasPersonal ? `<p class="sr-patient">রোগী: ${esc(sr.patient_name)}</p>` : ''}
+        </div>
+      `;
+
+      if (sr.status === 'pending') {
+        const night = dhakaHour() < 9 || dhakaHour() >= 21;
+        body += `<div class="waiting-note">ক্লিনিকে অনুরোধ পাঠানো হয়েছে। প্রতিনিধি সিরিয়াল নিয়ে আপনাকে কল করে জানাবেন।${night ? ' এখন রাত, সকাল ৯টার পর কল পাবেন।' : ''}</div>`;
+      } else if (sr.status === 'processing') {
+        body += `<div class="sr-processing-note"><i class="fas fa-spinner fa-spin"></i> আপনার সিরিয়ালের জন্য চেষ্টা চলছে। প্রতিনিধি শীঘ্রই কল করে সিরিয়াল নম্বর জানাবেন, কল এলে ধরুন।</div>`;
+      } else if (sr.status === 'confirmed') {
+        body += `
+          <div class="sr-serial-box">
+            <span class="sr-serial-label">আপনার সিরিয়াল নম্বর</span>
+            <span class="sr-serial-no">${esc(sr.serial_no || '')}</span>
+            <span class="sr-serial-sub">${esc(sr.doctor_name)} · ${serialDayLabel(sr.requested_date)}</span>
+            ${sr.rep_note ? `<p class="sr-note-line"><i class="fas fa-circle-info"></i> ${esc(sr.rep_note)}</p>` : ''}
+          </div>
+        `;
+      } else if (sr.status === 'unreachable') {
+        body += `<p class="sr-off-note">প্রয়োজনে সরাসরি ক্লিনিকে কল করে সিরিয়াল নিন।</p>`;
+      } else if (sr.status === 'cancelled' && sr.rep_note) {
+        body += `<p class="sr-off-note">${esc(sr.rep_note)}</p>`;
+      }
+
+      if (isOpen) {
+        body += `<button class="btn-cancel-request" data-serial-cancel="${sr.id}"><i class="fas fa-ban"></i> অনুরোধ বাতিল করুন</button>`;
+      }
+
+      card.innerHTML = body;
+
+      card.querySelector('[data-serial-cancel]')?.addEventListener('click', async (e) => {
+        if (!confirm('সিরিয়াল রিকোয়েস্টটি বাতিল করতে চান?')) return;
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        const { error } = await supabase.rpc('serial_patient_cancel', { p_id: sr.id });
+        if (error) {
+          alert(error.message.includes('invalid_status') ? 'অনুরোধের অবস্থা বদলে গেছে, পেজ রিফ্রেশ হচ্ছে' : 'বাতিল করা যায়নি: ' + error.message);
+          btn.disabled = false;
+        }
+        refreshOrders();
+      });
 
       return card;
     }
@@ -1491,6 +1719,12 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     // ============ মার্জ ও রেন্ডার ============
     function isOngoingItem(item) {
       if (item.__type === 'shop_order') return item.status === 'pending' || item.status === 'confirmed';
+      if (item.__type === 'serial') {
+        if (item.status === 'pending' || item.status === 'processing') return true;
+        // কনফার্ম হওয়া সিরিয়াল ডাক্তারের দিন পার না হওয়া পর্যন্ত "চলমান"-এ থাকে
+        if (item.status === 'confirmed') return String(item.requested_date) >= todayDhaka();
+        return false;
+      }
       return ['open', 'negotiating', 'confirmed', 'delivered', 'disputed'].includes(item.status);
     }
 
@@ -1500,19 +1734,23 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       });
     }
 
-    // ?req=<id> / ?order=<id> থেকে আসা কার্ডে স্ক্রল ও হাইলাইট (শুধু প্রথমবার)
+    // ?req=<id> / ?order=<id> / ?serial=<id> থেকে আসা কার্ডে স্ক্রল ও হাইলাইট (শুধু প্রথমবার)
     function findDeepLinkTarget(combined) {
       const reqId = deepLinkParams.get('req');
       const orderId = deepLinkParams.get('order');
+      const serialId = deepLinkParams.get('serial');
       if (reqId) return combined.find((i) => i.__type === 'delivery' && i.id === reqId) || null;
       if (orderId) return combined.find((i) => i.__type === 'shop_order' && i.id === orderId) || null;
+      if (serialId) return combined.find((i) => i.__type === 'serial' && i.id === serialId) || null;
       return null;
     }
 
     function scrollToDeepLinkCard(target) {
       const selector = target.__type === 'delivery'
         ? `[data-req-id="${target.id}"]`
-        : `[data-order-id="${target.id}"]`;
+        : target.__type === 'serial'
+          ? `[data-serial-id="${target.id}"]`
+          : `[data-order-id="${target.id}"]`;
       const card = ordersContainer.querySelector(selector);
       if (!card) return;
       card.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1521,12 +1759,13 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     }
 
     function paint() {
-      const { shopOrders, deliveryRequests, reviewedRequestIds } = lastData;
+      const { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds } = lastData;
       ordersContainer.innerHTML = '';
 
       const combined = [
         ...shopOrders.map((o) => ({ ...o, __type: 'shop_order' })),
         ...deliveryRequests.map((d) => ({ ...d, __type: 'delivery', __hasReview: reviewedRequestIds.has(d.id) })),
+        ...serialRequests.map((s) => ({ ...s, __type: 'serial' })),
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       if (combined.length === 0) {
@@ -1551,21 +1790,24 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       const visible = combined.filter((item) => (activeTab === 'ongoing') === isOngoingItem(item));
 
       if (visible.length === 0) {
-        const msg = activeTab === 'ongoing' ? 'এখন কোনো চলমান অর্ডার নেই' : 'এখনো কোনো সম্পন্ন অর্ডার নেই';
+        const msg = activeTab === 'ongoing' ? 'এখন কোনো চলমান অর্ডার বা সিরিয়াল নেই' : 'এখনো কোনো সম্পন্ন অর্ডার বা সিরিয়াল নেই';
         ordersContainer.innerHTML = `<p class="tab-empty">${msg}</p>`;
         return;
       }
 
       visible.forEach((item) => {
-        const card = item.__type === 'shop_order' ? renderShopOrderCard(item) : renderDeliveryCard(item);
+        let card;
+        if (item.__type === 'shop_order') card = renderShopOrderCard(item);
+        else if (item.__type === 'serial') card = renderSerialCard(item);
+        else card = renderDeliveryCard(item);
         ordersContainer.appendChild(card);
       });
 
       if (deepTarget) setTimeout(() => scrollToDeepLinkCard(deepTarget), 80);
     }
 
-    function renderAll(shopOrders, deliveryRequests, reviewedRequestIds) {
-      lastData = { shopOrders, deliveryRequests, reviewedRequestIds };
+    function renderAll(shopOrders, deliveryRequests, serialRequests, reviewedRequestIds) {
+      lastData = { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds };
       paint();
     }
 
@@ -1577,7 +1819,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     });
 
     async function loadOrders(userId, { silent = false } = {}) {
-      const [ordersRes, deliveryRes, reviewsRes] = await Promise.all([
+      const [ordersRes, deliveryRes, reviewsRes, serialRes] = await Promise.all([
         supabase
           .from('orders')
           .select('*, order_items(*), shops(name, slug, phone)')
@@ -1593,6 +1835,12 @@ import ChatModal from '../components/delivery/ChatModal.astro';
           .eq('customer_profile_id', userId)
           .order('created_at', { ascending: false }),
         supabase.from('delivery_reviews').select('request_id').eq('customer_profile_id', userId),
+        supabase
+          .from('serial_requests')
+          .select('id, doctor_name, clinic_name, requested_date, status, serial_no, rep_note, patient_name, created_at')
+          .eq('requester_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(60),
       ]);
 
       if (!silent) {
@@ -1608,6 +1856,10 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         return;
       }
 
+      // সিরিয়াল লোডে সমস্যা হলে বাকি অর্ডার দেখানো আটকাবে না
+      if (serialRes.error) console.error('সিরিয়াল লোড এরর:', serialRes.error.message);
+      const serialRequests = serialRes.error ? [] : (serialRes.data || []);
+
       const reviewedRequestIds = new Set((reviewsRes.data || []).map((r) => r.request_id));
 
       const deliveryRequests = (deliveryRes.data || []).map((req) => ({
@@ -1618,7 +1870,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       // ইউজার কিছু টাইপ করছে বা কনফার্ম শিট খোলা থাকলে অটো-রিফ্রেশে কার্ড নতুন করে আঁকব না
       if (silent && isUserInteracting()) return;
 
-      renderAll(ordersRes.data || [], deliveryRequests, reviewedRequestIds);
+      renderAll(ordersRes.data || [], deliveryRequests, serialRequests, reviewedRequestIds);
     }
 
     function refreshOrders() {
