@@ -3,20 +3,17 @@
 // পেজ: লাকি ড্র লাইভ (/admin/lucky-draw/[id]/live)
 // শুধু role === 'admin' অ্যাক্সেস করতে পারবে (moderator ব্লক)।
 //
-// আপডেট (এই সেশন — সম্পূর্ণ নতুন সিস্টেম):
-//   - এখন থেকে "গ্রিড + গ্লো স্পটলাইট" মেকানিজম — সব এলিজিবল
-//     এন্ট্রি ছবি (থাকলে) বা প্লেসহোল্ডার আইকন সহ গ্রিডে দেখায়।
-//     একটা গ্লো হাইলাইট idle অবস্থায় সবসময় ধীরে ধীরে এলোমেলো
-//     কার্ডে ঘুরতে থাকে। "ড্র শুরু করুন" চাপলে স্পিড বহুগুণ বেড়ে
-//     যায় (২-৩ সেকেন্ডে পুরো গ্রিড কভার করে রিপিট), তারপর ধীরে
-//     ধীরে ডিসিলারেট করে বিজয়ীর কার্ডে থেমে যায়।
-//   - বিজয়ী রিভিল মাঝের এরিয়া জুড়ে (লোগো হেডার ও ওয়েবসাইট ফুটার
-//     ফিক্সড থাকে, শুধু মাঝের কন্টেন্ট গ্রিড থেকে বিজয়ী কার্ডে
-//     বদলে যায়)।
-//   - কোনো DB রেকর্ড সেভ হয় না — প্রতিটা ড্র সম্পূর্ণ স্টেটলেস,
-//     আনলিমিটেড রি-ড্র, রিলোড করলে আবার ফ্রেশ শুরু।
-//   - কোণায় ক্রস (X) বাটন — ড্র লিস্ট পেজে ফিরিয়ে দেয়।
-//   - ক্যামেরা বাটন ডিফল্টে ছোট, চালু করলে বড় হয়ে যায়।
+// আপডেট (নতুন সেলিব্রেশন ডিজাইন):
+//   - ৩-কার্ড স্লট স্টাইল: মাঝেরটা বড়, দুই পাশের ২টা ছোট ও হেলানো
+//     (perspective)। idle-এ প্রতি ১ সেকেন্ডে এক ধাপ স্লাইড।
+//   - "উইনার খুজুন" চাপলে ৫সে ধীরে শুরু → ২০-২৫সে ফুল স্পিড (কমপক্ষে
+//     ২ রাউন্ড নিশ্চিত) → ৫সে ধীরে থেমে যাওয়া। থামা কার্ডই বিজয়ী।
+//   - থামার পর কার্ডের ছবি গ্লো/পালস করে, তারপর ফুল সেলিব্রেশন ভিউ।
+//   - পার্পল-গোল্ড থিম, ভাসমান প্রাইজ আইকন, স্পটলাইট বিম, ওয়াটারমার্ক লোগো।
+//   - ফুটারে স্মার্ট ফেনী অ্যাপ (Google Play) ডাউনলোডের আহ্বান।
+//   - ক্যামেরা: ছোট বক্স + ফুল স্ক্রিন (পাশাপাশি/উপর-নিচ) অপশন।
+//   - পারফরম্যান্স: শুধু মাঝের ±২ কার্ড DOM-এ থাকে (হাজার ইউজারেও হালকা)।
+//   - কোনো DB রেকর্ড সেভ হয় না — প্রতিটা ড্র স্টেটলেস, আনলিমিটেড রি-ড্র।
 // ============================================================
 
 export const prerender = false;
@@ -38,7 +35,13 @@ const { id } = Astro.params;
     <!-- ===== আসল কন্টেন্ট ===== -->
     <div id="adminGuardedContent" class="ldl-content-wrap" style="display:none;">
 
-      <!-- ===== টপবার — ফিক্সড, সাদা ===== -->
+      <!-- ব্যাকগ্রাউন্ড ডেকোরেশন -->
+      <div class="ldl-beam ldl-beam-a"></div>
+      <div class="ldl-beam ldl-beam-b"></div>
+      <img id="ldlWatermark" class="ldl-watermark" src="/logo.png" alt="" />
+      <div id="ldlFloaters" class="ldl-floaters"></div>
+
+      <!-- ===== টপবার — সাদা, লোগো সহ ===== -->
       <div class="ldl-topbar">
         <a href="/admin/lucky-draw" class="ldl-topbar-close" title="ড্র লিস্টে ফিরুন">
           <i class="fas fa-xmark"></i>
@@ -46,55 +49,91 @@ const { id } = Astro.params;
 
         <div class="ldl-topbar-logo">
           <img id="ldlTopLogo" src="/logo.png" alt="স্মার্ট ফেনী" />
-          <span class="ldl-topbar-tag" id="ldlTopTag">লাকি ড্র</span>
+          <span class="ldl-topbar-tag">লাকি ড্র</span>
         </div>
 
-        <button type="button" class="ldl-camera-circle" id="cameraToggleBtn" title="ক্যামেরা">
-          <video id="ldlCameraVideo" autoplay muted playsinline></video>
-          <i class="fas fa-video" id="ldlCameraIcon"></i>
+        <button type="button" class="ldl-camera-btn" id="cameraToggleBtn" title="ক্যামেরা">
+          <i class="fas fa-video"></i>
         </button>
       </div>
 
-      <!-- ===== মাঝের এরিয়া — গ্রিড ভিউ / বিজয়ী ভিউ ===== -->
-      <div class="ldl-middle">
+      <!-- ===== মেইন এরিয়া (ক্যামেরা + ড্র) ===== -->
+      <div class="ldl-main" id="ldlMain">
 
-        <!-- ----- গ্রিড ভিউ ----- -->
-        <div class="ldl-grid-view" id="ldlGridView">
-          <div class="ldl-draw-title">
-            <h1 id="ldlDrawTitle">লোড হচ্ছে...</h1>
-            <p id="ldlDrawDescription"></p>
-            <p class="ldl-eligible-count" id="ldlEligibleCount"></p>
+        <!-- ক্যামেরা প্যানেল — ছোট বক্স / ফুল -->
+        <div class="ldl-cam" id="ldlCam">
+          <video id="ldlCameraVideo" autoplay muted playsinline></video>
+          <div class="ldl-cam-fb" id="ldlCamFb">ক্যামেরা চালু হচ্ছে...</div>
+          <div class="ldl-cam-btns">
+            <button type="button" id="camFsBtn" title="ফুল স্ক্রিন / ছোট করুন"><i class="fas fa-expand" id="camFsIcon"></i></button>
+            <button type="button" id="camCloseBtn" title="ক্যামেরা বন্ধ"><i class="fas fa-xmark"></i></button>
           </div>
-
-          <div class="ldl-entry-grid" id="ldlEntryGrid"></div>
         </div>
 
-        <!-- ----- বিজয়ী ভিউ (ফুল এরিয়া) ----- -->
-        <div class="ldl-winner-view" id="ldlWinnerView" style="display:none;">
-          <i class="fas fa-trophy ldl-winner-trophy"></i>
-          <p class="ldl-winner-label">বিজয়ী</p>
-          <div class="ldl-winner-photo" id="ldlWinnerPhotoWrap">
-            <img id="ldlWinnerPhoto" src="" alt="" style="display:none;" />
-            <i class="fas fa-user" id="ldlWinnerPhotoIcon"></i>
-          </div>
-          <h2 class="ldl-winner-name" id="ldlWinnerName"></h2>
-          <p class="ldl-winner-phone" id="ldlWinnerPhone"></p>
+        <div class="ldl-draw">
 
-          <button type="button" id="respinBtn" class="ldl-respin-btn">
-            <i class="fas fa-rotate"></i> আবার ড্র করুন
+          <!-- ----- স্লট ভিউ ----- -->
+          <div class="ldl-slot-view" id="ldlGridView">
+            <div class="ldl-head">
+              <div class="ldl-chip"><i class="fas fa-gift"></i> মেগা লাকি ড্র</div>
+              <h1 id="ldlDrawTitle">কে হবে স্মার্ট ফেনীর চমক উইনার?</h1>
+              <div class="ldl-icons">
+                <i class="fas fa-trophy"></i><i class="fas fa-gift"></i><i class="fas fa-crown"></i>
+                <i class="fas fa-star"></i><i class="fas fa-gem"></i><i class="fas fa-coins"></i><i class="fas fa-ticket"></i>
+              </div>
+              <p class="ldl-prize" id="ldlDrawDescription"></p>
+              <div class="ldl-status" id="ldlStatus">আপনার ভাগ্য কি আজ খুলবে? 🍀</div>
+              <p class="ldl-eligible-count" id="ldlEligibleCount"></p>
+            </div>
+
+            <div class="ldl-stage" id="ldlStage"></div>
+          </div>
+
+          <!-- ড্র বাটন -->
+          <button type="button" id="spinBtn" class="ldl-spin-btn">
+            <i class="fas fa-play"></i> <span>উইনার খুজুন</span>
           </button>
-        </div>
 
+          <!-- ----- বিজয়ী ভিউ ----- -->
+          <div class="ldl-winner-view" id="ldlWinnerView" style="display:none;">
+            <i class="fas fa-trophy ldl-winner-trophy"></i>
+            <p class="ldl-winner-cong">🎉 অভিনন্দন! 🎉</p>
+            <p class="ldl-winner-label">আজকের ভাগ্যবান বিজয়ী</p>
+            <div class="ldl-winner-ring">
+              <i class="fas fa-crown ldl-winner-crown"></i>
+              <div class="ldl-winner-photo" id="ldlWinnerPhotoWrap">
+                <img id="ldlWinnerPhoto" src="" alt="" style="display:none;" />
+                <i class="fas fa-user" id="ldlWinnerPhotoIcon"></i>
+              </div>
+            </div>
+            <h2 class="ldl-winner-name" id="ldlWinnerName"></h2>
+            <p class="ldl-winner-phone" id="ldlWinnerPhone"></p>
+            <p class="ldl-winner-wish">স্মার্ট ফেনীর পক্ষ থেকে শুভেচ্ছা 💛</p>
+
+            <button type="button" id="respinBtn" class="ldl-respin-btn">
+              <i class="fas fa-rotate"></i> আবার ড্র করুন
+            </button>
+          </div>
+
+        </div>
       </div>
 
-      <!-- ===== ড্র বাটন (গ্রিড ভিউতে ভাসমান, ফুটারের উপরে ফিক্সড) ===== -->
-      <button type="button" id="spinBtn" class="ldl-spin-btn">
-        <i class="fas fa-play"></i> <span>ড্র শুরু করুন</span>
-      </button>
-
-      <!-- ===== ফুটার — ফিক্সড ===== -->
+      <!-- ===== ফুটার — অ্যাপ ডাউনলোড ===== -->
       <div class="ldl-footer">
-        <span>ভিজিট করুন: </span><span class="ldl-footer-domain">www.smartfeni.com</span>
+        <div class="ldl-footer-text">
+          <i class="fas fa-mobile-screen-button"></i>
+          <b>স্মার্ট ফেনী অ্যাপ</b> ডাউনলোড করুন — এখন প্লে স্টোরে!
+        </div>
+        <div class="ldl-store">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#00C3FF" d="M3.6 2.3L13.3 12 3.6 21.7C3.2 21.5 3 21.1 3 20.6V3.4c0-.5.2-.9.6-1.1z"/>
+            <path fill="#00F076" d="M3.6 2.3L13.3 12l3.3-3.3L5 2.4c-.5-.3-1-.3-1.4-.1z"/>
+            <path fill="#FF3A44" d="M3.6 21.7L13.3 12l3.3 3.3L5 21.6c-.5.3-1 .3-1.4.1z"/>
+            <path fill="#FFD500" d="M16.6 8.7l3.8 2.2c.9.5.9 1.7 0 2.2l-3.8 2.2L13.3 12z"/>
+          </svg>
+          <div><small>GET IT ON</small><span>Google Play</span></div>
+        </div>
+        <div class="ldl-footer-slogan">প্রয়োজন আপনার, দায়িত্ব আমাদের</div>
       </div>
 
       <!-- ===== canvas confetti ===== -->
@@ -108,7 +147,7 @@ const { id } = Astro.params;
       position: fixed;
       inset: 0;
       z-index: 9999;
-      background: radial-gradient(circle at top, #223257 0%, #101a30 65%, #0a1122 100%);
+      background: radial-gradient(circle at 50% 0%, #5b1470 0%, #2a0a4a 55%, #1a0630 100%);
       color: #fff;
       display: flex;
       flex-direction: column;
@@ -123,7 +162,7 @@ const { id } = Astro.params;
       align-items: center;
       justify-content: center;
       gap: 16px;
-      color: #cfd8e8;
+      color: #e9d7ff;
       font-weight: 600;
     }
 
@@ -131,31 +170,81 @@ const { id } = Astro.params;
       width: 40px;
       height: 40px;
       border: 3px solid rgba(255,255,255,0.15);
-      border-top-color: #FF6B35;
+      border-top-color: #FFD700;
       border-radius: 50%;
       animation: ldl-spin 0.8s linear infinite;
     }
 
-    @keyframes ldl-spin {
-      to { transform: rotate(360deg); }
-    }
+    @keyframes ldl-spin { to { transform: rotate(360deg); } }
 
     .ldl-content-wrap {
+      position: relative;
       width: 100%;
       height: 100%;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
 
-    /* ===== টপবার — ফিক্সড সাদা ===== */
+    /* ===== ব্যাকগ্রাউন্ড ডেকোরেশন ===== */
+    .ldl-beam {
+      position: absolute;
+      top: -30%;
+      width: 60%;
+      height: 140%;
+      background: linear-gradient(180deg, rgba(255,215,0,0.18), transparent 70%);
+      filter: blur(18px);
+      transform-origin: top;
+      pointer-events: none;
+      animation: ldl-sweep 7s ease-in-out infinite alternate;
+    }
+    .ldl-beam-a { left: -10%; --r: -18deg; }
+    .ldl-beam-b { right: -10%; --r: 18deg; animation-delay: -3s; }
+
+    @keyframes ldl-sweep {
+      from { transform: rotate(calc(var(--r) * -1)); }
+      to { transform: rotate(var(--r)); }
+    }
+
+    .ldl-watermark {
+      position: absolute;
+      left: 50%;
+      top: 52%;
+      width: min(70vw, 420px);
+      transform: translate(-50%, -50%);
+      opacity: 0.05;
+      pointer-events: none;
+      filter: grayscale(1) brightness(2);
+    }
+
+    .ldl-floaters {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    :global(.ldl-fl) {
+      position: absolute;
+      color: #FFD700;
+      opacity: 0.2;
+      animation: ldl-float-up linear infinite;
+    }
+
+    @keyframes ldl-float-up {
+      from { transform: translateY(110vh) rotate(0deg); }
+      to { transform: translateY(-20vh) rotate(360deg); }
+    }
+
+    /* ===== টপবার ===== */
     .ldl-topbar {
       background: #fff;
       padding: 10px 16px;
       position: relative;
-      z-index: 5;
+      z-index: 6;
       flex-shrink: 0;
-      box-shadow: 0 2px 14px rgba(0,0,0,0.18);
-      height: 60px;
+      box-shadow: 0 3px 16px rgba(0,0,0,0.35);
+      height: 64px;
     }
 
     .ldl-topbar-close {
@@ -169,16 +258,13 @@ const { id } = Astro.params;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #1B2A4A;
+      color: #5b1470;
       text-decoration: none;
-      background: #F4F7FC;
+      background: #f4eefa;
       transition: all 0.2s ease;
     }
 
-    .ldl-topbar-close:hover {
-      background: #FFF0EA;
-      color: #FF6B35;
-    }
+    .ldl-topbar-close:hover { background: #FFF0EA; color: #FF6B35; }
 
     .ldl-topbar-logo {
       position: absolute;
@@ -191,22 +277,20 @@ const { id } = Astro.params;
     }
 
     .ldl-topbar-logo img {
-      height: 36px;
+      height: 40px;
       width: auto;
       display: block;
-      margin-bottom: 2px;
+      margin-bottom: 1px;
     }
 
     .ldl-topbar-tag {
-      font-size: 0.62rem;
-      font-weight: 700;
+      font-size: 0.6rem;
+      font-weight: 800;
       color: #FF6B35;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.6px;
     }
 
-    /* ===== ক্যামেরা বাটন — রেক্টেঙ্গেল, ডিফল্টে ছোট, চালু করলে বড় ===== */
-    .ldl-camera-circle {
+    .ldl-camera-btn {
       position: absolute;
       top: 50%;
       right: 16px;
@@ -216,124 +300,241 @@ const { id } = Astro.params;
       border-radius: 10px;
       background: #FFF0EA;
       border: 2px solid #FFE3D4;
+      color: #FF6B35;
+      font-size: 1rem;
+      cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow: hidden;
-      cursor: pointer;
-      padding: 0;
-      transition: width 0.3s ease, height 0.3s ease, border-color 0.2s ease, top 0.3s ease, border-radius 0.3s ease;
-      z-index: 6;
+      transition: border-color 0.2s ease;
     }
 
-    .ldl-camera-circle:hover {
-      border-color: #FF6B35;
+    .ldl-camera-btn:hover, .ldl-camera-btn.on { border-color: #FF6B35; }
+
+    /* ===== মেইন এরিয়া ===== */
+    .ldl-main {
+      position: relative;
+      z-index: 3;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
     }
 
-    .ldl-camera-circle i {
-      color: #FF6B35;
-      font-size: 1rem;
+    .ldl-draw {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      position: relative;
     }
 
-    .ldl-camera-circle video {
+    /* ===== ক্যামেরা ===== */
+    .ldl-cam {
       display: none;
+      position: relative;
+      background: #12031f;
+      overflow: hidden;
+      border: 2px solid #FFD700;
+      z-index: 7;
+    }
+
+    .ldl-cam.on { display: block; }
+
+    .ldl-cam.small {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 112px;
+      height: 150px;
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+
+    .ldl-cam.full {
+      flex: 1.1;
+      min-height: 38%;
+      border-width: 0 0 2px 0;
+      border-radius: 0;
+    }
+
+    .ldl-cam video {
       width: 100%;
       height: 100%;
       object-fit: cover;
       transform: scaleX(-1);
-    }
-
-    .ldl-camera-circle.active {
-      width: 118px;
-      height: 168px;
-      border-radius: 18px;
-      border-color: #FF6B35;
-      top: 78px;
-    }
-
-    .ldl-camera-circle.active i {
       display: none;
     }
 
-    .ldl-camera-circle.active video {
-      display: block;
-    }
-
-    /* ===== মাঝের এরিয়া ===== */
-    .ldl-middle {
-      flex: 1;
-      min-height: 0;
-      position: relative;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .ldl-grid-view {
-      flex: 1;
-      min-height: 0;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .ldl-draw-title {
+    .ldl-cam-fb {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 8px;
       text-align: center;
-      padding: 16px 20px 10px;
+      font-size: 0.72rem;
+      color: #e9d7ff;
+    }
+
+    .ldl-cam-btns {
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      display: flex;
+      gap: 6px;
+      z-index: 2;
+    }
+
+    .ldl-cam-btns button {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 0;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    .ldl-main.cam-full .ldl-chip,
+    .ldl-main.cam-full .ldl-icons,
+    .ldl-main.cam-full .ldl-eligible-count,
+    .ldl-main.cam-full .ldl-prize { display: none; }
+
+    .ldl-main.cam-full .ldl-head h1 { font-size: 1.05rem; }
+
+    @media (min-width: 800px) {
+      .ldl-main.cam-full { flex-direction: row; }
+      .ldl-cam.full { flex: 1.3; min-height: 0; border-width: 0 2px 0 0; }
+    }
+
+    /* ===== স্লট ভিউ ===== */
+    .ldl-slot-view {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .ldl-head {
+      text-align: center;
+      padding: 12px 14px 4px;
       flex-shrink: 0;
     }
 
-    .ldl-draw-title h1 {
-      font-size: 1.35rem;
+    .ldl-chip {
+      display: inline-block;
+      background: linear-gradient(90deg, #FFD700, #FF6B35);
+      color: #3b0a2a;
       font-weight: 800;
-      color: #fff;
-      margin-bottom: 4px;
+      font-size: 0.72rem;
+      padding: 4px 14px;
+      border-radius: 99px;
+      margin-bottom: 6px;
     }
 
-    .ldl-draw-title p {
-      color: #a9b6cc;
-      font-size: 0.82rem;
+    .ldl-head h1 {
+      font-size: clamp(1.2rem, 5.4vw, 1.9rem);
+      font-weight: 800;
+      line-height: 1.25;
+      background: linear-gradient(180deg, #fff, #FFD700);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      margin: 0;
     }
+
+    .ldl-icons {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin: 6px 0 2px;
+      color: #FFD700;
+      font-size: 1rem;
+    }
+
+    .ldl-icons i { animation: ldl-bob 2s ease-in-out infinite; }
+    .ldl-icons i:nth-child(2n) { animation-delay: 0.4s; }
+    .ldl-icons i:nth-child(3n) { animation-delay: 0.8s; }
+
+    @keyframes ldl-bob { 50% { transform: translateY(-5px); } }
+
+    .ldl-prize {
+      color: #ffe9a8;
+      font-size: 0.85rem;
+      font-weight: 700;
+      margin: 2px 0;
+    }
+
+    .ldl-prize:empty { display: none; }
+
+    .ldl-status {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #ffe9a8;
+      min-height: 22px;
+      margin-top: 2px;
+    }
+
+    .ldl-status.live {
+      display: inline-block;
+      background: #e11d48;
+      color: #fff;
+      padding: 2px 14px;
+      border-radius: 99px;
+      animation: ldl-blink 1s infinite;
+    }
+
+    @keyframes ldl-blink { 50% { opacity: 0.6; } }
 
     .ldl-eligible-count {
-      margin-top: 4px;
-      color: #FF8C5A !important;
-      font-weight: 700;
-      font-size: 0.78rem !important;
+      color: #e9d7ff;
+      opacity: 0.75;
+      font-size: 0.74rem;
+      margin: 0;
     }
 
-    .ldl-entry-grid {
+    .ldl-stage {
+      position: relative;
       flex: 1;
-      overflow-y: auto;
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
-      gap: 12px;
-      padding: 6px 16px 100px;
+      min-height: 0;
+      perspective: 900px;
+      overflow: hidden;
     }
 
-    /* ===== এই কার্ডগুলো JS দিয়ে document.createElement এ তৈরি হয়,
-       তাই Astro-র scoped CSS attribute এদের গায়ে বসে না — :global()
-       দিয়ে র‍্যাপ করা হলো যাতে স্টাইল ঠিকমতো অ্যাপ্লাই হয় ===== */
-    :global(.ldl-entry-card) {
+    /* ===== ৩-কার্ড স্লট — JS দিয়ে তৈরি, তাই :global ===== */
+    :global(.ldl-cd) {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      border-radius: 24px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 5px;
-      padding: 6px;
-      border-radius: 14px;
-      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+      justify-content: center;
+      gap: 10px;
+      background: rgba(255,255,255,0.96);
+      color: #3b0a2a;
+      box-shadow: 0 14px 30px rgba(0,0,0,0.45);
+      transition: transform var(--ldl-dur, 0.6s) cubic-bezier(0.3, 0.8, 0.3, 1), opacity var(--ldl-dur, 0.6s);
+      will-change: transform;
       box-sizing: border-box;
     }
 
-    :global(.ldl-entry-photo) {
-      width: 58px;
-      height: 58px;
-      min-width: 58px;
-      min-height: 58px;
-      max-width: 58px;
-      max-height: 58px;
+    :global(.ldl-cd.c) {
+      background: linear-gradient(160deg, #ffb347, #FF6B35 55%, #c0267e);
+      color: #fff;
+      box-shadow: 0 0 0 3px rgba(255,215,0,0.7), 0 0 40px rgba(255,170,0,0.65), 0 20px 40px rgba(0,0,0,0.5);
+    }
+
+    :global(.ldl-ph) {
+      width: 62%;
+      aspect-ratio: 1;
       border-radius: 50%;
-      background: #1B2A4A;
-      border: 2px solid rgba(255,255,255,0.12);
+      background: #5b1470;
+      border: 4px solid #fff;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.3);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -342,119 +543,158 @@ const { id } = Astro.params;
       box-sizing: border-box;
     }
 
-    :global(.ldl-entry-photo img) {
+    :global(.ldl-ph img) {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
     }
 
-    :global(.ldl-entry-photo i) {
-      color: #5A6E85;
-      font-size: 1.4rem;
+    :global(.ldl-ph i) {
+      color: rgba(255,255,255,0.75);
+      font-size: 2.2rem;
     }
 
-    :global(.ldl-entry-name) {
-      font-size: 0.66rem;
-      font-weight: 600;
-      color: #cfd8e8;
+    :global(.ldl-cd-name) {
+      font-size: 0.95rem;
+      font-weight: 700;
       text-align: center;
+      padding: 0 10px;
+      max-width: 100%;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 100%;
+      box-sizing: border-box;
     }
 
-    /* ===== গ্লো স্পটলাইট ===== */
-    :global(.ldl-entry-card.glow) {
-      background: rgba(255, 107, 53, 0.12);
-      transform: scale(1.08);
+    :global(.ldl-cd.c .ldl-cd-name) { font-size: 1.15rem; }
+
+    :global(.ldl-cd-tag) {
+      font-size: 0.68rem;
+      opacity: 0.65;
     }
 
-    :global(.ldl-entry-card.glow .ldl-entry-photo) {
-      border-color: #FF6B35;
-      box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.35), 0 0 26px 6px rgba(255, 107, 53, 0.55);
+    :global(.ldl-cd.c .ldl-cd-tag) { opacity: 0.95; }
+
+    /* বিজয়ী নির্ধারণের পর কার্ডের ছবি পালস */
+    :global(.ldl-ph.pulse) {
+      animation: ldl-pp 0.6s ease-in-out infinite;
     }
 
-    :global(.ldl-entry-card.glow .ldl-entry-name) {
-      color: #fff;
-    }
-
-    /* ===== বিজয়ী নির্ধারণের পর ৫ সেকেন্ড পালস (গ্লো জ্বলে-নিভে) ===== */
-    :global(.ldl-entry-card.winner-pulse) {
-      animation: ldl-winner-pulse 0.7s ease-in-out infinite;
-      z-index: 2;
-    }
-
-    @keyframes ldl-winner-pulse {
-      0%, 100% {
-        transform: scale(1.08);
-        background: rgba(255, 107, 53, 0.12);
-      }
+    @keyframes ldl-pp {
       50% {
-        transform: scale(1.22);
-        background: rgba(255, 107, 53, 0.28);
+        transform: scale(1.18);
+        box-shadow: 0 0 0 6px rgba(255,215,0,0.6), 0 0 50px 14px rgba(255,215,0,0.85);
       }
     }
 
-    :global(.ldl-entry-card.winner-pulse .ldl-entry-photo) {
-      animation: ldl-winner-pulse-photo 0.7s ease-in-out infinite;
+    /* ===== ড্র বাটন ===== */
+    .ldl-spin-btn {
+      align-self: center;
+      margin: 8px 0 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      border: 0;
+      border-radius: 99px;
+      padding: 14px 40px;
+      font-weight: 800;
+      font-size: 1.05rem;
+      font-family: inherit;
+      color: #3b0a2a;
+      background: linear-gradient(90deg, #FFD700, #FF6B35);
+      box-shadow: 0 10px 30px rgba(255,160,0,0.5);
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+      animation: ldl-btn-pulse 1.8s ease-in-out infinite;
+      z-index: 4;
     }
 
-    @keyframes ldl-winner-pulse-photo {
-      0%, 100% {
-        box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.35), 0 0 26px 6px rgba(255, 107, 53, 0.55);
-      }
-      50% {
-        box-shadow: 0 0 0 5px rgba(255, 215, 0, 0.55), 0 0 44px 14px rgba(255, 215, 0, 0.75);
-      }
+    .ldl-spin-btn::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: -60%;
+      width: 40%;
+      height: 100%;
+      background: linear-gradient(100deg, transparent, rgba(255,255,255,0.7), transparent);
+      animation: ldl-shine 2.4s infinite;
     }
 
-    /* ===== বিজয়ী ভিউ — মাঝের পুরো এরিয়া ===== */
+    @keyframes ldl-shine { to { left: 130%; } }
+    @keyframes ldl-btn-pulse { 50% { transform: scale(1.05); } }
+
+    .ldl-spin-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      animation: none;
+    }
+
+    /* ===== বিজয়ী ভিউ ===== */
     .ldl-winner-view {
       flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 20px;
+      padding: 14px;
       text-align: center;
+      overflow-y: auto;
     }
 
     .ldl-winner-trophy {
-      font-size: 2.6rem;
+      font-size: 2.4rem;
       color: #FFD700;
-      margin-bottom: 6px;
-      filter: drop-shadow(0 8px 20px rgba(255, 215, 0, 0.35));
-      animation: ldl-trophy-bounce 1.4s ease-in-out infinite;
+      filter: drop-shadow(0 8px 20px rgba(255,215,0,0.4));
+      animation: ldl-bob 1.4s ease-in-out infinite;
     }
 
-    @keyframes ldl-trophy-bounce {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-10px); }
+    .ldl-winner-cong {
+      font-size: clamp(1.4rem, 6vw, 2rem);
+      font-weight: 800;
+      color: #FFD700;
+      margin: 4px 0 0;
     }
 
     .ldl-winner-label {
-      color: #a9b6cc;
+      color: #e9d7ff;
       font-size: 0.85rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      margin-bottom: 14px;
+      letter-spacing: 1px;
+      margin: 0 0 22px;
+    }
+
+    .ldl-winner-ring {
+      position: relative;
+      width: 160px;
+      height: 160px;
+      border-radius: 50%;
+      padding: 6px;
+      background: conic-gradient(#FFD700, #FF6B35, #c0267e, #FFD700);
+      animation: ldl-spin 4s linear infinite;
+    }
+
+    .ldl-winner-crown {
+      position: absolute;
+      top: -34px;
+      left: 50%;
+      font-size: 2.3rem;
+      color: #FFD700;
+      transform: translateX(-50%);
+      filter: drop-shadow(0 4px 10px rgba(0,0,0,0.5));
     }
 
     .ldl-winner-photo {
-      width: 140px;
-      height: 140px;
+      width: 100%;
+      height: 100%;
       border-radius: 50%;
-      background: #1B2A4A;
-      border: 4px solid #FF6B35;
+      background: #3b0a5a;
+      border: 4px solid #fff;
       display: flex;
       align-items: center;
       justify-content: center;
       overflow: hidden;
-      margin-bottom: 18px;
-      box-shadow: 0 20px 50px rgba(255, 107, 53, 0.35);
+      animation: ldl-spin 4s linear infinite reverse;
     }
 
     .ldl-winner-photo img {
@@ -464,94 +704,99 @@ const { id } = Astro.params;
     }
 
     .ldl-winner-photo i {
-      color: #5A6E85;
-      font-size: 3.2rem;
+      color: rgba(255,255,255,0.7);
+      font-size: 3.4rem;
     }
 
     .ldl-winner-name {
-      font-size: 2.2rem;
+      margin: 18px 0 0;
+      background: linear-gradient(90deg, #c0267e, #FF6B35);
+      padding: 8px 34px;
+      border-radius: 10px;
+      font-size: clamp(1.5rem, 7vw, 2.2rem);
       font-weight: 800;
       color: #fff;
-      margin-bottom: 6px;
-      text-shadow: 0 6px 30px rgba(255, 107, 53, 0.35);
+      box-shadow: 0 10px 28px rgba(192,38,126,0.5);
     }
 
     .ldl-winner-phone {
-      color: #a9b6cc;
-      font-size: 1rem;
-      margin-bottom: 4px;
+      color: #e9d7ff;
+      font-size: 0.95rem;
+      margin: 8px 0 0;
+    }
+
+    .ldl-winner-phone:empty { display: none; }
+
+    .ldl-winner-wish {
+      color: #ffe9a8;
+      font-size: 0.85rem;
+      margin: 10px 0 0;
     }
 
     .ldl-respin-btn {
-      margin-top: 26px;
+      margin-top: 16px;
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      background: #FF6B35;
+      background: rgba(255,255,255,0.16);
       color: #fff;
-      border: none;
-      padding: 15px 36px;
-      border-radius: 50px;
-      font-weight: 800;
-      font-size: 1rem;
-      cursor: pointer;
-      box-shadow: 0 14px 34px rgba(255,107,53,0.4);
-      transition: all 0.2s ease;
-    }
-
-    .ldl-respin-btn:hover {
-      background: #e85a2a;
-      transform: translateY(-2px);
-    }
-
-    /* ===== ড্র বাটন — ভাসমান, গ্রিডের উপরে ফিক্সড ===== */
-    .ldl-spin-btn {
-      position: absolute;
-      bottom: 76px;
-      left: 50%;
-      transform: translateX(-50%);
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      background: #FF6B35;
-      color: #fff;
-      border: none;
-      padding: 14px 36px;
-      border-radius: 50px;
-      font-weight: 800;
+      border: 1px solid rgba(255,255,255,0.4);
+      padding: 12px 30px;
+      border-radius: 99px;
+      font-weight: 700;
       font-size: 0.95rem;
+      font-family: inherit;
       cursor: pointer;
-      box-shadow: 0 14px 34px rgba(255,107,53,0.45);
       transition: all 0.2s ease;
-      z-index: 7;
     }
 
-    .ldl-spin-btn:hover {
-      background: #e85a2a;
-      transform: translateX(-50%) translateY(-2px);
-    }
+    .ldl-respin-btn:hover { background: #FF6B35; border-color: #FF6B35; }
 
-    .ldl-spin-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: translateX(-50%);
-    }
-
-    /* ===== ফুটার — ফিক্সড ===== */
+    /* ===== ফুটার ===== */
     .ldl-footer {
       flex-shrink: 0;
       text-align: center;
-      padding: 12px 16px;
-      background: rgba(0,0,0,0.35);
-      border-top: 1px solid rgba(255,255,255,0.08);
-      font-size: 0.82rem;
-      color: #a9b6cc;
-      z-index: 5;
+      padding: 9px 12px 10px;
+      background: rgba(0,0,0,0.45);
+      border-top: 1px solid rgba(255,215,0,0.25);
+      z-index: 6;
     }
 
-    .ldl-footer-domain {
-      font-weight: 800;
-      color: #fff;
+    .ldl-footer-text {
+      font-size: 0.8rem;
+      color: #f1e4ff;
+    }
+
+    .ldl-footer-text b { color: #FFD700; }
+
+    .ldl-store {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 5px 0 3px;
+      background: #000;
+      border: 1px solid #a6a6a6;
+      border-radius: 10px;
+      padding: 5px 14px 5px 10px;
+    }
+
+    .ldl-store svg { width: 24px; height: 24px; }
+
+    .ldl-store div { text-align: left; line-height: 1.05; }
+
+    .ldl-store small {
+      display: block;
+      font-size: 0.52rem;
+      letter-spacing: 0.6px;
+      color: #ddd;
+    }
+
+    .ldl-store span { font-size: 0.95rem; font-weight: 700; }
+
+    .ldl-footer-slogan {
+      font-size: 0.7rem;
+      color: #e9d7ff;
+      opacity: 0.8;
     }
 
     .ldl-confetti-canvas {
@@ -562,21 +807,8 @@ const { id } = Astro.params;
     }
 
     @media (max-width: 480px) {
-      .ldl-topbar-logo img { height: 28px; }
-      .ldl-draw-title h1 { font-size: 1.1rem; }
-      .ldl-winner-name { font-size: 1.7rem; }
-      .ldl-winner-photo { width: 110px; height: 110px; }
-    }
-
-    @media (max-width: 480px) {
-      :global(.ldl-entry-photo) {
-        width: 50px;
-        height: 50px;
-        min-width: 50px;
-        min-height: 50px;
-        max-width: 50px;
-        max-height: 50px;
-      }
+      .ldl-topbar-logo img { height: 34px; }
+      .ldl-winner-ring { width: 140px; height: 140px; }
     }
   </style>
 
@@ -590,10 +822,10 @@ const { id } = Astro.params;
     const drawTitleEl = document.getElementById('ldlDrawTitle');
     const drawDescEl = document.getElementById('ldlDrawDescription');
     const eligibleCountEl = document.getElementById('ldlEligibleCount');
-    const entryGridEl = document.getElementById('ldlEntryGrid');
-    const gridView = document.getElementById('ldlGridView');
+    const statusEl = document.getElementById('ldlStatus');
+    const stageEl = document.getElementById('ldlStage');
+    const slotView = document.getElementById('ldlGridView');
     const winnerView = document.getElementById('ldlWinnerView');
-    const winnerPhotoWrap = document.getElementById('ldlWinnerPhotoWrap');
     const winnerPhotoImg = document.getElementById('ldlWinnerPhoto');
     const winnerPhotoIcon = document.getElementById('ldlWinnerPhotoIcon');
     const winnerNameEl = document.getElementById('ldlWinnerName');
@@ -601,15 +833,25 @@ const { id } = Astro.params;
     const spinBtn = document.getElementById('spinBtn');
     const respinBtn = document.getElementById('respinBtn');
     const confettiCanvas = document.getElementById('ldlConfettiCanvas');
+    const mainEl = document.getElementById('ldlMain');
+
+    const IDLE_STATUS = 'আপনার ভাগ্য কি আজ খুলবে? 🍀';
+    const COLORS = ['#FF6B35', '#c0267e', '#0e9f8e', '#7c3aed', '#e11d48', '#d97706', '#059669', '#db2777', '#4f46e5', '#0891b2'];
 
     let drawRecord = null;
     let eligibleProfiles = []; // [{id, full_name, phone, avatar_url}]
-    let cardEls = [];
+    let N = 0;
+    let cur = 0;               // মাঝের (বড়) কার্ডের ইনডেক্স
     let isSpinning = false;
     let currentUserId = null;
-    let glowIndex = -1;
     let idleTimer = null;
     let idleActive = false;
+
+    // মাউন্টেড কার্ড (শুধু মাঝের ±২) — পারফরম্যান্সের জন্য
+    const mounted = new Map(); // index -> element
+    let neededSet = new Set();
+    let cardW = 150;
+    let cardH = 210;
 
     // ===== ব্র্যান্ড লোগো — Header.astro-র একই প্যাটার্ন =====
     async function loadBrandLogo() {
@@ -622,11 +864,33 @@ const { id } = Astro.params;
       if (data?.storage_path) {
         const { data: urlData } = supabase.storage.from('listing-images').getPublicUrl(data.storage_path);
         const bust = data.updated_at ? new Date(data.updated_at).getTime() : Date.now();
+        const url = `${urlData.publicUrl}?v=${bust}`;
         const topLogo = document.getElementById('ldlTopLogo');
-        if (topLogo) topLogo.src = `${urlData.publicUrl}?v=${bust}`;
+        const wm = document.getElementById('ldlWatermark');
+        if (topLogo) topLogo.src = url;
+        if (wm) wm.src = url;
       }
     }
     loadBrandLogo();
+
+    // ===== ভাসমান প্রাইজ আইকন (ব্যাকগ্রাউন্ড) =====
+    function buildFloaters() {
+      const host = document.getElementById('ldlFloaters');
+      if (!host) return;
+      const icons = ['fa-trophy', 'fa-gift', 'fa-star', 'fa-gem', 'fa-coins', 'fa-ticket', 'fa-crown', 'fa-sparkles'];
+      icons.forEach((ic) => {
+        for (let j = 0; j < 2; j++) {
+          const el = document.createElement('i');
+          el.className = `fas ${ic} ldl-fl`;
+          el.style.left = Math.random() * 95 + '%';
+          el.style.fontSize = 16 + Math.random() * 18 + 'px';
+          el.style.animationDuration = 12 + Math.random() * 12 + 's';
+          el.style.animationDelay = -Math.random() * 20 + 's';
+          host.appendChild(el);
+        }
+      });
+    }
+    buildFloaters();
 
     // ===== এলিজিবল প্রোফাইল লিস্ট =====
     async function computeEligibleProfiles(filterCriteria) {
@@ -653,7 +917,7 @@ const { id } = Astro.params;
       return filtered;
     }
 
-    // ===== Fisher-Yates শাফল — প্রতি রিফ্রেশে গ্রিডের অর্ডার আলাদা হবে =====
+    // ===== Fisher-Yates শাফল =====
     function shuffleArray(arr) {
       const a = arr.slice();
       for (let i = a.length - 1; i > 0; i--) {
@@ -663,65 +927,138 @@ const { id } = Astro.params;
       return a;
     }
 
-    // ===== গ্রিড রেন্ডার =====
-    function renderGrid() {
-      entryGridEl.innerHTML = '';
-      cardEls = eligibleProfiles.map((p) => {
-        const card = document.createElement('div');
-        card.className = 'ldl-entry-card';
+    // ===== ৩-কার্ড স্লট রেন্ডার =====
+    function buildCard(index) {
+      const p = eligibleProfiles[index];
+      const card = document.createElement('div');
+      card.className = 'ldl-cd';
 
-        const photo = document.createElement('div');
-        photo.className = 'ldl-entry-photo';
-        if (p.avatar_url) {
-          const img = document.createElement('img');
-          img.src = p.avatar_url;
-          img.alt = p.full_name || '';
-          photo.appendChild(img);
-        } else {
-          const icon = document.createElement('i');
-          icon.className = 'fas fa-image';
-          photo.appendChild(icon);
+      const ph = document.createElement('div');
+      ph.className = 'ldl-ph';
+      if (p.avatar_url) {
+        const img = document.createElement('img');
+        img.src = p.avatar_url;
+        img.alt = p.full_name || '';
+        ph.appendChild(img);
+      } else {
+        ph.style.background = COLORS[index % COLORS.length];
+        const icon = document.createElement('i');
+        icon.className = 'fas fa-user';
+        ph.appendChild(icon);
+      }
+
+      const name = document.createElement('div');
+      name.className = 'ldl-cd-name';
+      name.textContent = p.full_name || 'ইউজার';
+
+      const tag = document.createElement('div');
+      tag.className = 'ldl-cd-tag';
+      tag.textContent = 'স্মার্ট ফেনী সদস্য';
+
+      card.appendChild(ph);
+      card.appendChild(name);
+      card.appendChild(tag);
+      return card;
+    }
+
+    function offsetOf(i) {
+      let o = (((i - cur) % N) + N) % N;
+      if (o > N / 2) o -= N;
+      return o;
+    }
+
+    function placeCard(card, o, forceHidden) {
+      const k = Math.max(-2, Math.min(2, o));
+      card.style.width = cardW + 'px';
+      card.style.height = cardH + 'px';
+      card.classList.toggle('c', o === 0);
+
+      let t = 'translate(-50%, -50%) ';
+      let op = 1;
+      if (k === 0) {
+        t += 'scale(1.08) translateZ(40px)';
+      } else {
+        const scale = Math.abs(k) === 1 ? 0.74 : 0.6;
+        t += `translateX(${k * cardW * 0.8}px) scale(${scale}) rotateY(${-k * 28}deg)`;
+        if (Math.abs(k) === 2) op = 0;
+      }
+      if (forceHidden) op = 0;
+
+      card.style.transform = t;
+      card.style.opacity = String(op);
+      card.style.zIndex = o === 0 ? '3' : Math.abs(o) === 1 ? '2' : '1';
+    }
+
+    function render(dur) {
+      if (!N) return;
+      const sw = stageEl.clientWidth;
+      const sh = stageEl.clientHeight;
+      if (!sw || !sh) return;
+
+      cardW = Math.min(190, Math.max(118, sw * 0.42));
+      cardW = Math.min(cardW, (sh * 0.88) / 1.42);
+      cardH = cardW * 1.42;
+      stageEl.style.setProperty('--ldl-dur', dur + 's');
+
+      neededSet = new Set();
+      for (let o = -2; o <= 2; o++) {
+        neededSet.add((((cur + o) % N) + N) % N);
+      }
+
+      neededSet.forEach((i) => {
+        let card = mounted.get(i);
+        const o = offsetOf(i);
+        if (!card) {
+          card = buildCard(i);
+          card.style.transition = 'none';
+          placeCard(card, o, true);
+          stageEl.appendChild(card);
+          mounted.set(i, card);
+          void card.offsetWidth; // reflow — যাতে ট্রানজিশন শুধু পরের স্টেপে চলে
+          card.style.transition = '';
         }
+        if (card._rm) {
+          clearTimeout(card._rm);
+          card._rm = null;
+        }
+        placeCard(card, o, false);
+      });
 
-        const name = document.createElement('div');
-        name.className = 'ldl-entry-name';
-        name.textContent = p.full_name || 'ইউজার';
-
-        card.appendChild(photo);
-        card.appendChild(name);
-        entryGridEl.appendChild(card);
-        return card;
+      mounted.forEach((card, i) => {
+        if (neededSet.has(i)) return;
+        placeCard(card, offsetOf(i) < 0 ? -3 : 3, true);
+        if (!card._rm) {
+          card._rm = setTimeout(() => {
+            if (!neededSet.has(i)) {
+              card.remove();
+              mounted.delete(i);
+            }
+          }, dur * 1000 + 80);
+        }
       });
     }
 
-    function setGlow(index) {
-      if (glowIndex >= 0 && cardEls[glowIndex]) {
-        cardEls[glowIndex].classList.remove('glow');
-      }
-      glowIndex = index;
-      if (glowIndex >= 0 && cardEls[glowIndex]) {
-        cardEls[glowIndex].classList.add('glow');
-        cardEls[glowIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }
+    function clearStage() {
+      mounted.forEach((card) => card.remove());
+      mounted.clear();
     }
 
-    function randomIndexExcluding(exclude) {
-      const n = cardEls.length;
-      if (n <= 1) return 0;
-      return (exclude + 1) % n;
+    function slideTo(index, dur) {
+      cur = index;
+      render(dur == null ? 0.6 : dur);
     }
 
-    // ===== idle — সবসময় ধীরে ধীরে এলোমেলো ঘুরতে থাকবে =====
+    // ===== idle — প্রতি ১ সেকেন্ডে এক ধাপ স্লাইড =====
     function idleStep() {
       if (!idleActive) return;
-      setGlow(randomIndexExcluding(glowIndex));
-      idleTimer = setTimeout(idleStep, 550 + Math.random() * 350);
+      slideTo((cur + 1) % N, 0.7);
+      idleTimer = setTimeout(idleStep, 1000);
     }
 
     function startIdle() {
-      if (idleActive) return;
+      if (idleActive || !N) return;
       idleActive = true;
-      idleStep();
+      idleTimer = setTimeout(idleStep, 1000);
     }
 
     function stopIdle() {
@@ -729,11 +1066,8 @@ const { id } = Astro.params;
       if (idleTimer) clearTimeout(idleTimer);
     }
 
-    // ===== স্পিন — ফ্যানের মতো টাইমিং: ৫সে ধীরে শুরু (accelerate),
-    // মাঝে ২০-২৫সে পূর্ণ গতি, শেষ ৫সে ধীরে ধীরে থেমে যাওয়া
-    // (decelerate)। বিজয়ী আগে থেকে ঠিক না করে — পুরো স্পিনের গতি-
-    // কার্ভ অনুযায়ী ঠিক কোন কার্ডে গিয়ে থামবে সেটাই বিজয়ী, তাই
-    // "জাম্প" ছাড়াই স্বাভাবিকভাবে ধারাবাহিক থেমে যায় =====
+    // ===== স্পিন — ৫সে ধীরে শুরু, মাঝে ফুল স্পিড (কমপক্ষে ২ রাউন্ড),
+    // শেষ ৫সে ধীরে থামা। যে কার্ডে থামে সেটাই বিজয়ী =====
     const SPIN_RAMP_MS = 5000;
     const SPIN_FAST_DELAY = 40;
     const SPIN_SLOW_DELAY = 480;
@@ -753,43 +1087,41 @@ const { id } = Astro.params;
 
     function spinToWinner(onLanded) {
       stopIdle();
-      const n = cardEls.length;
-      const startIndex = glowIndex >= 0 ? glowIndex : 0;
-      const middleDuration = 20000 + Math.random() * 5000; // ২০-২৫ সেকেন্ড ফুল স্পিড
-      const totalDuration = SPIN_RAMP_MS * 2 + middleDuration; // মোট ~৩০-৩৫ সেকেন্ড
+      const startIndex = cur;
 
-      // আগে থেকে (নিঃশব্দে, তাৎক্ষণিক) সিমুলেট করে বের করা হচ্ছে এই
-      // গতি-কার্ভে মোট কতগুলো ধাপ হবে — সেই ধাপ অনুযায়ী যেখানে
-      // থামবে সেটাই বিজয়ী কার্ড
+      // ফুল স্পিডে কমপক্ষে ২ রাউন্ড — ইউজার বেশি হলে মাঝের সময় বাড়ে (সর্বোচ্চ ৬০সে)
+      const minMiddle = 2 * N * SPIN_FAST_DELAY + 1000;
+      const middleDuration = Math.min(60000, Math.max(20000 + Math.random() * 5000, minMiddle));
+      const totalDuration = SPIN_RAMP_MS * 2 + middleDuration;
+
+      // আগে নিঃশব্দে সিমুলেট করে দেখা মোট কত ধাপ হবে → সেই কার্ডেই থামবে
       let simElapsed = 0;
       let simSteps = 0;
       while (simElapsed < totalDuration) {
         simElapsed += spinDelayAt(simElapsed, totalDuration);
         simSteps++;
       }
-      const winnerIndex = (startIndex + simSteps) % n;
+      const winnerIndex = (startIndex + simSteps) % N;
 
-      // এখন একই গতি-কার্ভ দিয়ে বাস্তবে (রিয়েল-টাইমে) অ্যানিমেট করা
-      // হচ্ছে — একই ফাংশন ব্যবহার করায় ঠিক ওই কার্ডেই গিয়ে থামবে
       const startTs = performance.now();
       let idx = startIndex;
 
       function tick() {
         const elapsed = performance.now() - startTs;
         if (elapsed >= totalDuration) {
-          setGlow(winnerIndex); // টাইমিং ড্রিফট হলেও নিশ্চিতভাবে সঠিক কার্ডে থামা
+          slideTo(winnerIndex, 0.5); // ড্রিফট হলেও নিশ্চিতভাবে সঠিক কার্ডে থামা
           onLanded(winnerIndex);
           return;
         }
-        idx = (idx + 1) % n;
-        setGlow(idx);
-        setTimeout(tick, spinDelayAt(elapsed, totalDuration));
+        idx = (idx + 1) % N;
+        const d = spinDelayAt(elapsed, totalDuration);
+        slideTo(idx, Math.min((d * 0.95) / 1000, 0.5));
+        setTimeout(tick, d);
       }
       tick();
     }
 
     // ===== কনফেটি =====
-    let confettiParticles = [];
     let confettiRunning = false;
 
     function resizeCanvas() {
@@ -801,14 +1133,14 @@ const { id } = Astro.params;
 
     function launchConfetti() {
       const ctx = confettiCanvas.getContext('2d');
-      const colors = ['#FF6B35', '#FFD700', '#1B2A4A', '#4ADE80', '#fff'];
-      confettiParticles = Array.from({ length: 160 }, () => ({
+      const colors = ['#FFD700', '#FF6B35', '#c0267e', '#4ADE80', '#fff'];
+      const particles = Array.from({ length: 200 }, () => ({
         x: Math.random() * confettiCanvas.width,
-        y: -20 - Math.random() * 200,
-        r: 4 + Math.random() * 5,
+        y: -20 - Math.random() * 300,
+        r: 4 + Math.random() * 6,
         color: colors[Math.floor(Math.random() * colors.length)],
-        vy: 2 + Math.random() * 3,
-        vx: -1.5 + Math.random() * 3,
+        vy: 2 + Math.random() * 4,
+        vx: -2 + Math.random() * 4,
         rot: Math.random() * 360,
         vrot: -6 + Math.random() * 12,
       }));
@@ -821,7 +1153,7 @@ const { id } = Astro.params;
         ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
         frames++;
         let anyAlive = false;
-        confettiParticles.forEach((p) => {
+        particles.forEach((p) => {
           p.x += p.vx;
           p.y += p.vy;
           p.rot += p.vrot;
@@ -833,7 +1165,7 @@ const { id } = Astro.params;
           ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 0.6);
           ctx.restore();
         });
-        if (anyAlive && frames < 420) {
+        if (anyAlive && frames < 480) {
           requestAnimationFrame(tick);
         } else {
           confettiRunning = false;
@@ -845,24 +1177,26 @@ const { id } = Astro.params;
 
     // ===== মেইন স্পিন ফ্লো =====
     function startSpin() {
-      if (isSpinning || eligibleProfiles.length === 0) return;
+      if (isSpinning || N === 0) return;
       isSpinning = true;
       spinBtn.disabled = true;
+      statusEl.textContent = '🔥 ড্র চলছে... ভাগ্যের চাকা ঘুরছে';
+      statusEl.classList.add('live');
 
       spinToWinner((winnerIndex) => {
         isSpinning = false;
-        spinBtn.disabled = false;
+        statusEl.classList.remove('live');
+        statusEl.textContent = '';
 
         const profile = eligibleProfiles[winnerIndex];
-        const card = cardEls[winnerIndex];
+        const ph = mounted.get(winnerIndex)?.querySelector('.ldl-ph');
 
-        // ৫ সেকেন্ড বিজয়ীর কার্ড গ্রিডেই কয়েকবার গ্লো/পালস করবে,
-        // তারপর ফুল-স্ক্রিন সেলিব্রেশনে যাবে
-        card?.classList.add('winner-pulse');
+        // কিছুক্ষণ বিজয়ীর ছবি মাঝের কার্ডে গ্লো/পালস করবে, তারপর সেলিব্রেশন
+        ph?.classList.add('pulse');
         setTimeout(() => {
-          card?.classList.remove('winner-pulse');
+          ph?.classList.remove('pulse');
           showWinner(profile);
-        }, 5000);
+        }, 3500);
       });
     }
 
@@ -879,47 +1213,94 @@ const { id } = Astro.params;
         winnerPhotoIcon.style.display = 'block';
       }
 
-      gridView.style.display = 'none';
+      slotView.style.display = 'none';
       spinBtn.style.display = 'none';
       winnerView.style.display = 'flex';
-      respinBtn.style.display = 'inline-flex';
       launchConfetti();
+      setTimeout(launchConfetti, 2500);
     }
 
-    function backToGrid() {
+    function backToSlot() {
       winnerView.style.display = 'none';
-      gridView.style.display = 'flex';
+      slotView.style.display = 'flex';
       spinBtn.style.display = 'inline-flex';
+      spinBtn.disabled = false;
+      statusEl.textContent = IDLE_STATUS;
+      clearStage();
+      render(0.01);
       startIdle();
     }
 
     spinBtn?.addEventListener('click', startSpin);
     respinBtn?.addEventListener('click', () => {
-      backToGrid();
+      backToSlot();
       startSpin();
     });
 
-    // ===== ক্যামেরা (ডিফল্টে ছোট, চালু করলে বড়) =====
+    window.addEventListener('resize', () => {
+      if (N && slotView.style.display !== 'none') render(0.01);
+    });
+
+    // ===== ক্যামেরা — ছোট বক্স + ফুল স্ক্রিন (পাশাপাশি/উপর-নিচ) =====
     const cameraToggleBtn = document.getElementById('cameraToggleBtn');
+    const camEl = document.getElementById('ldlCam');
     const cameraVideo = document.getElementById('ldlCameraVideo');
+    const camFb = document.getElementById('ldlCamFb');
+    const camFsBtn = document.getElementById('camFsBtn');
+    const camFsIcon = document.getElementById('camFsIcon');
+    const camCloseBtn = document.getElementById('camCloseBtn');
     let cameraStream = null;
 
-    cameraToggleBtn?.addEventListener('click', async () => {
+    function relayout() {
+      setTimeout(() => {
+        if (N && slotView.style.display !== 'none') render(0.01);
+      }, 60);
+    }
+
+    function closeCamera() {
       if (cameraStream) {
         cameraStream.getTracks().forEach((t) => t.stop());
         cameraStream = null;
-        cameraVideo.srcObject = null;
-        cameraToggleBtn.classList.remove('active');
-        return;
       }
+      cameraVideo.srcObject = null;
+      cameraVideo.style.display = 'none';
+      camEl.className = 'ldl-cam small';
+      mainEl.classList.remove('cam-full');
+      camFsIcon.className = 'fas fa-expand';
+      cameraToggleBtn.classList.remove('on');
+      relayout();
+    }
+
+    async function openCamera() {
+      camEl.className = 'ldl-cam small on';
+      cameraToggleBtn.classList.add('on');
+      camFb.style.display = 'grid';
+      camFb.textContent = 'ক্যামেরা চালু হচ্ছে...';
+      relayout();
       try {
         cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         cameraVideo.srcObject = cameraStream;
-        cameraToggleBtn.classList.add('active');
+        cameraVideo.style.display = 'block';
+        camFb.style.display = 'none';
       } catch (err) {
-        alert('ক্যামেরা চালু করা যায়নি: ' + err.message);
+        camFb.textContent = 'ক্যামেরা চালু করা যায়নি';
       }
+    }
+
+    cameraToggleBtn?.addEventListener('click', () => {
+      if (camEl.classList.contains('on')) closeCamera();
+      else openCamera();
     });
+
+    camFsBtn?.addEventListener('click', () => {
+      const goFull = !camEl.classList.contains('full');
+      camEl.className = 'ldl-cam on ' + (goFull ? 'full' : 'small');
+      mainEl.classList.toggle('cam-full', goFull);
+      camFsIcon.className = goFull ? 'fas fa-compress' : 'fas fa-expand';
+      relayout();
+    });
+
+    camCloseBtn?.addEventListener('click', closeCamera);
 
     // ===== ইনিশিয়ালাইজেশন =====
     async function loadDraw() {
@@ -932,23 +1313,29 @@ const { id } = Astro.params;
       if (error || !data) {
         drawTitleEl.textContent = 'ড্র পাওয়া যায়নি';
         spinBtn.style.display = 'none';
+        statusEl.textContent = '';
         return;
       }
 
       drawRecord = data;
-      drawTitleEl.textContent = data.title;
-      drawDescEl.textContent = data.description || '';
+      // টাইটেল সবসময় ব্র্যান্ড লাইন; ড্রয়ের নাম/বর্ণনা প্রাইজ লাইনে
+      const prizeLine = [data.title, data.description].filter(Boolean).join(' — ');
+      drawDescEl.textContent = prizeLine ? `🎁 ${prizeLine}` : '';
 
       eligibleProfiles = shuffleArray(await computeEligibleProfiles(data.filter_criteria));
+      N = eligibleProfiles.length;
 
-      if (eligibleProfiles.length === 0) {
+      if (N === 0) {
         eligibleCountEl.textContent = 'এই ফিল্টারে কোনো এলিজিবল ইউজার নেই';
+        statusEl.textContent = '';
         spinBtn.disabled = true;
         return;
       }
 
-      eligibleCountEl.textContent = `মোট এলিজিবল: ${eligibleProfiles.length} জন`;
-      renderGrid();
+      eligibleCountEl.textContent = `মোট এলিজিবল: ${N} জন`;
+      statusEl.textContent = IDLE_STATUS;
+      cur = 0;
+      render(0.01);
       startIdle();
     }
 
