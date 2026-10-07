@@ -13,6 +13,8 @@
 //   - ফুটারে স্মার্ট ফেনী অ্যাপ (Google Play) ডাউনলোডের আহ্বান।
 //   - ক্যামেরা: ছোট বক্স + ফুল স্ক্রিন (পাশাপাশি/উপর-নিচ) অপশন।
 //   - পারফরম্যান্স: শুধু মাঝের ±২ কার্ড DOM-এ থাকে (হাজার ইউজারেও হালকা)।
+//   - বিজয়ীর ফোন নম্বর মাস্ক করা (017XXXXX678) — প্রথম ৩ + শেষ ৩ ডিজিট
+//     দৃশ্যমান, মাঝের ৫টা X। লোডের সময়ই মাস্ক হয়, পুরো নম্বর DOM/মেমোরিতে থাকে না।
 //   - কোনো DB রেকর্ড সেভ হয় না — প্রতিটা ড্র স্টেটলেস, আনলিমিটেড রি-ড্র।
 // ============================================================
 
@@ -108,6 +110,7 @@ const { id } = Astro.params;
             </div>
             <h2 class="ldl-winner-name" id="ldlWinnerName"></h2>
             <p class="ldl-winner-phone" id="ldlWinnerPhone"></p>
+            <p class="ldl-winner-hint" id="ldlWinnerHint">ফোনের শেষ ৩ ডিজিট মিলিয়ে বিজয়ী নিশ্চিত করুন</p>
             <p class="ldl-winner-wish">স্মার্ট ফেনীর পক্ষ থেকে শুভেচ্ছা 💛</p>
 
             <button type="button" id="respinBtn" class="ldl-respin-btn">
@@ -720,12 +723,24 @@ const { id } = Astro.params;
     }
 
     .ldl-winner-phone {
-      color: #e9d7ff;
-      font-size: 0.95rem;
-      margin: 8px 0 0;
+      color: #FFD700;
+      font-size: 1.25rem;
+      font-weight: 800;
+      letter-spacing: 3px;
+      margin: 10px 0 0;
+      font-variant-numeric: tabular-nums;
     }
 
     .ldl-winner-phone:empty { display: none; }
+
+    .ldl-winner-hint {
+      color: #e9d7ff;
+      font-size: 0.75rem;
+      opacity: 0.8;
+      margin: 4px 0 0;
+    }
+
+    .ldl-winner-phone:empty + .ldl-winner-hint { display: none; }
 
     .ldl-winner-wish {
       color: #ffe9a8;
@@ -915,6 +930,17 @@ const { id } = Astro.params;
       }
 
       return filtered;
+    }
+
+    // ===== ফোন নম্বর মাস্কিং — প্রথম ৩ + মাঝে XXXXX + শেষ ৩ =====
+    // 01712345678 / +8801712345678 → 017XXXXX678
+    // পুরো নম্বর কোথাও (DOM বা মেমোরিতে) রাখা হয় না, লোডের সময়ই মাস্ক হয়ে যায়
+    function maskPhone(raw) {
+      if (!raw) return '';
+      let digits = String(raw).replace(/\D/g, '');
+      if (digits.startsWith('880') && digits.length >= 13) digits = '0' + digits.slice(3);
+      if (digits.length < 9) return '';
+      return digits.slice(0, 3) + 'X'.repeat(digits.length - 6) + digits.slice(-3);
     }
 
     // ===== Fisher-Yates শাফল =====
@@ -1202,7 +1228,7 @@ const { id } = Astro.params;
 
     function showWinner(profile) {
       winnerNameEl.textContent = profile.full_name || 'ইউজার';
-      winnerPhoneEl.textContent = profile.phone || '';
+      winnerPhoneEl.textContent = profile.phoneMasked || '';
 
       if (profile.avatar_url) {
         winnerPhotoImg.src = profile.avatar_url;
@@ -1322,7 +1348,15 @@ const { id } = Astro.params;
       const prizeLine = [data.title, data.description].filter(Boolean).join(' — ');
       drawDescEl.textContent = prizeLine ? `🎁 ${prizeLine}` : '';
 
-      eligibleProfiles = shuffleArray(await computeEligibleProfiles(data.filter_criteria));
+      const rawProfiles = await computeEligibleProfiles(data.filter_criteria);
+      eligibleProfiles = shuffleArray(
+        rawProfiles.map((p) => ({
+          id: p.id,
+          full_name: p.full_name,
+          avatar_url: p.avatar_url,
+          phoneMasked: maskPhone(p.phone),
+        }))
+      );
       N = eligibleProfiles.length;
 
       if (N === 0) {
