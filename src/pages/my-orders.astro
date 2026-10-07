@@ -22,6 +22,12 @@
 //   অ্যাক্টিভিটি বার থেকে) সংশ্লিষ্ট কার্ডের ট্যাব খুলে স্ক্রল ও হাইলাইট
 // - ১৫ সেকেন্ডের অটো-রিফ্রেশ এখন বন্ধ থাকে যখন ইউজার কিছু টাইপ করছে বা
 //   কনফার্ম শিট খোলা (আগে রিফ্রেশে টাইপ করা দাম মুছে যেত)
+//
+// আপডেট (নতুন ফ্লো): কাস্টমারের শেষ "রিসিভড / যাত্রা সম্পন্ন" বাটন বাদ।
+// অর্ডারের পর একসেপ্ট, পিকআপ ও সম্পন্ন — সব হিরো করে; কাস্টমার শুধু সমস্যা
+// হলে "রিপোর্ট করুন" চাপে (সম্পন্ন হওয়ার ১ ঘণ্টা পর্যন্ত)। পেমেন্ট প্রুফ
+// আপলোডের বক্স এখন পিকআপের পর (confirmed) আর সম্পন্ন হওয়ার ১ ঘণ্টার মধ্যে
+// (completed) দেখায়; পুরোনো 'delivered' রিকোয়েস্টে আগের মতোই থাকে।
 // ============================================================
 
 export const prerender = false;
@@ -957,7 +963,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
   <script>
     import { supabase } from '../lib/supabase.js';
     import { compressImages } from '../lib/imageCompress.js';
-    import { markReceived, submitReview, uploadPaymentProof, cancelRequest, expireRequests, confirmBestPrice, updateAskingPrice } from '../lib/deliveryClient.js';
+    import { submitReview, uploadPaymentProof, cancelRequest, expireRequests, confirmBestPrice, updateAskingPrice } from '../lib/deliveryClient.js';
 
     const loadingState = document.getElementById('loadingState');
     const loginRequired = document.getElementById('loginRequired');
@@ -1141,6 +1147,19 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     }
 
     // ============ DELIVERY কার্ড ============
+    // পেমেন্ট প্রুফ আপলোড বক্স (confirmed-এ পিকআপের পর, completed-এ ১ ঘণ্টার মধ্যে)
+    function paymentProofBoxHtml(reqId) {
+      return `
+        <div class="payment-proof-box" data-request-id="${reqId}">
+          <label>
+            <i class="fas fa-camera"></i> পেমেন্ট প্রুফ আপলোড করুন
+            <input type="file" accept="image/*" multiple data-proof-input />
+          </label>
+          <div class="proof-thumbs" data-proof-thumbs></div>
+        </div>
+      `;
+    }
+
     function renderDeliveryCard(req) {
       const card = document.createElement('div');
       card.className = 'order-card';
@@ -1240,7 +1259,8 @@ import ChatModal from '../components/delivery/ChatModal.astro';
             ${acceptedRiderPhone ? `<a href="tel:${acceptedRiderPhone}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> কল করুন</a>` : ''}
             <button type="button" class="order-contact-btn order-chat-btn" data-chat-request-id="${req.id}" data-chat-other-name="${acceptedRiderProfile?.full_name || 'হিরো'}"><i class="fas fa-comment-dots"></i> চ্যাট</button>
           </div>
-          <button class="btn-received" data-request-id="${req.id}"><i class="fas fa-check-circle"></i> ${req.category === 'ride' ? 'যাত্রা সম্পন্ন হয়েছে' : 'পণ্য রিসিভড'}</button>
+          <div class="waiting-note">${req.category === 'ride' ? 'যাত্রা শেষে হিরো নিজেই সম্পন্ন মার্ক করবেন, আপনাকে নোটিফিকেশন যাবে' : 'ডেলিভারি শেষে হিরো নিজেই সম্পন্ন মার্ক করবেন, আপনাকে নোটিফিকেশন যাবে'}</div>
+          ${isPickupDone ? paymentProofBoxHtml(req.id) : ''}
           <button class="dispute-link" data-request-id="${req.id}">সমস্যা হয়েছে? রিপোর্ট করুন</button>
         `;
       } else if (req.status === 'delivered') {
@@ -1278,6 +1298,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         const completedAt = req.updated_at ? new Date(req.updated_at).getTime() : 0;
         const withinDisputeWindow = Date.now() - completedAt <= 60 * 60 * 1000;
         if (withinDisputeWindow) {
+          bodyHtml += paymentProofBoxHtml(req.id);
           bodyHtml += `<button class="dispute-link" data-request-id="${req.id}">সমস্যা হয়েছে? রিপোর্ট করুন</button>`;
         }
       }
@@ -1362,18 +1383,6 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         if (!confirm('রিকোয়েস্টটি বাতিল করতে চাও?')) return;
         e.target.disabled = true;
         const { error } = await cancelRequest({ requestId: req.id });
-        if (error) {
-          alert(error);
-          e.target.disabled = false;
-          return;
-        }
-        refreshOrders();
-      });
-
-      // রিসিভড বাটন
-      card.querySelector('.btn-received')?.addEventListener('click', async (e) => {
-        e.target.disabled = true;
-        const { error } = await markReceived({ requestId: req.id });
         if (error) {
           alert(error);
           e.target.disabled = false;
