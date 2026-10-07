@@ -18,6 +18,12 @@
 //   • কল ক্লিক ট্র্যাকিং: BaseLayout-এর গ্লোবাল tel: লিসেনার (data-shop-name)
 //   • শেয়ার বাটন (মোবাইল শেয়ার শিট, না থাকলে লিংক কপি)
 //
+// সিরিয়াল রিকোয়েস্ট (নতুন): যে চেম্বারের ক্লিনিকে "সিরিয়াল পাবেন" প্রতিনিধি আছে
+// (serial_enabled_chambers RPC), সেখানে কলের পাশে "সিরিয়াল রিকোয়েস্ট" বাটন।
+// বটম শিট ফর্ম: দিন (ডাক্তার বসেন এমন দিন), নাম, মোবাইল, সমস্যা → লগইন বাধ্যতামূলক
+// → submit_serial_request RPC → প্রতিনিধি কল করে সিরিয়াল জানান। অবস্থা দেখা যায়
+// /my-orders-এ। সমস্যায় জরুরি শব্দ থাকলে আগে ৯৯৯ সতর্কতা।
+//
 // ইচ্ছাকৃতভাবে নেই: রেটিং/রিভিউ (আলাদা প্রজেক্ট), ভুল-তথ্য রিপোর্ট
 // (content_reports টেবিল এখনো 'doctor' টাইপ নেয় না — সাজেশন সিস্টেমে আসবে)
 // ============================================================
@@ -63,6 +69,7 @@ const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 let doctor = null;
 let specNames = [];
+let serialChamberIds = new Set();   // কোন চেম্বারে সিরিয়াল রিকোয়েস্ট বাটন দেখাবে
 
 if (isUuid) {
   const { data, error } = await supabase
@@ -83,6 +90,11 @@ if (isUuid) {
       .in('slug', doctor.specialties)
       .order('sort_order');
     specNames = (specRows || []).map((s) => s.name_bn);
+  }
+
+  if (doctor) {
+    const { data: enabled } = await supabase.rpc('serial_enabled_chambers', { p_doctor: id });
+    serialChamberIds = new Set(Array.isArray(enabled) ? enabled : []);
   }
 }
 
@@ -109,7 +121,7 @@ const chambers = doctor
           .filter(Boolean);
         const phone = cleanPhone(c.serial_phone);
         const fee = c.fee != null ? c.fee : doctor.default_fee;
-        return { ...c, slots, days, phone, fee };
+        return { ...c, slots, days, phone, fee, serialEnabled: serialChamberIds.has(c.id) };
       })
   : [];
 
@@ -119,9 +131,11 @@ const lastUpdated = doctor
 
 // ক্লায়েন্ট-সাইড সূচির জন্য JSON
 const schedJson = JSON.stringify({
+  doctorName: doctor ? doctor.name_bn : '',
   chambers: chambers.map((c) => ({
     id: c.id,
     name: c.place_name,
+    serialEnabled: c.serialEnabled,
     slots: c.slots.map((s) => ({ weekday: s.weekday, start: s.start_time, end: s.end_time })),
   })),
 }).replace(/</g, '\\u003c');
@@ -239,13 +253,22 @@ const upLabel = doctor?.upazila ? (UPAZILA_LABELS[doctor.upazila] || doctor.upaz
                   {c.fee != null && <p class="dd-fee">ভিজিট ফি: <strong>৳{toBn(c.fee)}</strong></p>}
                   {c.note && <p class="dd-note"><i class="fas fa-circle-info"></i> {c.note}</p>}
 
-                  {c.phone
+                  {(c.phone || c.serialEnabled)
                     ? (
-                      <a class="dd-call" href={`tel:${c.phone}`} data-shop-name={doctor.name_bn}>
-                        <i class="fas fa-phone"></i>
-                        <span>সিরিয়ালের জন্য কল করুন</span>
-                        <strong>{c.serial_phone}</strong>
-                      </a>
+                      <div class="dd-cta-row">
+                        {c.phone && (
+                          <a class="dd-call" href={`tel:${c.phone}`} data-shop-name={doctor.name_bn}>
+                            <span class="dd-cta-main"><i class="fas fa-phone"></i> কল করুন</span>
+                            <small>{c.serial_phone}</small>
+                          </a>
+                        )}
+                        {c.serialEnabled && (
+                          <button type="button" class="dd-serial-btn" data-serial-chamber={c.id}>
+                            <span class="dd-cta-main"><i class="fas fa-ticket"></i> সিরিয়াল রিকোয়েস্ট</span>
+                            <small>আমরা কল করে সিরিয়াল জানাব</small>
+                          </button>
+                        )}
+                      </div>
                     )
                     : <div class="dd-nocall">সিরিয়ালের নম্বর দেওয়া নেই</div>}
 
@@ -267,6 +290,62 @@ const upLabel = doctor?.upazila ? (UPAZILA_LABELS[doctor.upazila] || doctor.upaz
   </div>
 
   <ImageLightbox />
+
+  {doctor && chambers.some((c) => c.serialEnabled) && (
+    <div class="ddm-overlay" id="ddSerialOverlay" aria-hidden="true">
+      <div class="ddm-sheet" id="ddSerialSheet" role="dialog" aria-modal="true" aria-labelledby="ddmTitle">
+        <div class="ddm-head">
+          <div>
+            <h3 id="ddmTitle">সিরিয়াল রিকোয়েস্ট</h3>
+            <p id="ddmSub"></p>
+          </div>
+          <button type="button" class="ddm-x" id="ddmClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+        </div>
+
+        <div class="ddm-body" id="ddmForm">
+          <div class="ddm-urgent">
+            <i class="fas fa-triangle-exclamation"></i>
+            <span>জরুরি হলে এই ফর্ম নয়, <b>এখনই ৯৯৯-এ কল করুন বা হাসপাতালে যান।</b></span>
+            <a href="tel:999" data-shop-name="জরুরি ৯৯৯ (সিরিয়াল ফর্ম)">৯৯৯</a>
+          </div>
+
+          <label class="ddm-label" for="ddmDate">কোন দিনের সিরিয়াল চান?</label>
+          <select id="ddmDate" class="ddm-input"></select>
+          <p class="ddm-hint" id="ddmNoDate" style="display:none;">এই চেম্বারে আগামী ১৪ দিনে ডাক্তারের বসার দিন পাওয়া যায়নি। সরাসরি কল করুন।</p>
+
+          <label class="ddm-label" for="ddmName">রোগীর নাম</label>
+          <input type="text" id="ddmName" class="ddm-input" maxlength="80" autocomplete="name" placeholder="যার জন্য সিরিয়াল" />
+
+          <label class="ddm-label" for="ddmPhone">মোবাইল নম্বর (যে নম্বরে কল পাবেন)</label>
+          <input type="tel" id="ddmPhone" class="ddm-input" maxlength="20" inputmode="tel" autocomplete="tel" placeholder="01XXXXXXXXX" />
+
+          <label class="ddm-label" for="ddmProblem">সমস্যা (সংক্ষেপে)</label>
+          <textarea id="ddmProblem" class="ddm-input" rows="3" maxlength="300" placeholder="যেমন: কয়েকদিন ধরে পেটে ব্যথা"></textarea>
+          <div class="ddm-counter" id="ddmCount">০ / ৩০০</div>
+
+          <p class="ddm-privacy"><i class="fas fa-lock"></i> আপনার তথ্য শুধু এই ক্লিনিকের প্রতিনিধি ও স্মার্ট ফেনী অ্যাডমিন দেখবেন, ৩০ দিন পর মুছে যাবে।</p>
+
+          <div class="ddm-urgent-box" id="ddmUrgentBox" style="display:none;">
+            <p>⚠️ আপনার লেখায় জরুরি লক্ষণ থাকতে পারে। অপেক্ষা না করে <b>এখনই ৯৯৯-এ কল করুন বা রোগীকে হাসপাতালের ইমার্জেন্সিতে নিয়ে যান।</b></p>
+            <a href="tel:999" class="ddm-999" data-shop-name="জরুরি ৯৯৯ (সিরিয়াল ফর্ম)"><i class="fas fa-phone"></i> ৯৯৯-এ কল করুন</a>
+          </div>
+
+          <p class="ddm-error" id="ddmError" style="display:none;"></p>
+
+          <button type="button" class="ddm-submit" id="ddmSubmit"><i class="fas fa-paper-plane"></i> <span id="ddmSubmitText">অনুরোধ পাঠান</span></button>
+          <p class="ddm-disclaimer">এটা শুধু অনুরোধ, সিরিয়াল কনফার্ম নয়। ক্লিনিক প্রতিনিধি সিরিয়াল নিয়ে আপনাকে কল করে নম্বর জানাবেন।</p>
+        </div>
+
+        <div class="ddm-done" id="ddmDone" style="display:none;">
+          <div class="ddm-done-icon"><i class="fas fa-circle-check"></i></div>
+          <h4>অনুরোধ পাঠানো হয়েছে</h4>
+          <p id="ddmDoneText"></p>
+          <a href="/my-orders" class="ddm-done-link" id="ddmDoneLink">অনুরোধের অবস্থা দেখুন</a>
+          <button type="button" class="ddm-done-close" id="ddmDoneClose">বন্ধ করুন</button>
+        </div>
+      </div>
+    </div>
+  )}
 
   <style is:global>
     .dd-page { min-height: 70vh; padding: 28px 0 90px; }
@@ -333,7 +412,45 @@ const upLabel = doctor?.upazila ? (UPAZILA_LABELS[doctor.upazila] || doctor.upaz
     .dd-fee strong { color: #1B2A4A; }
     .dd-note { font-size: 0.8rem; color: #8FA0BC; margin-top: 8px; display: flex; gap: 6px; line-height: 1.5; }
     .dd-note i { margin-top: 3px; }
-    .dd-call { margin-top: 14px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 10px; background: #FF6B35; color: #fff; text-decoration: none; padding: 13px 14px; border-radius: 14px; font-size: 0.9rem; font-weight: 700; }
+    .dd-cta-row { display: flex; gap: 10px; margin-top: 14px; }
+    .dd-call, .dd-serial-btn { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-decoration: none; padding: 11px 10px; border-radius: 14px; font-weight: 700; border: none; cursor: pointer; font-family: inherit; text-align: center; }
+    .dd-call { background: #FFF0EA; color: #E5551E; border: 1.5px solid #FFD3BC; }
+    .dd-serial-btn { background: #FF6B35; color: #fff; }
+    .dd-cta-main { display: inline-flex; align-items: center; gap: 7px; font-size: 0.9rem; }
+    .dd-call small, .dd-serial-btn small { font-size: 0.7rem; font-weight: 600; opacity: 0.9; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ===== সিরিয়াল রিকোয়েস্ট বটম শিট ===== */
+    .ddm-overlay { position: fixed; inset: 0; z-index: 2300; background: rgba(15, 23, 42, 0.55); display: none; align-items: flex-end; justify-content: center; }
+    .ddm-overlay.open { display: flex; }
+    .ddm-sheet { --ddm-vh: 100dvh; width: 100%; max-width: 520px; max-height: min(92dvh, calc(var(--ddm-vh) - 8px)); background: #fff; border-radius: 24px 24px 0 0; display: flex; flex-direction: column; overflow: hidden; animation: ddmUp 0.22s ease-out; }
+    @keyframes ddmUp { from { transform: translateY(40px); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
+    @media (min-width: 640px) { .ddm-overlay { align-items: center; } .ddm-sheet { border-radius: 24px; } }
+    .ddm-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 18px 18px 12px; border-bottom: 1px solid #F0F3F8; flex-shrink: 0; }
+    .ddm-head h3 { font-size: 1.1rem; font-weight: 700; color: #1B2A4A; }
+    .ddm-head p { font-size: 0.8rem; color: #8FA0BC; margin-top: 3px; line-height: 1.5; }
+    .ddm-x { width: 34px; height: 34px; border-radius: 50%; border: none; background: #F1F4F9; color: #5A6E85; cursor: pointer; flex-shrink: 0; }
+    .ddm-body { overflow-y: auto; padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 0px)); overscroll-behavior: contain; }
+    .ddm-urgent { display: flex; align-items: center; gap: 9px; background: #FEF1F0; color: #B42318; border-radius: 12px; padding: 9px 12px; font-size: 0.78rem; line-height: 1.5; }
+    .ddm-urgent a { background: #D14343; color: #fff; text-decoration: none; padding: 4px 13px; border-radius: 20px; font-weight: 700; flex-shrink: 0; }
+    .ddm-label { display: block; font-size: 0.82rem; font-weight: 700; color: #1B2A4A; margin: 14px 0 6px; }
+    .ddm-input { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1.5px solid #E5EAF0; background: #FBFCFE; font-size: 0.92rem; font-family: inherit; color: #1B2A4A; }
+    .ddm-input:focus { outline: none; border-color: #FF6B35; background: #fff; }
+    textarea.ddm-input { resize: none; line-height: 1.5; }
+    .ddm-counter { text-align: right; font-size: 0.7rem; color: #B0BCCB; margin-top: 3px; }
+    .ddm-hint { font-size: 0.8rem; color: #B42318; margin-top: 8px; line-height: 1.5; }
+    .ddm-privacy { font-size: 0.74rem; color: #8FA0BC; margin-top: 10px; line-height: 1.55; }
+    .ddm-urgent-box { margin-top: 12px; background: #FEF1F0; border: 1.5px solid #F4A39B; color: #7A1F17; border-radius: 14px; padding: 12px 14px; font-size: 0.84rem; line-height: 1.6; }
+    .ddm-999 { margin-top: 10px; display: inline-flex; align-items: center; gap: 8px; background: #D14343; color: #fff; text-decoration: none; font-weight: 700; padding: 10px 16px; border-radius: 12px; }
+    .ddm-error { margin-top: 12px; background: #FFF0EA; color: #D14343; border-radius: 12px; padding: 10px 14px; font-size: 0.82rem; font-weight: 600; line-height: 1.5; }
+    .ddm-submit { width: 100%; margin-top: 16px; display: flex; align-items: center; justify-content: center; gap: 8px; background: #FF6B35; color: #fff; border: none; padding: 14px; border-radius: 14px; font-weight: 700; font-size: 0.95rem; cursor: pointer; font-family: inherit; }
+    .ddm-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+    .ddm-disclaimer { margin-top: 10px; font-size: 0.74rem; color: #8FA0BC; text-align: center; line-height: 1.55; }
+    .ddm-done { padding: 30px 22px calc(26px + env(safe-area-inset-bottom, 0px)); text-align: center; }
+    .ddm-done-icon { font-size: 3rem; color: #1FA45A; }
+    .ddm-done h4 { font-size: 1.15rem; color: #1B2A4A; margin: 10px 0 8px; }
+    .ddm-done p { font-size: 0.88rem; color: #5A6E85; line-height: 1.7; }
+    .ddm-done-link { display: inline-block; margin-top: 16px; background: #FF6B35; color: #fff; text-decoration: none; font-weight: 700; padding: 12px 22px; border-radius: 14px; }
+    .ddm-done-close { display: block; margin: 10px auto 0; background: none; border: none; color: #8FA0BC; font-weight: 700; cursor: pointer; font-family: inherit; padding: 8px; }
     .dd-nocall { margin-top: 14px; background: #F1F4F9; color: #8FA0BC; border-radius: 14px; padding: 13px; text-align: center; font-size: 0.84rem; font-weight: 600; }
     .dd-updated { font-size: 0.72rem; color: #B0BCCB; margin-top: 10px; text-align: right; }
     .dd-empty { background: #fff; border-radius: 16px; padding: 22px; text-align: center; color: #8FA0BC; font-size: 0.88rem; }
@@ -349,6 +466,8 @@ const upLabel = doctor?.upazila ? (UPAZILA_LABELS[doctor.upazila] || doctor.upaz
   <script is:inline type="application/json" id="schedData" set:html={schedJson}></script>
 
   <script>
+    import { supabase } from '../../lib/supabase.js';
+
     const dataEl = document.getElementById('schedData');
     const sched = dataEl ? JSON.parse(dataEl.textContent || '{}') : { chambers: [] };
 
@@ -459,6 +578,223 @@ const upLabel = doctor?.upazila ? (UPAZILA_LABELS[doctor.upazila] || doctor.upaz
           window.showToast('লিংক কপি করা যায়নি', 'error');
         }
       });
+    }
+
+    // ============================================================
+    // সিরিয়াল রিকোয়েস্ট ফর্ম (বটম শিট)
+    // ============================================================
+    const ddmOverlay = document.getElementById('ddSerialOverlay');
+    if (ddmOverlay) {
+      const MONTHS = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+      const g = (id) => document.getElementById(id);
+      const sheet = g('ddSerialSheet');
+      const dateSel = g('ddmDate');
+      const nameIn = g('ddmName');
+      const phoneIn = g('ddmPhone');
+      const problemIn = g('ddmProblem');
+      const errorEl = g('ddmError');
+      const urgentBox = g('ddmUrgentBox');
+      const submitBtn = g('ddmSubmit');
+      const submitText = g('ddmSubmitText');
+
+      const URGENT = [
+        /বুক(ে|ের)?\s*(খুব\s*|প্রচণ্ড\s*)?(ব্যথা|ব্যাথা|চাপ|যন্ত্রণা)/, /হার্ট\s*(অ্যাটাক|এটাক)/,
+        /শ্বাস(\s*নিতে)?\s*(কষ্ট|পারছ|বন্ধ)|শ্বাসকষ্ট|দম\s*(বন্ধ|আটকে)/, /অজ্ঞান|বেহুঁশ|জ্ঞান\s*(নেই|হারা)/,
+        /(প্রচণ্ড|প্রচুর|অনেক)\s*রক্ত|রক্তক্ষরণ|রক্ত\s*বমি/, /বিষ\s*(খেয়ে|পান)|বিষক্রিয়া/, /সাপ(ে|ের)?\s*(কামড়|কেটে)/,
+        /খিঁ?চুনি|তড়কা/, /স্ট্রোক|মুখ\s*(বেঁকে|বাঁকা)|কথা\s*জড়িয়ে/, /প্রসব\s*(ব্যথা|বেদনা)|পানি\s*ভে?ঙে/,
+        /chest\s*pain|can'?t\s*breathe|unconscious|seizure|stroke|poison|snake\s*bite/i,
+      ];
+      const isUrgent = (t) => {
+        const s = String(t || '').normalize('NFC').toLowerCase();
+        return URGENT.some((re) => re.test(s));
+      };
+
+      let currentChamber = null;
+      let urgentAck = false;
+      let submitting = false;
+      let hasDates = false;
+
+      function dhakaParts() {
+        const p = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+        }).formatToParts(new Date());
+        const n = (t) => Number(p.find((x) => x.type === t)?.value);
+        const hour = n('hour') % 24;
+        return { y: n('year'), m: n('month'), d: n('day'), hour, minutes: hour * 60 + n('minute') };
+      }
+
+      // ডাক্তার যে যে দিন এই চেম্বারে বসেন (আজ থেকে ১৪ দিনের মধ্যে, সর্বোচ্চ ৮টি)
+      function buildDateOptions(chamber) {
+        const now = dhakaParts();
+        const base = Date.UTC(now.y, now.m - 1, now.d);
+        const opts = [];
+        for (let i = 0; i < 14 && opts.length < 8; i++) {
+          const dt = new Date(base + i * 86400000);
+          const wd = dt.getUTCDay();
+          const daySlots = chamber.slots.filter((s) => s.weekday === wd);
+          if (!daySlots.length) continue;
+          if (i === 0 && !daySlots.some((s) => toMin(s.end) > now.minutes)) continue;
+          const rel = i === 0 ? 'আজ · ' : i === 1 ? 'আগামীকাল · ' : i === 2 ? 'পরশু · ' : '';
+          opts.push({ value: dt.toISOString().slice(0, 10), text: `${rel}${WEEKDAY_FULL[wd]}, ${toBn(dt.getUTCDate())} ${MONTHS[dt.getUTCMonth()]}` });
+        }
+        return opts;
+      }
+
+      function normalizePhone(v) {
+        let s = String(v || '').replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d))).replace(/[\s\-]/g, '');
+        s = s.replace(/^\+?88/, '');
+        return /^01[3-9]\d{8}$/.test(s) ? s : null;
+      }
+
+      function showError(msg) {
+        errorEl.textContent = msg || '';
+        errorEl.style.display = msg ? 'block' : 'none';
+      }
+
+      function updateCount() {
+        g('ddmCount').textContent = `${toBn(problemIn.value.length)} / ${toBn(300)}`;
+      }
+
+      function resetForm() {
+        showError('');
+        urgentBox.style.display = 'none';
+        urgentAck = false;
+        submitting = false;
+        submitBtn.disabled = false;
+        submitText.textContent = 'অনুরোধ পাঠান';
+        problemIn.value = '';
+        updateCount();
+        g('ddmForm').style.display = 'block';
+        g('ddmDone').style.display = 'none';
+      }
+
+      async function openSerial(chamberId) {
+        const ch = sched.chambers.find((c) => c.id === chamberId);
+        if (!ch) return;
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          window.showToast('সিরিয়াল রিকোয়েস্ট করতে আগে লগইন করুন', 'error');
+          window.openAuthModal?.('login');
+          return;
+        }
+
+        currentChamber = ch;
+        resetForm();
+        g('ddmSub').textContent = `${sched.doctorName} · ${ch.name}`;
+
+        const opts = buildDateOptions(ch);
+        hasDates = opts.length > 0;
+        dateSel.innerHTML = opts.map((o) => `<option value="${o.value}">${o.text}</option>`).join('');
+        dateSel.style.display = hasDates ? 'block' : 'none';
+        g('ddmNoDate').style.display = hasDates ? 'none' : 'block';
+        submitBtn.disabled = !hasDates;
+
+        ddmOverlay.classList.add('open');
+        ddmOverlay.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+
+        // নাম/ফোন আগে থেকে ভরে দেওয়া (সম্পাদনযোগ্য, ফাঁকা থাকলেই)
+        if (!nameIn.value || !phoneIn.value) {
+          const { data: prof } = await supabase.from('profiles').select('full_name, phone').eq('id', session.user.id).maybeSingle();
+          if (prof) {
+            if (!nameIn.value && prof.full_name) nameIn.value = prof.full_name;
+            if (!phoneIn.value && prof.phone && normalizePhone(prof.phone)) phoneIn.value = normalizePhone(prof.phone);
+          }
+        }
+      }
+
+      function closeSerial() {
+        ddmOverlay.classList.remove('open');
+        ddmOverlay.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
+      }
+
+      const ERRORS = {
+        login_required: 'আগে লগইন করুন',
+        blocked: 'আপনার অ্যাকাউন্টে এই সুবিধা বন্ধ আছে',
+        serial_not_available: 'এই চেম্বারে এখন অনলাইনে সিরিয়াল রিকোয়েস্ট নেওয়া হচ্ছে না। সরাসরি কল করে সিরিয়াল নিন।',
+        invalid_name: 'রোগীর নাম ২ থেকে ৮০ অক্ষরের মধ্যে লিখুন',
+        invalid_phone: 'সঠিক মোবাইল নম্বর দিন (যেমন: 01711XXXXXX)',
+        invalid_problem: 'সমস্যা কমপক্ষে ৩ অক্ষর লিখুন',
+        invalid_date: 'সঠিক দিন বেছে নিন',
+        doctor_not_sitting: 'ওই দিন ডাক্তার এখানে বসেন না — অন্য দিন বেছে নিন',
+        time_over: 'আজকের জন্য ডাক্তারের বসার সময় শেষ হয়ে গেছে — অন্য দিন বেছে নিন',
+        daily_limit: 'আজ আপনি ৩টি সিরিয়াল রিকোয়েস্ট করে ফেলেছেন। কাল আবার চেষ্টা করুন বা সরাসরি কল করুন।',
+        phone_limit: 'এই নম্বর থেকে আজ অনেক অনুরোধ হয়েছে। সরাসরি কল করুন।',
+        duplicate_request: 'এই দিনের জন্য আপনার অনুরোধ আগেই জমা আছে — "আমার অর্ডার" পেজে অবস্থা দেখুন',
+      };
+
+      async function submitSerial() {
+        if (submitting || !currentChamber) return;
+        showError('');
+
+        const name = nameIn.value.trim();
+        const phone = normalizePhone(phoneIn.value);
+        const problem = problemIn.value.trim();
+        if (!hasDates || !dateSel.value) { showError('ডাক্তারের বসার দিন পাওয়া যায়নি'); return; }
+        if (name.length < 2) { showError('রোগীর নাম লিখুন'); nameIn.focus(); return; }
+        if (!phone) { showError('সঠিক মোবাইল নম্বর দিন (যেমন: 01711XXXXXX)'); phoneIn.focus(); return; }
+        if (problem.length < 3) { showError('সমস্যা কমপক্ষে ৩ অক্ষর লিখুন'); problemIn.focus(); return; }
+
+        // জরুরি লক্ষণ থাকলে আগে ৯৯৯ সতর্কতা; ইউজার চাইলে তবুও পাঠাতে পারবে
+        if (isUrgent(problem) && !urgentAck) {
+          urgentBox.style.display = 'block';
+          urgentAck = true;
+          submitText.textContent = 'তবুও অনুরোধ পাঠান';
+          urgentBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+
+        submitting = true;
+        submitBtn.disabled = true;
+        submitText.textContent = 'পাঠানো হচ্ছে...';
+
+        const { data, error } = await supabase.rpc('submit_serial_request', {
+          p_chamber: currentChamber.id,
+          p_date: dateSel.value,
+          p_name: name,
+          p_phone: phone,
+          p_problem: problem,
+        });
+
+        submitting = false;
+        if (error) {
+          const key = Object.keys(ERRORS).find((k) => (error.message || '').includes(k));
+          showError(key ? ERRORS[key] : 'পাঠানো যায়নি, একটু পরে আবার চেষ্টা করুন');
+          submitBtn.disabled = false;
+          submitText.textContent = urgentAck ? 'তবুও অনুরোধ পাঠান' : 'অনুরোধ পাঠান';
+          if (key === 'login_required') window.openAuthModal?.('login');
+          return;
+        }
+
+        const hour = dhakaParts().hour;
+        const offHours = hour < 9 || hour >= 21;
+        g('ddmDoneText').textContent =
+          `${sched.doctorName}-এর জন্য আপনার অনুরোধ ক্লিনিকে পাঠানো হয়েছে। প্রতিনিধি সিরিয়াল নিয়ে আপনাকে কল করে নম্বর জানাবেন।` +
+          (offHours ? ' এখন রাত, তাই সকাল ৯টার পর কল পাবেন।' : '');
+        g('ddmDoneLink').setAttribute('href', data ? `/my-orders?serial=${data}` : '/my-orders');
+        g('ddmForm').style.display = 'none';
+        g('ddmDone').style.display = 'block';
+      }
+
+      document.querySelectorAll('[data-serial-chamber]').forEach((btn) => {
+        btn.addEventListener('click', () => openSerial(btn.dataset.serialChamber));
+      });
+      problemIn.addEventListener('input', () => { updateCount(); if (urgentAck) { urgentAck = false; urgentBox.style.display = 'none'; submitText.textContent = 'অনুরোধ পাঠান'; } });
+      submitBtn.addEventListener('click', submitSerial);
+      g('ddmClose').addEventListener('click', closeSerial);
+      g('ddmDoneClose').addEventListener('click', closeSerial);
+      ddmOverlay.addEventListener('click', (e) => { if (e.target === ddmOverlay) closeSerial(); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ddmOverlay.classList.contains('open')) closeSerial(); });
+
+      // মোবাইলে কীবোর্ড খুললে শিটের উচ্চতা ঠিক রাখা
+      if (window.visualViewport) {
+        const vv = window.visualViewport;
+        const sync = () => sheet.style.setProperty('--ddm-vh', vv.height + 'px');
+        vv.addEventListener('resize', sync);
+        sync();
+      }
     }
   </script>
 </BaseLayout>
