@@ -5,6 +5,17 @@
 // Supabase Storage-এ (site/featured/) সেভ হয় এবং featured_photos
 // টেবিলে সারি + sort_order যোগ হয়। হোমপেজে ৫ সেকেন্ড পরপর ক্রমানুসারে
 // crossfade স্লাইডশো হিসেবে দেখা যায়।
+//
+// নতুন (Oct 2026) — ট্যাপ লিংক: প্রতিটা ছবিতে সেট করা যায় ট্যাপ করলে
+// কোথায় যাবে (link_type + link_url কলাম)। হোমপেজে আলাদা বাটন/টেক্সট
+// নেই — পুরো ছবিটাই বাটন, "ট্যাপ করুন" নির্দেশনা ছবির আর্টওয়ার্কে দিতে হবে।
+//   • লিংক নেই
+//   • ক্যাটাগরি/সাধারণ পেজ
+//   • লিস্টিং ফর্ম সরাসরি খোলা (/services/<slug>?openListing=1)
+//   • রাইডার/হিরো রেজিস্ট্রেশন ফর্ম
+//   • ইন-পেজ অ্যাকশন (পোস্ট ফ্লো, ক্যাটাগরি ড্রয়ার, লগইন, সাইন আপ)
+//   • কাস্টম পাথ (/ দিয়ে শুরু বা https://)
+// নতুন ছবি আপলোডের সময় এবং আগের ছবিতেও পরে লিংক এডিট করা যায়।
 // ============================================================
 
 export const prerender = false;
@@ -30,6 +41,14 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
           <p class="admin-subtitle">একাধিক ছবি যোগ করুন — হোমপেজে ৫ সেকেন্ড পরপর ক্রমানুসারে বদলাবে</p>
         </div>
 
+        <div class="tip-card">
+          <i class="fas fa-hand-pointer"></i>
+          <p>
+            <strong>পুরো ছবিটাই বাটন।</strong> হোমপেজে আলাদা কোনো বাটন বা লেখা আসবে না — তাই
+            ছবির ডিজাইনেই "ট্যাপ করুন" নির্দেশনা বড় ও স্পষ্ট করে দিন।
+          </p>
+        </div>
+
         <div class="upload-card">
           <label for="fileInput" class="upload-drop">
             <i class="fas fa-cloud-arrow-up"></i>
@@ -42,6 +61,10 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
             <div class="preview-frame">
               <canvas id="cropCanvas" width="1280" height="720"></canvas>
             </div>
+
+            <p class="field-label"><i class="fas fa-link"></i> ছবিতে ট্যাপ করলে কী হবে?</p>
+            <div id="newLinkMount"></div>
+
             <button id="uploadBtn" class="upload-btn">
               <i class="fas fa-plus"></i> <span id="uploadBtnText">লিস্টে যোগ করুন</span>
             </button>
@@ -107,7 +130,7 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
     }
 
     .admin-header {
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
 
     .admin-header h1 {
@@ -120,6 +143,30 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
       font-size: 0.85rem;
       color: #8FA0BC;
       margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .tip-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: #FFF4EE;
+      border: 1px solid rgba(255, 107, 53, 0.25);
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+    }
+
+    .tip-card i {
+      color: #FF6B35;
+      font-size: 1.2rem;
+      margin-top: 2px;
+    }
+
+    .tip-card p {
+      font-size: 0.82rem;
+      color: #1B2A4A;
+      line-height: 1.55;
       font-weight: 600;
     }
 
@@ -138,7 +185,7 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
       border-radius: 16px;
       overflow: hidden;
       background: #F4F7FC;
-      margin-bottom: 12px;
+      margin: 16px 0 14px;
     }
 
     .preview-frame canvas {
@@ -146,6 +193,18 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
       height: 100%;
       object-fit: cover;
       display: block;
+    }
+
+    .field-label {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      margin-bottom: 8px;
+    }
+
+    .field-label i {
+      color: #FF6B35;
+      margin-right: 4px;
     }
 
     .upload-drop {
@@ -195,6 +254,7 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
       font-weight: 700;
       font-size: 0.95rem;
       cursor: pointer;
+      margin-top: 14px;
     }
 
     .upload-btn:disabled {
@@ -248,12 +308,14 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../../lib/adminGuard.js';
     import { supabase } from '../../../lib/supabase.js';
+    import { categories } from '../../../data/services.js';
 
     const BUCKET = 'listing-images';
     const FOLDER = 'site/featured';
 
     const fileInput = document.getElementById('fileInput');
     const newPreviewWrap = document.getElementById('newPreviewWrap');
+    const newLinkMount = document.getElementById('newLinkMount');
     const cropCanvas = document.getElementById('cropCanvas');
     const uploadBtn = document.getElementById('uploadBtn');
     const uploadBtnText = document.getElementById('uploadBtnText');
@@ -263,12 +325,194 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
 
     let croppedBlob = null;
     let photos = [];
+    let newLinkPicker = null;
 
     function publicUrl(path) {
       const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
       return data.publicUrl;
     }
 
+    // ------------------------------------------------------------
+    // ট্যাপ-লিংক ড্রপডাউনের অপশন তালিকা
+    // মান ফরম্যাট: "none" | "page|/path" | "action|name" | "custom"
+    // ------------------------------------------------------------
+    const LISTING_FORM_SLUGS = [
+      'housing', 'job', 'recycle', 'tuition', 'sports',
+      'lost-found', 'event', 'repair', 'car-rental', 'home-food',
+    ];
+
+    function categoryPath(slug) {
+      return slug === 'clubs' ? '/clubs' : `/services/${slug}`;
+    }
+
+    function buildOptionGroups() {
+      const listingForms = LISTING_FORM_SLUGS
+        .map((slug) => categories.find((c) => c.slug === slug))
+        .filter(Boolean)
+        .map((c) => ({
+          value: `page|/services/${c.slug}?openListing=1`,
+          label: `${c.name} — লিস্টিং ফর্ম খুলুন`,
+        }));
+
+      return [
+        {
+          label: 'লিংক নেই',
+          options: [{ value: 'none', label: 'কিছুই হবে না (শুধু ছবি)' }],
+        },
+        {
+          label: 'ফর্ম / আবেদন খুলবে',
+          options: [
+            { value: 'page|/become-a-shop-owner', label: 'শপের আবেদন ফর্ম' },
+            { value: 'page|/services/courier?openRiderRegister=1', label: 'ডেলিভারি হিরো রেজিস্ট্রেশন ফর্ম' },
+            { value: 'page|/services/ride?openRiderRegister=1', label: 'রাইড হিরো রেজিস্ট্রেশন ফর্ম' },
+            ...listingForms,
+          ],
+        },
+        {
+          label: 'অ্যাপের ভেতরে অ্যাকশন (পেজ বদলাবে না)',
+          options: [
+            { value: 'action|post-flow', label: '➕ পোস্ট ফ্লো খুলুন (কী পোস্ট করবেন)' },
+            { value: 'action|category-drawer', label: 'সব ক্যাটাগরির ড্রয়ার খুলুন' },
+            { value: 'action|auth-login', label: 'লগইন মোডাল (লগইন থাকলে কিছু হবে না)' },
+            { value: 'action|auth-signup', label: 'নতুন অ্যাকাউন্ট মোডাল (লগইন থাকলে কিছু হবে না)' },
+          ],
+        },
+        {
+          label: 'সাধারণ পেজ',
+          options: [
+            { value: 'page|/clubs', label: 'ক্লাব সমূহ' },
+            { value: 'page|/shop', label: 'শপ হোম' },
+            { value: 'page|/delivery-hero', label: 'ডেলিভারি হিরো পেজ' },
+            { value: 'page|/ride-hero', label: 'রাইড হিরো পেজ' },
+            { value: 'page|/refer', label: 'রেফার' },
+            { value: 'page|/about', label: 'আমাদের সম্পর্কে' },
+            { value: 'page|/contact', label: 'যোগাযোগ' },
+          ],
+        },
+        {
+          label: 'ক্যাটাগরি পেজ',
+          options: categories.map((c) => ({
+            value: `page|${categoryPath(c.slug)}`,
+            label: c.name,
+          })),
+        },
+        {
+          label: 'অন্য কিছু',
+          options: [{ value: 'custom', label: 'কাস্টম পাথ / লিংক লিখব' }],
+        },
+      ];
+    }
+
+    const OPTION_GROUPS = buildOptionGroups();
+    const OPTION_LABELS = {};
+    OPTION_GROUPS.forEach((g) => g.options.forEach((o) => { OPTION_LABELS[o.value] = o.label; }));
+
+    function describeLink(linkType, linkUrl) {
+      if (!linkType || linkType === 'none' || !linkUrl) return 'লিংক নেই';
+      const key = `${linkType}|${linkUrl}`;
+      return OPTION_LABELS[key] || `কাস্টম: ${linkUrl}`;
+    }
+
+    // কাস্টম পাথ যাচাই — ডেটাবেজের CHECK constraint-এর সাথে মিল রেখে
+    function validateCustomUrl(raw) {
+      const value = (raw || '').trim();
+      if (!value) return { error: 'কাস্টম লিংক লিখুন' };
+      const isInternal = value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
+      const isHttps = /^https:\/\/[^\s]+$/i.test(value);
+      if (!isInternal && !isHttps) {
+        return { error: 'লিংক অবশ্যই / দিয়ে শুরু (যেমন /clubs) বা https:// দিয়ে শুরু হতে হবে' };
+      }
+      return { value };
+    }
+
+    // ------------------------------------------------------------
+    // লিংক পিকার (ড্রপডাউন + কাস্টম ইনপুট) — আপলোড কার্ড ও প্রতিটা সারিতে রিইউজ
+    // Astro scoped CSS ডাইনামিক HTML-এ কাজ করে না, তাই সব inline style
+    // ------------------------------------------------------------
+    const SELECT_STYLE = 'width:100%;padding:12px 14px;border:1.5px solid #D7E0EC;border-radius:12px;background:#fff;color:#1B2A4A;font-size:0.88rem;font-weight:600;font-family:inherit;';
+    const INPUT_STYLE = 'width:100%;padding:12px 14px;border:1.5px solid #D7E0EC;border-radius:12px;background:#fff;color:#1B2A4A;font-size:0.88rem;font-weight:600;font-family:inherit;margin-top:8px;box-sizing:border-box;';
+
+    function createLinkPicker(initialType, initialUrl) {
+      const wrap = document.createElement('div');
+
+      const select = document.createElement('select');
+      select.setAttribute('style', SELECT_STYLE);
+
+      OPTION_GROUPS.forEach((group) => {
+        const og = document.createElement('optgroup');
+        og.label = group.label;
+        group.options.forEach((opt) => {
+          const o = document.createElement('option');
+          o.value = opt.value;
+          o.textContent = opt.label;
+          og.appendChild(o);
+        });
+        select.appendChild(og);
+      });
+
+      const customInput = document.createElement('input');
+      customInput.type = 'text';
+      customInput.placeholder = '/clubs অথবা https://example.com';
+      customInput.setAttribute('style', INPUT_STYLE + 'display:none;');
+      customInput.setAttribute('autocapitalize', 'off');
+      customInput.setAttribute('autocomplete', 'off');
+
+      wrap.appendChild(select);
+      wrap.appendChild(customInput);
+
+      function syncCustomVisibility() {
+        customInput.style.display = select.value === 'custom' ? 'block' : 'none';
+      }
+
+      select.addEventListener('change', syncCustomVisibility);
+
+      // প্রাথমিক মান সেট
+      if (!initialType || initialType === 'none' || !initialUrl) {
+        select.value = 'none';
+      } else {
+        const key = `${initialType}|${initialUrl}`;
+        if (OPTION_LABELS[key]) {
+          select.value = key;
+        } else {
+          select.value = 'custom';
+          customInput.value = initialUrl;
+        }
+      }
+      syncCustomVisibility();
+
+      function getValue() {
+        const v = select.value;
+
+        if (v === 'none') return { link_type: 'none', link_url: null };
+
+        if (v === 'custom') {
+          const checked = validateCustomUrl(customInput.value);
+          if (checked.error) return { error: checked.error };
+          return { link_type: 'page', link_url: checked.value };
+        }
+
+        const sep = v.indexOf('|');
+        return { link_type: v.slice(0, sep), link_url: v.slice(sep + 1) };
+      }
+
+      function reset() {
+        select.value = 'none';
+        customInput.value = '';
+        syncCustomVisibility();
+      }
+
+      return { el: wrap, getValue, reset };
+    }
+
+    function mountNewLinkPicker() {
+      newLinkMount.innerHTML = '';
+      newLinkPicker = createLinkPicker('none', null);
+      newLinkMount.appendChild(newLinkPicker.el);
+    }
+
+    // ------------------------------------------------------------
+    // ছবি সিলেক্ট ও ক্রপ
+    // ------------------------------------------------------------
     fileInput.addEventListener('change', () => {
       const file = fileInput.files?.[0];
       if (!file) return;
@@ -296,6 +540,7 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
         ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
         cropCanvas.toBlob((blob) => { croppedBlob = blob; }, 'image/jpeg', 0.85);
 
+        mountNewLinkPicker();
         newPreviewWrap.style.display = 'block';
         uploadMessage.textContent = '';
         uploadMessage.className = 'upload-message';
@@ -305,6 +550,14 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
 
     uploadBtn.addEventListener('click', async () => {
       if (!croppedBlob) return;
+
+      // লিংক আগে যাচাই — ভুল হলে আপলোডই শুরু হবে না
+      const linkValue = newLinkPicker ? newLinkPicker.getValue() : { link_type: 'none', link_url: null };
+      if (linkValue.error) {
+        uploadMessage.textContent = linkValue.error;
+        uploadMessage.className = 'upload-message error';
+        return;
+      }
 
       uploadBtn.disabled = true;
       uploadBtnText.textContent = 'আপলোড হচ্ছে...';
@@ -349,7 +602,12 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
 
       const { error: dbError } = await supabase
         .from('featured_photos')
-        .insert({ storage_path: path, sort_order: nextOrder });
+        .insert({
+          storage_path: path,
+          sort_order: nextOrder,
+          link_type: linkValue.link_type,
+          link_url: linkValue.link_url,
+        });
 
       uploadBtn.disabled = false;
       uploadBtnText.textContent = 'লিস্টে যোগ করুন';
@@ -365,35 +623,67 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
       newPreviewWrap.style.display = 'none';
       fileInput.value = '';
       croppedBlob = null;
+      newLinkPicker = null;
+      newLinkMount.innerHTML = '';
 
       loadPhotos();
     });
 
+    // ------------------------------------------------------------
+    // ছবির সারি (ক্রম, লিংক এডিট, ডিলিট)
+    // ------------------------------------------------------------
     function renderPhotoRow(photo, index) {
       const row = document.createElement('div');
-      row.style.cssText = 'background:#fff;border-radius:16px;padding:12px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;align-items:center;gap:12px;';
+      row.style.cssText = 'background:#fff;border-radius:16px;padding:12px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;flex-direction:column;gap:12px;';
 
-      row.innerHTML = `
-        <img src="${publicUrl(photo.storage_path)}" style="width:80px;height:45px;border-radius:10px;object-fit:cover;flex-shrink:0;" />
-        <div style="flex:1;min-width:0;font-size:0.8rem;color:#8FA0BC;font-weight:600;">ক্রম #${index + 1}</div>
-        <div class="row-controls" style="display:flex;gap:6px;flex-shrink:0;"></div>
-      `;
+      const top = document.createElement('div');
+      top.style.cssText = 'display:flex;align-items:center;gap:12px;';
 
-      const controls = row.querySelector('.row-controls');
+      const thumb = document.createElement('img');
+      thumb.src = publicUrl(photo.storage_path);
+      thumb.alt = '';
+      thumb.style.cssText = 'width:80px;height:45px;border-radius:10px;object-fit:cover;flex-shrink:0;';
+
+      const info = document.createElement('div');
+      info.style.cssText = 'flex:1;min-width:0;';
+
+      const orderLabel = document.createElement('div');
+      orderLabel.style.cssText = 'font-size:0.8rem;color:#8FA0BC;font-weight:600;';
+      orderLabel.textContent = `ক্রম #${index + 1}`;
+
+      const linkLabel = document.createElement('div');
+      const hasLink = photo.link_type && photo.link_type !== 'none' && photo.link_url;
+      linkLabel.style.cssText = `font-size:0.78rem;font-weight:700;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${hasLink ? '#FF6B35' : '#B0BCCB'};`;
+      linkLabel.textContent = (hasLink ? '🔗 ' : '') + describeLink(photo.link_type, photo.link_url);
+
+      info.appendChild(orderLabel);
+      info.appendChild(linkLabel);
+
+      const controls = document.createElement('div');
+      controls.style.cssText = 'display:flex;gap:6px;flex-shrink:0;';
+
+      const linkBtn = document.createElement('button');
+      linkBtn.type = 'button';
+      linkBtn.setAttribute('aria-label', 'ট্যাপ লিংক এডিট');
+      linkBtn.innerHTML = '<i class="fas fa-link"></i>';
+      linkBtn.style.cssText = `background:${hasLink ? '#FFF0EA' : '#F4F7FC'};color:${hasLink ? '#FF6B35' : '#1B2A4A'};border:none;width:34px;height:34px;border-radius:10px;font-size:0.8rem;cursor:pointer;`;
 
       const upBtn = document.createElement('button');
+      upBtn.type = 'button';
       upBtn.innerHTML = '<i class="fas fa-chevron-up"></i>';
       upBtn.disabled = index === 0;
       upBtn.style.cssText = `background:#F4F7FC;color:#1B2A4A;border:none;width:34px;height:34px;border-radius:10px;font-size:0.8rem;cursor:pointer;${index === 0 ? 'opacity:0.4;cursor:not-allowed;' : ''}`;
       upBtn.addEventListener('click', () => moveOrder(index, -1));
 
       const downBtn = document.createElement('button');
+      downBtn.type = 'button';
       downBtn.innerHTML = '<i class="fas fa-chevron-down"></i>';
       downBtn.disabled = index === photos.length - 1;
       downBtn.style.cssText = `background:#F4F7FC;color:#1B2A4A;border:none;width:34px;height:34px;border-radius:10px;font-size:0.8rem;cursor:pointer;${index === photos.length - 1 ? 'opacity:0.4;cursor:not-allowed;' : ''}`;
       downBtn.addEventListener('click', () => moveOrder(index, 1));
 
       const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
       deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
       deleteBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;width:34px;height:34px;border-radius:10px;font-size:0.8rem;cursor:pointer;';
       let confirming = false;
@@ -407,9 +697,75 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
         deletePhoto(photo);
       });
 
+      controls.appendChild(linkBtn);
       controls.appendChild(upBtn);
       controls.appendChild(downBtn);
       controls.appendChild(deleteBtn);
+
+      top.appendChild(thumb);
+      top.appendChild(info);
+      top.appendChild(controls);
+      row.appendChild(top);
+
+      // লিংক এডিটর (লিংক বাটনে ট্যাপ করলে খোলে/বন্ধ হয়)
+      const editor = document.createElement('div');
+      editor.style.cssText = 'display:none;border-top:1px solid #EEF2F7;padding-top:12px;';
+
+      const editorTitle = document.createElement('div');
+      editorTitle.style.cssText = 'font-size:0.8rem;font-weight:700;color:#1B2A4A;margin-bottom:8px;';
+      editorTitle.textContent = 'ছবিতে ট্যাপ করলে কী হবে?';
+
+      const picker = createLinkPicker(photo.link_type, photo.link_url);
+
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.textContent = 'লিংক সেভ করুন';
+      saveBtn.style.cssText = 'width:100%;margin-top:10px;background:#FF6B35;color:#fff;border:none;padding:12px;border-radius:12px;font-weight:700;font-size:0.88rem;cursor:pointer;font-family:inherit;';
+
+      const saveMsg = document.createElement('div');
+      saveMsg.style.cssText = 'text-align:center;font-size:0.8rem;font-weight:600;margin-top:8px;min-height:1em;';
+
+      saveBtn.addEventListener('click', async () => {
+        const value = picker.getValue();
+        if (value.error) {
+          saveMsg.style.color = '#D14343';
+          saveMsg.textContent = value.error;
+          return;
+        }
+
+        saveBtn.disabled = true;
+        saveBtn.style.opacity = '0.6';
+        saveBtn.textContent = 'সেভ হচ্ছে...';
+
+        const { error } = await supabase
+          .from('featured_photos')
+          .update({ link_type: value.link_type, link_url: value.link_url })
+          .eq('id', photo.id);
+
+        saveBtn.disabled = false;
+        saveBtn.style.opacity = '1';
+        saveBtn.textContent = 'লিংক সেভ করুন';
+
+        if (error) {
+          saveMsg.style.color = '#D14343';
+          saveMsg.textContent = 'সেভ ব্যর্থ: ' + error.message;
+          return;
+        }
+
+        saveMsg.style.color = '#1B7A3C';
+        saveMsg.textContent = 'লিংক সেভ হয়েছে ✓';
+        setTimeout(loadPhotos, 600);
+      });
+
+      editor.appendChild(editorTitle);
+      editor.appendChild(picker.el);
+      editor.appendChild(saveBtn);
+      editor.appendChild(saveMsg);
+      row.appendChild(editor);
+
+      linkBtn.addEventListener('click', () => {
+        editor.style.display = editor.style.display === 'none' ? 'block' : 'none';
+      });
 
       return row;
     }
@@ -444,7 +800,11 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
         .order('sort_order', { ascending: true });
 
       if (error) {
-        photosContainer.innerHTML = `<p style="color:#D14343;">লোড করা যায়নি: ${error.message}</p>`;
+        photosContainer.innerHTML = '';
+        const errP = document.createElement('p');
+        errP.style.color = '#D14343';
+        errP.textContent = 'লোড করা যায়নি: ' + error.message;
+        photosContainer.appendChild(errP);
         return;
       }
 
