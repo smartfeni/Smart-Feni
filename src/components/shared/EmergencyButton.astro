@@ -7,6 +7,13 @@
 // ফেচ ফেইল করলে ৯৯৯ ফলব্যাক দেখায়
 // শীট document.body-তে সরিয়ে নেওয়া হয়, কারণ হেডারে
 // transform থাকলে position:fixed ভেঙে যায়
+//
+// আপডেট (লগইন-ভিত্তিক): হেডারের বাটন শুধু লগইন না থাকলে দেখায়।
+// লগইন থাকলে বাটন লুকায় — তখন HamburgerMenu.astro-র "জরুরি নাম্বার"
+// আইটেম থেকে 'smartfeni:open-emergency' ইভেন্টে একই শীট খোলে।
+// ফ্ল্যাশ এড়াতে: বাটনের ঠিক পরের inline স্ক্রিপ্ট Header-এর
+// 'sf_profile_cache_v1' ক্যাশ দেখে সাথে সাথে লুকায়, পরে আসল
+// সেশন চেক দিয়ে কারেক্ট করে। auth-changed / logged-out ইভেন্টে লাইভ বদলায়।
 // ============================================================
 ---
 
@@ -14,6 +21,14 @@
   <span class="emg-dot"></span>
   <span>জরুরি নাম্বার</span>
 </button>
+<script is:inline>
+  // পেইন্টের আগেই চলে — লগইন ক্যাশ থাকলে বাটন লুকায় (ফ্ল্যাশ ঠেকাতে)
+  try {
+    if (localStorage.getItem('sf_profile_cache_v1')) {
+      document.getElementById('emgOpenBtn').style.display = 'none';
+    }
+  } catch (e) {}
+</script>
 
 <div class="emg-back" id="emgBack"></div>
 <section class="emg-sheet" id="emgSheet" role="dialog" aria-modal="true" aria-labelledby="emgTitle" aria-hidden="true">
@@ -261,15 +276,20 @@
     }
   }
 
+  let lastFocus = null;
+
   function show(on) {
     sheet.classList.toggle('on', on);
     back.classList.toggle('on', on);
     sheet.setAttribute('aria-hidden', on ? 'false' : 'true');
     if (on) {
+      lastFocus = document.activeElement;
       load();
       closeBtn?.focus();
     } else {
-      openBtn?.focus();
+      // বাটন লুকানো থাকলে (লগইন) ফোকাস ফেরানো হয় না
+      if (openBtn && openBtn.style.display !== 'none') openBtn.focus();
+      else if (lastFocus && document.body.contains(lastFocus)) lastFocus.focus?.();
     }
   }
 
@@ -282,4 +302,26 @@
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && sheet.classList.contains('on')) show(false);
   });
+
+  // হ্যামবার্গার মেনু (লগইন থাকলে) থেকে খোলার ইভেন্ট
+  window.addEventListener('smartfeni:open-emergency', () => show(true));
+
+  // ===== লগইন থাকলে হেডার বাটন লুকানো, না থাকলে দেখানো =====
+  function setHeaderBtn(loggedIn) {
+    if (!openBtn) return;
+    openBtn.style.display = loggedIn ? 'none' : '';
+  }
+
+  async function checkSession() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      setHeaderBtn(!!session);
+    } catch (e) {
+      // সেশন চেক ফেইল করলে ক্যাশের অবস্থাই থাকবে
+    }
+  }
+
+  checkSession();
+  window.addEventListener('smartfeni:auth-changed', () => setHeaderBtn(true));
+  window.addEventListener('smartfeni:logged-out', () => setHeaderBtn(false));
 </script>
