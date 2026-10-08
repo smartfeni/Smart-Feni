@@ -1116,33 +1116,47 @@ const { id } = Astro.params;
       stopIdle();
       const startIndex = cur;
 
-      // ফুল স্পিডে কমপক্ষে ২ রাউন্ড — ইউজার বেশি হলে মাঝের সময় বাড়ে (সর্বোচ্চ ৬০সে)
+      // ১) বিজয়ী আগেই র‍্যান্ডমভাবে ঠিক করা হয় (সম্পূর্ণ ফেয়ার)
+      const winnerIndex = Math.floor(Math.random() * N);
+
+      // ২) গতি-কার্ভ অনুযায়ী প্রতিটা ধাপের delay-র লিস্ট বানানো
+      //    (ফুল স্পিডে কমপক্ষে ২ রাউন্ড — ইউজার বেশি হলে মাঝের সময় বাড়ে, সর্বোচ্চ ৬০সে)
       const minMiddle = 2 * N * SPIN_FAST_DELAY + 1000;
       const middleDuration = Math.min(60000, Math.max(20000 + Math.random() * 5000, minMiddle));
       const totalDuration = SPIN_RAMP_MS * 2 + middleDuration;
 
-      // আগে নিঃশব্দে সিমুলেট করে দেখা মোট কত ধাপ হবে → সেই কার্ডেই থামবে
+      const delays = [];
       let simElapsed = 0;
-      let simSteps = 0;
+      let rampUpCount = 0;
       while (simElapsed < totalDuration) {
-        simElapsed += spinDelayAt(simElapsed, totalDuration);
-        simSteps++;
+        if (simElapsed < SPIN_RAMP_MS) rampUpCount++;
+        const d = spinDelayAt(simElapsed, totalDuration);
+        delays.push(d);
+        simElapsed += d;
       }
-      const winnerIndex = (startIndex + simSteps) % N;
 
-      const startTs = performance.now();
+      // ৩) মোট ধাপ এমনভাবে মেলানো যাতে ঠিক winnerIndex-এই শেষ ধাপ পড়ে
+      //    (বাড়তি ধাপ ফুল-স্পিড অংশে ঢোকানো হয়, তাই ধীরে-থামার অংশ অক্ষত থাকে)
+      const extra = (((winnerIndex - startIndex - delays.length) % N) + N) % N;
+      for (let e = 0; e < extra; e++) {
+        delays.splice(rampUpCount, 0, SPIN_FAST_DELAY);
+      }
+
+      // ৪) ধাপ-ভিত্তিক চালানো — সময়ের ড্রিফটে ফলাফল বদলায় না,
+      //    শেষ ধাপ নিজেই বিজয়ীর কার্ডে থামে, কোনো জোর-করে লাফ নেই
+      let step = 0;
       let idx = startIndex;
 
       function tick() {
-        const elapsed = performance.now() - startTs;
-        if (elapsed >= totalDuration) {
-          slideTo(winnerIndex, 0.5); // ড্রিফট হলেও নিশ্চিতভাবে সঠিক কার্ডে থামা
-          onLanded(winnerIndex);
+        idx = (idx + 1) % N;
+        const d = delays[step];
+        slideTo(idx, Math.min((d * 0.95) / 1000, 0.5));
+        step++;
+        if (step >= delays.length) {
+          // idx এখন গাণিতিকভাবেই winnerIndex
+          setTimeout(() => onLanded(idx), 600);
           return;
         }
-        idx = (idx + 1) % N;
-        const d = spinDelayAt(elapsed, totalDuration);
-        slideTo(idx, Math.min((d * 0.95) / 1000, 0.5));
         setTimeout(tick, d);
       }
       tick();
