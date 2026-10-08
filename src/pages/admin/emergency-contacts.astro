@@ -1,0 +1,320 @@
+---
+// ============================================================
+// পেজ: জরুরি নাম্বার ম্যানেজমেন্ট (/admin/emergency-contacts)
+// admin ও moderator দুজনেই ব্যবহার করতে পারবে (RLS: is_admin_or_mod())
+// কাজ: নাম্বার যোগ, এডিট, ডিলিট, চালু/বন্ধ
+// ক্যাটাগরির ক্রম: সিরিয়াল (sort_order) অনুযায়ী — যে ক্যাটাগরির
+// সবচেয়ে ছোট সিরিয়াল, সে আগে দেখাবে। পরামর্শ: জরুরি সেবা ১০০-১৯৯,
+// পুলিশ ২০০-২৯৯, ফায়ার ৩০০-৩৯৯ ইত্যাদি
+// প্যাটার্ন: adminGuard.js + smartfeni:admin-ready (বাকি admin পেজের মতোই)
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="জরুরি নাম্বার ম্যানেজমেন্ট | স্মার্ট ফেনী">
+  <div class="emga-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="emga-loading">
+        <div class="emga-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" style="display:none;">
+
+        <a href="/admin" class="emga-back"><i class="fas fa-arrow-left"></i> অ্যাডমিন ড্যাশবোর্ড</a>
+        <h1 class="emga-title">জরুরি নাম্বার</h1>
+        <p class="emga-sub">এখানে যা বদলাবেন, সাইটের "জরুরি নাম্বার" বাটনে সাথে সাথে বদলে যাবে।</p>
+
+        <!-- ===== ফর্ম (যোগ / এডিট) ===== -->
+        <div class="emga-card">
+          <div class="emga-card-h" id="formTitle">নতুন নাম্বার যোগ করুন</div>
+
+          <label class="emga-lbl" for="fCategory">ক্যাটাগরি</label>
+          <input class="emga-in" id="fCategory" list="catList" placeholder="যেমন: পুলিশ" maxlength="40" autocomplete="off" />
+          <datalist id="catList"></datalist>
+
+          <label class="emga-lbl" for="fName">নাম</label>
+          <input class="emga-in" id="fName" placeholder="যেমন: ফেনী মডেল থানা (ওসি)" maxlength="100" />
+
+          <label class="emga-lbl" for="fPhone">ফোন নাম্বার</label>
+          <input class="emga-in" id="fPhone" type="tel" inputmode="tel" placeholder="যেমন: 01320112976" maxlength="20" />
+
+          <label class="emga-lbl" for="fNote">নোট (ঐচ্ছিক)</label>
+          <input class="emga-in" id="fNote" placeholder="যেমন: ২৪ ঘণ্টা খোলা" maxlength="100" />
+
+          <label class="emga-lbl" for="fSort">সিরিয়াল (ছোট নম্বর আগে দেখাবে)</label>
+          <input class="emga-in" id="fSort" type="number" inputmode="numeric" value="800" />
+
+          <label class="emga-check"><input type="checkbox" id="fActive" checked /> সাইটে দেখান</label>
+
+          <p class="emga-err" id="formErr" style="display:none;"></p>
+
+          <div class="emga-actions">
+            <button class="emga-btn emga-primary" id="saveBtn" type="button">সেভ করুন</button>
+            <button class="emga-btn emga-ghost" id="cancelBtn" type="button" style="display:none;">বাতিল</button>
+          </div>
+        </div>
+
+        <!-- ===== তালিকা ===== -->
+        <div class="emga-card-h" style="margin-top:22px;">সব নাম্বার <span id="countLbl"></span></div>
+        <div id="listWrap"><p class="emga-muted">লোড হচ্ছে...</p></div>
+
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .emga-page { min-height: 60vh; padding: 28px 0 90px; }
+    .emga-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .emga-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: emgaSpin 0.8s linear infinite; }
+    @keyframes emgaSpin { to { transform: rotate(360deg); } }
+
+    .emga-back { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 700; color: #64748B; text-decoration: none; margin-bottom: 10px; }
+    .emga-title { margin: 0; font-size: 1.5rem; font-weight: 800; color: #1B2A4A; }
+    .emga-sub { margin: 4px 0 16px; font-size: 0.84rem; color: #64748B; }
+    .emga-muted { font-size: 0.86rem; color: #64748B; padding: 8px 2px; }
+
+    .emga-card { background: #fff; border: 1px solid #E5EAF0; border-radius: 18px; padding: 16px; }
+    .emga-card-h { font-size: 0.95rem; font-weight: 800; color: #1B2A4A; margin-bottom: 8px; }
+    .emga-card-h span { font-weight: 600; color: #64748B; font-size: 0.8rem; }
+    .emga-lbl { display: block; margin: 12px 0 5px; font-size: 0.78rem; font-weight: 700; color: #64748B; }
+    .emga-in { width: 100%; border: 1.5px solid #E5EAF0; border-radius: 12px; padding: 11px 12px; font: inherit; font-size: 0.92rem; color: #1B2A4A; background: #fff; }
+    .emga-in:focus { outline: 0; border-color: #FF6B35; }
+    .emga-check { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 0.88rem; font-weight: 600; color: #1B2A4A; }
+    .emga-err { margin: 12px 0 0; font-size: 0.84rem; font-weight: 600; color: #D14343; }
+
+    .emga-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .emga-btn { border: 0; border-radius: 12px; padding: 12px 18px; font: inherit; font-size: 0.9rem; font-weight: 700; cursor: pointer; }
+    .emga-btn:disabled { opacity: 0.6; cursor: default; }
+    .emga-primary { background: #FF6B35; color: #fff; flex: 1; }
+    .emga-ghost { background: #F1F5F9; color: #1B2A4A; }
+
+    .emga-cat { margin: 16px 2px 8px; font-size: 0.8rem; font-weight: 800; color: #64748B; }
+    .emga-row { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #E5EAF0; border-radius: 14px; padding: 10px 10px 10px 14px; margin-bottom: 8px; }
+    .emga-row.off { opacity: 0.55; }
+    .emga-info { flex: 1; min-width: 0; }
+    .emga-name { font-size: 0.9rem; font-weight: 700; color: #1B2A4A; line-height: 1.3; }
+    .emga-meta { font-size: 0.78rem; color: #64748B; }
+    .emga-tools { display: flex; gap: 6px; flex: none; }
+    .emga-ic { width: 36px; height: 36px; border-radius: 10px; border: 1px solid #E5EAF0; background: #F8FAFC; color: #1B2A4A; cursor: pointer; font-size: 0.85rem; }
+    .emga-ic.del { color: #D14343; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const $ = (id) => document.getElementById(id);
+
+    let rows = [];
+    let editingId = null;
+
+    function showErr(text) {
+      const el = $('formErr');
+      if (!text) { el.style.display = 'none'; return; }
+      el.textContent = text;
+      el.style.display = 'block';
+    }
+
+    function resetForm() {
+      editingId = null;
+      $('formTitle').textContent = 'নতুন নাম্বার যোগ করুন';
+      $('fCategory').value = '';
+      $('fName').value = '';
+      $('fPhone').value = '';
+      $('fNote').value = '';
+      $('fSort').value = String(nextSort());
+      $('fActive').checked = true;
+      $('cancelBtn').style.display = 'none';
+      showErr('');
+    }
+
+    function nextSort() {
+      if (!rows.length) return 100;
+      const max = Math.max(...rows.map((r) => r.sort_order || 0));
+      return max + 10;
+    }
+
+    function startEdit(r) {
+      editingId = r.id;
+      $('formTitle').textContent = 'নাম্বার এডিট করুন';
+      $('fCategory').value = r.category;
+      $('fName').value = r.name;
+      $('fPhone').value = r.phone;
+      $('fNote').value = r.note || '';
+      $('fSort').value = String(r.sort_order ?? 0);
+      $('fActive').checked = !!r.is_active;
+      $('cancelBtn').style.display = '';
+      showErr('');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function renderCats() {
+      const dl = $('catList');
+      dl.innerHTML = '';
+      const seen = new Set();
+      rows.forEach((r) => {
+        if (seen.has(r.category)) return;
+        seen.add(r.category);
+        const o = document.createElement('option');
+        o.value = r.category;
+        dl.appendChild(o);
+      });
+    }
+
+    function renderList() {
+      const wrap = $('listWrap');
+      wrap.innerHTML = '';
+      $('countLbl').textContent = rows.length ? '(' + rows.length + 'টি)' : '';
+
+      if (!rows.length) {
+        const p = document.createElement('p');
+        p.className = 'emga-muted';
+        p.textContent = 'এখনো কোনো নাম্বার নেই। উপরের ফর্ম থেকে যোগ করুন।';
+        wrap.appendChild(p);
+        return;
+      }
+
+      let last = null;
+      rows.forEach((r) => {
+        if (r.category !== last) {
+          last = r.category;
+          const h = document.createElement('div');
+          h.className = 'emga-cat';
+          h.textContent = last;
+          wrap.appendChild(h);
+        }
+
+        const row = document.createElement('div');
+        row.className = 'emga-row' + (r.is_active ? '' : ' off');
+
+        const info = document.createElement('div');
+        info.className = 'emga-info';
+        const n = document.createElement('div');
+        n.className = 'emga-name';
+        n.textContent = r.name;
+        const m = document.createElement('div');
+        m.className = 'emga-meta';
+        m.textContent = r.phone + (r.note ? ' · ' + r.note : '') + (r.is_active ? '' : ' · বন্ধ');
+        info.appendChild(n);
+        info.appendChild(m);
+
+        const tools = document.createElement('div');
+        tools.className = 'emga-tools';
+
+        const eb = document.createElement('button');
+        eb.type = 'button';
+        eb.className = 'emga-ic';
+        eb.setAttribute('aria-label', 'এডিট');
+        eb.innerHTML = '<i class="fas fa-pen"></i>';
+        eb.addEventListener('click', () => startEdit(r));
+
+        const tb = document.createElement('button');
+        tb.type = 'button';
+        tb.className = 'emga-ic';
+        tb.setAttribute('aria-label', r.is_active ? 'বন্ধ করুন' : 'চালু করুন');
+        tb.innerHTML = r.is_active ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+        tb.addEventListener('click', () => toggleActive(r));
+
+        const db = document.createElement('button');
+        db.type = 'button';
+        db.className = 'emga-ic del';
+        db.setAttribute('aria-label', 'ডিলিট');
+        db.innerHTML = '<i class="fas fa-trash"></i>';
+        db.addEventListener('click', () => removeRow(r));
+
+        tools.appendChild(eb);
+        tools.appendChild(tb);
+        tools.appendChild(db);
+        row.appendChild(info);
+        row.appendChild(tools);
+        wrap.appendChild(row);
+      });
+    }
+
+    async function loadRows() {
+      const { data, error } = await supabase
+        .from('emergency_contacts')
+        .select('*')
+        .order('sort_order', { ascending: true });
+      if (error) {
+        $('listWrap').innerHTML = '';
+        const p = document.createElement('p');
+        p.className = 'emga-err';
+        p.textContent = 'লোড করতে সমস্যা হয়েছে: ' + error.message;
+        $('listWrap').appendChild(p);
+        return;
+      }
+      rows = data || [];
+      renderCats();
+      renderList();
+      if (!editingId) $('fSort').value = String(nextSort());
+    }
+
+    async function save() {
+      showErr('');
+      const category = $('fCategory').value.trim();
+      const name = $('fName').value.trim();
+      const phone = $('fPhone').value.trim();
+      const note = $('fNote').value.trim();
+      const sort = parseInt($('fSort').value, 10);
+
+      if (!category) return showErr('ক্যাটাগরি লিখুন।');
+      if (!name) return showErr('নাম লিখুন।');
+      if (!phone) return showErr('ফোন নাম্বার লিখুন।');
+      if (!/^[0-9+\-\s]{3,20}$/.test(phone)) return showErr('ফোন নাম্বারে শুধু ইংরেজি সংখ্যা, + আর - ব্যবহার করুন।');
+
+      const payload = {
+        category,
+        name,
+        phone,
+        note: note || null,
+        sort_order: Number.isFinite(sort) ? sort : 0,
+        is_active: $('fActive').checked,
+      };
+
+      const btn = $('saveBtn');
+      btn.disabled = true;
+      btn.textContent = 'সেভ হচ্ছে...';
+
+      const q = editingId
+        ? supabase.from('emergency_contacts').update(payload).eq('id', editingId)
+        : supabase.from('emergency_contacts').insert(payload);
+      const { error } = await q;
+
+      btn.disabled = false;
+      btn.textContent = 'সেভ করুন';
+
+      if (error) return showErr('সেভ হয়নি: ' + error.message);
+      resetForm();
+      await loadRows();
+    }
+
+    async function toggleActive(r) {
+      const { error } = await supabase.from('emergency_contacts').update({ is_active: !r.is_active }).eq('id', r.id);
+      if (error) { alert('বদলানো যায়নি: ' + error.message); return; }
+      await loadRows();
+    }
+
+    async function removeRow(r) {
+      if (!confirm('"' + r.name + '" ডিলিট করবেন? এটা ফেরানো যাবে না।')) return;
+      const { error } = await supabase.from('emergency_contacts').delete().eq('id', r.id);
+      if (error) { alert('ডিলিট হয়নি: ' + error.message); return; }
+      if (editingId === r.id) resetForm();
+      await loadRows();
+    }
+
+    $('saveBtn').addEventListener('click', save);
+    $('cancelBtn').addEventListener('click', resetForm);
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      loadRows();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
