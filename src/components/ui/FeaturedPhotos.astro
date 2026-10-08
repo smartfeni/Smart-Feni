@@ -11,6 +11,18 @@
 // Contentful Paint) এলিমেন্ট — সার্চ বারের ঠিক নিচেই প্রথম দেখা যায়।
 // আগে loading="lazy" থাকায় ব্রাউজার ইচ্ছাকৃত দেরি করছিল, যা PageSpeed
 // রিপোর্টে LCP 6.9s দেখাচ্ছিল। তাই এখন eager + fetchpriority="high"।
+//
+// নতুন (Oct 2026) — ট্যাপযোগ্য ছবি: পুরো ছবিটাই বাটন। আলাদা কোনো
+// CTA বাটন/টেক্সট/আইকন নেই — "ট্যাপ করুন" নির্দেশনা ছবির আর্টওয়ার্কেই
+// থাকবে। প্রতিটা ছবির link_type / link_url (featured_photos টেবিল):
+//   • none   → ট্যাপ করলে কিছু হয় না (আগের মতো)
+//   • page   → পেজে যায় (যেমন /become-a-shop-owner,
+//              /services/housing?openListing=1 — লিস্টিং ফর্ম সহ খোলে)
+//   • action → ইন-পেজ অ্যাকশন: post-flow | category-drawer |
+//              auth-login | auth-signup
+// সেফটি: page হলে শুধু "/" দিয়ে শুরু (// ছাড়া) বা https:// লিংক, অ্যাকশন
+// শুধু ফিক্সড তালিকা থেকে। ডেটাবেজেও একই CHECK constraint আছে।
+// স্লাইড বদলালে কার্ডের লিংকও সাথে সাথে বদলে যায়।
 // ============================================================
 
 const fallbackSrc = '/featured/featured-photo.jpg';
@@ -18,7 +30,7 @@ const fallbackSrc = '/featured/featured-photo.jpg';
 
 <section class="featured-photo-section">
   <div class="container">
-    <div class="photo-card">
+    <a class="photo-card" data-photo-card>
       <img
         class="photo-layer photo-base"
         src={fallbackSrc}
@@ -29,7 +41,7 @@ const fallbackSrc = '/featured/featured-photo.jpg';
       />
       <img class="photo-layer photo-slide" data-slide-a alt="" loading="eager" />
       <img class="photo-layer photo-slide" data-slide-b alt="" loading="eager" />
-    </div>
+    </a>
   </div>
 </section>
 
@@ -41,12 +53,41 @@ const fallbackSrc = '/featured/featured-photo.jpg';
 
   .photo-card {
     position: relative;
+    display: block;
     width: 100%;
     aspect-ratio: 16 / 9;
     border-radius: 24px;
     overflow: hidden;
     background: #F4F7FC;
     box-shadow: 0 16px 40px rgba(27, 42, 74, 0.14), 0 0 0 1px rgba(255, 107, 53, 0.08);
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  /* শুধু লিংক থাকা ছবিতে — কোনো ওভারলে/বাটন নেই, শুধু tap/hover অনুভূতি */
+  .photo-card.tappable {
+    cursor: pointer;
+  }
+
+  .photo-card.tappable:active {
+    transform: scale(0.985);
+    box-shadow: 0 8px 22px rgba(27, 42, 74, 0.16), 0 0 0 2px rgba(255, 107, 53, 0.28);
+  }
+
+  .photo-card.tappable:focus-visible {
+    outline: 3px solid #FF6B35;
+    outline-offset: 3px;
+  }
+
+  @media (hover: hover) {
+    .photo-card.tappable:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 20px 46px rgba(27, 42, 74, 0.18), 0 0 0 1px rgba(255, 107, 53, 0.22);
+    }
+    .photo-card.tappable:active {
+      transform: scale(0.985);
+    }
   }
 
   .photo-layer {
@@ -54,6 +95,8 @@ const fallbackSrc = '/featured/featured-photo.jpg';
     height: 100%;
     object-fit: cover;
     display: block;
+    -webkit-user-drag: none;
+    user-select: none;
   }
 
   .photo-slide {
@@ -72,31 +115,140 @@ const fallbackSrc = '/featured/featured-photo.jpg';
       border-radius: 16px;
     }
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    .photo-card,
+    .photo-slide {
+      transition: none;
+    }
+  }
 </style>
 
 <script>
   import { supabase } from '../../lib/supabase.js';
 
   const SLIDE_INTERVAL_MS = 5000;
+  const ALLOWED_ACTIONS = ['post-flow', 'category-drawer', 'auth-login', 'auth-signup'];
+
+  // ডেটাবেজের CHECK constraint-এর পাশাপাশি ক্লায়েন্টেও যাচাই — ভুল/অনিরাপদ
+  // লিংক থাকলে ছবিটা আর ট্যাপযোগ্য থাকে না (সাধারণ ছবি হিসেবেই দেখায়)
+  function normalizeLink(type, url) {
+    if (!url || typeof url !== 'string') return null;
+    const value = url.trim();
+
+    if (type === 'page') {
+      const isInternal = value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
+      const isHttps = /^https:\/\/[^\s]+$/i.test(value);
+      if (isInternal || isHttps) return { type: 'page', url: value };
+      return null;
+    }
+
+    if (type === 'action' && ALLOWED_ACTIONS.includes(value)) {
+      return { type: 'action', url: value };
+    }
+
+    return null;
+  }
+
+  async function runAction(action) {
+    if (action === 'post-flow') {
+      window.dispatchEvent(new CustomEvent('smartfeni:open-post-flow'));
+      return;
+    }
+
+    if (action === 'category-drawer') {
+      window.dispatchEvent(new CustomEvent('smartfeni:open-category-drawer'));
+      return;
+    }
+
+    if (action === 'auth-login' || action === 'auth-signup') {
+      // ইউজার আগে থেকেই লগইন থাকলে লগইন/সাইনআপ মোডাল খোলার দরকার নেই
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) return;
+      window.openAuthModal?.(action === 'auth-signup' ? 'signup' : 'login');
+    }
+  }
 
   async function initSlideshow() {
     const BUCKET = 'listing-images';
+    const card = document.querySelector('[data-photo-card]');
     const layerA = document.querySelector('[data-slide-a]');
     const layerB = document.querySelector('[data-slide-b]');
-    if (!layerA || !layerB) return;
+    if (!card || !layerA || !layerB) return;
 
     const { data: photos, error } = await supabase
       .from('featured_photos')
-      .select('storage_path')
+      .select('storage_path, link_type, link_url')
       .order('sort_order', { ascending: true });
 
     if (error || !photos || photos.length === 0) return; // fallback ছবিই থাকবে
 
     const urls = photos.map((p) => supabase.storage.from(BUCKET).getPublicUrl(p.storage_path).data.publicUrl);
+    const links = photos.map((p) => normalizeLink(p.link_type, p.link_url));
 
     let currentIndex = 0;
     let activeLayer = layerA;
     let inactiveLayer = layerB;
+    let currentLink = null;
+
+    // কার্ডের বর্তমান লিংক সেট — লিংক থাকলে পুরো কার্ডই ট্যাপযোগ্য
+    function applyLink(link) {
+      currentLink = link;
+
+      if (!link) {
+        card.classList.remove('tappable');
+        card.removeAttribute('href');
+        card.removeAttribute('target');
+        card.removeAttribute('rel');
+        card.removeAttribute('role');
+        card.removeAttribute('tabindex');
+        card.removeAttribute('aria-label');
+        return;
+      }
+
+      card.classList.add('tappable');
+      card.setAttribute('aria-label', 'বিস্তারিত দেখতে ট্যাপ করুন');
+
+      if (link.type === 'page') {
+        card.setAttribute('href', link.url);
+        card.removeAttribute('role');
+        card.removeAttribute('tabindex');
+        const isExternal = /^https:\/\//i.test(link.url) && !link.url.startsWith(window.location.origin);
+        if (isExternal) {
+          card.setAttribute('target', '_blank');
+          card.setAttribute('rel', 'noopener noreferrer');
+        } else {
+          card.removeAttribute('target');
+          card.removeAttribute('rel');
+        }
+      } else {
+        // অ্যাকশন — href নেই, তাই কীবোর্ড/স্ক্রিন রিডারের জন্য role + tabindex
+        card.removeAttribute('href');
+        card.removeAttribute('target');
+        card.removeAttribute('rel');
+        card.setAttribute('role', 'button');
+        card.setAttribute('tabindex', '0');
+      }
+    }
+
+    card.addEventListener('click', (e) => {
+      if (!currentLink) {
+        e.preventDefault();
+        return;
+      }
+      if (currentLink.type === 'action') {
+        e.preventDefault();
+        runAction(currentLink.url);
+      }
+      // page হলে ব্রাউজার নিজেই href-এ নিয়ে যাবে
+    });
+
+    card.addEventListener('keydown', (e) => {
+      if (currentLink?.type === 'action' && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        runAction(currentLink.url);
+      }
+    });
 
     function preload(url) {
       return new Promise((resolve) => {
@@ -111,6 +263,7 @@ const fallbackSrc = '/featured/featured-photo.jpg';
     await preload(urls[0]);
     activeLayer.src = urls[0];
     activeLayer.classList.add('visible');
+    applyLink(links[0]);
 
     if (urls.length <= 1) return; // একটাই ছবি হলে স্লাইডশো লাগবে না
 
@@ -122,6 +275,7 @@ const fallbackSrc = '/featured/featured-photo.jpg';
       inactiveLayer.src = nextUrl;
       inactiveLayer.classList.add('visible');
       activeLayer.classList.remove('visible');
+      applyLink(links[currentIndex]);
 
       const temp = activeLayer;
       activeLayer = inactiveLayer;
