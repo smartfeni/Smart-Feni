@@ -481,9 +481,16 @@ function handleNotificationTap(event) {
 
     navigatingAway = true; // ড্যাশবোর্ড রিডাইরেক্ট যেন ট্যাপের পেজ নষ্ট না করে
     const notifId = data.notification_id;
-    const target = notifId
-      ? `${url.pathname}?notif=${encodeURIComponent(notifId)}`
-      : url.pathname + url.search;
+    const guestPromoId = data.guest_promo_id; // লগইন ছাড়া ডিভাইসের প্রমো (guest-broadcast)
+    let target;
+    if (notifId) {
+      target = `${url.pathname}?notif=${encodeURIComponent(notifId)}`;
+    } else if (guestPromoId && !data.action_url) {
+      // লিংক ছাড়া গেস্ট প্রমো — হোমে গিয়ে "অফার ও খবর" তালিকা খোলে
+      target = `/?promo=${encodeURIComponent(guestPromoId)}`;
+    } else {
+      target = url.pathname + url.search;
+    }
 
     window.location.href = target;
   } catch (err) {
