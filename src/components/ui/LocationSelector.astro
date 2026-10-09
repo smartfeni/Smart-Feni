@@ -4,12 +4,34 @@
 // কম্পোনেন্ট: লোকেশন সিলেক্টর (উপজেলা)
 // (আগের সব কমেন্ট/হিস্ট্রি অপরিবর্তিত)
 //
-// আপডেট (বাগফিক্স — Supabase চেক করে পাওয়া): profiles.upazila
-// কলামে ডেটা আসলে বাংলা নামে সেভ আছে ("ফেনী সদর", "দাগনভূঞা"),
-// slug ("feni-sadar") ফরম্যাটে না। আগের ভার্সনে slug দিয়ে ম্যাচ
-// করার চেষ্টা হচ্ছিল বলে প্রোফাইল-ম্যাচ কখনো সফল হতো না। এখন
-// বাংলা নাম দিয়ে ম্যাচ/সেভ করা হচ্ছে (existing ডেটার সাথে
-// কনসিস্টেন্ট)।
+// আগের বাগফিক্স (বাংলা নাম): profiles.upazila কলামে ডেটা বাংলা নামে
+// সেভ আছে ("ফেনী সদর", "দাগনভূঞা"), slug না। তাই বাংলা নাম দিয়ে
+// ম্যাচ/সেভ করা হয় (existing ডেটার সাথে কনসিস্টেন্ট)।
+//
+// ============================================================
+// নতুন আপডেট — ম্যাপ-ভিত্তিক উপজেলা/ইউনিয়ন সিলেকশন
+// ============================================================
+// ১. বাটনে ক্লিক করলে ছোট লিস্ট ড্রপডাউনের বদলে ফুলস্ক্রিন ম্যাপ শিট খোলে।
+//    - ধাপ ১: ৬টা উপজেলা আলাদা রঙ, বাউন্ডারি ও নামসহ। ট্যাপ → ধাপ ২।
+//    - ধাপ ২: শুধু সেই উপজেলায় জুম, প্রতিটা ইউনিয়ন বাউন্ডারি ও নামসহ।
+//      ইউনিয়ন বাছা ঐচ্ছিক (আবার ট্যাপ করলে বাদ); উপজেলা বাছলেই সেভ করা যায়।
+// ২. ম্যাপে বর্তমান ম্যাপের (OSM) টাইল হুবহু থাকে — স্কুল/বাজার/দোকানের নাম
+//    কিছুই বদলায় না। শুধু ওপরে বাউন্ডারি + নাম ওভারলে। ফেনী জেলার পুরো
+//    বাইরের সীমানা সবসময় বোল্ড (সাদা হ্যালো + কমলা লাইন)। ম্যাপ ফেনীর
+//    সীমানার বাইরে প্যান করা যায় না।
+// ৩. নতুন ভিজিটরের (প্রোফাইল/ক্যাশে কিছু নেই) জন্য ড্রপডাউন আর অটো খোলে না —
+//    বাটনের নিচে আইকনসহ "উপজেলা সিলেক্ট করুন" ইনস্ট্রাকশন বাবল দেখায়।
+// ৪. ঐচ্ছিক "আমার লোকেশন" বাটন — ট্যাপ করলে GPS থেকে উপজেলা/ইউনিয়ন ধরে
+//    ধাপ ২-এ নিয়ে যায়। নিজে থেকে কিছু সেভ হয় না, "সেভ করুন" চাপতে হয়।
+//    ফেনীর বাইরে হলে নোটিস দেখায়।
+// ৫. ম্যাপ/geojson লোড না হলে পুরনো ৬টা বাটনের লিস্ট ফলব্যাক হিসেবে দেখায়।
+// ৬. ইউনিয়ন সেভ হয় localStorage 'smartfeni_union'-এ (ইংরেজি shapeName)।
+//    ডেটাবেজে যায় না। 'smartfeni:upazila-changed' ইভেন্টে detail.upazila
+//    (slug, আগের মতোই) + নতুন detail.union (ইউনিয়ন বা null)।
+//
+// ডেটা/হেল্পার: src/data/feniAreas.js, geojson: public/data/feni_unions.geojson
+// Android ব্যাক বাটন: শিটের root ক্লাস "ls-overlay" + ".active" এবং ক্লোজ
+// বাটনের aria-label "বন্ধ করুন" — native-bridge.js-এর closeTopOverlay নিজে ধরে।
 // ============================================================
 ---
 
@@ -20,14 +42,54 @@
     <i class="fas fa-chevron-down chevron"></i>
   </button>
 
-  <div class="location-dropdown" id="locationDropdown">
-    <p class="dropdown-title">আপনার উপজেলা বেছে নিন</p>
-    <button class="upazila-option" data-upazila="feni-sadar">ফেনী সদর</button>
-    <button class="upazila-option" data-upazila="chhagalnaiya">ছাগলনাইয়া</button>
-    <button class="upazila-option" data-upazila="daganbhuiyan">দাগনভূঞা</button>
-    <button class="upazila-option" data-upazila="parshuram">পরশুরাম</button>
-    <button class="upazila-option" data-upazila="fulgazi">ফুলগাজী</button>
-    <button class="upazila-option" data-upazila="sonagazi">সোনাগাজী</button>
+  <button class="location-hint" id="locationHint" type="button">
+    <i class="fas fa-hand-pointer"></i>
+    <span>উপজেলা সিলেক্ট করুন</span>
+  </button>
+</div>
+
+<!-- ফুলস্ক্রিন ম্যাপ শিট (JS এটাকে <body>-তে সরিয়ে নেয়, যাতে হেডারের stacking-এ আটকে না যায়) -->
+<div class="ls-overlay" id="lsSheet">
+  <div class="ls-header">
+    <button type="button" class="ls-back-btn" id="lsBack" aria-label="সব উপজেলায় ফিরুন" hidden>
+      <i class="fas fa-arrow-left"></i>
+    </button>
+    <div class="ls-title-wrap">
+      <span class="ls-title" id="lsTitle">আপনার উপজেলা বেছে নিন</span>
+      <span class="ls-sub" id="lsSub">যেকোনো উপজেলায় ট্যাপ করুন</span>
+    </div>
+    <button type="button" class="ls-x-btn" id="lsClose" aria-label="বন্ধ করুন">
+      <i class="fas fa-xmark"></i>
+    </button>
+  </div>
+
+  <div class="ls-map-wrap" id="lsMapWrap">
+    <div class="ls-map" id="lsMap"></div>
+    <button type="button" class="ls-locate" id="lsLocate">
+      <i class="fas fa-crosshairs"></i>
+      <span>আমার লোকেশন</span>
+    </button>
+    <div class="ls-loading" id="lsLoading">
+      <i class="fas fa-spinner fa-spin"></i>
+      <span>ম্যাপ লোড হচ্ছে…</span>
+    </div>
+  </div>
+
+  <!-- ফলব্যাক: ম্যাপ লোড না হলে পুরনো লিস্ট -->
+  <div class="ls-fallback" id="lsFallback" hidden>
+    <p class="ls-fallback-note">ম্যাপ লোড হয়নি — লিস্ট থেকে বেছে নিন</p>
+    <button class="upazila-option" data-upazila="feni-sadar" type="button">ফেনী সদর</button>
+    <button class="upazila-option" data-upazila="chhagalnaiya" type="button">ছাগলনাইয়া</button>
+    <button class="upazila-option" data-upazila="daganbhuiyan" type="button">দাগনভূঞা</button>
+    <button class="upazila-option" data-upazila="parshuram" type="button">পরশুরাম</button>
+    <button class="upazila-option" data-upazila="fulgazi" type="button">ফুলগাজী</button>
+    <button class="upazila-option" data-upazila="sonagazi" type="button">সোনাগাজী</button>
+  </div>
+
+  <div class="ls-footer" id="lsFooter">
+    <p class="ls-note" id="lsNote" hidden></p>
+    <p class="ls-selected" id="lsSelected">ম্যাপে একটা উপজেলায় ট্যাপ করুন</p>
+    <button type="button" class="ls-save" id="lsSave" disabled>সেভ করুন</button>
   </div>
 </div>
 
@@ -85,29 +147,296 @@
     transform: rotate(180deg);
   }
 
-  .location-dropdown {
+  /* ---------- নতুন ভিজিটরের ইনস্ট্রাকশন বাবল ---------- */
+  .location-hint {
     display: none;
     position: absolute;
-    top: calc(100% + 8px);
-    left: 14px;
-    background: #fff;
-    border-radius: 16px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
-    padding: 12px;
-    width: 240px;
+    top: calc(100% + 10px);
+    left: 6px;
+    align-items: center;
+    gap: 8px;
+    background: #1B2A4A;
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    padding: 9px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    white-space: nowrap;
+    max-width: calc(100vw - 24px);
+    box-shadow: 0 8px 24px rgba(27, 42, 74, 0.25);
+    cursor: pointer;
     z-index: 1000;
-    border: 1px solid #EEF3F9;
+    animation: hintFloat 2s ease-in-out infinite;
   }
 
-  .location-selector.open .location-dropdown {
-    display: block;
+  .location-hint::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: var(--caret-x, 26px);
+    width: 12px;
+    height: 12px;
+    background: #1B2A4A;
+    transform: rotate(45deg);
+    border-radius: 2px;
   }
 
-  .dropdown-title {
+  .location-hint i {
+    color: #FF6B35;
+    font-size: 1rem;
+    animation: hintTap 1.2s ease-in-out infinite;
+  }
+
+  .location-selector.needs-pick .location-hint {
+    display: inline-flex;
+  }
+
+  .location-selector.needs-pick .location-btn {
+    border-color: rgba(255, 107, 53, 0.55);
+    animation: btnPulse 2s ease-out infinite;
+  }
+
+  @keyframes hintFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(3px); }
+  }
+
+  @keyframes hintTap {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(2px, -3px); }
+  }
+
+  @keyframes btnPulse {
+    0% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.45); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 107, 53, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0); }
+  }
+
+  /* ---------- ফুলস্ক্রিন ম্যাপ শিট ---------- */
+  .ls-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: #fff;
+    flex-direction: column;
+  }
+
+  .ls-overlay.active {
+    display: flex;
+  }
+
+  .ls-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    border-bottom: 1px solid #E5EAF0;
+    background: #fff;
+    flex-shrink: 0;
+  }
+
+  .ls-title-wrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ls-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ls-sub {
     font-size: 0.75rem;
     color: #5C7086;
+    margin-top: 1px;
+  }
+
+  .ls-back-btn,
+  .ls-x-btn {
+    width: 38px;
+    height: 38px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #F1F5F9;
+    border: none;
+    border-radius: 50%;
+    color: #1B2A4A;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+
+  .ls-back-btn[hidden] {
+    display: none;
+  }
+
+  .ls-back-btn:hover,
+  .ls-x-btn:hover {
+    background: #FFF0EA;
+    color: #FF6B35;
+  }
+
+  .ls-map-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #EAF0F6;
+  }
+
+  .ls-map-wrap[hidden] {
+    display: none;
+  }
+
+  /* isolation: Leaflet-এর ভেতরের z-index (200-700) বাইরে escape করবে না */
+  .ls-map {
+    position: absolute;
+    inset: 0;
+    isolation: isolate;
+  }
+
+  .ls-locate {
+    position: absolute;
+    left: 12px;
+    bottom: 14px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    color: #1B2A4A;
+    border: 1px solid #E5EAF0;
+    border-radius: 30px;
+    padding: 10px 16px;
+    font-size: 0.85rem;
     font-weight: 600;
-    padding: 4px 12px 8px;
+    font-family: inherit;
+    box-shadow: 0 4px 14px rgba(27, 42, 74, 0.18);
+    cursor: pointer;
+  }
+
+  .ls-locate i {
+    color: #FF6B35;
+  }
+
+  .ls-locate:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
+
+  .ls-loading {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(234, 240, 246, 0.92);
+    color: #1B2A4A;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .ls-loading[hidden] {
+    display: none;
+  }
+
+  .ls-footer {
+    flex-shrink: 0;
+    padding: 12px 14px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    border-top: 1px solid #E5EAF0;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .ls-footer[hidden] {
+    display: none;
+  }
+
+  .ls-selected {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1B2A4A;
+  }
+
+  /* innerHTML দিয়ে বসানো এলিমেন্টে Astro scoped CSS লাগে না — তাই :global() */
+  .ls-selected :global(small) {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: #5C7086;
+  }
+
+  .ls-selected :global(i) {
+    color: #FF6B35;
+    margin-right: 4px;
+  }
+
+  .ls-note {
+    margin: 0;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: #FFF4E5;
+    color: #9A5B00;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .ls-note[hidden] {
+    display: none;
+  }
+
+  .ls-save {
+    width: 100%;
+    background: #FF6B35;
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    padding: 13px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+  }
+
+  .ls-save:disabled {
+    background: #CBD5E1;
+    cursor: not-allowed;
+  }
+
+  /* ---------- ফলব্যাক লিস্ট ---------- */
+  .ls-fallback {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+  }
+
+  .ls-fallback[hidden] {
+    display: none;
+  }
+
+  .ls-fallback-note {
+    margin: 0 0 8px;
+    font-size: 0.78rem;
+    color: #5C7086;
+    font-weight: 600;
   }
 
   .upazila-option {
@@ -116,10 +445,11 @@
     text-align: left;
     background: none;
     border: none;
-    padding: 10px 12px;
+    padding: 12px;
     border-radius: 10px;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 500;
+    font-family: inherit;
     color: #1B2A4A;
     cursor: pointer;
     transition: background 0.15s ease;
@@ -139,58 +469,115 @@
       max-width: 130px;
       padding: 6px 8px 6px 12px;
     }
-
-    .location-dropdown {
-      position: fixed;
-      left: 8px;
-      top: 70px;
-      width: calc(100vw - 16px);
-      max-width: 280px;
-      max-height: calc(100vh - 90px);
-      overflow-y: auto;
-      z-index: 1000;
-    }
   }
 </style>
 
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { trackEvent } from '../../lib/analytics.js';
-
-  const UPAZILAS = [
-    { id: 'feni-sadar', name: 'ফেনী সদর' },
-    { id: 'chhagalnaiya', name: 'ছাগলনাইয়া' },
-    { id: 'daganbhuiyan', name: 'দাগনভূঞা' },
-    { id: 'parshuram', name: 'পরশুরাম' },
-    { id: 'fulgazi', name: 'ফুলগাজী' },
-    { id: 'sonagazi', name: 'সোনাগাজী' },
-  ];
+  import { getCurrentPosition } from '../../lib/native-bridge.js';
+  import {
+    UPAZILAS,
+    getUnionBn,
+    getUnionUpazilaId,
+    loadFeniGeo,
+    findAreaAt,
+    getFeniBounds,
+    getUpazilaBounds,
+    getUpazilaFeatures,
+    getUpazilaBorders,
+    getDistrictBorder,
+    getLabelPoints,
+  } from '../../data/feniAreas.js';
 
   const DEFAULT_UPAZILA = 'feni-sadar';
   const STORAGE_KEY = 'smartfeni_upazila';
+  const UNION_KEY = 'smartfeni_union';
 
-  const selector = document.getElementById('locationSelector');
-  const btn = document.getElementById('locationBtn');
-  const label = document.getElementById('locationLabel');
-  const dropdown = document.getElementById('locationDropdown');
-  const options = document.querySelectorAll('.upazila-option');
+  const selector = document.getElementById('locationSelector') as HTMLElement;
+  const btn = document.getElementById('locationBtn') as HTMLElement;
+  const label = document.getElementById('locationLabel') as HTMLElement;
+  const hint = document.getElementById('locationHint') as HTMLElement;
 
+  const sheet = document.getElementById('lsSheet') as HTMLElement;
+  const mapWrap = document.getElementById('lsMapWrap') as HTMLElement;
+  const mapEl = document.getElementById('lsMap') as HTMLElement;
+  const loadingEl = document.getElementById('lsLoading') as HTMLElement;
+  const fallbackEl = document.getElementById('lsFallback') as HTMLElement;
+  const footerEl = document.getElementById('lsFooter') as HTMLElement;
+  const titleEl = document.getElementById('lsTitle') as HTMLElement;
+  const subEl = document.getElementById('lsSub') as HTMLElement;
+  const backBtn = document.getElementById('lsBack') as HTMLButtonElement;
+  const closeBtn = document.getElementById('lsClose') as HTMLButtonElement;
+  const locateBtn = document.getElementById('lsLocate') as HTMLButtonElement;
+  const noteEl = document.getElementById('lsNote') as HTMLElement;
+  const selectedEl = document.getElementById('lsSelected') as HTMLElement;
+  const saveBtn = document.getElementById('lsSave') as HTMLButtonElement;
+  const fallbackOptions = sheet.querySelectorAll('.upazila-option');
+
+  // শিটকে <body>-তে সরানো — হেডারের z-index/stacking context থেকে মুক্ত
+  document.body.appendChild(sheet);
+
+  // ------------------------------------------------------------
+  // স্টেট
+  // ------------------------------------------------------------
   let hasResolvedUpazila = false;
+  let currentUpazilaId: string | null = null;
 
-  function setUpazila(id: string, { save = true, syncProfile = false } = {}) {
-    const upazila = UPAZILAS.find((u) => u.id === id) || UPAZILAS.find((u) => u.id === DEFAULT_UPAZILA)!;
-    label!.textContent = upazila.name;
-    options.forEach((opt) => {
+  let geo: any = null;
+  let map: any = null;
+  let Lf: any = null;
+  let mapReady = false;
+  let layerGroup: any = null; // ধাপ ১/২-এর লেয়ার
+  let userDot: any = null;
+  let unionLayers: Record<string, any> = {};
+  let unionMarkers: Record<string, any> = {};
+  let step: 1 | 2 = 1;
+  let pendingUpazila: string | null = null;
+  let pendingUnion: string | null = null;
+  let locating = false;
+  let openToken = 0;
+
+  function esc(s: string) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]
+    );
+  }
+
+  function getSavedUnion(upazilaId: string | null): string | null {
+    if (!upazilaId) return null;
+    const u = localStorage.getItem(UNION_KEY);
+    return u && getUnionUpazilaId(u) === upazilaId ? u : null;
+  }
+
+  // ------------------------------------------------------------
+  // উপজেলা সেট (আগের লজিক অপরিবর্তিত + ঐচ্ছিক ইউনিয়ন)
+  // ------------------------------------------------------------
+  function setUpazila(
+    id: string,
+    { save = true, syncProfile = false, union = null as string | null } = {}
+  ) {
+    const upazila = UPAZILAS.find((u: any) => u.id === id) || UPAZILAS.find((u: any) => u.id === DEFAULT_UPAZILA)!;
+    label.textContent = upazila.name;
+    fallbackOptions.forEach((opt) => {
       opt.classList.toggle('active', (opt as HTMLElement).dataset.upazila === upazila.id);
     });
 
     hasResolvedUpazila = true;
+    currentUpazilaId = upazila.id;
+    hideHint();
 
-    window.dispatchEvent(new CustomEvent('smartfeni:upazila-changed', { detail: { upazila: upazila.id } }));
+    const validUnion = union && getUnionUpazilaId(union) === upazila.id ? union : null;
+
+    window.dispatchEvent(
+      new CustomEvent('smartfeni:upazila-changed', { detail: { upazila: upazila.id, union: validUnion } })
+    );
 
     if (save) {
       localStorage.setItem(STORAGE_KEY, upazila.id);
-      trackEvent('upazila_selected', { upazila: upazila.id });
+      if (validUnion) localStorage.setItem(UNION_KEY, validUnion);
+      else localStorage.removeItem(UNION_KEY);
+      trackEvent('upazila_selected', { upazila: upazila.id, union: validUnion || '' });
     }
 
     if (syncProfile) {
@@ -208,32 +595,485 @@
     await supabase.from('profiles').update({ upazila: bengaliName }).eq('id', session.user.id);
   }
 
-  function openDropdown() {
-    selector!.classList.add('open');
-    updateDropdownPosition();
-  }
-
-  function closeDropdown() {
-    selector!.classList.remove('open');
-  }
-
-  function updateDropdownPosition() {
+  // ------------------------------------------------------------
+  // ইনস্ট্রাকশন বাবল (নতুন ভিজিটর)
+  // ------------------------------------------------------------
+  function positionHint() {
+    if (!selector.classList.contains('needs-pick')) return;
     if (window.innerWidth > 768) {
-      dropdown!.style.top = '';
-      dropdown!.style.left = '';
+      hint.style.position = '';
+      hint.style.top = '';
+      hint.style.left = '';
+      hint.style.visibility = '';
+      hint.style.removeProperty('--caret-x');
       return;
     }
     const navbar = document.querySelector('.navbar') as HTMLElement | null;
     if (!navbar) return;
     const navRect = navbar.getBoundingClientRect();
-    dropdown!.style.top = `${Math.round(navRect.bottom)}px`;
-    dropdown!.style.left = '8px';
+    const btnRect = btn.getBoundingClientRect();
+    hint.style.position = 'fixed';
+    hint.style.top = `${Math.round(navRect.bottom + 8)}px`;
+    hint.style.left = '12px';
+    const caretX = Math.max(14, Math.round(btnRect.left + btnRect.width / 2 - 12 - 6));
+    hint.style.setProperty('--caret-x', `${caretX}px`);
+    // নেভবার স্ক্রল করে লুকিয়ে গেলে বাবলও লুকাবে
+    hint.style.visibility = navRect.bottom > 20 ? 'visible' : 'hidden';
   }
 
-  // ============================================================
+  function showHint() {
+    selector.classList.add('needs-pick');
+    positionHint();
+  }
+
+  function hideHint() {
+    selector.classList.remove('needs-pick');
+  }
+
+  // ------------------------------------------------------------
+  // Leaflet লোড (LocationPicker-এর মতোই cdnjs, আগে থেকে লোড থাকলে রিইউজ)
+  // ------------------------------------------------------------
+  let leafletLoadPromise: Promise<void> | null = null;
+
+  function loadLeaflet(): Promise<void> {
+    if ((window as any).L) return Promise.resolve();
+    if (leafletLoadPromise) return leafletLoadPromise;
+
+    leafletLoadPromise = new Promise<void>((resolve, reject) => {
+      if (!document.querySelector('link[href*="leaflet.min.css"]')) {
+        const cssLink = document.createElement('link');
+        cssLink.rel = 'stylesheet';
+        cssLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+        document.head.appendChild(cssLink);
+      }
+
+      const existing = document.querySelector('script[src*="leaflet.min.js"]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve());
+        existing.addEventListener('error', () => reject(new Error('Leaflet লোড ব্যর্থ')));
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Leaflet লোড ব্যর্থ'));
+      document.head.appendChild(script);
+    }).catch((err) => {
+      leafletLoadPromise = null;
+      throw err;
+    });
+
+    return leafletLoadPromise;
+  }
+
+  // ------------------------------------------------------------
+  // ম্যাপ তৈরি (একবারই)
+  // ------------------------------------------------------------
+  function createMap() {
+    Lf = (window as any).L;
+
+    map = Lf.map(mapEl, {
+      zoomControl: false,
+      maxBoundsViscosity: 1.0,
+      zoomSnap: 0.25,
+      zoomDelta: 0.5,
+    });
+
+    // বর্তমান ম্যাপের টাইল — হুবহু একই (স্কুল/বাজার/দোকানের নাম সব থাকবে)
+    Lf.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+
+    Lf.control.zoom({ position: 'topright' }).addTo(map);
+
+    // ওভারলে প্যান — টাইলের ওপরে, মার্কারের নিচে/ওপরে ক্রমানুসারে
+    const panes: Array<[string, number]> = [
+      ['sfAreas', 420],
+      ['sfBorders', 430],
+      ['sfDistrictHalo', 440],
+      ['sfDistrictLine', 450],
+      ['sfLabels', 460],
+    ];
+    panes.forEach(([name, z]) => {
+      map.createPane(name);
+      map.getPane(name).style.zIndex = String(z);
+    });
+    // লেবেল প্যান ট্যাপ আটকাবে না
+    map.getPane('sfLabels').style.pointerEvents = 'none';
+
+    layerGroup = Lf.layerGroup().addTo(map);
+
+    // ফেনী জেলার পুরো বাইরের সীমানা — সবসময় বোল্ড (সাদা হ্যালো + কমলা লাইন)
+    const border = getDistrictBorder(geo);
+    Lf.polyline(border, {
+      pane: 'sfDistrictHalo', color: '#ffffff', weight: 11, opacity: 0.95,
+      lineCap: 'round', lineJoin: 'round', interactive: false,
+    }).addTo(map);
+    Lf.polyline(border, {
+      pane: 'sfDistrictLine', color: '#FF6B35', weight: 5, opacity: 1,
+      lineCap: 'round', lineJoin: 'round', interactive: false,
+    }).addTo(map);
+
+    // ফেনীর সীমানায় আটকানো
+    const bounds = getFeniBounds(geo, 0);
+    map.fitBounds(bounds, { padding: [14, 14] });
+    map.setMaxBounds(getFeniBounds(geo, 0.05));
+    map.setMinZoom(map.getZoom() - 0.5);
+
+    mapReady = true;
+  }
+
+  function clearLayers() {
+    layerGroup.clearLayers();
+    unionLayers = {};
+    unionMarkers = {};
+  }
+
+  function chipHtml(text: string, color: string, opts: { size?: number; active?: boolean } = {}) {
+    const size = opts.size || 13;
+    const active = !!opts.active;
+    const bg = active ? '#FF6B35' : 'rgba(255,255,255,0.9)';
+    const fg = active ? '#ffffff' : '#1B2A4A';
+    const bd = active ? '#FF6B35' : color;
+    return (
+      '<div style="position:absolute;left:0;top:0;transform:translate(-50%,-50%);' +
+      'white-space:nowrap;pointer-events:none;font-weight:700;' +
+      `font-size:${size}px;line-height:1.2;color:${fg};background:${bg};` +
+      `padding:3px 9px;border-radius:12px;border:1.5px solid ${bd};` +
+      'box-shadow:0 1px 4px rgba(0,0,0,0.2);">' +
+      esc(text) +
+      '</div>'
+    );
+  }
+
+  function labelMarker(latlng: number[], html: string) {
+    return Lf.marker(latlng, {
+      pane: 'sfLabels',
+      interactive: false,
+      keyboard: false,
+      icon: Lf.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] }),
+    });
+  }
+
+  // ------------------------------------------------------------
+  // ধাপ ১: ৬টা উপজেলা
+  // ------------------------------------------------------------
+  function renderStep1(fit = true) {
+    clearLayers();
+    const borders = getUpazilaBorders(geo);
+    const labels = getLabelPoints(geo);
+
+    UPAZILAS.forEach((u: any) => {
+      const isSel = pendingUpazila === u.id;
+      const fill = Lf.geoJSON(
+        { type: 'FeatureCollection', features: getUpazilaFeatures(geo, u.id) },
+        {
+          pane: 'sfAreas',
+          style: () => ({ stroke: false, fillColor: u.color, fillOpacity: isSel ? 0.36 : 0.2 }),
+          onEachFeature: (_f: any, layer: any) => {
+            layer.on('click', () => enterUpazila(u.id));
+          },
+        }
+      );
+      layerGroup.addLayer(fill);
+
+      layerGroup.addLayer(
+        Lf.polyline(borders[u.id], {
+          pane: 'sfBorders', color: u.color, weight: 3, opacity: 1,
+          lineCap: 'round', lineJoin: 'round', interactive: false,
+        })
+      );
+
+      const pt = labels.upazilas[u.id];
+      if (pt) {
+        layerGroup.addLayer(labelMarker(pt, chipHtml((isSel ? '✓ ' : '') + u.name, u.color, { size: 13 })));
+      }
+    });
+
+    step = 1;
+    backBtn.hidden = true;
+    titleEl.textContent = 'আপনার উপজেলা বেছে নিন';
+    subEl.textContent = 'যেকোনো উপজেলায় ট্যাপ করুন';
+    updateFooter();
+
+    if (fit) {
+      map.flyToBounds(getFeniBounds(geo, 0), { padding: [14, 14], duration: 0.6 });
+    }
+  }
+
+  // ------------------------------------------------------------
+  // ধাপ ২: নির্দিষ্ট উপজেলার ইউনিয়ন
+  // ------------------------------------------------------------
+  function unionStyle(color: string, selected: boolean) {
+    return selected
+      ? { color: '#1B2A4A', weight: 3.5, opacity: 1, fillColor: color, fillOpacity: 0.5 }
+      : { color, weight: 1.6, opacity: 0.95, fillColor: color, fillOpacity: 0.14 };
+  }
+
+  function setUnionSelection(name: string | null, color: string) {
+    const prev = pendingUnion;
+    pendingUnion = name;
+    [prev, name].forEach((n) => {
+      if (!n) return;
+      const layer = unionLayers[n];
+      if (layer) layer.setStyle(unionStyle(color, n === name));
+      const marker = unionMarkers[n];
+      if (marker) {
+        marker.setIcon(
+          Lf.divIcon({
+            className: '',
+            html: chipHtml(getUnionBn(n), color, { size: 11, active: n === name }),
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
+          })
+        );
+      }
+    });
+    updateFooter();
+  }
+
+  function renderStep2(upazilaId: string) {
+    clearLayers();
+    const u: any = UPAZILAS.find((x: any) => x.id === upazilaId);
+    const borders = getUpazilaBorders(geo);
+    const labels = getLabelPoints(geo);
+
+    // অন্য উপজেলাগুলো: শুধু পাতলা ড্যাশ লাইন, ট্যাপ করলে সেই উপজেলায় চলে যাবে
+    UPAZILAS.filter((o: any) => o.id !== upazilaId).forEach((o: any) => {
+      layerGroup.addLayer(
+        Lf.geoJSON(
+          { type: 'FeatureCollection', features: getUpazilaFeatures(geo, o.id) },
+          {
+            pane: 'sfAreas',
+            style: () => ({ stroke: false, fillColor: '#94a3b8', fillOpacity: 0.04 }),
+            onEachFeature: (_f: any, layer: any) => {
+              layer.on('click', () => enterUpazila(o.id));
+            },
+          }
+        )
+      );
+      layerGroup.addLayer(
+        Lf.polyline(borders[o.id], {
+          pane: 'sfBorders', color: '#64748b', weight: 1.5, opacity: 0.7, dashArray: '4 4', interactive: false,
+        })
+      );
+    });
+
+    // এই উপজেলার প্রতিটা ইউনিয়ন
+    getUpazilaFeatures(geo, upazilaId).forEach((f: any) => {
+      const name = f.properties.shapeName as string;
+      const layer = Lf.geoJSON(f, {
+        pane: 'sfAreas',
+        style: () => unionStyle(u.color, name === pendingUnion),
+        onEachFeature: (_f: any, l: any) => {
+          l.on('click', () => setUnionSelection(pendingUnion === name ? null : name, u.color));
+        },
+      });
+      unionLayers[name] = {
+        setStyle: (s: any) => layer.setStyle(s),
+      };
+      layerGroup.addLayer(layer);
+
+      const pt = labels.unions[name];
+      if (pt) {
+        const marker = labelMarker(pt, chipHtml(getUnionBn(name), u.color, { size: 11, active: name === pendingUnion }));
+        unionMarkers[name] = marker;
+        layerGroup.addLayer(marker);
+      }
+    });
+
+    // উপজেলার বাইরের সীমানা — একটু মোটা
+    layerGroup.addLayer(
+      Lf.polyline(borders[upazilaId], {
+        pane: 'sfBorders', color: u.color, weight: 4.5, opacity: 1,
+        lineCap: 'round', lineJoin: 'round', interactive: false,
+      })
+    );
+
+    step = 2;
+    backBtn.hidden = false;
+    titleEl.textContent = `${u.name} উপজেলা`;
+    subEl.textContent = 'ইউনিয়ন বাছা ঐচ্ছিক — না বাছলেও সেভ করা যাবে';
+    updateFooter();
+  }
+
+  function enterUpazila(upazilaId: string, union: string | null = null) {
+    pendingUpazila = upazilaId;
+    pendingUnion = union && getUnionUpazilaId(union) === upazilaId ? union : null;
+    setNote('');
+    renderStep2(upazilaId);
+    const b = getUpazilaBounds(geo, upazilaId);
+    if (b) map.flyToBounds(b, { padding: [26, 26], duration: 0.6 });
+  }
+
+  function goStep1() {
+    pendingUnion = null;
+    setNote('');
+    renderStep1(true);
+  }
+
+  // ------------------------------------------------------------
+  // ফুটার ও নোটিস
+  // ------------------------------------------------------------
+  function updateFooter() {
+    if (step === 2 && pendingUpazila) {
+      const u: any = UPAZILAS.find((x: any) => x.id === pendingUpazila);
+      let html = `<i class="fas fa-location-dot"></i>${esc(u.name)} উপজেলা`;
+      if (pendingUnion) {
+        html += ` · ${esc(getUnionBn(pendingUnion))}`;
+      } else {
+        html += '<small>ইউনিয়ন বাছা ঐচ্ছিক — ম্যাপে ট্যাপ করে বাছতে পারেন</small>';
+      }
+      selectedEl.innerHTML = html;
+      saveBtn.disabled = false;
+    } else {
+      const cur: any = currentUpazilaId ? UPAZILAS.find((x: any) => x.id === currentUpazilaId) : null;
+      selectedEl.textContent = cur ? `বর্তমান: ${cur.name}` : 'ম্যাপে একটা উপজেলায় ট্যাপ করুন';
+      saveBtn.disabled = true;
+    }
+  }
+
+  function setNote(text: string) {
+    if (text) {
+      noteEl.textContent = text;
+      noteEl.hidden = false;
+    } else {
+      noteEl.hidden = true;
+      noteEl.textContent = '';
+    }
+  }
+
+  // ------------------------------------------------------------
+  // শিট খোলা/বন্ধ
+  // ------------------------------------------------------------
+  function showFallback() {
+    loadingEl.hidden = true;
+    mapWrap.hidden = true;
+    footerEl.hidden = true;
+    fallbackEl.hidden = false;
+    backBtn.hidden = true;
+    titleEl.textContent = 'আপনার উপজেলা বেছে নিন';
+    subEl.textContent = 'লিস্ট থেকে বেছে নিন';
+  }
+
+  function showMapUI() {
+    mapWrap.hidden = false;
+    footerEl.hidden = false;
+    fallbackEl.hidden = true;
+  }
+
+  async function openSheet() {
+    const token = ++openToken;
+    hideHint();
+    selector.classList.add('open');
+    sheet.classList.add('active');
+    document.body.style.overflow = 'hidden';
+    trackEvent('upazila_map_opened', {});
+
+    pendingUpazila = currentUpazilaId;
+    pendingUnion = null;
+    setNote('');
+    showMapUI();
+    loadingEl.hidden = false;
+
+    try {
+      if (!geo) {
+        const [g] = await Promise.all([loadFeniGeo(), loadLeaflet()]);
+        geo = g;
+      } else {
+        await loadLeaflet();
+      }
+      if (token !== openToken || !sheet.classList.contains('active')) return;
+
+      // শিট দৃশ্যমান হয়ে লেআউট শেষ হওয়ার পর ম্যাপ সাইজ নেবে
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+      const firstTime = !mapReady;
+      if (firstTime) createMap();
+      else map.invalidateSize();
+
+      renderStep1(!firstTime);
+      loadingEl.hidden = true;
+    } catch (err) {
+      console.error('[LocationSelector] ম্যাপ লোড ব্যর্থ:', err);
+      showFallback();
+    }
+  }
+
+  function closeSheet() {
+    openToken++;
+    sheet.classList.remove('active');
+    selector.classList.remove('open');
+    document.body.style.overflow = '';
+    setNote('');
+    if (!hasResolvedUpazila) showHint();
+  }
+
+  // ------------------------------------------------------------
+  // "আমার লোকেশন" (ঐচ্ছিক)
+  // ------------------------------------------------------------
+  function setLocateState(busy: boolean) {
+    locateBtn.disabled = busy;
+    const icon = locateBtn.querySelector('i') as HTMLElement;
+    const text = locateBtn.querySelector('span') as HTMLElement;
+    icon.className = busy ? 'fas fa-spinner fa-spin' : 'fas fa-crosshairs';
+    text.textContent = busy ? 'খোঁজা হচ্ছে…' : 'আমার লোকেশন';
+  }
+
+  function drawUserDot(lat: number, lng: number) {
+    if (userDot) {
+      map.removeLayer(userDot);
+      userDot = null;
+    }
+    userDot = Lf.circleMarker([lat, lng], {
+      pane: 'sfLabels', radius: 7, color: '#ffffff', weight: 3,
+      fillColor: '#2563eb', fillOpacity: 1, interactive: false,
+    }).addTo(map);
+  }
+
+  locateBtn.addEventListener('click', () => {
+    if (locating || !mapReady) return;
+    locating = true;
+    setLocateState(true);
+    setNote('');
+
+    getCurrentPosition(
+      (pos: any) => {
+        locating = false;
+        setLocateState(false);
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const area = findAreaAt(lat, lng, geo);
+        if (!area) {
+          setNote('আপনি এখন ফেনীর বাইরে আছেন — ম্যাপ থেকে নিজের উপজেলা বেছে নিন');
+          if (step === 2) goStep1();
+          return;
+        }
+        drawUserDot(lat, lng);
+        trackEvent('upazila_locate_used', { upazila: area.upazilaId });
+        enterUpazila(area.upazilaId, area.union);
+      },
+      (err: any) => {
+        locating = false;
+        setLocateState(false);
+        const denied = err && /denied/i.test(String(err.message || ''));
+        const code = err && typeof err.code === 'number' ? err.code : 0;
+        setNote(
+          denied || code === 1
+            ? 'লোকেশন পারমিশন দেওয়া হয়নি — ম্যাপ থেকে নিজে বেছে নিন'
+            : 'লোকেশন পাওয়া যায়নি — আবার চেষ্টা করুন বা ম্যাপ থেকে বেছে নিন'
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    );
+  });
+
+  // ------------------------------------------------------------
   // প্রাথমিক উপজেলা নির্ণয় — priority: profile (বাংলা নাম দিয়ে
-  // ম্যাচ) → cache (slug) → mandatory dropdown
-  // ============================================================
+  // ম্যাচ) → cache (slug) → ইনস্ট্রাকশন বাবল (আর অটো ড্রপডাউন নয়)
+  // ------------------------------------------------------------
   async function resolveInitialUpazila() {
     const { data: { session } } = await supabase.auth.getSession();
 
@@ -246,54 +1086,58 @@
 
       const profileUpazilaName = profile?.upazila?.trim();
       const matched = profileUpazilaName
-        ? UPAZILAS.find((u) => u.name === profileUpazilaName)
+        ? UPAZILAS.find((u: any) => u.name === profileUpazilaName)
         : null;
 
       if (matched) {
-        setUpazila(matched.id, { save: true, syncProfile: false });
+        setUpazila(matched.id, { save: true, syncProfile: false, union: getSavedUnion(matched.id) });
         return;
       }
     }
 
     const cached = localStorage.getItem(STORAGE_KEY);
-    if (cached && UPAZILAS.some((u) => u.id === cached)) {
-      setUpazila(cached, { save: false });
+    if (cached && UPAZILAS.some((u: any) => u.id === cached)) {
+      setUpazila(cached, { save: false, union: getSavedUnion(cached) });
       return;
     }
 
-    label!.textContent = 'উপজেলা বেছে নিন';
-    openDropdown();
+    label.textContent = 'উপজেলা বেছে নিন';
+    showHint();
   }
 
   resolveInitialUpazila();
 
-  btn!.addEventListener('click', () => {
-    const willOpen = !selector!.classList.contains('open');
-    if (willOpen) {
-      openDropdown();
-    } else {
-      closeDropdown();
-    }
+  // ------------------------------------------------------------
+  // ইভেন্ট
+  // ------------------------------------------------------------
+  btn.addEventListener('click', () => {
+    if (sheet.classList.contains('active')) closeSheet();
+    else openSheet();
   });
 
-  document.addEventListener('click', (e) => {
-    if (!selector!.contains(e.target as Node)) {
-      if (!hasResolvedUpazila) return;
-      closeDropdown();
-    }
+  hint.addEventListener('click', () => openSheet());
+  closeBtn.addEventListener('click', () => closeSheet());
+  backBtn.addEventListener('click', () => goStep1());
+
+  saveBtn.addEventListener('click', () => {
+    if (step !== 2 || !pendingUpazila) return;
+    setUpazila(pendingUpazila, { save: true, syncProfile: true, union: pendingUnion });
+    closeSheet();
   });
 
-  window.addEventListener('resize', () => {
-    if (selector!.classList.contains('open')) {
-      updateDropdownPosition();
-    }
-  });
-
-  options.forEach((opt) => {
+  // ফলব্যাক লিস্ট (ম্যাপ লোড না হলে) — আগের আচরণ
+  fallbackOptions.forEach((opt) => {
     opt.addEventListener('click', () => {
       const id = (opt as HTMLElement).dataset.upazila!;
       setUpazila(id, { save: true, syncProfile: true });
-      closeDropdown();
+      closeSheet();
     });
   });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sheet.classList.contains('active')) closeSheet();
+  });
+
+  window.addEventListener('resize', positionHint);
+  window.addEventListener('scroll', positionHint, { passive: true });
 </script>
