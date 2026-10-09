@@ -179,7 +179,7 @@
 </style>
 
 <script>
-  import { subscribeToPush, getPushPermissionState, isPushSupported } from '../../lib/push.js';
+  import { subscribeToPush, getPushPermissionState, isPushSupported, registerGuestDevice } from '../../lib/push.js';
   import { supabase } from '../../lib/supabase.js';
   import { isNativeApp } from '../../lib/native-bridge.js';
 
@@ -201,7 +201,8 @@
   }
 
   // লগইন ছাড়া শুধু ফোনের অনুমতি চাওয়া (Android এর নিজের ডায়ালগ)।
-  // টোকেন সার্ভারে সেভ হবে না — লগইনের পর push.js সিঙ্ক করবে।
+  // অনুমতি পেলে caller registerGuestDevice() চালায় — টোকেন গেস্ট ডিভাইস হিসেবে
+  // সেভ হয় (শুধু অ্যাডমিনের প্রমো পাওয়ার জন্য); লগইনের পর push.js ইউজারের নামে সরায়।
   async function requestNativePermissionOnly() {
     try {
       const { PushNotifications } = await import('@capacitor/push-notifications');
@@ -231,6 +232,7 @@
       // আগে থেকেই অনুমতি আছে (যেমন রিইনস্টলের পর) — লগইন থাকলে ডায়ালগ ছাড়াই সিঙ্ক
       const { data: { session } } = await supabase.auth.getSession();
       if (session) subscribeToPush();
+      else registerGuestDevice(); // লগইন ছাড়া: গেস্ট ডিভাইস হিসেবে প্রমোর জন্য
       return;
     }
     if (status === 'denied') {
@@ -253,6 +255,8 @@
         const granted = await requestNativePermissionOnly(); // শুধু অনুমতি
         if (!granted) {
           localStorage.setItem(COOLDOWN_KEY, String(Date.now()));
+        } else {
+          registerGuestDevice(); // অনুমতি পেয়েই গেস্ট ডিভাইস হিসেবে টোকেন সেভ
         }
       }
     }, NATIVE_ASK_DELAY_MS);
