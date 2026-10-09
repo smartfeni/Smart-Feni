@@ -139,6 +139,17 @@ export async function POST({ request }) {
         ));
     }
 
+    // লগইন করেছে — এই ফোনের টোকেন আগে গেস্ট ডিভাইস হিসেবে থাকলে সেটা মুছে ফেলা,
+    // যাতে একই ফোনে প্রমো দুইবার (একবার গেস্ট হিসেবে, একবার ইনবক্সে) না যায়।
+    // ব্যর্থ হলেও লগইন/সাবস্ক্রিপশন সেভ আটকাবে না।
+    if (!upsertError && platform === 'android' && body.fcm_token) {
+      try {
+        await supabaseAdmin.from('guest_push_devices').delete().eq('fcm_token', body.fcm_token);
+      } catch (e) {
+        // উপেক্ষা
+      }
+    }
+
     if (upsertError) {
       return new Response(
         JSON.stringify({ error: 'সাবস্ক্রিপশন সেভ করতে ব্যর্থ', details: upsertError.message }),
