@@ -4,6 +4,14 @@
 // কম্পোনেন্ট: নোটিফিকেশন স্লাইড-ইন ড্রয়ার
 // (আগের সব কমেন্ট/হিস্ট্রি অপরিবর্তিত)
 //
+// আপডেট (Oct 2026 — লগইন ছাড়া মেসেজ বক্স): "মেসেজ" বাটন এখন লগইন ছাড়াও
+// খোলে। লগইন না থাকলে ব্যক্তিগত ইনবক্সের বদলে গেস্ট প্যানেল "অফার ও খবর"
+// (guest_promos — পাবলিক টেবিল, শুধু অ্যাডমিনের পাঠানো প্রমো) খোলে। লগইন
+// থাকলে আগের ড্রয়ার হুবহু একই। গেস্ট প্যানেল পুরোপুরি আলাদা মার্কআপ/স্ক্রিপ্ট
+// ব্লকে (ফাইলের শেষে) — পুরনো ড্রয়ার লজিকে হাত পড়েনি। গেস্টের "নতুন"
+// ব্যাজ ফোনের localStorage-এ (সার্ভারে ট্র্যাক হয় না)। পুশে ট্যাপ করলে
+// ?promo=<id> দিয়ে এই প্যানেল সরাসরি খোলে (native-bridge.js)।
+//
 // আপডেট (Blood Request ফিচার): category='blood_request' নোটিফিকেশনে
 // ইনলাইন "স্কিপ" / "আমি রক্তদানে আগ্রহী" বাটন, লাইভ status চেক।
 //
@@ -105,6 +113,36 @@
       <i class="fas fa-bell-slash"></i>
       কোনো মেসেজ নেই
     </p>
+  </aside>
+</div>
+
+<!-- ===== গেস্ট প্যানেল: লগইন ছাড়া "অফার ও খবর" (guest_promos) ===== -->
+<div class="nd-overlay" id="guestPromoOverlay">
+  <aside class="nd-panel" id="guestPromoPanel" role="dialog" aria-label="অফার ও খবর">
+    <div class="nd-header">
+      <h2><i class="fas fa-gift"></i> অফার ও খবর</h2>
+      <div class="nd-header-actions">
+        <button class="nd-close" id="guestPromoClose" type="button" aria-label="বন্ধ করুন">
+          <i class="fas fa-xmark"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="nd-list" id="guestPromoList"></div>
+
+    <p class="nd-empty" id="guestPromoEmpty" style="display:none;">
+      <i class="fas fa-gift"></i>
+      এখনো কোনো অফার বা খবর নেই
+    </p>
+
+    <div style="padding:14px 16px calc(14px + env(safe-area-inset-bottom, 0px));border-top:1px solid #EEF2F7;background:#fff;">
+      <p style="font-size:0.78rem;font-weight:600;color:#5A6E85;text-align:center;line-height:1.5;margin:0 0 10px;">
+        লগইন করলে আপনার ব্যক্তিগত মেসেজ, অর্ডার ও আপডেটও এখানে পাবেন
+      </p>
+      <button type="button" id="guestPromoLoginBtn" style="width:100%;background:#FF6B35;color:#fff;border:none;padding:13px;border-radius:14px;font-weight:700;font-size:0.92rem;font-family:inherit;cursor:pointer;">
+        লগইন / সাইন আপ
+      </button>
+    </div>
   </aside>
 </div>
 
@@ -1454,7 +1492,13 @@
     }
   }
 
-  window.addEventListener('smartfeni:open-notification-drawer', () => {
+  // লগইন থাকলে আগের মতো ব্যক্তিগত ড্রয়ার; না থাকলে গেস্ট "অফার ও খবর" প্যানেল
+  window.addEventListener('smartfeni:open-notification-drawer', async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      window.dispatchEvent(new CustomEvent('smartfeni:open-guest-promos'));
+      return;
+    }
     openDrawer();
     loadNotifications();
   });
@@ -1505,4 +1549,195 @@
     updateBadgeCount();
     unsubscribeRealtime();
   });
+</script>
+
+<!-- ============================================================
+     গেস্ট "অফার ও খবর" প্যানেলের স্ক্রিপ্ট (লগইন ছাড়া মেসেজ বক্স)
+     - guest_promos পাবলিক টেবিল থেকে শেষ ২০টা প্রমো
+     - "নতুন" ব্যাজ: ফোনের localStorage-এ শেষ দেখার সময় (সার্ভারে ট্র্যাক হয় না)
+     - ইনবক্স/ব্যক্তিগত ডেটা এখানে কখনো লোড হয় না
+     ============================================================ -->
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const SEEN_KEY = 'sf_guest_promos_seen_at';
+  const gpOverlay = document.getElementById('guestPromoOverlay');
+  const gpList = document.getElementById('guestPromoList');
+  const gpEmpty = document.getElementById('guestPromoEmpty');
+  const gpClose = document.getElementById('guestPromoClose');
+  const gpLoginBtn = document.getElementById('guestPromoLoginBtn');
+
+  let guestPromos = [];
+
+  function isSafeUrl(u) {
+    if (!u || typeof u !== 'string') return false;
+    const internal = u.startsWith('/') && !u.startsWith('//') && !u.includes('\\');
+    return internal || /^https:\/\/[^\s]+$/i.test(u);
+  }
+
+  function getSeenAt() {
+    const raw = localStorage.getItem(SEEN_KEY);
+    if (raw) return Number(raw);
+    // প্রথমবার: পুরনো সব প্রমো "নতুন" গণ্য করে ব্যাজে ভিড় না করে, এখন থেকে শুরু
+    const now = Date.now();
+    localStorage.setItem(SEEN_KEY, String(now));
+    return now;
+  }
+
+  function unreadCount() {
+    const seen = getSeenAt();
+    return guestPromos.filter((p) => new Date(p.created_at).getTime() > seen).length;
+  }
+
+  function dispatchCount(n) {
+    window.dispatchEvent(new CustomEvent('smartfeni:notification-count', { detail: { count: n } }));
+  }
+
+  async function fetchGuestPromos() {
+    const { data, error } = await supabase
+      .from('guest_promos')
+      .select('id, body, action_url, link_label, image_url, created_at')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error) return [];
+    return data || [];
+  }
+
+  function formatWhen(iso) {
+    return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Astro scoped CSS ডাইনামিক এলিমেন্টে কাজ করে না, তাই সব inline style
+  function renderGuestPromos(seenAt, highlightId) {
+    gpList.innerHTML = '';
+    if (guestPromos.length === 0) {
+      gpEmpty.style.display = 'flex';
+      return;
+    }
+    gpEmpty.style.display = 'none';
+
+    guestPromos.forEach((p) => {
+      const isNew = new Date(p.created_at).getTime() > seenAt;
+      const isTarget = highlightId && String(p.id) === String(highlightId);
+
+      const card = document.createElement('div');
+      card.dataset.promoId = p.id;
+      card.style.cssText = `background:#fff;border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:0 4px 14px rgba(15,23,42,0.07);border:2px solid ${isTarget ? '#FF6B35' : 'transparent'};`;
+
+      const top = document.createElement('div');
+      top.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
+
+      const tag = document.createElement('span');
+      tag.style.cssText = 'font-size:0.7rem;font-weight:800;color:#FF6B35;background:#FFF0EA;padding:3px 10px;border-radius:99px;';
+      tag.textContent = isNew ? '🎁 নতুন অফার' : '🎁 অফার';
+
+      const when = document.createElement('span');
+      when.style.cssText = 'font-size:0.7rem;color:#8FA0BC;font-weight:600;';
+      when.textContent = formatWhen(p.created_at);
+
+      top.appendChild(tag);
+      top.appendChild(when);
+      card.appendChild(top);
+
+      if (p.image_url && /^https:\/\//i.test(p.image_url)) {
+        const img = document.createElement('img');
+        img.src = p.image_url;
+        img.alt = '';
+        img.loading = 'lazy';
+        img.style.cssText = 'width:100%;border-radius:12px;margin-bottom:10px;display:block;object-fit:cover;max-height:220px;';
+        card.appendChild(img);
+      }
+
+      const body = document.createElement('div');
+      body.style.cssText = 'font-size:0.9rem;color:#1B2A4A;font-weight:600;line-height:1.6;white-space:pre-wrap;word-break:break-word;';
+      body.textContent = p.body;
+      card.appendChild(body);
+
+      if (isSafeUrl(p.action_url)) {
+        const link = document.createElement('a');
+        link.href = p.action_url;
+        link.rel = 'noopener';
+        link.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-top:12px;background:#FF6B35;color:#fff;text-decoration:none;padding:10px 16px;border-radius:12px;font-weight:700;font-size:0.84rem;';
+        link.textContent = (p.link_label || 'বিস্তারিত দেখুন') + ' →';
+        card.appendChild(link);
+      }
+
+      gpList.appendChild(card);
+    });
+  }
+
+  async function openGuestPanel(highlightId) {
+    const seenAt = getSeenAt(); // রেন্ডারের সময় "নতুন" চিহ্নের জন্য আগের মান
+    gpOverlay?.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    guestPromos = await fetchGuestPromos();
+    renderGuestPromos(seenAt, highlightId);
+
+    // এখন সব দেখা হয়ে গেছে — ব্যাজ মুছে ফেলা
+    localStorage.setItem(SEEN_KEY, String(Date.now()));
+    dispatchCount(0);
+
+    if (highlightId) {
+      const el = gpList.querySelector(`[data-promo-id="${CSS.escape(String(highlightId))}"]`);
+      el?.scrollIntoView({ block: 'center' });
+    }
+  }
+
+  function closeGuestPanel() {
+    gpOverlay?.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  async function refreshGuestBadge() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) return; // লগইন থাকলে ব্যক্তিগত ড্রয়ার নিজের ব্যাজ দেয়
+    guestPromos = await fetchGuestPromos();
+    dispatchCount(unreadCount());
+  }
+
+  window.addEventListener('smartfeni:open-guest-promos', () => openGuestPanel());
+
+  gpClose?.addEventListener('click', closeGuestPanel);
+  gpOverlay?.addEventListener('click', (e) => {
+    if (e.target === gpOverlay) closeGuestPanel();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && gpOverlay?.classList.contains('open')) closeGuestPanel();
+  });
+
+  gpLoginBtn?.addEventListener('click', () => {
+    closeGuestPanel();
+    window.openAuthModal?.('login');
+  });
+
+  // লগইন হয়ে গেলে গেস্ট প্যানেল বন্ধ; লগআউট হলে গেস্ট ব্যাজ আবার হিসাব
+  window.addEventListener('smartfeni:auth-changed', async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) closeGuestPanel();
+    else setTimeout(refreshGuestBadge, 400);
+  });
+  window.addEventListener('smartfeni:logged-out', () => {
+    setTimeout(refreshGuestBadge, 400);
+  });
+
+  async function initGuest() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) return;
+
+    // পুশ ট্যাপ ডীপ-লিংক: /?promo=<id>
+    const params = new URLSearchParams(window.location.search);
+    const promoId = params.get('promo');
+    if (promoId) {
+      params.delete('promo');
+      const newUrl = window.location.pathname + (params.toString() ? `?${params}` : '');
+      window.history.replaceState({}, '', newUrl);
+      openGuestPanel(promoId);
+      return;
+    }
+
+    refreshGuestBadge();
+  }
+
+  initGuest();
 </script>
