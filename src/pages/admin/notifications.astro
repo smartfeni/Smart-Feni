@@ -42,6 +42,19 @@
 //   সেভ হয়, যেন তাদের পড়া ট্র্যাক করা যায়।
 // - ট্র্যাকিং চালুর আগের পুরনো লগে campaign_id নেই, তাই সেগুলোতে
 //   পড়ার তথ্য দেখায় না।
+//
+// আপডেট (Oct 2026 — অডিয়েন্স সিলেক্টর + লগইন ছাড়া ডিভাইস):
+// - "সবাই / গ্রুপ" ট্যাব: "সব ইউজার" টগল অথবা গ্রুপ ভিত্তিক ম্যানুয়াল বাছাই
+//   (ডেলিভারি হিরো, রাইড হিরো, শপ/ক্লাব ওনার ও মডারেটর, ব্লাড ডোনার,
+//   অ্যাডমিন/মডারেটর) — প্রতিটা গ্রুপে সবার তালিকা, প্রতিজনের চেকবক্স,
+//   গ্রুপ-ভিত্তিক "সবাইকে সিলেক্ট" বাটন, সার্চ ও উপজেলা ফিল্টার।
+//   একজন একাধিক গ্রুপে থাকলেও একবারই মেসেজ পায়।
+// - তালিকা/সংখ্যা আসে admin-only RPC (admin_audience_members /
+//   admin_audience_counts) থেকে, Supabase-এ তৈরি।
+// - নতুন বক্স "লগইন ছাড়া ইনস্টলড অ্যাপ": শুধু অফার-প্রমো ক্যাটাগরিতে চালু।
+//   /api/push/guest-broadcast দিয়ে guest_push_devices-এর সব টোকেনে পুশ যায়
+//   এবং guest_promos-এ সেভ হয় (গেস্টরা মেসেজ বক্সে "অফার ও খবর" দেখে)।
+//   গেস্ট ডিভাইসে "কে পড়েছে" ট্র্যাকিং নেই, শুধু কতটি ডিভাইসে গেছে তার লগ।
 // ============================================================
 
 export const prerender = false;
@@ -70,7 +83,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         <div class="compose-card">
           <div class="target-tabs">
             <button class="target-tab active" data-target="single" type="button">নির্দিষ্ট ইউজার</button>
-            <button class="target-tab" data-target="broadcast" type="button">সবাইকে (ব্রডকাস্ট)</button>
+            <button class="target-tab" data-target="broadcast" type="button">সবাই / গ্রুপ</button>
           </div>
 
           <!-- নির্দিষ্ট ইউজার সার্চ -->
@@ -83,12 +96,32 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             <div id="userSearchResult" class="user-search-result"></div>
           </div>
 
-          <!-- ব্রডকাস্ট কনফার্মেশন -->
+          <!-- অডিয়েন্স: সব ইউজার / গ্রুপ ভিত্তিক বাছাই / লগইন ছাড়া ডিভাইস -->
           <div id="broadcastTargetPanel" class="target-panel" style="display:none;">
-            <p class="broadcast-note">
+            <label class="aud-all-row">
+              <input type="checkbox" id="audAll" checked />
+              <span><strong>সব ইউজার</strong> <small id="audAllCount"></small></span>
+            </label>
+            <p class="broadcast-note" id="audAllNote">
               <i class="fas fa-triangle-exclamation"></i>
-              এই মেসেজ <strong>সব রেজিস্টার্ড ইউজারের</strong> কাছে যাবে এবং পুশ নোটিফিকেশনও যাবে। সতর্কতার সাথে ব্যবহার করুন।
+              এই মেসেজ <strong>সব রেজিস্টার্ড ইউজারের</strong> কাছে যাবে এবং পুশ নোটিফিকেশনও যাবে। নির্দিষ্ট গ্রুপে পাঠাতে উপরের টিক তুলে দিন। সতর্কতার সাথে ব্যবহার করুন।
             </p>
+
+            <div id="audGroupsWrap" style="display:none;">
+              <label class="field-label">উপজেলা ফিল্টার (তালিকা ছোট করতে ও "সবাইকে সিলেক্ট"-এর জন্য)</label>
+              <div id="audUpazilaChips" class="aud-chips"></div>
+              <div id="audGroups"></div>
+            </div>
+
+            <div class="aud-guest-box">
+              <label class="aud-all-row" style="margin:0;">
+                <input type="checkbox" id="audGuest" checked />
+                <span><strong>লগইন ছাড়া ইনস্টলড অ্যাপ</strong> <small id="audGuestCount"></small></span>
+              </label>
+              <p class="aud-guest-hint" id="audGuestHint"></p>
+            </div>
+
+            <p class="aud-summary" id="audSummary">প্রাপক: ...</p>
           </div>
 
           <!-- ক্যাটাগরি সিলেক্টর -->
@@ -1008,6 +1041,46 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     }
   </style>
 
+  <style>
+    .aud-all-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: #F4F7FC;
+      border-radius: 14px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: #1B2A4A;
+    }
+    .aud-all-row input { width: 20px; height: 20px; accent-color: #FF6B35; flex-shrink: 0; }
+    .aud-all-row small { color: #8FA0BC; font-weight: 600; margin-left: 4px; }
+    .aud-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+    .aud-guest-box {
+      margin-top: 14px;
+      border: 1.5px dashed #D7E0EC;
+      border-radius: 14px;
+      padding: 10px;
+    }
+    .aud-guest-hint {
+      font-size: 0.76rem;
+      line-height: 1.55;
+      color: #5A6E85;
+      font-weight: 600;
+      margin: 8px 4px 2px;
+    }
+    .aud-summary {
+      margin-top: 14px;
+      padding: 10px 14px;
+      background: #FFF4EE;
+      border-radius: 12px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+  </style>
+
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
@@ -1222,6 +1295,338 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     });
 
     // ============================================================
+    // অডিয়েন্স সিলেক্টর: সব ইউজার / গ্রুপ ভিত্তিক ম্যানুয়াল বাছাই /
+    // লগইন ছাড়া ইনস্টলড অ্যাপ (গেস্ট ডিভাইস, শুধু প্রমো)
+    // তালিকা ও সংখ্যা আসে admin-only RPC থেকে। Astro scoped CSS
+    // ডাইনামিক এলিমেন্টে কাজ করে না, তাই এখানে সব inline style।
+    // ============================================================
+    const AUDIENCE_GROUPS = [
+      { key: 'delivery_hero', label: 'ডেলিভারি হিরো', icon: 'fa-motorcycle' },
+      { key: 'ride_hero', label: 'রাইড হিরো', icon: 'fa-car-side' },
+      { key: 'shop_owner', label: 'শপ ওনার', icon: 'fa-store' },
+      { key: 'shop_moderator', label: 'শপ মডারেটর', icon: 'fa-user-shield' },
+      { key: 'club_owner', label: 'ক্লাব ওনার', icon: 'fa-people-group' },
+      { key: 'club_moderator', label: 'ক্লাব মডারেটর', icon: 'fa-user-gear' },
+      { key: 'blood_donor', label: 'ব্লাড ডোনার', icon: 'fa-droplet' },
+      { key: 'staff', label: 'অ্যাডমিন / মডারেটর', icon: 'fa-user-tie' },
+    ];
+    const UPAZILA_LIST = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
+    const MEMBER_PAGE = 100;
+
+    const audAllInput = document.getElementById('audAll');
+    const audAllCountEl = document.getElementById('audAllCount');
+    const audAllNote = document.getElementById('audAllNote');
+    const audGroupsWrap = document.getElementById('audGroupsWrap');
+    const audGroupsEl = document.getElementById('audGroups');
+    const audChipsEl = document.getElementById('audUpazilaChips');
+    const audGuestInput = document.getElementById('audGuest');
+    const audGuestCountEl = document.getElementById('audGuestCount');
+    const audGuestHint = document.getElementById('audGuestHint');
+    const audSummary = document.getElementById('audSummary');
+
+    let audCounts = {};
+    let audUpazila = '';
+    const groupSel = {};   // key -> Map(userId -> {full_name, phone})
+    const groupState = {}; // key -> { rows, total, offset, search, seq, open, loaded }
+    const groupUI = {};    // key -> { countSpan, selBadge, ... }
+
+    AUDIENCE_GROUPS.forEach((g) => { groupSel[g.key] = new Map(); });
+
+    function mk(tag, css, text) {
+      const e = document.createElement(tag);
+      if (css) e.style.cssText = css;
+      if (text !== undefined) e.textContent = text;
+      return e;
+    }
+
+    function selectedUserIds() {
+      const s = new Set();
+      AUDIENCE_GROUPS.forEach((g) => groupSel[g.key].forEach((_, id) => s.add(id)));
+      return s;
+    }
+
+    function guestActive() {
+      return currentCategory === 'promo' && audGuestInput.checked && Number(audCounts.guest_devices || 0) > 0;
+    }
+
+    function audienceReady() {
+      return audAllInput.checked || selectedUserIds().size > 0 || guestActive();
+    }
+
+    function audienceLabel() {
+      if (audAllInput.checked) return 'সবাইকে';
+      const parts = AUDIENCE_GROUPS
+        .filter((g) => groupSel[g.key].size > 0)
+        .map((g) => `${g.label} (${groupSel[g.key].size})`);
+      const label = parts.length ? 'বাছাই: ' + parts.join(', ') : 'লগইন ছাড়া ডিভাইস';
+      return label.length > 180 ? label.slice(0, 177) + '...' : label;
+    }
+
+    function updateGuestBox() {
+      const n = Number(audCounts.guest_devices || 0);
+      const isPromo = currentCategory === 'promo';
+      audGuestCountEl.textContent = `(${n}টি ডিভাইস)`;
+      audGuestInput.disabled = !isPromo || n === 0;
+
+      if (!isPromo) {
+        audGuestHint.textContent = 'লগইন ছাড়া ডিভাইসে শুধু "অফার-প্রমো" ধরনের মেসেজ যায়। সাধারণ মেসেজ শুধু লগইন করা ইউজারদের কাছে যাবে — ওপরের "নোটিফিকেশনের ধরন" থেকে অফার-প্রমো বেছে নিলে এই অপশন চালু হবে।';
+      } else if (n === 0) {
+        audGuestHint.textContent = 'এখনো কোনো লগইন-ছাড়া ডিভাইস নেই। ইউজার অ্যাপ খুলে নোটিফিকেশনের অনুমতি দিলে ডিভাইস এখানে যোগ হবে।';
+      } else {
+        audGuestHint.textContent = 'ফোনে পুশ যাবে, আর অ্যাপের "মেসেজ" বক্সে (লগইন ছাড়াই) "অফার ও খবর" তালিকায় থাকবে। এই ডিভাইসগুলোর "কে পড়েছে" ট্র্যাকিং নেই, শুধু কতটিতে গেছে তার লগ থাকবে।';
+      }
+    }
+
+    function updateAudienceSummary() {
+      const parts = [];
+      if (audAllInput.checked) {
+        parts.push(`সব ইউজার (${audCounts.all_users ?? '?'} জন)`);
+      } else {
+        parts.push(`${selectedUserIds().size} জন বাছাই করা`);
+      }
+      if (guestActive()) parts.push(`${audCounts.guest_devices}টি লগইন-ছাড়া ডিভাইস`);
+      audSummary.textContent = 'প্রাপক: ' + parts.join(' + ');
+      updateSendBtnState();
+    }
+
+    // ---------- উপজেলা চিপ ----------
+    function renderChips() {
+      audChipsEl.innerHTML = '';
+      ['', ...UPAZILA_LIST].forEach((u) => {
+        const active = audUpazila === u;
+        const chip = mk(
+          'button',
+          `border:1.5px solid ${active ? '#FF6B35' : '#D7E0EC'};background:${active ? '#FF6B35' : '#fff'};color:${active ? '#fff' : '#1B2A4A'};padding:7px 13px;border-radius:99px;font-size:0.78rem;font-weight:700;font-family:inherit;cursor:pointer;`,
+          u || 'সব উপজেলা'
+        );
+        chip.type = 'button';
+        chip.addEventListener('click', () => {
+          audUpazila = u;
+          renderChips();
+          AUDIENCE_GROUPS.forEach((g) => {
+            const st = groupState[g.key];
+            st.loaded = false;
+            if (st.open) groupUI[g.key].load(true);
+          });
+        });
+        audChipsEl.appendChild(chip);
+      });
+    }
+
+    // ---------- গ্রুপ কার্ড ----------
+    function buildGroupCard(g) {
+      const st = { rows: [], total: 0, offset: 0, search: '', seq: 0, open: false, loaded: false };
+      groupState[g.key] = st;
+      const map = groupSel[g.key];
+
+      const card = mk('div', 'background:#fff;border:1.5px solid #E5EAF0;border-radius:14px;margin-top:10px;overflow:hidden;');
+
+      const head = mk('button', 'width:100%;display:flex;align-items:center;gap:10px;padding:13px 14px;background:#fff;border:none;cursor:pointer;font-family:inherit;text-align:left;');
+      head.type = 'button';
+      const icon = mk('i', 'color:#FF6B35;width:20px;text-align:center;');
+      icon.className = `fas ${g.icon}`;
+      const name = mk('span', 'font-weight:700;color:#1B2A4A;font-size:0.9rem;', g.label);
+      const countSpan = mk('span', 'font-size:0.78rem;color:#8FA0BC;font-weight:600;', '');
+      const spacer = mk('span', 'flex:1;');
+      const selBadge = mk('span', 'display:none;background:#FF6B35;color:#fff;font-size:0.72rem;font-weight:800;padding:3px 10px;border-radius:99px;', '');
+      const chev = mk('i', 'color:#8FA0BC;font-size:0.8rem;transition:transform 0.2s;');
+      chev.className = 'fas fa-chevron-down';
+      [icon, name, countSpan, spacer, selBadge, chev].forEach((x) => head.appendChild(x));
+
+      const body = mk('div', 'display:none;padding:0 14px 14px;border-top:1px solid #EEF2F7;');
+
+      const toolbar = mk('div', 'display:flex;gap:8px;margin:12px 0 8px;');
+      const selectAllBtn = mk('button', 'background:#FF6B35;color:#fff;border:none;padding:10px 14px;border-radius:12px;font-weight:700;font-size:0.8rem;font-family:inherit;cursor:pointer;white-space:nowrap;', '✓ সবাইকে সিলেক্ট');
+      selectAllBtn.type = 'button';
+      const search = mk('input', 'flex:1;min-width:0;padding:10px 12px;border:1.5px solid #D7E0EC;border-radius:12px;font-size:0.82rem;font-family:inherit;color:#1B2A4A;');
+      search.type = 'text';
+      search.placeholder = 'নাম বা ফোন খুঁজুন';
+      toolbar.appendChild(selectAllBtn);
+      toolbar.appendChild(search);
+
+      const status = mk('p', 'font-size:0.76rem;color:#8FA0BC;font-weight:600;margin:4px 2px 8px;', '');
+      const list = mk('div', 'display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;');
+      const moreBtn = mk('button', 'display:none;width:100%;margin-top:8px;background:#F4F7FC;color:#1B2A4A;border:none;border-radius:12px;padding:10px;font-size:0.8rem;font-weight:700;font-family:inherit;cursor:pointer;', 'আরও দেখান');
+      moreBtn.type = 'button';
+
+      [toolbar, status, list, moreBtn].forEach((x) => body.appendChild(x));
+      card.appendChild(head);
+      card.appendChild(body);
+
+      function updateSelBadge() {
+        if (map.size > 0) {
+          selBadge.style.display = 'inline-block';
+          selBadge.textContent = `${map.size} নির্বাচিত`;
+        } else {
+          selBadge.style.display = 'none';
+        }
+      }
+
+      function syncSelectAllLabel() {
+        const everyoneShown = st.total > 0 && st.rows.length === st.total && st.rows.every((r) => map.has(r.id));
+        selectAllBtn.textContent = everyoneShown ? '✕ সব বাদ দিন' : '✓ সবাইকে সিলেক্ট';
+      }
+
+      function renderRows() {
+        list.innerHTML = '';
+        st.rows.forEach((r) => {
+          const row = mk('label', 'display:flex;align-items:center;gap:10px;padding:9px 10px;background:#F8FAFC;border-radius:10px;cursor:pointer;');
+          const cb = mk('input', 'width:19px;height:19px;accent-color:#FF6B35;flex-shrink:0;');
+          cb.type = 'checkbox';
+          cb.checked = map.has(r.id);
+          cb.addEventListener('change', () => {
+            if (cb.checked) map.set(r.id, { full_name: r.full_name, phone: r.phone });
+            else map.delete(r.id);
+            updateSelBadge();
+            syncSelectAllLabel();
+            updateAudienceSummary();
+          });
+          const info = mk('div', 'min-width:0;flex:1;');
+          info.appendChild(mk('div', 'font-size:0.85rem;font-weight:700;color:#1B2A4A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', r.full_name || 'নাম নেই'));
+          info.appendChild(mk('div', 'font-size:0.74rem;color:#8FA0BC;font-weight:600;', `${r.phone || 'ফোন নেই'}${r.upazila ? ' • ' + r.upazila : ''}`));
+          row.appendChild(cb);
+          row.appendChild(info);
+          list.appendChild(row);
+        });
+        syncSelectAllLabel();
+      }
+
+      async function load(reset) {
+        if (reset) {
+          st.offset = 0;
+          st.rows = [];
+        }
+        const seq = ++st.seq; // পুরনো রেসপন্স নতুনটাকে ওভাররাইট করা আটকায়
+        status.textContent = 'লোড হচ্ছে...';
+
+        const { data, error } = await supabase.rpc('admin_audience_members', {
+          p_group: g.key,
+          p_upazila: audUpazila || null,
+          p_search: st.search || null,
+          p_limit: MEMBER_PAGE,
+          p_offset: st.offset,
+        });
+        if (seq !== st.seq) return;
+
+        if (error) {
+          status.textContent = 'লোড করা যায়নি: ' + error.message;
+          return;
+        }
+
+        const rows = data || [];
+        if (rows.length > 0) st.total = Number(rows[0].total);
+        else if (reset) st.total = 0;
+
+        st.rows.push(...rows);
+        st.offset += rows.length;
+        st.loaded = true;
+
+        status.textContent = st.rows.length === 0
+          ? 'এই ফিল্টারে কেউ নেই'
+          : `${st.total} জনের মধ্যে ${st.rows.length} জন দেখাচ্ছে`;
+        moreBtn.style.display = st.rows.length < st.total ? 'block' : 'none';
+        renderRows();
+      }
+
+      // "সবাইকে সিলেক্ট" — বর্তমান ফিল্টারের (উপজেলা + সার্চ) সবাই, শুধু দেখানো ১০০ জন না
+      async function fetchAllMatching() {
+        const all = [];
+        for (let off = 0; ; off += 1000) {
+          const { data, error } = await supabase.rpc('admin_audience_members', {
+            p_group: g.key,
+            p_upazila: audUpazila || null,
+            p_search: st.search || null,
+            p_limit: 1000,
+            p_offset: off,
+          });
+          if (error) throw error;
+          const rows = data || [];
+          all.push(...rows);
+          if (rows.length < 1000) break;
+        }
+        return all;
+      }
+
+      selectAllBtn.addEventListener('click', async () => {
+        selectAllBtn.disabled = true;
+        selectAllBtn.style.opacity = '0.6';
+        try {
+          const all = await fetchAllMatching();
+          const allSelected = all.length > 0 && all.every((r) => map.has(r.id));
+          all.forEach((r) => {
+            if (allSelected) map.delete(r.id);
+            else map.set(r.id, { full_name: r.full_name, phone: r.phone });
+          });
+          renderRows();
+          updateSelBadge();
+          updateAudienceSummary();
+        } catch (err) {
+          status.textContent = 'সিলেক্ট করা যায়নি: ' + (err.message || err);
+        }
+        selectAllBtn.disabled = false;
+        selectAllBtn.style.opacity = '1';
+      });
+
+      let searchTimer = null;
+      search.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          st.search = search.value.trim();
+          load(true);
+        }, 350);
+      });
+
+      moreBtn.addEventListener('click', () => load(false));
+
+      head.addEventListener('click', () => {
+        st.open = !st.open;
+        body.style.display = st.open ? 'block' : 'none';
+        chev.style.transform = st.open ? 'rotate(180deg)' : 'none';
+        if (st.open && !st.loaded) load(true);
+      });
+
+      groupUI[g.key] = { countSpan, load, updateSelBadge };
+      return card;
+    }
+
+    AUDIENCE_GROUPS.forEach((g) => audGroupsEl.appendChild(buildGroupCard(g)));
+    renderChips();
+
+    async function loadAudienceCounts() {
+      const { data, error } = await supabase.rpc('admin_audience_counts');
+      if (error) {
+        audSummary.textContent = 'সংখ্যা আনা যায়নি: ' + error.message;
+        return;
+      }
+      audCounts = {};
+      (data || []).forEach((r) => { audCounts[r.grp] = Number(r.cnt); });
+
+      audAllCountEl.textContent = `(${audCounts.all_users ?? 0} জন)`;
+      AUDIENCE_GROUPS.forEach((g) => {
+        groupUI[g.key].countSpan.textContent = `(${audCounts[g.key] ?? 0})`;
+      });
+      updateGuestBox();
+      updateAudienceSummary();
+    }
+
+    audAllInput.addEventListener('change', () => {
+      audGroupsWrap.style.display = audAllInput.checked ? 'none' : 'block';
+      audAllNote.style.display = audAllInput.checked ? 'block' : 'none';
+      updateAudienceSummary();
+    });
+
+    audGuestInput.addEventListener('change', updateAudienceSummary);
+
+    // ক্যাটাগরি বদলালে (সাধারণ মেসেজ ↔ অফার-প্রমো) গেস্ট বক্সের অবস্থা বদলায়
+    // (পুরনো ক্যাটাগরি হ্যান্ডলার আগে চলে currentCategory সেট করে, তারপর এটা)
+    document.querySelectorAll('.category-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        updateGuestBox();
+        updateAudienceSummary();
+      });
+    });
+
+    // ============================================================
     // মেসেজ ইনপুট + সেন্ড বাটন স্টেট
     // ============================================================
     const messageInput = document.getElementById('messageInput');
@@ -1230,7 +1635,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     function updateSendBtnState() {
       const hasMessage = messageInput.value.trim().length > 0;
-      const targetReady = currentTarget === 'broadcast' || (currentTarget === 'single' && selectedUser);
+      const targetReady = (currentTarget === 'broadcast' && audienceReady()) || (currentTarget === 'single' && selectedUser);
       sendBtn.disabled = !(hasMessage && targetReady);
     }
 
@@ -1362,6 +1767,29 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     // campaign_id হিসেবে এবং লগ রো-র id হিসেবে বসে, এভাবেই "কে পড়েছে"
     // ট্র্যাকিং কাজ করে।
     // ============================================================
+    // লগইন ছাড়া ডিভাইসে প্রমো — সার্ভার রুট অ্যাডমিন যাচাই করে FCM পাঠায়
+    async function sendGuestBroadcast({ message, imageUrl }) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('লগইন সেশন পাওয়া যায়নি');
+
+      const res = await fetch('/api/push/guest-broadcast', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          message,
+          image_url: imageUrl,
+          link_label: selectedLink?.label || null,
+          action_url: selectedLink?.url || null,
+        }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || 'লগইন-ছাড়া ডিভাইসে পাঠানো ব্যর্থ');
+      return out;
+    }
+
     sendBtn.addEventListener('click', async () => {
       const message = messageInput.value.trim();
       if (!message) return;
@@ -1375,6 +1803,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const campaignId = crypto.randomUUID();
       let isBroadcast = false;
       let logWarning = '';
+      let sentSummary = '';
+      let guestWarning = '';
       broadcastInserted = 0;
 
       try {
@@ -1415,23 +1845,46 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           if (logError) logWarning = logError.message;
         } else {
           isBroadcast = true;
-          const allProfiles = await fetchAllProfileIds();
 
-          const rows = allProfiles.map((p) => ({
-            user_id: p.id,
-            message,
-            category: currentCategory,
-            priority: ADMIN_PRIORITY,
-            image_url: imageUrl,
-            link_label: selectedLink?.label || null,
-            action_url: selectedLink?.url || null,
-            sender_type: 'admin',
-            sender_id: adminUser?.id || null,
-            campaign_id: campaignId,
-          }));
-          if (rows.length === 0) throw new Error('কোনো ইউজার পাওয়া যায়নি');
+          // প্রাপক: "সব ইউজার" হলে সব প্রোফাইল, নইলে গ্রুপ থেকে বাছাই করা (ডুপ্লিকেট ছাড়া)
+          const userIds = audAllInput.checked
+            ? (await fetchAllProfileIds()).map((p) => p.id)
+            : [...selectedUserIds()];
+          const sendToGuests = guestActive();
 
-          await insertInBatches(rows);
+          if (userIds.length === 0 && !sendToGuests) throw new Error('কোনো প্রাপক বাছাই করা হয়নি');
+
+          if (userIds.length > 0) {
+            const rows = userIds.map((id) => ({
+              user_id: id,
+              message,
+              category: currentCategory,
+              priority: ADMIN_PRIORITY,
+              image_url: imageUrl,
+              link_label: selectedLink?.label || null,
+              action_url: selectedLink?.url || null,
+              sender_type: 'admin',
+              sender_id: adminUser?.id || null,
+              campaign_id: campaignId,
+            }));
+            await insertInBatches(rows);
+          }
+
+          // লগইন ছাড়া ইনস্টলড অ্যাপ (শুধু প্রমো)। লগইন করা ইউজারদের ইনসার্ট আগেই
+          // হয়ে গেছে, তাই এখানে ব্যর্থ হলে পুরো পাঠানো ব্যর্থ না — শুধু সতর্কতা
+          let guestDevices = 0;
+          if (sendToGuests) {
+            try {
+              const out = await sendGuestBroadcast({ message, imageUrl });
+              guestDevices = Number(out.sent || 0);
+            } catch (guestErr) {
+              if (userIds.length === 0) throw guestErr;
+              guestWarning = guestErr.message;
+            }
+          }
+
+          sentSummary = `${userIds.length} জন`;
+          if (sendToGuests) sentSummary += ` + ${guestDevices}টি লগইন-ছাড়া ডিভাইস`;
 
           const { error: logError } = await supabase.from('admin_notification_log').insert({
             id: campaignId,
@@ -1441,8 +1894,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             link_label: selectedLink?.label || null,
             action_url: selectedLink?.url || null,
             target_type: 'broadcast',
-            target_label: 'সবাইকে',
-            recipient_count: rows.length,
+            target_label: audienceLabel(),
+            recipient_count: userIds.length,
+            guest_device_count: guestDevices,
             sent_by: adminUser?.id,
           });
           if (logError) logWarning = logError.message;
@@ -1450,8 +1904,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
         if (logWarning) {
           showFeedback('পাঠানো হয়েছে, কিন্তু হিস্ট্রি লগ সেভ হয়নি: ' + logWarning, 'error');
+        } else if (guestWarning) {
+          showFeedback(`লগইন করা ইউজারদের পাঠানো হয়েছে (${sentSummary}), কিন্তু লগইন-ছাড়া ডিভাইসে ব্যর্থ: ${guestWarning}`, 'error');
         } else {
-          showFeedback('সফলভাবে পাঠানো হয়েছে ✓', 'success');
+          showFeedback(sentSummary ? `সফলভাবে পাঠানো হয়েছে ✓ (${sentSummary})` : 'সফলভাবে পাঠানো হয়েছে ✓', 'success');
         }
         messageInput.value = '';
         selectedUser = null;
@@ -1513,7 +1969,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
       const total = Number(stats?.total_count || 0);
       if (total === 0) {
-        container.innerHTML = `<div class="log-stats-muted">পড়ার তথ্য নেই (ট্র্যাকিং চালুর আগের মেসেজ)</div>`;
+        container.innerHTML = log.guest_device_count > 0 && !log.recipient_count
+          ? `<div class="log-stats-muted">শুধু লগইন-ছাড়া ডিভাইসে গেছে (পড়ার ট্র্যাকিং নেই)</div>`
+          : `<div class="log-stats-muted">পড়ার তথ্য নেই (ট্র্যাকিং চালুর আগের মেসেজ)</div>`;
         return;
       }
 
@@ -1573,7 +2031,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
                 ${categoryLabels[log.category] || 'সাধারণ মেসেজ'}
               </span>
             </div>
-            <span style="font-size:0.72rem;color:#8FA0BC;">${log.recipient_count} জনকে</span>
+            <span style="font-size:0.72rem;color:#8FA0BC;">${log.recipient_count} জনকে${log.guest_device_count ? ` + ${log.guest_device_count}টি ডিভাইস` : ''}</span>
           </div>
           ${log.image_url ? `<img src="${log.image_url}" alt="" class="log-item-image" />` : ''}
           <div class="log-item-msg">${escapeHtml(log.message)}</div>
@@ -1751,6 +2209,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     window.addEventListener('smartfeni:admin-ready', () => {
       loadLog();
+      loadAudienceCounts();
     });
 
     initAdminGuard();
