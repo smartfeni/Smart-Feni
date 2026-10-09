@@ -1,0 +1,779 @@
+<!-- path: src/components/clinic-dashboard/DoctorsTab.astro -->
+---
+// ============================================================
+// কম্পোনেন্ট: DoctorsTab (clinic-dashboard) — ক্লিনিকের ডাক্তার ম্যানেজমেন্ট
+//
+// প্যারেন্ট (my-clinic.astro) 'smartfeni:clinic-ready' ইভেন্টে
+//   { clinic, isReceiver, isAdmin, userId } পাঠায় (ক্লিনিক বদলালেও আবার)।
+//
+// প্রতিনিধি (বা অ্যাডমিন) এখান থেকে:
+//   • নিজের ক্লিনিকে কোন কোন ডাক্তার বসেন, সময়সূচি ও সিরিয়ালের নম্বর দেখা
+//   • "ডাক্তার যোগ করুন" — আগে নাম/BMDC লিখে সার্চ (ডুপ্লিকেট এড়াতে):
+//       - আগে থেকে থাকা ডাক্তার বাছলে → শুধু এই ক্লিনিকের চেম্বার ফর্ম
+//       - না থাকলে → নতুন ডাক্তারের পুরো ফর্ম + চেম্বার ফর্ম
+//   • চেম্বার/সময় এডিট, চেম্বার সরানো (ডাক্তারের প্রোফাইল থেকে যায়)
+//   • ডাক্তারের নিজের তথ্য এডিট — শুধু যে প্রতিনিধি যোগ করেছেন (বা অ্যাডমিন)
+//
+// ব্যাকএন্ড: সব লেখা SECURITY DEFINER RPC দিয়ে (সরাসরি টেবিলে লেখা হয় না):
+//   rep_search_doctors, rep_add_doctor, rep_save_chamber,
+//   rep_update_doctor, rep_remove_chamber  (সব কাজ clinic_activity_log-এ লগ হয়)
+// ছবি: doctor-photos বাকেটে (প্রতিনিধির insert পলিসি আছে), আপলোডের আগে কম্প্রেস
+// প্রতিনিধির যোগ করা ডাক্তার সাথে সাথে পাবলিশড; অ্যাডমিন পরে যাচাই করেন
+// ============================================================
+---
+
+<div class="dt-wrap">
+
+  <div class="dt-note">
+    <i class="fas fa-circle-info"></i>
+    <span>আপনার যোগ করা তথ্য সাথে সাথে পাবলিক পেজে দেখা যায়। ডাক্তার আগে থেকে সাইটে থাকলে নতুন করে না বানিয়ে নাম বা BMDC লিখে খুঁজে বেছে নিন।</span>
+  </div>
+
+  <div class="dt-head">
+    <h3>ক্লিনিকের ডাক্তার <span id="dtCount" class="dt-count"></span></h3>
+    <button type="button" class="dt-btn primary" id="dtAddBtn"><i class="fas fa-plus"></i> ডাক্তার যোগ করুন</button>
+  </div>
+
+  <div id="dtList" class="dt-list"></div>
+
+  <div class="dt-empty" id="dtEmpty" style="display:none;">
+    <i class="fas fa-user-doctor"></i>
+    <p>এই ক্লিনিকে এখনো কোনো ডাক্তার যোগ হয়নি।<br />উপরের বাটন চেপে প্রথম ডাক্তার যোগ করুন।</p>
+  </div>
+
+  <div id="dtLoading" class="dt-empty"><div class="dt-spinner"></div><p>লোড হচ্ছে...</p></div>
+
+  <!-- ===== মোডাল (সার্চ / চেম্বার ফর্ম / ডাক্তার ফর্ম) ===== -->
+  <div class="dt-overlay" id="dtOverlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="dtModalTitle">
+    <div class="dt-sheet">
+      <div class="dt-sheet-head">
+        <h4 id="dtModalTitle">ডাক্তার যোগ করুন</h4>
+        <button type="button" class="dt-close" id="dtClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      </div>
+      <div class="dt-sheet-body" id="dtModalBody"></div>
+    </div>
+  </div>
+
+</div>
+
+<style is:global>
+  .dt-wrap { display: flex; flex-direction: column; gap: 14px; }
+  .dt-note { display: flex; gap: 8px; align-items: flex-start; background: #EAF2FF; color: #1D4FA8; border-radius: 14px; padding: 11px 14px; font-size: 0.78rem; line-height: 1.6; font-weight: 600; }
+  .dt-note i { margin-top: 3px; }
+
+  .dt-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .dt-head h3 { font-size: 1.02rem; font-weight: 700; color: #1B2A4A; }
+  .dt-count { color: #FF6B35; font-weight: 800; }
+
+  .dt-btn { border: none; padding: 12px 16px; border-radius: 14px; font-weight: 700; font-size: 0.88rem; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+  .dt-btn.primary { background: #FF6B35; color: #fff; }
+  .dt-btn.soft { background: #F1F4F9; color: #44506B; }
+  .dt-btn.blue { background: #EAF2FF; color: #1D4FA8; }
+  .dt-btn.red { background: #FFF0EA; color: #D14343; }
+  .dt-btn.red.confirming { background: #D14343; color: #fff; }
+  .dt-btn.wide { width: 100%; }
+  .dt-btn.small { padding: 9px 13px; font-size: 0.8rem; border-radius: 12px; }
+  .dt-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .dt-list { display: flex; flex-direction: column; gap: 12px; }
+  .dt-card { background: #fff; border-radius: 18px; padding: 16px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); }
+  .dt-card-top { display: flex; gap: 12px; align-items: center; }
+  .dt-photo { width: 56px; height: 56px; border-radius: 16px; background: #EAF6F9; color: #0891B2; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; overflow: hidden; flex-shrink: 0; }
+  .dt-photo img { width: 100%; height: 100%; object-fit: cover; }
+  .dt-info { min-width: 0; flex: 1; }
+  .dt-name { font-size: 0.98rem; font-weight: 700; color: #1B2A4A; line-height: 1.4; }
+  .dt-sub { font-size: 0.8rem; color: #5A6E85; margin-top: 2px; line-height: 1.5; }
+  .dt-meta { font-size: 0.74rem; color: #8FA0BC; margin-top: 2px; }
+  .dt-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; background: #FFF4D6; color: #9A6412; margin-top: 4px; }
+
+  .dt-slots { margin-top: 12px; background: #F8FAFC; border-radius: 14px; padding: 10px 13px; font-size: 0.82rem; color: #44506B; line-height: 1.75; }
+  .dt-slots b { color: #1B2A4A; }
+  .dt-slots .dt-noslot { color: #8FA0BC; }
+  .dt-chfoot { margin-top: 8px; font-size: 0.8rem; color: #5A6E85; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .dt-chfoot i { color: #FF6B35; margin-right: 4px; }
+  .dt-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .dt-actions .dt-btn { flex: 1; min-width: 130px; }
+  .dt-removehint { margin-top: 8px; font-size: 0.76rem; color: #B42318; font-weight: 600; line-height: 1.55; }
+
+  .dt-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 46px 10px; color: #B0BCCB; text-align: center; }
+  .dt-empty i { font-size: 2.2rem; }
+  .dt-empty p { font-size: 0.9rem; color: #8FA0BC; line-height: 1.65; }
+  .dt-spinner { width: 30px; height: 30px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: dtSpin 0.8s linear infinite; }
+  @keyframes dtSpin { to { transform: rotate(360deg); } }
+
+  /* মোডাল */
+  .dt-overlay { position: fixed; inset: 0; z-index: 10060; background: rgba(15, 23, 42, 0.55); display: flex; align-items: flex-end; justify-content: center; }
+  .dt-sheet { background: #fff; width: min(580px, 100%); max-height: 94vh; max-height: 94dvh; border-radius: 22px 22px 0 0; display: flex; flex-direction: column; box-shadow: 0 -10px 40px rgba(15, 23, 42, 0.25); }
+  @media (min-width: 640px) { .dt-overlay { align-items: center; } .dt-sheet { border-radius: 22px; } }
+  .dt-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; border-bottom: 1px solid #EEF2F7; }
+  .dt-sheet-head h4 { font-size: 1.02rem; font-weight: 700; color: #1B2A4A; }
+  .dt-close { width: 36px; height: 36px; border-radius: 50%; border: none; background: #F1F4F9; color: #5A6E85; cursor: pointer; font-size: 1rem; }
+  .dt-sheet-body { padding: 16px 18px 26px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+  .dt-field { margin-bottom: 14px; }
+  .dt-field label, .dt-label { display: block; font-size: 0.8rem; font-weight: 700; color: #1B2A4A; margin-bottom: 6px; }
+  .dt-label .dt-opt { color: #8FA0BC; font-weight: 600; }
+  .dt-input, .dt-select, .dt-textarea { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1.5px solid #E5EAF0; background: #FBFCFE; font-size: 16px; font-family: inherit; color: #1B2A4A; }
+  .dt-textarea { min-height: 84px; resize: vertical; line-height: 1.6; }
+  .dt-input:focus, .dt-select:focus, .dt-textarea:focus { outline: none; border-color: #FF6B35; background: #fff; }
+  .dt-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .dt-help { font-size: 0.74rem; color: #8FA0BC; margin-top: 5px; line-height: 1.55; }
+  .dt-section { font-size: 0.86rem; font-weight: 800; color: #0891B2; margin: 20px 0 12px; padding-top: 14px; border-top: 1px dashed #E5EAF0; }
+  .dt-check { display: flex; align-items: center; gap: 8px; font-size: 0.84rem; color: #44506B; font-weight: 600; margin-top: 8px; cursor: pointer; }
+  .dt-check input { width: 18px; height: 18px; accent-color: #FF6B35; }
+
+  .dt-specs { display: flex; flex-wrap: wrap; gap: 7px; }
+  .dt-spec { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 20px; border: 1.5px solid #E5EAF0; background: #fff; font-size: 0.8rem; font-weight: 700; color: #5A6E85; cursor: pointer; }
+  .dt-spec input { display: none; }
+  .dt-spec.on { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+
+  .dt-photo-pick { display: flex; align-items: center; gap: 12px; }
+  .dt-photo-pick .dt-photo { width: 72px; height: 72px; }
+  .dt-photo-pick input[type=file] { display: none; }
+
+  .dt-slot-row { display: grid; grid-template-columns: 1.3fr 1fr 1fr auto; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .dt-slot-row .dt-select, .dt-slot-row .dt-input { padding: 10px 8px; border-radius: 12px; font-size: 15px; }
+  .dt-slot-del { width: 36px; height: 40px; border: none; border-radius: 12px; background: #FFF0EA; color: #D14343; cursor: pointer; }
+
+  .dt-result { display: flex; gap: 11px; align-items: center; width: 100%; text-align: left; background: #fff; border: 1.5px solid #E5EAF0; border-radius: 16px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; font-family: inherit; }
+  .dt-result:hover { border-color: #FF6B35; }
+  .dt-result.off { opacity: 0.6; cursor: not-allowed; }
+  .dt-result .dt-photo { width: 44px; height: 44px; border-radius: 12px; font-size: 1.2rem; }
+  .dt-result-here { color: #1B7A3C; background: #EAFBF0; }
+
+  .dt-picked { display: flex; gap: 12px; align-items: center; background: #F8FAFC; border-radius: 16px; padding: 12px; margin-bottom: 14px; }
+  .dt-msg { margin-top: 12px; font-size: 0.84rem; font-weight: 700; color: #D14343; line-height: 1.6; }
+  .dt-msg.ok { color: #1B7A3C; }
+  .dt-savebar { margin-top: 18px; display: flex; gap: 10px; }
+  .dt-savebar .dt-btn { flex: 1; }
+
+  .dt-toast { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); background: #1B2A4A; color: #fff; padding: 12px 20px; border-radius: 14px; font-size: 0.86rem; font-weight: 700; z-index: 10080; max-width: 90vw; text-align: center; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.3); }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { compressImage } from '../../lib/imageCompress.js';
+
+  const BN = '০১২৩৪৫৬৭৮৯';
+  const toBn = (n) => String(n).replace(/\d/g, (d) => BN[d]);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const $ = (id) => document.getElementById(id);
+
+  const WEEKDAYS = { 0: 'রবিবার', 1: 'সোমবার', 2: 'মঙ্গলবার', 3: 'বুধবার', 4: 'বৃহস্পতিবার', 5: 'শুক্রবার', 6: 'শনিবার' };
+  const WEEKDAY_ORDER = [6, 0, 1, 2, 3, 4, 5]; // শনি থেকে শুরু (বাংলাদেশের সপ্তাহ)
+  const UPAZILAS = [
+    ['feni-sadar', 'ফেনী সদর'], ['chhagalnaiya', 'ছাগলনাইয়া'], ['daganbhuiyan', 'দাগনভূঞা'],
+    ['parshuram', 'পরশুরাম'], ['fulgazi', 'ফুলগাজী'], ['sonagazi', 'সোনাগাজী'],
+  ];
+  const MAX_SLOTS = 28;
+
+  const ERRORS = [
+    ['duplicate_bmdc', 'এই BMDC নম্বরে আগে থেকেই একজন ডাক্তার আছেন। ডাক্তার যোগ করার ধাপে নাম বা BMDC লিখে খুঁজে তাঁকে বেছে নিন।'],
+    ['daily_limit', 'গত ২৪ ঘণ্টায় ১৫ জন নতুন ডাক্তার যোগ করার সীমা শেষ। পরে আবার চেষ্টা করুন। আগে থেকে থাকা ডাক্তারের চেম্বার যোগ করতে সমস্যা নেই।'],
+    ['not_creator', 'এই ডাক্তারের তথ্য শুধু যে প্রতিনিধি যোগ করেছেন তিনিই বদলাতে পারবেন।'],
+    ['doctor_unavailable', 'এই ডাক্তার এখনো পাবলিশড নন। অ্যাডমিন যাচাই করার পর চেম্বার যোগ করা যাবে।'],
+    ['not_allowed', 'এই কাজ করার অনুমতি আপনার নেই।'],
+    ['bmdc_required', 'BMDC নম্বর দিন, অথবা "BMDC নম্বর নেই" টিক দিন।'],
+    ['specialty_required', 'অন্তত একটা স্পেশালিটি বাছুন।'],
+    ['name_required', 'ডাক্তারের নাম দিন।'],
+    ['invalid_photo', 'ছবি ঠিকমতো আপলোড হয়নি, আবার দিন।'],
+    ['invalid_number', 'ফি বা অভিজ্ঞতার সংখ্যা ঋণাত্মক হতে পারবে না।'],
+    ['too_many_slots', 'সর্বোচ্চ ২৮টা সময় দেওয়া যাবে।'],
+    ['invalid_slot', 'সময় ঠিক নেই। প্রতিটার শেষ সময় শুরুর পরে হতে হবে।'],
+    ['clinic_not_found', 'ক্লিনিক খুঁজে পাওয়া যায়নি।'],
+  ];
+  const errMsg = (error) => {
+    const m = String(error?.message || error || '');
+    const hit = ERRORS.find(([k]) => m.includes(k));
+    return hit ? hit[1] : 'সেভ করা যায়নি, একটু পরে আবার চেষ্টা করুন।';
+  };
+
+  let ctx = null;          // { clinic, isReceiver, isAdmin, userId }
+  let specialties = [];    // [{ slug, name_bn }]
+  let specMap = {};
+  let items = [];          // ক্লিনিকের চেম্বার + ডাক্তার
+  let loadSeq = 0;
+  let modal = null;        // { mode, doctor, chamber, photoUrl, busy }
+  let searchTimer = null;
+  let searchSeq = 0;
+  let removeTimer = null;
+
+  // ---------- ছোট হেল্পার ----------
+  function toast(text) {
+    const t = document.createElement('div');
+    t.className = 'dt-toast';
+    t.textContent = text;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2800);
+  }
+
+  function hhmm(t) { return String(t || '').slice(0, 5); }
+
+  function fmtTime(t) {
+    const [h, m] = hhmm(t).split(':').map(Number);
+    if (Number.isNaN(h)) return '';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${toBn(h12)}:${toBn(String(m).padStart(2, '0'))} ${h < 12 ? 'AM' : 'PM'}`;
+  }
+
+  const specNames = (arr) => (arr || []).map((s) => specMap[s] || s).join(', ');
+  const upazilaLabel = (slug) => (UPAZILAS.find((u) => u[0] === slug) || [])[1] || '';
+
+  function photoHtml(url) {
+    return url ? `<img src="${esc(url)}" alt="" loading="lazy" />` : '<i class="fas fa-user-doctor"></i>';
+  }
+
+  // ---------- ডাটা লোড ----------
+  async function loadSpecialties() {
+    if (specialties.length) return;
+    const { data } = await supabase.from('specialties').select('slug, name_bn').eq('is_active', true).order('sort_order');
+    specialties = data || [];
+    specMap = {};
+    specialties.forEach((s) => { specMap[s.slug] = s.name_bn; });
+  }
+
+  async function loadList() {
+    if (!ctx) return;
+    const seq = ++loadSeq;
+    $('dtLoading').style.display = 'flex';
+    $('dtEmpty').style.display = 'none';
+    $('dtList').innerHTML = '';
+
+    await loadSpecialties();
+
+    const { data, error } = await supabase
+      .from('doctor_chambers')
+      .select('id, doctor_id, place_name, address, upazila, serial_phone, serial_whatsapp, fee, note, updated_at, doctors!inner(id, name_bn, name_en, photo_url, specialties, degrees, bmdc_no, no_bmdc, bio, experience_years, default_fee, upazila, created_by, status), chamber_slots(weekday, start_time, end_time)')
+      .eq('clinic_id', ctx.clinic.id);
+
+    if (seq !== loadSeq) return;
+    $('dtLoading').style.display = 'none';
+
+    if (error) {
+      $('dtList').innerHTML = `<div class="dt-msg">ডাক্তারের তালিকা লোড করা যায়নি। পেজ রিফ্রেশ করে আবার চেষ্টা করুন।</div>`;
+      return;
+    }
+
+    items = (data || []).sort((a, b) => String(a.doctors.name_bn).localeCompare(String(b.doctors.name_bn), 'bn'));
+    renderList();
+  }
+
+  function renderList() {
+    const list = $('dtList');
+    $('dtCount').textContent = items.length ? `(${toBn(items.length)})` : '';
+    $('dtEmpty').style.display = items.length ? 'none' : 'flex';
+
+    list.innerHTML = items.map((c) => {
+      const d = c.doctors;
+      const slots = c.chamber_slots || [];
+      const days = WEEKDAY_ORDER.map((wd) => {
+        const ds = slots.filter((s) => s.weekday === wd).sort((a, b) => hhmm(a.start_time).localeCompare(hhmm(b.start_time)));
+        return ds.length ? `<div><b>${WEEKDAYS[wd]}:</b> ${ds.map((s) => `${fmtTime(s.start_time)} – ${fmtTime(s.end_time)}`).join(', ')}</div>` : '';
+      }).join('');
+      const canEditDoctor = ctx.isAdmin || d.created_by === ctx.userId;
+      const sub = [specNames(d.specialties), d.degrees].filter(Boolean).join(' · ');
+
+      return `
+        <div class="dt-card" data-chamber="${esc(c.id)}" data-doctor="${esc(d.id)}">
+          <div class="dt-card-top">
+            <div class="dt-photo">${photoHtml(d.photo_url)}</div>
+            <div class="dt-info">
+              <div class="dt-name">${esc(d.name_bn)}</div>
+              ${sub ? `<div class="dt-sub">${esc(sub)}</div>` : ''}
+              <div class="dt-meta">${d.bmdc_no ? 'BMDC: ' + esc(d.bmdc_no) : 'BMDC নম্বর নেই'}</div>
+              ${d.status !== 'published' ? '<span class="dt-chip"><i class="fas fa-hourglass-half"></i> অ্যাডমিন রিভিউয়ের অপেক্ষায়</span>' : ''}
+            </div>
+          </div>
+          <div class="dt-slots">${days || '<span class="dt-noslot">বসার সময় দেওয়া নেই</span>'}</div>
+          <div class="dt-chfoot">
+            ${c.serial_phone ? `<span><i class="fas fa-phone"></i>${esc(c.serial_phone)}</span>` : '<span style="color:#B42318;">সিরিয়ালের নম্বর নেই</span>'}
+            ${c.fee != null ? `<span><i class="fas fa-bangladeshi-taka-sign"></i>ফি ${toBn(c.fee)}</span>` : ''}
+          </div>
+          <div class="dt-actions">
+            <button type="button" class="dt-btn blue small" data-act="edit-chamber"><i class="fas fa-clock"></i> সময় ও নম্বর বদলান</button>
+            ${canEditDoctor ? '<button type="button" class="dt-btn soft small" data-act="edit-doctor"><i class="fas fa-pen"></i> ডাক্তারের তথ্য</button>' : ''}
+            <button type="button" class="dt-btn red small" data-act="remove"><i class="fas fa-trash"></i> সরান</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ---------- মোডাল ----------
+  function openModal() {
+    $('dtOverlay').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    $('dtOverlay').style.display = 'none';
+    document.body.style.overflow = '';
+    modal = null;
+    clearTimeout(searchTimer);
+  }
+
+  const pickedHtml = (d) => `
+    <div class="dt-picked">
+      <div class="dt-photo">${photoHtml(d.photo_url)}</div>
+      <div class="dt-info">
+        <div class="dt-name">${esc(d.name_bn)}</div>
+        <div class="dt-sub">${esc(specNames(d.specialties))}</div>
+        <div class="dt-meta">${d.bmdc_no ? 'BMDC: ' + esc(d.bmdc_no) : 'BMDC নম্বর নেই'}</div>
+      </div>
+    </div>`;
+
+  // --- ধাপ ১: সার্চ ---
+  function showSearch() {
+    modal = { mode: 'search' };
+    $('dtModalTitle').textContent = 'ডাক্তার যোগ করুন';
+    $('dtModalBody').innerHTML = `
+      <div class="dt-field">
+        <label for="dtSearch">আগে খুঁজে দেখুন ডাক্তার সাইটে আছেন কিনা</label>
+        <input type="text" id="dtSearch" class="dt-input" placeholder="ডাক্তারের নাম বা BMDC নম্বর লিখুন" autocomplete="off" />
+        <div class="dt-help">কমপক্ষে ২ অক্ষর লিখুন। বাংলা বা ইংরেজি, দুইভাবেই খোঁজা যায়।</div>
+      </div>
+      <div id="dtResults"></div>
+      <button type="button" class="dt-btn soft wide" data-act="new-doctor"><i class="fas fa-user-plus"></i> তালিকায় নেই? নতুন ডাক্তার যোগ করুন</button>
+      <div class="dt-help" style="text-align:center;margin-top:8px;">দিনে সর্বোচ্চ ১৫ জন নতুন ডাক্তার যোগ করা যায়।</div>`;
+    openModal();
+    setTimeout(() => $('dtSearch')?.focus(), 80);
+  }
+
+  async function runSearch(q) {
+    const box = $('dtResults');
+    if (!box) return;
+    const text = q.trim();
+    if (text.length < 2) { box.innerHTML = ''; return; }
+    const seq = ++searchSeq;
+    box.innerHTML = '<div class="dt-empty" style="padding:18px;"><div class="dt-spinner"></div></div>';
+
+    const { data, error } = await supabase.rpc('rep_search_doctors', { p_clinic: ctx.clinic.id, p_query: text, p_limit: 8 });
+    if (seq !== searchSeq || !$('dtResults')) return;
+
+    if (error) { box.innerHTML = `<div class="dt-msg">${esc(errMsg(error))}</div>`; return; }
+    const rows = data || [];
+    if (!rows.length) {
+      box.innerHTML = '<div class="dt-help" style="margin:4px 0 14px;">এই নামে কেউ পাওয়া যায়নি। নিচের বাটন চেপে নতুন ডাক্তার যোগ করুন।</div>';
+      return;
+    }
+    box.innerHTML = rows.map((r) => {
+      const pending = r.status !== 'published';
+      return `
+        <button type="button" class="dt-result ${pending ? 'off' : ''}" data-act="pick" data-id="${esc(r.id)}" ${pending ? 'disabled' : ''}>
+          <div class="dt-photo">${photoHtml(r.photo_url)}</div>
+          <div class="dt-info">
+            <div class="dt-name">${esc(r.name_bn)}</div>
+            <div class="dt-sub">${esc(specNames(r.specialties))}</div>
+            <div class="dt-meta">${r.bmdc_no ? 'BMDC: ' + esc(r.bmdc_no) : 'BMDC নম্বর নেই'}${r.upazila ? ' · ' + esc(upazilaLabel(r.upazila)) : ''}</div>
+            ${r.has_chamber_here ? '<span class="dt-chip dt-result-here"><i class="fas fa-check"></i> এই ক্লিনিকে আছেন</span>' : ''}
+            ${pending ? '<span class="dt-chip"><i class="fas fa-hourglass-half"></i> অ্যাডমিন রিভিউয়ের অপেক্ষায়</span>' : ''}
+          </div>
+        </button>`;
+    }).join('');
+    box.dataset.rows = JSON.stringify(rows);
+  }
+
+  // --- চেম্বার ফর্ম ---
+  function slotRowHtml(s) {
+    const opts = WEEKDAY_ORDER.map((wd) => `<option value="${wd}" ${s && Number(s.weekday) === wd ? 'selected' : ''}>${WEEKDAYS[wd]}</option>`).join('');
+    return `
+      <div class="dt-slot-row">
+        <select class="dt-select dt-sl-day" aria-label="বার">${opts}</select>
+        <input type="time" class="dt-input dt-sl-start" value="${s ? esc(hhmm(s.start_time || s.start)) : ''}" aria-label="শুরু" />
+        <input type="time" class="dt-input dt-sl-end" value="${s ? esc(hhmm(s.end_time || s.end)) : ''}" aria-label="শেষ" />
+        <button type="button" class="dt-slot-del" data-act="del-slot" aria-label="সময় মুছুন"><i class="fas fa-xmark"></i></button>
+      </div>`;
+  }
+
+  function chamberFormHtml(ch) {
+    const clinic = ctx.clinic;
+    const slots = (ch?.chamber_slots || []).slice().sort((a, b) => (WEEKDAY_ORDER.indexOf(a.weekday) - WEEKDAY_ORDER.indexOf(b.weekday)) || hhmm(a.start_time).localeCompare(hhmm(b.start_time)));
+    const upOpts = ['<option value="">ক্লিনিকের উপজেলাই থাকুক</option>']
+      .concat(UPAZILAS.map(([v, l]) => `<option value="${v}" ${ch?.upazila === v ? 'selected' : ''}>${l}</option>`)).join('');
+    return `
+      <div class="dt-section" style="margin-top:6px;border-top:none;padding-top:0;"><i class="fas fa-hospital"></i> ${esc(clinic.name)}-এ বসার তথ্য</div>
+
+      <div class="dt-row2">
+        <div class="dt-field">
+          <label for="dtPhone">সিরিয়ালের ফোন নম্বর *</label>
+          <input type="tel" id="dtPhone" class="dt-input" inputmode="tel" maxlength="30" placeholder="01XXXXXXXXX" value="${esc(ch?.serial_phone || '')}" />
+        </div>
+        <div class="dt-field">
+          <label for="dtWa">WhatsApp <span class="dt-opt">(ঐচ্ছিক)</span></label>
+          <input type="tel" id="dtWa" class="dt-input" inputmode="tel" maxlength="30" placeholder="01XXXXXXXXX" value="${esc(ch?.serial_whatsapp || '')}" />
+        </div>
+      </div>
+
+      <div class="dt-field">
+        <label for="dtFee">এই চেম্বারের ভিজিট ফি <span class="dt-opt">(টাকা, ঐচ্ছিক)</span></label>
+        <input type="number" id="dtFee" class="dt-input" inputmode="numeric" min="0" placeholder="যেমন: 500" value="${ch?.fee != null ? esc(ch.fee) : ''}" />
+      </div>
+
+      <div class="dt-field">
+        <span class="dt-label">বসার দিন ও সময় <span class="dt-opt">(একই দিনে একাধিক সময় দেওয়া যায়)</span></span>
+        <div id="dtSlots">${slots.map(slotRowHtml).join('')}</div>
+        <button type="button" class="dt-btn blue small" data-act="add-slot"><i class="fas fa-plus"></i> সময় যোগ করুন</button>
+        <div class="dt-help">সময় না জানা থাকলে খালি রাখুন, রোগীরা ফোন করে জেনে নেবেন।</div>
+      </div>
+
+      <div class="dt-field">
+        <label for="dtAddr">ঠিকানা <span class="dt-opt">(ঐচ্ছিক)</span></label>
+        <input type="text" id="dtAddr" class="dt-input" maxlength="200" placeholder="${esc(clinic.address || 'ক্লিনিকের ঠিকানাই দেখানো হবে')}" value="${esc(ch?.address && ch.address !== clinic.address ? ch.address : '')}" />
+        <div class="dt-help">খালি রাখলে ক্লিনিকের ঠিকানা দেখাবে।</div>
+      </div>
+
+      <div class="dt-field">
+        <label for="dtUpazila">উপজেলা</label>
+        <select id="dtUpazila" class="dt-select">${upOpts}</select>
+      </div>
+
+      <div class="dt-field">
+        <label for="dtNote">নোট <span class="dt-opt">(ঐচ্ছিক)</span></label>
+        <input type="text" id="dtNote" class="dt-input" maxlength="300" placeholder="যেমন: আগে ফোনে সিরিয়াল নিয়ে আসবেন" value="${esc(ch?.note || '')}" />
+      </div>`;
+  }
+
+  function collectChamber() {
+    const phone = $('dtPhone').value.trim();
+    if (!phone) return { error: 'সিরিয়ালের ফোন নম্বর দিন।' };
+
+    const slots = [];
+    for (const row of document.querySelectorAll('#dtSlots .dt-slot-row')) {
+      const weekday = Number(row.querySelector('.dt-sl-day').value);
+      const start = row.querySelector('.dt-sl-start').value;
+      const end = row.querySelector('.dt-sl-end').value;
+      if (!start || !end) return { error: 'প্রতিটা সময়ের শুরু ও শেষ দিন, নয়তো সেই লাইন মুছে দিন।' };
+      if (end <= start) return { error: `${WEEKDAYS[weekday]}-এর শেষ সময় শুরুর পরে হতে হবে।` };
+      slots.push({ weekday, start, end });
+    }
+    if (slots.length > MAX_SLOTS) return { error: 'সর্বোচ্চ ২৮টা সময় দেওয়া যাবে।' };
+
+    const feeRaw = $('dtFee').value.trim();
+    const fee = feeRaw === '' ? null : Number(feeRaw);
+    if (fee !== null && (!Number.isFinite(fee) || fee < 0)) return { error: 'ফি ঠিকমতো লিখুন।' };
+
+    return {
+      chamber: {
+        serial_phone: phone,
+        serial_whatsapp: $('dtWa').value.trim() || null,
+        fee,
+        address: $('dtAddr').value.trim() || null,
+        upazila: $('dtUpazila').value || null,
+        note: $('dtNote').value.trim() || null,
+        slots,
+      },
+    };
+  }
+
+  function showChamberForm(doctor, chamber) {
+    modal = { mode: 'chamber', doctor, chamber };
+    $('dtModalTitle').textContent = chamber ? 'চেম্বার ও সময় বদলান' : 'এই ক্লিনিকে চেম্বার যোগ করুন';
+    $('dtModalBody').innerHTML = `
+      ${pickedHtml(doctor)}
+      ${chamberFormHtml(chamber)}
+      <div class="dt-msg" id="dtMsg" style="display:none;"></div>
+      <div class="dt-savebar">
+        <button type="button" class="dt-btn soft" data-act="cancel">বাতিল</button>
+        <button type="button" class="dt-btn primary" data-act="save-chamber" id="dtSaveBtn">সেভ করুন</button>
+      </div>`;
+    openModal();
+  }
+
+  // --- ডাক্তার ফর্ম (নতুন / এডিট) ---
+  function doctorFormHtml(d) {
+    const specHtml = specialties.map((s) => {
+      const on = (d?.specialties || []).includes(s.slug);
+      return `<label class="dt-spec ${on ? 'on' : ''}"><input type="checkbox" class="dt-spec-in" value="${esc(s.slug)}" ${on ? 'checked' : ''} />${esc(s.name_bn)}</label>`;
+    }).join('');
+    const upOpts = ['<option value="">বাছুন (ঐচ্ছিক)</option>']
+      .concat(UPAZILAS.map(([v, l]) => `<option value="${v}" ${d?.upazila === v ? 'selected' : ''}>${l}</option>`)).join('');
+
+    return `
+      <div class="dt-field">
+        <span class="dt-label">ছবি <span class="dt-opt">(ঐচ্ছিক)</span></span>
+        <div class="dt-photo-pick">
+          <div class="dt-photo" id="dtPhotoPreview">${photoHtml(modal?.photoUrl)}</div>
+          <div>
+            <label class="dt-btn blue small" for="dtPhotoFile" style="cursor:pointer;"><i class="fas fa-camera"></i> ছবি বাছুন</label>
+            <input type="file" id="dtPhotoFile" accept="image/jpeg,image/png,image/webp" />
+            <div class="dt-help" id="dtPhotoHelp">পরিষ্কার মুখের ছবি দিন।</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dt-field">
+        <label for="dtNameBn">ডাক্তারের নাম (বাংলা) *</label>
+        <input type="text" id="dtNameBn" class="dt-input" maxlength="120" placeholder="যেমন: ডা. মোহাম্মদ আলী" value="${esc(d?.name_bn || modal?.prefillName || '')}" />
+      </div>
+      <div class="dt-field">
+        <label for="dtNameEn">নাম (ইংরেজি) <span class="dt-opt">(ঐচ্ছিক)</span></label>
+        <input type="text" id="dtNameEn" class="dt-input" maxlength="120" placeholder="Dr. Mohammad Ali" value="${esc(d?.name_en || '')}" />
+      </div>
+
+      <div class="dt-field">
+        <span class="dt-label">স্পেশালিটি * <span class="dt-opt">(একাধিক বাছা যায়)</span></span>
+        <div class="dt-specs" id="dtSpecs">${specHtml}</div>
+      </div>
+
+      <div class="dt-field">
+        <label for="dtDegrees">ডিগ্রি <span class="dt-opt">(ঐচ্ছিক)</span></label>
+        <input type="text" id="dtDegrees" class="dt-input" maxlength="200" placeholder="যেমন: MBBS, FCPS (Medicine)" value="${esc(d?.degrees || '')}" />
+      </div>
+
+      <div class="dt-field">
+        <label for="dtBmdc">BMDC রেজিস্ট্রেশন নম্বর *</label>
+        <input type="text" id="dtBmdc" class="dt-input" maxlength="40" placeholder="যেমন: A-12345" value="${esc(d?.bmdc_no || '')}" ${d?.no_bmdc && !d?.bmdc_no ? 'disabled' : ''} />
+        <label class="dt-check"><input type="checkbox" id="dtNoBmdc" ${d?.no_bmdc && !d?.bmdc_no ? 'checked' : ''} /> BMDC নম্বর নেই বা জানা নেই</label>
+      </div>
+
+      <div class="dt-row2">
+        <div class="dt-field">
+          <label for="dtExp">অভিজ্ঞতা <span class="dt-opt">(বছর)</span></label>
+          <input type="number" id="dtExp" class="dt-input" inputmode="numeric" min="0" value="${d?.experience_years != null ? esc(d.experience_years) : ''}" />
+        </div>
+        <div class="dt-field">
+          <label for="dtDefFee">সাধারণ ফি <span class="dt-opt">(টাকা)</span></label>
+          <input type="number" id="dtDefFee" class="dt-input" inputmode="numeric" min="0" value="${d?.default_fee != null ? esc(d.default_fee) : ''}" />
+        </div>
+      </div>
+
+      <div class="dt-field">
+        <label for="dtDocUpazila">ডাক্তারের উপজেলা</label>
+        <select id="dtDocUpazila" class="dt-select">${upOpts}</select>
+      </div>
+
+      <div class="dt-field">
+        <label for="dtBio">পরিচিতি <span class="dt-opt">(ঐচ্ছিক)</span></label>
+        <textarea id="dtBio" class="dt-textarea" maxlength="1500" placeholder="ডাক্তার সম্পর্কে ২-৩ লাইন">${esc(d?.bio || '')}</textarea>
+      </div>`;
+  }
+
+  function collectDoctor() {
+    const nameBn = $('dtNameBn').value.trim();
+    if (!nameBn) return { error: 'ডাক্তারের নাম দিন।' };
+    const specs = [...document.querySelectorAll('#dtSpecs .dt-spec-in:checked')].map((i) => i.value);
+    if (!specs.length) return { error: 'অন্তত একটা স্পেশালিটি বাছুন।' };
+    const noBmdc = $('dtNoBmdc').checked;
+    const bmdc = $('dtBmdc').value.trim();
+    if (!bmdc && !noBmdc) return { error: 'BMDC নম্বর দিন, অথবা "BMDC নম্বর নেই" টিক দিন।' };
+
+    const num = (id) => { const v = $(id).value.trim(); return v === '' ? null : Number(v); };
+    const exp = num('dtExp');
+    const fee = num('dtDefFee');
+    if ((exp !== null && (!Number.isFinite(exp) || exp < 0)) || (fee !== null && (!Number.isFinite(fee) || fee < 0))) {
+      return { error: 'অভিজ্ঞতা বা ফি ঠিকমতো লিখুন।' };
+    }
+
+    return {
+      doc: {
+        name_bn: nameBn,
+        name_en: $('dtNameEn').value.trim() || null,
+        photo_url: modal?.photoUrl || null,
+        specialties: specs,
+        degrees: $('dtDegrees').value.trim() || null,
+        bmdc_no: bmdc || null,
+        no_bmdc: noBmdc && !bmdc,
+        bio: $('dtBio').value.trim() || null,
+        experience_years: exp,
+        default_fee: fee,
+        upazila: $('dtDocUpazila').value || null,
+      },
+    };
+  }
+
+  function showDoctorForm(doctor, prefillName) {
+    const editing = !!doctor;
+    modal = { mode: editing ? 'edit-doctor' : 'new-doctor', doctor: doctor || null, photoUrl: doctor?.photo_url || null, prefillName: prefillName || '' };
+    $('dtModalTitle').textContent = editing ? 'ডাক্তারের তথ্য বদলান' : 'নতুন ডাক্তার যোগ করুন';
+    $('dtModalBody').innerHTML = `
+      ${doctorFormHtml(doctor)}
+      ${editing ? '' : chamberFormHtml(null)}
+      <div class="dt-msg" id="dtMsg" style="display:none;"></div>
+      <div class="dt-savebar">
+        <button type="button" class="dt-btn soft" data-act="cancel">বাতিল</button>
+        <button type="button" class="dt-btn primary" data-act="${editing ? 'save-doctor' : 'save-new'}" id="dtSaveBtn">${editing ? 'সেভ করুন' : 'ডাক্তার যোগ করুন'}</button>
+      </div>`;
+    openModal();
+  }
+
+  // ---------- ছবি আপলোড ----------
+  async function handlePhoto(file) {
+    const help = $('dtPhotoHelp');
+    if (!file) return;
+    help.textContent = 'ছবি আপলোড হচ্ছে...';
+    try {
+      const out = await compressImage(file, { maxDimension: 900, quality: 0.82, skipIfSmallerThan: 250 * 1024 });
+      const extMap = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+      const ext = extMap[out.type];
+      if (!ext) throw new Error('শুধু JPG, PNG বা WebP ছবি দিন।');
+      if (out.size > 3 * 1024 * 1024) throw new Error('ছবি অনেক বড়। ছোট ছবি দিন।');
+
+      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error } = await supabase.storage.from('doctor-photos').upload(path, out, { contentType: out.type, upsert: false });
+      if (error) throw new Error('ছবি আপলোড হয়নি, আবার চেষ্টা করুন।');
+
+      const url = supabase.storage.from('doctor-photos').getPublicUrl(path).data.publicUrl;
+      if (modal) modal.photoUrl = url;
+      $('dtPhotoPreview').innerHTML = photoHtml(url);
+      help.textContent = 'ছবি যোগ হয়েছে ✓';
+    } catch (e) {
+      help.textContent = e?.message || 'ছবি আপলোড হয়নি।';
+    }
+  }
+
+  // ---------- সেভ অ্যাকশন ----------
+  function setMsg(text) {
+    const m = $('dtMsg');
+    if (!m) return;
+    m.textContent = text || '';
+    m.style.display = text ? 'block' : 'none';
+  }
+
+  function setBusy(on, label) {
+    const b = $('dtSaveBtn');
+    if (!b) return;
+    modal && (modal.busy = on);
+    b.disabled = on;
+    if (on) { b.dataset.old = b.textContent; b.textContent = 'সেভ হচ্ছে...'; }
+    else if (b.dataset.old) b.textContent = label || b.dataset.old;
+  }
+
+  async function afterSave(text) {
+    closeModal();
+    toast(text);
+    await loadList();
+  }
+
+  async function saveChamber() {
+    if (modal?.busy) return;
+    setMsg('');
+    const c = collectChamber();
+    if (c.error) { setMsg(c.error); return; }
+    setBusy(true);
+    const { error } = await supabase.rpc('rep_save_chamber', { p_clinic: ctx.clinic.id, p_doctor: modal.doctor.id, p_chamber: c.chamber });
+    if (error) { setBusy(false); setMsg(errMsg(error)); return; }
+    await afterSave('চেম্বারের তথ্য সেভ হয়েছে');
+  }
+
+  async function saveNewDoctor() {
+    if (modal?.busy) return;
+    setMsg('');
+    const d = collectDoctor();
+    if (d.error) { setMsg(d.error); return; }
+    const c = collectChamber();
+    if (c.error) { setMsg(c.error); return; }
+    setBusy(true);
+    const { error } = await supabase.rpc('rep_add_doctor', { p_clinic: ctx.clinic.id, p_doc: d.doc, p_chamber: c.chamber });
+    if (error) { setBusy(false); setMsg(errMsg(error)); return; }
+    await afterSave('ডাক্তার যোগ হয়েছে');
+  }
+
+  async function saveDoctor() {
+    if (modal?.busy) return;
+    setMsg('');
+    const d = collectDoctor();
+    if (d.error) { setMsg(d.error); return; }
+    setBusy(true);
+    const { error } = await supabase.rpc('rep_update_doctor', { p_clinic: ctx.clinic.id, p_doctor: modal.doctor.id, p_doc: d.doc });
+    if (error) { setBusy(false); setMsg(errMsg(error)); return; }
+    await afterSave('ডাক্তারের তথ্য সেভ হয়েছে');
+  }
+
+  async function removeChamber(btn, doctorId) {
+    if (btn.dataset.confirming !== '1') {
+      btn.dataset.confirming = '1';
+      btn.classList.add('confirming');
+      btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> নিশ্চিত? আবার চাপুন';
+      const card = btn.closest('.dt-card');
+      if (card && !card.querySelector('.dt-removehint')) {
+        const hint = document.createElement('div');
+        hint.className = 'dt-removehint';
+        hint.textContent = 'এটা শুধু আপনার ক্লিনিকের তালিকা থেকে সরাবে। ডাক্তারের প্রোফাইল ও অন্য চেম্বার থাকবে।';
+        card.appendChild(hint);
+      }
+      clearTimeout(removeTimer);
+      removeTimer = setTimeout(() => renderList(), 5000);
+      return;
+    }
+    clearTimeout(removeTimer);
+    btn.disabled = true;
+    const { error } = await supabase.rpc('rep_remove_chamber', { p_clinic: ctx.clinic.id, p_doctor: doctorId });
+    if (error) { toast(errMsg(error)); renderList(); return; }
+    toast('ক্লিনিকের তালিকা থেকে সরানো হয়েছে');
+    await loadList();
+  }
+
+  // ---------- ইভেন্ট ----------
+  $('dtAddBtn').addEventListener('click', showSearch);
+  $('dtClose').addEventListener('click', closeModal);
+  $('dtOverlay').addEventListener('click', (e) => { if (e.target === $('dtOverlay')) closeModal(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal) closeModal(); });
+
+  // কার্ডের বাটন
+  $('dtList').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    const card = btn.closest('.dt-card');
+    const item = items.find((c) => c.id === card?.dataset.chamber);
+    if (!item) return;
+    if (btn.dataset.act === 'edit-chamber') showChamberForm(item.doctors, item);
+    else if (btn.dataset.act === 'edit-doctor') showDoctorForm(item.doctors);
+    else if (btn.dataset.act === 'remove') removeChamber(btn, item.doctor_id);
+  });
+
+  // মোডালের ভেতরের ক্লিক (ডেলিগেশন)
+  $('dtModalBody').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act;
+
+    if (act === 'cancel') closeModal();
+    else if (act === 'new-doctor') {
+      const q = ($('dtSearch')?.value || '').trim();
+      // BMDC-র মতো (ইংরেজি/সংখ্যা) হলে নাম হিসেবে প্রিফিল করি না
+      showDoctorForm(null, /^[A-Za-z0-9\-\s]+$/.test(q) ? '' : q);
+    } else if (act === 'pick') {
+      let rows = [];
+      try { rows = JSON.parse($('dtResults').dataset.rows || '[]'); } catch (_) { /* উপেক্ষা */ }
+      const r = rows.find((x) => x.id === btn.dataset.id);
+      if (!r) return;
+      const existing = items.find((c) => c.doctor_id === r.id);
+      showChamberForm(r, existing || null);
+    } else if (act === 'add-slot') {
+      const box = $('dtSlots');
+      if (box.querySelectorAll('.dt-slot-row').length >= MAX_SLOTS) { setMsg('সর্বোচ্চ ২৮টা সময় দেওয়া যাবে।'); return; }
+      box.insertAdjacentHTML('beforeend', slotRowHtml(null));
+    } else if (act === 'del-slot') btn.closest('.dt-slot-row')?.remove();
+    else if (act === 'save-chamber') saveChamber();
+    else if (act === 'save-new') saveNewDoctor();
+    else if (act === 'save-doctor') saveDoctor();
+  });
+
+  $('dtModalBody').addEventListener('input', (e) => {
+    if (e.target.id === 'dtSearch') {
+      clearTimeout(searchTimer);
+      const v = e.target.value;
+      searchTimer = setTimeout(() => runSearch(v), 320);
+    }
+  });
+
+  $('dtModalBody').addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.id === 'dtPhotoFile') handlePhoto(t.files?.[0]);
+    else if (t.id === 'dtNoBmdc') {
+      const inp = $('dtBmdc');
+      inp.disabled = t.checked;
+      if (t.checked) inp.value = '';
+    } else if (t.classList?.contains('dt-spec-in')) {
+      t.closest('.dt-spec')?.classList.toggle('on', t.checked);
+    }
+  });
+
+  // প্যারেন্ট থেকে ক্লিনিক এলে (বা বদলালে) লোড
+  window.addEventListener('smartfeni:clinic-ready', (e) => {
+    const prevId = ctx?.clinic?.id;
+    ctx = e.detail;
+    if (prevId && prevId !== ctx.clinic.id) closeModal();
+    if (prevId === ctx.clinic.id && items.length) return; // একই ক্লিনিক, ডেটা আছে
+    loadList();
+  });
+</script>
