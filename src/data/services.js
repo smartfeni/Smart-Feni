@@ -18,7 +18,7 @@ export const categories = [
   { id: 'legal', name: 'আইনি পরামর্শ', icon: 'fa-scale-balanced', desc: 'আইনি পরামর্শ ও নথি', slug: 'legal', hidden: true },
   { id: 'event', name: 'ইভেন্ট ম্যানেজমেন্ট', icon: 'fa-calendar-check', desc: 'অনুষ্ঠান আয়োজন', slug: 'event', hidden: true },
   { id: 'laundry', name: 'লন্ড্রি সার্ভিস', icon: 'fa-shirt', desc: 'কাপড় ধোলাই সার্ভিস', slug: 'laundry', hidden: true },
-  { id: 'doctor-directory', name: 'ডাক্তার ও হাসপাতাল ডিরেক্টরি', icon: 'fa-hospital', desc: 'ডাক্তার ও হাসপাতাল তালিকা', slug: 'doctor-directory' },
+  { id: 'doctor-directory', name: 'ডাক্তার ডিরেক্টরি', icon: 'fa-stethoscope', desc: 'ডাক্তারের চেম্বার, সময় ও সিরিয়াল', slug: 'doctor-directory' },
 ];
 
 export const featuredServices = [
