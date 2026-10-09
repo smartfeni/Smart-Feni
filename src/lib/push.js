@@ -19,6 +19,12 @@
 //         ৩) লগআউটে offline ক্যাশ পরিষ্কার (O7) — শেয়ার্ড ফোনে আগের
 //            ইউজারের সংরক্ষিত পেজ/ছবি পরের ইউজারের কাছে থেকে না যায়
 //
+// আপডেট (গেস্ট ডিভাইস, Oct 2026): লগইন না থাকলেও অ্যাপে ফোনের অনুমতি
+//         দেওয়া থাকলে FCM টোকেন /api/push/guest-register-এ সেভ হয়
+//         (registerGuestDevice) — যাতে অ্যাডমিন লগইন ছাড়া সব ইনস্টলড
+//         অ্যাপে প্রমো পাঠাতে পারে। লগইন করলে টোকেন ইউজারের নামে সরে যায়
+//         (subscribe.ts গেস্ট রো মুছে দেয়), লগআউটে আবার গেস্ট হিসেবে ফেরে।
+//
 // ব্যবহার (অন্য কম্পোনেন্ট থেকে, আগের মতোই অপরিবর্তিত):
 //   import { subscribeToPush, getPushPermissionState, isPushSupported } from '../../lib/push.js';
 //   const result = await subscribeToPush();
@@ -242,6 +248,58 @@ async function syncNativeToken(session) {
   }
 }
 
+// ------------------ গেস্ট ডিভাইস (লগইন ছাড়া) ------------------
+// লগইন নেই কিন্তু ফোনে নোটিফিকেশন অনুমতি দেওয়া আছে — টোকেন সার্ভারে সেভ হয়,
+// শুধু অ্যাডমিনের প্রমো পাওয়ার জন্য (ব্যক্তিগত কিছু কখনো এই পথে আসে না)।
+const GUEST_SYNC_KEY = 'smartfeni_guest_push_last_sync';
+const GUEST_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let guestListenerAdded = false;
+
+export async function registerGuestDevice() {
+  try {
+    if (!isNativeApp()) return;
+
+    // লগইন থাকলে এটা গেস্ট না — ইউজারের নামের পথ (syncNativeToken) কাজ করবে
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) return;
+
+    const last = Number(localStorage.getItem(GUEST_SYNC_KEY) || 0);
+    if (last && Date.now() - last < GUEST_SYNC_INTERVAL_MS) return;
+
+    const { PushNotifications } = await import('@capacitor/push-notifications');
+
+    // অনুমতি না থাকলে কিছু করি না (অনুমতি চাওয়া প্রম্পটের কাজ)
+    const permStatus = await PushNotifications.checkPermissions();
+    if (permStatus.receive !== 'granted') return;
+
+    if (!guestListenerAdded) {
+      guestListenerAdded = true;
+      await PushNotifications.addListener('registration', async (token) => {
+        try {
+          // টোকেন আসার মুহূর্তে আবার যাচাই — এর মধ্যে লগইন হয়ে গেলে গেস্ট হিসেবে সেভ করব না
+          const { data: { session: nowSession } } = await supabase.auth.getSession();
+          if (nowSession) return;
+
+          const response = await fetch('/api/push/guest-register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fcm_token: token.value }),
+          });
+          if (response.ok) {
+            localStorage.setItem(GUEST_SYNC_KEY, String(Date.now()));
+          }
+        } catch (err) {
+          // নেটওয়ার্ক সমস্যা — পরের অ্যাপ খোলায় আবার চেষ্টা
+        }
+      });
+    }
+
+    await PushNotifications.register();
+  } catch (err) {
+    // গেস্ট রেজিস্ট্রেশন ফেইল করলে অ্যাপ স্বাভাবিক চলবে
+  }
+}
+
 // O7: লগআউটে ক্যাশ করা পেজ/ছবি মুছে ফেলা — শেয়ার্ড ফোনে আগের ইউজারের
 // সংরক্ষিত (অফলাইন) তথ্য পরের ইউজারের কাছে থেকে না যায়। sw.js এর
 // CACHE_NAME/IMAGE_CACHE_NAME এর সাথে নাম মিলিয়ে রাখা জরুরি (ভার্সন
@@ -272,6 +330,10 @@ async function handleNativeSignedOut() {
   }
 
   clearOfflineCachesOnLogout(); // এটার সফলতা/ব্যর্থতা লগআউটের বাকি ধাপকে প্রভাবিত করবে না
+
+  // লগআউটের পর এই ফোন আবার গেস্ট ডিভাইস — নতুন টোকেন নিয়ে প্রমো পাওয়ার জন্য
+  localStorage.removeItem(GUEST_SYNC_KEY);
+  setTimeout(registerGuestDevice, 1500);
 }
 
 export function initNativePushLifecycle() {
@@ -288,6 +350,10 @@ export function initNativePushLifecycle() {
     }
     if (session && (event === 'INITIAL_SESSION' || event === 'SIGNED_IN')) {
       setTimeout(() => syncNativeToken(session), 0);
+    }
+    // অ্যাপ খুলেছে কিন্তু লগইন নেই → গেস্ট ডিভাইস হিসেবে রেজিস্টার (অনুমতি থাকলে)
+    if (!session && event === 'INITIAL_SESSION') {
+      setTimeout(registerGuestDevice, 0);
     }
   });
 }
