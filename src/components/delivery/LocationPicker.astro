@@ -27,7 +27,7 @@
 // ব্যবহার করুক না কেন, সেটা .lp-map এর বাইরে কখনো "escape" করবে না।
 //
 // ============================================================
-// নতুন (ঐচ্ছিক): enableSuggestions prop — true হলে এই instance-এ:
+// (আগের) enableSuggestions prop — true হলে এই instance-এ:
 // ১. টাইপ করার সময় /api/location-suggestions-search থেকে নাম-ভিত্তিক
 //    সাজেশন ড্রপডাউন দেখায় (থাম্বনেইল + নাম + উপজেলা), ক্লিক করলে
 //    টেক্সটে নাম বসে আর lat/lng ব্যাকএন্ডে এমবেডেড থাকে।
@@ -35,6 +35,35 @@
 //    দেখায় — নাম দিলে সেটা /api/save-location-suggestion-এ সেভ হয়ে
 //    ভবিষ্যতের জন্য সাজেশন-ডাটাবেসে যোগ হয় (খালি রাখলে কিছুই সেভ হয় না)।
 // ডিফল্ট false — drop/Ride Hero-তে কোনো পরিবর্তন হয় না।
+//
+// ============================================================
+// নতুন আপডেট — ফেনীর বাউন্ডারি ওভারলে + সেভড ঠিকানা
+// ============================================================
+// ১. ম্যাপ: বর্তমান OSM টাইল হুবহু থাকে (স্কুল/বাজার/দোকানের নাম সব ঠিক)।
+//    ওপরে শুধু ওভারলে — ফেনী জেলার পুরো সীমানা বোল্ড (সাদা হ্যালো + কমলা),
+//    উপজেলা/ইউনিয়নের পাতলা বাউন্ডারি আর নাম (জুম কম হলে উপজেলার নাম,
+//    জুম বেশি হলে ইউনিয়নের নাম)। ওভারলে ট্যাপ আটকায় না। ম্যাপ ফেনীর
+//    সীমানার বাইরে প্যান করা যায় না।
+// ২. পিন বসালে নিচে দেখায়: "ফুলগাজী উপজেলা · মুন্সিরহাট ইউনিয়ন"।
+// ৩. ফেনীর বাইরে পিন/GPS হলে লাল সতর্কবার্তা, পিন বসে না, সেভ হয় না।
+//    (geojson লোড না হলে চেক বন্ধ থাকে — অর্ডার কখনো আটকায় না।)
+// ৪. ⭐ "আমার ঠিকানা হিসেবে রাখুন" (শুধু লগইন করা ইউজার): নাম দিয়ে
+//    (বাসা/অফিস/অন্য) সেভ — Supabase saved_locations (src/lib/savedLocations.js)।
+// ৫. ঠিকানা বক্সে ট্যাপ করলে সবার আগে নিজের সেভ করা ঠিকানার সাজেশন দেখায়
+//    (টাইপ করলে নাম/ঠিকানা মিলিয়ে ফিল্টার)। বাছলে ঠিকানা + lat/lng বসে
+//    যায়। প্রতিটার পাশে মুছে ফেলার বাটন (দুইবার ট্যাপ করে কনফার্ম)।
+// ৬. পেরেন্ট ফর্মের জন্য নতুন ইভেন্ট (আগের কিছু বদলায়নি):
+//      wrap-এ 'lp:location-changed' (bubbles) —
+//      detail: { id, source: 'map'|'saved'|'suggestion'|'text', cleared,
+//                lat, lng, address, upazila (বাংলা নাম), upazilaId, union }
+//    + wrap.dataset.lpUpazila / lpUnion এবং hidden .lp-out-upazila / .lp-out-union
+//    পিকআপ পিন থেকে ফর্মের উপজেলা ড্রপডাউন অটো-সিলেক্টের কাজ এই ইভেন্ট দিয়ে হবে।
+// ৭. enableSavedLocations prop (ডিফল্ট true) — false দিলে সেভড-ঠিকানা ফিচার বন্ধ।
+//
+// ডেটা/হেল্পার: src/data/feniAreas.js, src/lib/savedLocations.js,
+// geojson: public/data/feni_unions.geojson
+// Android ব্যাক বাটন: ওভারলের ক্লাস "lp-overlay"+".active" আর ক্লোজ বাটনের
+// aria-label "বন্ধ করুন" আগের মতোই — native-bridge.js-এর closeTopOverlay ধরে।
 // ============================================================
 
 interface Props {
@@ -44,6 +73,7 @@ interface Props {
   placeholder?: string;
   required?: boolean;
   enableSuggestions?: boolean;
+  enableSavedLocations?: boolean;
 }
 
 const {
@@ -53,6 +83,7 @@ const {
   placeholder = 'যেমন: নবী হোটেল, ফেনী সদর',
   required = true,
   enableSuggestions = false,
+  enableSavedLocations = true,
 } = Astro.props;
 ---
 
@@ -61,6 +92,7 @@ const {
   data-lp-id={id}
   data-auto-locate={allowAutoLocate ? '1' : '0'}
   data-enable-suggestions={enableSuggestions ? '1' : '0'}
+  data-enable-saved={enableSavedLocations ? '1' : '0'}
 >
   <label class="lp-label">{label}{required && <span class="required-mark">*</span>}</label>
 
@@ -79,6 +111,8 @@ const {
     </button>
   </div>
 
+  {enableSavedLocations && <div class="lp-saved-results"></div>}
+
   {enableSuggestions && <div class="lp-suggest-results"></div>}
 
   {required && (
@@ -96,6 +130,8 @@ const {
   <input type="hidden" class="lp-out-address" value="" />
   <input type="hidden" class="lp-out-lat" value="" />
   <input type="hidden" class="lp-out-lng" value="" />
+  <input type="hidden" class="lp-out-upazila" value="" />
+  <input type="hidden" class="lp-out-union" value="" />
   <input type="hidden" class="lp-out-instructions" value="" />
 
   <div class="lp-overlay">
@@ -123,10 +159,20 @@ const {
     </div>
 
     <div class="lp-overlay-footer">
+      <p class="lp-area-warn" hidden>
+        <i class="fas fa-triangle-exclamation"></i>
+        <span class="lp-area-warn-text"></span>
+      </p>
+      <p class="lp-area-badge" hidden>
+        <i class="fas fa-location-dot"></i>
+        <span class="lp-area-badge-text"></span>
+      </p>
+
       <p class="lp-address-preview">
         <i class="fas fa-map-pin"></i>
         <span class="lp-address-text">ম্যাপে পিন বসান বা সার্চ করুন</span>
       </p>
+
       {enableSuggestions && (
         <div class="lp-suggest-name-row">
           <input
@@ -137,6 +183,36 @@ const {
           />
         </div>
       )}
+
+      {enableSavedLocations && (
+        <div class="lp-saved-tools">
+          <button type="button" class="lp-star-btn" hidden>
+            <i class="fas fa-star"></i> আমার ঠিকানা হিসেবে রাখুন
+          </button>
+
+          <div class="lp-save-place" hidden>
+            <div class="lp-save-place-chips">
+              <button type="button" class="lp-chip" data-name="বাসা"><i class="fas fa-house"></i> বাসা</button>
+              <button type="button" class="lp-chip" data-name="অফিস"><i class="fas fa-building"></i> অফিস</button>
+              <button type="button" class="lp-chip lp-chip-other"><i class="fas fa-pen"></i> অন্য</button>
+            </div>
+            <input
+              type="text"
+              class="lp-save-place-input"
+              placeholder="নাম দিন (যেমন: বাসা, অফিস)"
+              maxlength="30"
+              autocomplete="off"
+            />
+            <div class="lp-save-place-actions">
+              <button type="button" class="lp-save-place-ok">সেভ</button>
+              <button type="button" class="lp-save-place-cancel">বাতিল</button>
+            </div>
+          </div>
+
+          <p class="lp-saved-msg" hidden></p>
+        </div>
+      )}
+
       <button type="button" class="lp-save-btn">
         <i class="fas fa-check"></i> সেভ করুন
       </button>
@@ -146,28 +222,70 @@ const {
 
 <script>
   import { getCurrentPosition } from '../../lib/native-bridge.js';
+  import { supabase } from '../../lib/supabase.js';
+  import {
+    UPAZILAS,
+    getUnionUpazilaId,
+    loadFeniGeo,
+    findAreaAt,
+    getFeniBounds,
+    getUpazilaBorders,
+    getDistrictBorder,
+    getLabelPoints,
+    getUnionBn,
+  } from '../../data/feniAreas.js';
+  import {
+    listSavedLocations,
+    saveLocation,
+    deleteSavedLocation,
+    filterSavedLocations,
+    iconForName,
+  } from '../../lib/savedLocations.js';
 
   const FENI_CENTER = [23.0159, 91.3976];
   let leafletLoadPromise: Promise<void> | null = null;
+
+  // ফেনীর geojson — একবার লোড, সব instance শেয়ার করে। লোড না হলে null
+  // থাকে এবং ওভারলে/ফেনী-চেক বন্ধ থাকে (অর্ডার আটকায় না)
+  let geo: any = null;
 
   function loadLeaflet(): Promise<void> {
     if ((window as any).L) return Promise.resolve();
     if (leafletLoadPromise) return leafletLoadPromise;
 
-    leafletLoadPromise = new Promise((resolve, reject) => {
-      const cssLink = document.createElement('link');
-      cssLink.rel = 'stylesheet';
-      cssLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
-      document.head.appendChild(cssLink);
+    leafletLoadPromise = new Promise<void>((resolve, reject) => {
+      // হেডারের LocationSelector আগেই CSS/JS বসিয়ে থাকলে রিইউজ
+      if (!document.querySelector('link[href*="leaflet.min.css"]')) {
+        const cssLink = document.createElement('link');
+        cssLink.rel = 'stylesheet';
+        cssLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+        document.head.appendChild(cssLink);
+      }
+
+      const existing = document.querySelector('script[src*="leaflet.min.js"]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve());
+        existing.addEventListener('error', () => reject(new Error('Leaflet লোড ব্যর্থ')));
+        return;
+      }
 
       const script = document.createElement('script');
       script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
       script.onload = () => resolve();
       script.onerror = () => reject(new Error('Leaflet লোড ব্যর্থ'));
       document.head.appendChild(script);
+    }).catch((err) => {
+      leafletLoadPromise = null;
+      throw err;
     });
 
     return leafletLoadPromise;
+  }
+
+  function esc(s: any): string {
+    return String(s ?? '').replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]
+    );
   }
 
   async function reverseGeocode(lat: number, lng: number): Promise<string> {
@@ -195,7 +313,7 @@ const {
     }
   }
 
-  // নতুন: নিজেদের লোকেশন-সাজেশন API থেকে অটোকমপ্লিট ফলাফল আনা
+  // নিজেদের লোকেশন-সাজেশন API থেকে অটোকমপ্লিট ফলাফল আনা
   async function fetchLocationSuggestions(query: string) {
     try {
       const res = await fetch(`/api/location-suggestions-search?q=${encodeURIComponent(query)}`);
@@ -207,7 +325,7 @@ const {
     }
   }
 
-  // নতুন: কাস্টমার ম্যাপ-পিনের সাথে নাম দিলে fire-and-forget সেভ করা
+  // কাস্টমার ম্যাপ-পিনের সাথে নাম দিলে fire-and-forget সেভ করা
   function saveLocationSuggestion(name: string, lat: number, lng: number) {
     fetch('/api/save-location-suggestion', {
       method: 'POST',
@@ -216,6 +334,28 @@ const {
     }).catch(() => {
       /* ব্যর্থ হলেও মূল ফ্লো আটকাবে না — নীরবে ইগনোর */
     });
+  }
+
+  // "ফুলগাজী উপজেলা · মুন্সিরহাট ইউনিয়ন"
+  function areaText(area: any): string {
+    if (!area) return '';
+    const up = area.upazilaName ? `${area.upazilaName} উপজেলা` : '';
+    let un = area.unionBn || '';
+    if (un && !/পৌরসভা/.test(un)) un += ' ইউনিয়ন';
+    return [up, un].filter(Boolean).join(' · ');
+  }
+
+  // ম্যাপ ওভারলের নামের ছোট চিপ — inline style (Leaflet divIcon-এ scoped CSS লাগে না)
+  function chipHtml(text: string, color: string, size: number, bgAlpha: number) {
+    return (
+      '<div style="position:absolute;left:0;top:0;transform:translate(-50%,-50%);' +
+      'white-space:nowrap;pointer-events:none;font-weight:700;' +
+      `font-size:${size}px;line-height:1.2;color:#1B2A4A;` +
+      `background:rgba(255,255,255,${bgAlpha});padding:1px 6px;border-radius:9px;` +
+      `border:1px solid ${color};">` +
+      esc(text) +
+      '</div>'
+    );
   }
 
   function initPicker(wrap: HTMLElement) {
@@ -234,24 +374,173 @@ const {
     const locateBtn = wrap.querySelector('.lp-locate-btn') as HTMLButtonElement | null;
     const addressPreview = wrap.querySelector('.lp-address-text') as HTMLElement;
 
+    const areaBadge = wrap.querySelector('.lp-area-badge') as HTMLElement;
+    const areaBadgeText = wrap.querySelector('.lp-area-badge-text') as HTMLElement;
+    const areaWarn = wrap.querySelector('.lp-area-warn') as HTMLElement;
+    const areaWarnText = wrap.querySelector('.lp-area-warn-text') as HTMLElement;
+
     const outMode = wrap.querySelector('.lp-out-mode') as HTMLInputElement;
     const outAddress = wrap.querySelector('.lp-out-address') as HTMLInputElement;
     const outLat = wrap.querySelector('.lp-out-lat') as HTMLInputElement;
     const outLng = wrap.querySelector('.lp-out-lng') as HTMLInputElement;
+    const outUpazila = wrap.querySelector('.lp-out-upazila') as HTMLInputElement;
+    const outUnion = wrap.querySelector('.lp-out-union') as HTMLInputElement;
     const outInstructions = wrap.querySelector('.lp-out-instructions') as HTMLInputElement;
 
     const allowAutoLocate = wrap.dataset.autoLocate === '1';
     const enableSuggestions = wrap.dataset.enableSuggestions === '1';
+    const enableSaved = wrap.dataset.enableSaved === '1';
+    const lpId = wrap.dataset.lpId || '';
 
-    // নতুন: সাজেশন ড্রপডাউন + ম্যাপ-কনফার্ম নাম ফিল্ড (শুধু enableSuggestions=1 হলে DOM-এ থাকে)
+    // সাজেশন ড্রপডাউন + ম্যাপ-কনফার্ম নাম ফিল্ড (শুধু enableSuggestions=1 হলে DOM-এ থাকে)
     const suggestResults = wrap.querySelector('.lp-suggest-results') as HTMLElement | null;
     const suggestNameInput = wrap.querySelector('.lp-suggest-name-input') as HTMLInputElement | null;
+
+    // সেভড ঠিকানা (শুধু enableSavedLocations=1 হলে DOM-এ থাকে)
+    const savedResults = wrap.querySelector('.lp-saved-results') as HTMLElement | null;
+    const starBtn = wrap.querySelector('.lp-star-btn') as HTMLButtonElement | null;
+    const savePlacePanel = wrap.querySelector('.lp-save-place') as HTMLElement | null;
+    const savePlaceInput = wrap.querySelector('.lp-save-place-input') as HTMLInputElement | null;
+    const savePlaceOk = wrap.querySelector('.lp-save-place-ok') as HTMLButtonElement | null;
+    const savePlaceCancel = wrap.querySelector('.lp-save-place-cancel') as HTMLButtonElement | null;
+    const savedMsg = wrap.querySelector('.lp-saved-msg') as HTMLElement | null;
 
     let map: any = null;
     let marker: any = null;
     let pendingLat: number | null = null;
     let pendingLng: number | null = null;
     let pendingAddress = '';
+    let pendingArea: any = null;
+    let markerToken = 0;
+    let overlayDrawn = false;
+    let upLabels: any = null;
+    let unLabels: any = null;
+
+    // ============ পেরেন্ট ফর্মের জন্য ইভেন্ট ============
+    function emitLocation(source: string, lat: number | null, lng: number | null, address: string, area: any) {
+      const upazila = area ? area.upazilaName || '' : '';
+      const union = area ? area.unionBn || '' : '';
+      wrap.dataset.lpUpazila = upazila;
+      wrap.dataset.lpUnion = union;
+      outUpazila.value = upazila;
+      outUnion.value = union;
+      wrap.dispatchEvent(
+        new CustomEvent('lp:location-changed', {
+          bubbles: true,
+          detail: {
+            id: lpId,
+            source,
+            cleared: source === 'text',
+            lat,
+            lng,
+            address,
+            upazila,
+            upazilaId: area ? area.upazilaId || '' : '',
+            union,
+          },
+        })
+      );
+    }
+
+    // ============ ম্যাপ ও ফেনী ওভারলে ============
+    function drawFeniOverlay() {
+      if (!geo || overlayDrawn) return;
+      overlayDrawn = true;
+
+      const panes: Array<[string, number]> = [
+        ['lpUnions', 420],
+        ['lpUpazilaLines', 425],
+        ['lpDistrictHalo', 440],
+        ['lpDistrictLine', 450],
+        ['lpLabels', 460],
+      ];
+      panes.forEach(([name, z]) => {
+        map.createPane(name);
+        map.getPane(name).style.zIndex = String(z);
+      });
+      // ওভারলে ট্যাপ/ড্র্যাগ আটকাবে না — ক্লিক সরাসরি নিচের ম্যাপে যাবে
+      panes.forEach(([name]) => {
+        map.getPane(name).style.pointerEvents = 'none';
+      });
+
+      // ইউনিয়নের পাতলা বাউন্ডারি (ভেতরে কোনো রঙ নেই — নিচের ম্যাপ হুবহু দেখা যায়)
+      L.geoJSON(geo, {
+        pane: 'lpUnions',
+        interactive: false,
+        style: () => ({ color: '#64748b', weight: 1, opacity: 0.6, fill: false }),
+      }).addTo(map);
+
+      // উপজেলার বাউন্ডারি — ইউনিয়নের চেয়ে একটু গাঢ়
+      const upBorders = getUpazilaBorders(geo);
+      UPAZILAS.forEach((u: any) => {
+        L.polyline(upBorders[u.id], {
+          pane: 'lpUpazilaLines', color: u.color, weight: 2.5, opacity: 0.9, interactive: false,
+        }).addTo(map);
+      });
+
+      // ফেনী জেলার পুরো সীমানা — বোল্ড (সাদা হ্যালো + কমলা)
+      const border = getDistrictBorder(geo);
+      L.polyline(border, {
+        pane: 'lpDistrictHalo', color: '#ffffff', weight: 10, opacity: 0.95,
+        lineCap: 'round', lineJoin: 'round', interactive: false,
+      }).addTo(map);
+      L.polyline(border, {
+        pane: 'lpDistrictLine', color: '#FF6B35', weight: 4.5, opacity: 1,
+        lineCap: 'round', lineJoin: 'round', interactive: false,
+      }).addTo(map);
+
+      // নাম: জুম কম হলে উপজেলা, বেশি হলে ইউনিয়ন
+      const labels = getLabelPoints(geo);
+      upLabels = L.layerGroup();
+      unLabels = L.layerGroup();
+
+      UPAZILAS.forEach((u: any) => {
+        const pt = labels.upazilas[u.id];
+        if (!pt) return;
+        upLabels.addLayer(
+          L.marker(pt, {
+            pane: 'lpLabels', interactive: false, keyboard: false,
+            icon: L.divIcon({ className: '', html: chipHtml(u.name, u.color, 12, 0.85), iconSize: [0, 0], iconAnchor: [0, 0] }),
+          })
+        );
+      });
+
+      Object.keys(labels.unions).forEach((name) => {
+        const upId = getUnionUpazilaId(name);
+        const up: any = UPAZILAS.find((x: any) => x.id === upId);
+        unLabels.addLayer(
+          L.marker(labels.unions[name], {
+            pane: 'lpLabels', interactive: false, keyboard: false,
+            icon: L.divIcon({
+              className: '',
+              html: chipHtml(getUnionBn(name), up ? up.color : '#64748b', 10, 0.78),
+              iconSize: [0, 0],
+              iconAnchor: [0, 0],
+            }),
+          })
+        );
+      });
+
+      map.on('zoomend', refreshLabels);
+      refreshLabels();
+
+      // ফেনীর সীমানায় আটকানো
+      map.options.maxBoundsViscosity = 1.0;
+      map.setMaxBounds(getFeniBounds(geo, 0.05));
+      map.setMinZoom(10);
+    }
+
+    function refreshLabels() {
+      if (!map || !upLabels || !unLabels) return;
+      const showUnions = map.getZoom() >= 12;
+      if (showUnions) {
+        if (map.hasLayer(upLabels)) map.removeLayer(upLabels);
+        if (!map.hasLayer(unLabels)) map.addLayer(unLabels);
+      } else {
+        if (map.hasLayer(unLabels)) map.removeLayer(unLabels);
+        if (!map.hasLayer(upLabels)) map.addLayer(upLabels);
+      }
+    }
 
     function ensureMap() {
       if (map) return;
@@ -261,12 +550,51 @@ const {
         maxZoom: 19,
       }).addTo(map);
 
+      drawFeniOverlay();
+
       map.on('click', (e: any) => {
         handleNewPosition(e.latlng.lat, e.latlng.lng, false);
       });
     }
 
-    async function setMarker(lat: number, lng: number, panTo = true) {
+    // ============ ব্যাজ / সতর্কবার্তা ============
+    function showArea(area: any) {
+      areaWarn.hidden = true;
+      if (area) {
+        areaBadgeText.textContent = areaText(area);
+        areaBadge.hidden = false;
+      } else {
+        areaBadge.hidden = true;
+      }
+    }
+
+    function showOutside(message: string) {
+      areaBadge.hidden = true;
+      areaWarnText.textContent = message;
+      areaWarn.hidden = false;
+    }
+
+    // knownAddress দেওয়া থাকলে (সেভড ঠিকানা) reverse-geocode ছাড়াই সেটাই ব্যবহার হয়
+    async function setMarker(lat: number, lng: number, panTo = true, knownAddress = '') {
+      const token = ++markerToken;
+
+      // ফেনীর বাইরে হলে পিন বসবে না
+      const area = geo ? findAreaAt(lat, lng, geo) : null;
+      if (geo && !area) {
+        if (marker) {
+          map.removeLayer(marker);
+          marker = null;
+        }
+        pendingLat = null;
+        pendingLng = null;
+        pendingAddress = '';
+        pendingArea = null;
+        showOutside('এই লোকেশন ফেনী জেলার বাইরে — ফেনীর ভেতরে পিন বসান');
+        addressPreview.textContent = 'ম্যাপে পিন বসান বা সার্চ করুন';
+        updateStarVisibility();
+        return;
+      }
+
       if (marker) {
         marker.setLatLng([lat, lng]);
       } else {
@@ -280,15 +608,25 @@ const {
 
       pendingLat = lat;
       pendingLng = lng;
-      addressPreview.textContent = 'ঠিকানা খোঁজা হচ্ছে...';
+      pendingArea = area;
+      showArea(area);
+      updateStarVisibility();
 
+      if (knownAddress) {
+        pendingAddress = knownAddress;
+        addressPreview.textContent = knownAddress;
+        return;
+      }
+
+      addressPreview.textContent = 'ঠিকানা খোঁজা হচ্ছে...';
       const address = await reverseGeocode(lat, lng);
+      if (token !== markerToken) return; // এর মধ্যে নতুন পিন বসেছে
       pendingAddress = address;
       addressPreview.textContent = address;
     }
 
-    function handleNewPosition(lat: number, lng: number, panTo = true) {
-      setMarker(lat, lng, panTo);
+    function handleNewPosition(lat: number, lng: number, panTo = true, knownAddress = '') {
+      setMarker(lat, lng, panTo, knownAddress);
     }
 
     // ============ ফুলস্ক্রিন ওভারলে খোলা/বন্ধ ============
@@ -304,9 +642,14 @@ const {
         }
       }, 50);
 
-      if (allowAutoLocate && !marker) {
+      // সেভড ঠিকানা বাছা থাকলে ম্যাপে সেই পিন দেখানো (ঠিকানার লেখা অপরিবর্তিত)
+      if (!marker && outMode.value === 'saved' && outLat.value && outLng.value) {
+        handleNewPosition(parseFloat(outLat.value), parseFloat(outLng.value), true, outAddress.value);
+      } else if (allowAutoLocate && !marker) {
         tryAutoLocate();
       }
+
+      refreshLoginState();
     }
 
     function closeOverlay() {
@@ -314,6 +657,7 @@ const {
       document.body.style.overflow = '';
       setSearchResultsVisible(false);
       searchInput.value = '';
+      closeSavePlacePanel();
     }
 
     mapSelectBtn.addEventListener('click', openOverlay);
@@ -332,7 +676,7 @@ const {
       addressInput.classList.remove('field-invalid');
       wrap.querySelector(`[data-error-for="${addressInput.id}"]`)?.classList.remove('show');
 
-      // নতুন: ঐচ্ছিক নাম দেওয়া থাকলে সাজেশন-ডাটাবেসে ফায়ার-অ্যান্ড-ফরগেট সেভ
+      // ঐচ্ছিক নাম দেওয়া থাকলে সাজেশন-ডাটাবেসে ফায়ার-অ্যান্ড-ফরগেট সেভ
       if (enableSuggestions && suggestNameInput) {
         const suggestName = suggestNameInput.value.trim();
         if (suggestName) {
@@ -341,6 +685,7 @@ const {
         suggestNameInput.value = '';
       }
 
+      emitLocation('map', pendingLat, pendingLng, pendingAddress, pendingArea);
       closeOverlay();
     });
 
@@ -350,13 +695,14 @@ const {
       outMode.value = 'text';
       outLat.value = '';
       outLng.value = '';
+      emitLocation('text', null, null, outAddress.value, null);
     });
 
     instructionsInput.addEventListener('input', () => {
       outInstructions.value = instructionsInput.value.trim();
     });
 
-    // ============ নতুন: লোকেশন-সাজেশন অটোকমপ্লিট (শুধু enableSuggestions=1) ============
+    // ============ লোকেশন-সাজেশন অটোকমপ্লিট (শুধু enableSuggestions=1) ============
     if (enableSuggestions && suggestResults) {
       function setSuggestResultsVisible(visible: boolean) {
         suggestResults!.classList.toggle('active', visible);
@@ -412,6 +758,9 @@ const {
               wrap.querySelector(`[data-error-for="${addressInput.id}"]`)?.classList.remove('show');
 
               setSuggestResultsVisible(false);
+
+              const area = geo && Number.isFinite(lat) && Number.isFinite(lng) ? findAreaAt(lat, lng, geo) : null;
+              emitLocation('suggestion', Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null, name, area);
             });
           });
         }, 350);
@@ -474,19 +823,31 @@ const {
     });
 
     // ============ অটো-লোকেট (শুধু allowAutoLocate=true) ============
+    function resetLocateBtn() {
+      if (!locateBtn) return;
+      locateBtn.disabled = false;
+      locateBtn.innerHTML = '<i class="fas fa-location-crosshairs"></i> বর্তমান লোকেশন ব্যবহার করুন';
+    }
+
     function tryAutoLocate() {
       if (!locateBtn) return;
       locateBtn.disabled = true;
       locateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> লোকেশন খোঁজা হচ্ছে...';
       getCurrentPosition(
         (pos) => {
-          handleNewPosition(pos.coords.latitude, pos.coords.longitude, true);
-          locateBtn.disabled = false;
-          locateBtn.innerHTML = '<i class="fas fa-location-crosshairs"></i> বর্তমান লোকেশন ব্যবহার করুন';
+          const la = pos.coords.latitude;
+          const ln = pos.coords.longitude;
+          // ফেনীর বাইরে (যেমন প্রবাস) হলে পিন বসবে না, ম্যাপ ফেনীতেই থাকবে
+          if (geo && !findAreaAt(la, ln, geo)) {
+            showOutside('আপনি এখন ফেনীর বাইরে আছেন — ম্যাপে ফেনীর ভেতরে পিন বসান');
+            resetLocateBtn();
+            return;
+          }
+          handleNewPosition(la, ln, true);
+          resetLocateBtn();
         },
         () => {
-          locateBtn.disabled = false;
-          locateBtn.innerHTML = '<i class="fas fa-location-crosshairs"></i> বর্তমান লোকেশন ব্যবহার করুন';
+          resetLocateBtn();
         },
         { enableHighAccuracy: true, timeout: 8000 }
       );
@@ -495,12 +856,240 @@ const {
     if (allowAutoLocate && locateBtn) {
       locateBtn.addEventListener('click', tryAutoLocate);
     }
+
+    // ============================================================
+    // সেভড ঠিকানা (শুধু enableSavedLocations=1)
+    // ============================================================
+    let loggedIn = false;
+    let savedList: any[] = [];
+    let savedLoaded = false;
+    let msgTimer: ReturnType<typeof setTimeout>;
+    let deleteArmedId: string | null = null;
+    let deleteArmTimer: ReturnType<typeof setTimeout>;
+
+    async function refreshLoginState() {
+      if (!enableSaved) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      loggedIn = !!session;
+      updateStarVisibility();
+    }
+
+    function updateStarVisibility() {
+      if (!starBtn) return;
+      const show = loggedIn && pendingLat !== null && pendingLng !== null;
+      starBtn.hidden = !show;
+      if (!show) closeSavePlacePanel();
+    }
+
+    function showSavedMsg(text: string, isError = false) {
+      if (!savedMsg) return;
+      clearTimeout(msgTimer);
+      savedMsg.textContent = text;
+      savedMsg.classList.toggle('error', isError);
+      savedMsg.hidden = false;
+      msgTimer = setTimeout(() => {
+        savedMsg.hidden = true;
+      }, 4000);
+    }
+
+    function openSavePlacePanel() {
+      if (!savePlacePanel || !savePlaceInput || !starBtn) return;
+      savePlacePanel.hidden = false;
+      starBtn.hidden = true;
+      savePlaceInput.value = '';
+      savePlaceInput.focus();
+    }
+
+    function closeSavePlacePanel() {
+      if (!savePlacePanel) return;
+      savePlacePanel.hidden = true;
+      if (starBtn && loggedIn && pendingLat !== null) starBtn.hidden = false;
+    }
+
+    if (enableSaved && starBtn && savePlacePanel && savePlaceInput && savePlaceOk && savePlaceCancel) {
+      starBtn.addEventListener('click', openSavePlacePanel);
+      savePlaceCancel.addEventListener('click', closeSavePlacePanel);
+
+      savePlacePanel.querySelectorAll('.lp-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const name = (chip as HTMLElement).dataset.name;
+          savePlaceInput!.value = name || '';
+          savePlaceInput!.focus();
+        });
+      });
+
+      savePlaceOk.addEventListener('click', async () => {
+        if (pendingLat === null || pendingLng === null) return;
+        savePlaceOk.disabled = true;
+        const original = savePlaceOk.textContent;
+        savePlaceOk.textContent = 'সেভ হচ্ছে…';
+
+        const result: any = await saveLocation({
+          name: savePlaceInput!.value,
+          address: pendingAddress,
+          lat: pendingLat,
+          lng: pendingLng,
+          upazila: pendingArea ? pendingArea.upazilaName : null,
+          union: pendingArea ? pendingArea.unionBn : null,
+        });
+
+        savePlaceOk.disabled = false;
+        savePlaceOk.textContent = original;
+
+        if (result.error) {
+          showSavedMsg(result.error, true);
+          return;
+        }
+
+        savedLoaded = false; // পরের বার ড্রপডাউন খুললে নতুন লিস্ট আসবে
+        closeSavePlacePanel();
+        showSavedMsg(
+          result.updated
+            ? `✓ "${result.data.name}" আপডেট হয়েছে`
+            : `✓ "${result.data.name}" আপনার ঠিকানায় সেভ হয়েছে`
+        );
+      });
+    }
+
+    // ----- ঠিকানা বক্সে সেভড ঠিকানার সাজেশন -----
+    function setSavedVisible(visible: boolean) {
+      if (savedResults) savedResults.classList.toggle('active', visible);
+    }
+
+    async function ensureSavedLoaded() {
+      if (savedLoaded) return;
+      await refreshLoginState();
+      if (!loggedIn) {
+        savedList = [];
+        savedLoaded = true;
+        return;
+      }
+      const { data } = await listSavedLocations();
+      savedList = data || [];
+      savedLoaded = true;
+    }
+
+    function renderSaved() {
+      if (!savedResults) return;
+      const items = filterSavedLocations(savedList, addressInput.value);
+      if (!items.length) {
+        savedResults.innerHTML = '';
+        setSavedVisible(false);
+        return;
+      }
+      const rows = items
+        .map((it: any) => {
+          const armed = deleteArmedId === it.id;
+          const sub = [it.upazila, it.union_name].filter(Boolean).join(' · ');
+          return `
+            <div class="lp-saved-item" data-id="${esc(it.id)}">
+              <div class="lp-saved-ico"><i class="fas ${iconForName(it.name)}"></i></div>
+              <div class="lp-saved-text">
+                <span class="lp-saved-name">${esc(it.name)}</span>
+                <span class="lp-saved-addr">${esc(it.address)}</span>
+                ${sub ? `<span class="lp-saved-sub">${esc(sub)}</span>` : ''}
+              </div>
+              <button type="button" class="lp-saved-del${armed ? ' armed' : ''}" data-del="${esc(it.id)}" aria-label="ঠিকানা মুছুন">
+                ${armed ? 'মুছবেন?' : '<i class="fas fa-trash-can"></i>'}
+              </button>
+            </div>`;
+        })
+        .join('');
+      savedResults.innerHTML = `<div class="lp-saved-head"><i class="fas fa-star"></i> আপনার সেভ করা ঠিকানা</div>${rows}`;
+      setSavedVisible(true);
+    }
+
+    function applySaved(item: any) {
+      const lat = Number(item.lat);
+      const lng = Number(item.lng);
+      addressInput.value = item.address;
+      outAddress.value = item.address;
+      outLat.value = String(lat);
+      outLng.value = String(lng);
+      outMode.value = 'saved';
+      addressInput.classList.remove('field-invalid');
+      wrap.querySelector(`[data-error-for="${addressInput.id}"]`)?.classList.remove('show');
+      setSavedVisible(false);
+      // ম্যাপ থেকে ধরা উপজেলা/ইউনিয়ন; geojson না থাকলে সেভ করা নামই ব্যবহার
+      let area: any = geo ? findAreaAt(lat, lng, geo) : null;
+      if (!area && item.upazila) {
+        const up: any = UPAZILAS.find((u: any) => u.name === item.upazila);
+        area = { upazilaName: item.upazila, upazilaId: up ? up.id : '', unionBn: item.union_name || '' };
+      }
+      emitLocation('saved', lat, lng, item.address, area);
+    }
+
+    if (enableSaved && savedResults) {
+      const openSaved = async () => {
+        await ensureSavedLoaded();
+        renderSaved();
+      };
+      addressInput.addEventListener('focus', openSaved);
+      addressInput.addEventListener('click', openSaved);
+      addressInput.addEventListener('input', async () => {
+        await ensureSavedLoaded();
+        renderSaved();
+      });
+
+      savedResults.addEventListener('click', async (e) => {
+        const target = e.target as HTMLElement;
+
+        // মুছে ফেলা — প্রথম ট্যাপে "মুছবেন?", দ্বিতীয় ট্যাপে আসলে মোছা
+        const delBtn = target.closest('.lp-saved-del') as HTMLElement | null;
+        if (delBtn) {
+          e.stopPropagation();
+          const delId = delBtn.dataset.del || '';
+          if (deleteArmedId !== delId) {
+            deleteArmedId = delId;
+            clearTimeout(deleteArmTimer);
+            deleteArmTimer = setTimeout(() => {
+              deleteArmedId = null;
+              renderSaved();
+            }, 3000);
+            renderSaved();
+            return;
+          }
+          clearTimeout(deleteArmTimer);
+          deleteArmedId = null;
+          const { error } = await deleteSavedLocation(delId);
+          if (error) {
+            showSavedMsg(error, true);
+          } else {
+            savedList = savedList.filter((x: any) => x.id !== delId);
+          }
+          renderSaved();
+          return;
+        }
+
+        const row = target.closest('.lp-saved-item') as HTMLElement | null;
+        if (row) {
+          const item = savedList.find((x: any) => x.id === row.dataset.id);
+          if (item) applySaved(item);
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!wrap.contains(e.target as Node)) setSavedVisible(false);
+      });
+    }
+
+    refreshLoginState();
   }
 
   async function initAllPickers() {
     const wraps = document.querySelectorAll<HTMLElement>('.lp-wrap');
     if (!wraps.length) return;
-    await loadLeaflet();
+
+    // Leaflet আর ফেনীর geojson একসাথে লোড। geojson ব্যর্থ হলেও পিকার চলবে (ওভারলে ছাড়া)
+    const [, g] = await Promise.all([
+      loadLeaflet(),
+      loadFeniGeo().catch((err: any) => {
+        console.error('[LocationPicker] ফেনীর geojson লোড ব্যর্থ — ওভারলে/ফেনী-চেক বন্ধ:', err);
+        return null;
+      }),
+    ]);
+    geo = g;
+
     wraps.forEach((wrap) => {
       if (wrap.dataset.lpInitialized === '1') return;
       wrap.dataset.lpInitialized = '1';
@@ -576,8 +1165,9 @@ const {
     }
   }
 
-  /* নতুন: অটোকমপ্লিট সাজেশন ড্রপডাউন — address-row এর ঠিক নিচে */
-  .lp-suggest-results {
+  /* অটোকমপ্লিট সাজেশন ড্রপডাউন — address-row এর ঠিক নিচে */
+  .lp-suggest-results,
+  .lp-saved-results {
     display: none;
     position: relative;
     margin-top: 6px;
@@ -590,7 +1180,8 @@ const {
     z-index: 40;
   }
 
-  .lp-suggest-results.active {
+  .lp-suggest-results.active,
+  .lp-saved-results.active {
     display: block;
   }
 
@@ -777,6 +1368,43 @@ const {
     flex-shrink: 0;
     padding: 14px 18px calc(16px + env(safe-area-inset-bottom));
     border-top: 1px solid #E5EAF0;
+    max-height: 55vh;
+    overflow-y: auto;
+  }
+
+  /* ফেনীর বাইরে সতর্কবার্তা / ইউনিয়ন ব্যাজ */
+  .lp-area-warn,
+  .lp-area-badge {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 0 10px;
+    padding: 9px 12px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+
+  .lp-area-warn[hidden],
+  .lp-area-badge[hidden] {
+    display: none;
+  }
+
+  .lp-area-warn {
+    background: #FEF2F2;
+    color: #B91C1C;
+  }
+
+  .lp-area-badge {
+    background: #ECFDF5;
+    color: #047857;
+  }
+
+  .lp-area-warn i,
+  .lp-area-badge i {
+    margin-top: 2px;
+    flex-shrink: 0;
   }
 
   .lp-address-preview {
@@ -798,7 +1426,7 @@ const {
     flex-shrink: 0;
   }
 
-  /* নতুন: ম্যাপ-কনফার্মে ঐচ্ছিক নাম ফিল্ড */
+  /* ম্যাপ-কনফার্মে ঐচ্ছিক নাম ফিল্ড */
   .lp-suggest-name-row {
     margin-bottom: 12px;
   }
@@ -818,6 +1446,147 @@ const {
     outline: none;
     border-color: #FF6B35;
     background: #fff;
+  }
+
+  /* ============ নতুন: সেভড ঠিকানা টুলস (ফুটারে) ============ */
+  .lp-saved-tools {
+    margin-bottom: 12px;
+  }
+
+  .lp-star-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #FFF9E6;
+    color: #B45309;
+    border: 1.5px solid #FDE68A;
+    border-radius: 30px;
+    padding: 9px 16px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .lp-star-btn[hidden] {
+    display: none;
+  }
+
+  .lp-star-btn i {
+    color: #F59E0B;
+  }
+
+  .lp-save-place {
+    background: #FFFBEB;
+    border: 1.5px solid #FDE68A;
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .lp-save-place[hidden] {
+    display: none;
+  }
+
+  .lp-save-place-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .lp-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #fff;
+    color: #1B2A4A;
+    border: 1.5px solid #E5EAF0;
+    border-radius: 30px;
+    padding: 7px 14px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .lp-chip i {
+    color: #FF6B35;
+  }
+
+  .lp-chip:hover {
+    border-color: #FF6B35;
+    background: #FFF6F2;
+  }
+
+  .lp-save-place-input {
+    width: 100%;
+    padding: 11px 14px;
+    border-radius: 12px;
+    border: 1.5px solid #E5EAF0;
+    font-size: 0.84rem;
+    color: #1B2A4A;
+    box-sizing: border-box;
+    background: #fff;
+  }
+
+  .lp-save-place-input:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+
+  .lp-save-place-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .lp-save-place-ok {
+    flex: 1;
+    background: #FF6B35;
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 10px;
+    font-size: 0.84rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .lp-save-place-ok:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
+
+  .lp-save-place-cancel {
+    background: #F4F7FC;
+    color: #5A6E85;
+    border: none;
+    border-radius: 12px;
+    padding: 10px 16px;
+    font-size: 0.84rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .lp-saved-msg {
+    margin: 8px 0 0;
+    padding: 9px 12px;
+    border-radius: 12px;
+    background: #ECFDF5;
+    color: #047857;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+
+  .lp-saved-msg[hidden] {
+    display: none;
+  }
+
+  .lp-saved-msg.error {
+    background: #FEF2F2;
+    color: #B91C1C;
   }
 
   .lp-save-btn {
@@ -871,7 +1640,7 @@ const {
     color: #99A9BE;
   }
 
-  /* নতুন: লোকেশন-সাজেশন অটোকমপ্লিট আইটেম — JS দিয়ে innerHTML হিসেবে বসে, তাই global */
+  /* লোকেশন-সাজেশন অটোকমপ্লিট আইটেম — JS দিয়ে innerHTML হিসেবে বসে, তাই global */
   .lp-suggest-item {
     padding: 9px 12px;
     display: flex;
@@ -924,5 +1693,103 @@ const {
   .lp-suggest-sub {
     font-size: 0.72rem;
     color: #99A9BE;
+  }
+
+  /* নতুন: সেভড ঠিকানার সাজেশন — JS দিয়ে innerHTML হিসেবে বসে, তাই global */
+  .lp-saved-head {
+    padding: 9px 14px 7px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: #B45309;
+    background: #FFFBEB;
+    border-bottom: 1px solid #FDE68A;
+    position: sticky;
+    top: 0;
+  }
+
+  .lp-saved-head i {
+    color: #F59E0B;
+    margin-right: 4px;
+  }
+
+  .lp-saved-item {
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #F0F3F8;
+  }
+
+  .lp-saved-item:last-child {
+    border-bottom: none;
+  }
+
+  .lp-saved-item:hover {
+    background: #FFF6F2;
+  }
+
+  .lp-saved-ico {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 0.95rem;
+  }
+
+  .lp-saved-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .lp-saved-name {
+    font-size: 0.86rem;
+    font-weight: 800;
+    color: #1B2A4A;
+  }
+
+  .lp-saved-addr {
+    font-size: 0.74rem;
+    color: #5A6E85;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .lp-saved-sub {
+    font-size: 0.7rem;
+    color: #99A9BE;
+  }
+
+  .lp-saved-del {
+    flex-shrink: 0;
+    min-width: 34px;
+    height: 34px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 17px;
+    background: #F4F7FC;
+    color: #99A9BE;
+    font-size: 0.8rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .lp-saved-del:hover {
+    color: #B91C1C;
+    background: #FEF2F2;
+  }
+
+  .lp-saved-del.armed {
+    background: #B91C1C;
+    color: #fff;
   }
 </style>
