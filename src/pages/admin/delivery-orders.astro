@@ -1,0 +1,1039 @@
+<!-- path: src/pages/admin/delivery-orders.astro -->
+---
+// ============================================================
+// পেজ: অ্যাডমিন — ডেলিভারি ও রাইড অর্ডার মনিটরিং (/admin/delivery-orders)
+// শুধু admin/moderator — adminGuard.js কন্ট্রাক্ট (adminLoadingState /
+// adminGuardedContent), প্যাটার্ন admin/delivery-disputes.astro এর মতোই।
+//
+// কী করে:
+//   ১) সামারি কার্ড — আজকের অর্ডার, চলমান, ডিসপিউট, আজ সম্পন্ন/বাতিল, অনলাইন রাইডার
+//   ২) তিন ট্যাব — 🔴 লাইভ / 📜 হিস্ট্রি / ⚡ আপডেট ফিড
+//   ৩) একটাই সার্চ বক্স — অর্ডার নাম্বার (SFD-1042 / 1042), ফোন নম্বর, অথবা নাম।
+//      ইউজার সার্চে সেই ইউজারের কাস্টমার ও রাইডার দুই ভূমিকার অর্ডারই আসে,
+//      সাথে ইউজার সামারি (মোট / সম্পন্ন / বাতিল / ডিসপিউট)
+//   ৪) অর্ডার ডিটেইল মোডাল — রুট, দুই পক্ষ, অফার লিস্ট, ডিসপিউট, পুরো টাইমলাইন, চ্যাট
+//   ৫) "🔔 রাইডারদের এলার্ট দিন" বাটন — open অর্ডারে; কনফার্মেশন মোডালে টার্গেট বেছে
+//      মেসেজ এডিট করা যায়; একই অর্ডারে ৫ মিনিট কুলডাউন (সার্ভারে চেক)
+//   ৬) লাইভ আপডেট — order_events এ Supabase Realtime + ১৫ সেকেন্ড পোলিং ফলব্যাক;
+//      নতুন অর্ডার এলে হালকা বীপ (🔔/🔕 বাটনে অন-অফ)
+//
+// URL প্যারামিটার: ?open=SFD-1042 (সরাসরি ডিটেইল), ?tab=live|history|feed,
+//   ?filter=no_offer (অফারহীন অর্ডার), ?q=সার্চ টেক্সট
+//
+// ডেটা সব RPC থেকে (সার্ভারে is_admin_or_mod চেক): admin_orders_overview,
+// admin_search_orders, admin_get_order, admin_order_feed, admin_alert_riders।
+// নোট: ডায়নামিক HTML JS দিয়ে তৈরি, তাই স্টাইল is:global এবং ক্লাস do- দিয়ে শুরু।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import ChatModal from '../../components/delivery/ChatModal.astro';
+
+const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
+---
+
+<BaseLayout title="ডেলিভারি ও রাইড অর্ডার | স্মার্ট ফেনী">
+  <div class="do-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="do-loading">
+        <div class="do-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" style="display:none;">
+
+        <a href="/admin" class="do-back"><i class="fas fa-arrow-left"></i> অ্যাডমিন ড্যাশবোর্ডে ফিরুন</a>
+
+        <div class="do-head">
+          <div>
+            <h1><i class="fas fa-route"></i> ডেলিভারি ও রাইড অর্ডার</h1>
+            <p>লাইভ অর্ডার, হিস্ট্রি ও আপডেট — এক জায়গায়</p>
+          </div>
+          <button type="button" id="doSoundBtn" class="do-sound" title="নতুন অর্ডারের শব্দ"><i class="fas fa-bell"></i></button>
+        </div>
+
+        <!-- ===== সামারি ===== -->
+        <div class="do-stats" id="doStats">
+          <div class="do-stat"><b id="stToday">—</b><span>আজকের অর্ডার</span></div>
+          <div class="do-stat live"><b id="stLive">—</b><span>চলমান</span></div>
+          <div class="do-stat warn" id="stDisputeBox"><b id="stDispute">—</b><span>ডিসপিউট</span></div>
+          <div class="do-stat ok"><b id="stDone">—</b><span>আজ সম্পন্ন</span></div>
+          <div class="do-stat"><b id="stCancel">—</b><span>আজ বাতিল</span></div>
+          <div class="do-stat"><b id="stRiders">—</b><span>অনলাইন রাইডার</span></div>
+        </div>
+
+        <!-- ===== সার্চ ===== -->
+        <div class="do-search">
+          <i class="fas fa-magnifying-glass"></i>
+          <input type="search" id="doSearch" placeholder="অর্ডার নাম্বার (SFD-1042), ফোন নম্বর বা নাম" autocomplete="off" />
+        </div>
+
+        <!-- ===== ট্যাব ===== -->
+        <div class="do-tabs" role="tablist">
+          <button type="button" class="do-tab active" data-tab="live"><span class="do-dot"></span> লাইভ <em id="tabLiveCount"></em></button>
+          <button type="button" class="do-tab" data-tab="history">📜 হিস্ট্রি</button>
+          <button type="button" class="do-tab" data-tab="feed">⚡ আপডেট ফিড</button>
+        </div>
+
+        <!-- ===== ফিল্টার (লাইভ ও হিস্ট্রি) ===== -->
+        <div class="do-filters" id="doFilters">
+          <div class="do-chips" id="catChips">
+            <button type="button" class="do-chip active" data-cat="">সব</button>
+            <button type="button" class="do-chip" data-cat="delivery">📦 ডেলিভারি</button>
+            <button type="button" class="do-chip" data-cat="ride">🏍️ রাইড</button>
+            <button type="button" class="do-chip" data-filter="no_offer" id="noOfferChip">⏳ অফারহীন</button>
+          </div>
+          <div class="do-filter-row">
+            <select id="fStatus" class="do-select">
+              <option value="">সব স্ট্যাটাস</option>
+            </select>
+            <select id="fUpazila" class="do-select">
+              <option value="">সব উপজেলা</option>
+              {upazilaList.map((u) => <option value={u}>{u}</option>)}
+            </select>
+          </div>
+          <div class="do-filter-row" id="dateRow" style="display:none;">
+            <label class="do-date"><span>থেকে</span><input type="date" id="fFrom" /></label>
+            <label class="do-date"><span>পর্যন্ত</span><input type="date" id="fTo" /></label>
+          </div>
+        </div>
+
+        <!-- ===== ইউজার সামারি (ইউজার সার্চে) ===== -->
+        <div id="doUsers" class="do-users" style="display:none;"></div>
+
+        <!-- ===== লিস্ট ===== -->
+        <div id="doList" class="do-list"></div>
+        <div id="doEmpty" class="do-empty" style="display:none;"><i class="fas fa-inbox"></i><p></p></div>
+        <div id="doLoading" class="do-inline-loading" style="display:none;"><div class="do-spinner"></div></div>
+        <button type="button" id="doMore" class="do-more" style="display:none;">আরও দেখুন</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ডিটেইল মোডাল ===== -->
+  <div class="do-overlay" id="doDetailOverlay">
+    <div class="do-sheet" role="dialog" aria-label="অর্ডার ডিটেইলস">
+      <div class="do-grip"></div>
+      <button type="button" class="do-x" id="doDetailClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      <div id="doDetailBody"></div>
+    </div>
+  </div>
+
+  <!-- ===== এলার্ট মোডাল ===== -->
+  <div class="do-overlay" id="doAlertOverlay">
+    <div class="do-sheet" role="dialog" aria-label="রাইডারদের এলার্ট">
+      <div class="do-grip"></div>
+      <button type="button" class="do-x" id="doAlertClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      <h3 class="do-sheet-title">🔔 রাইডারদের এলার্ট দিন</h3>
+      <p class="do-sheet-sub" id="alertOrderLine"></p>
+
+      <p class="do-label">কাদের কাছে যাবে</p>
+      <label class="do-radio"><input type="radio" name="alertScope" value="online" checked /> <span>শুধু অনলাইন রাইডার</span></label>
+      <label class="do-radio"><input type="radio" name="alertScope" value="all" /> <span>সব ভেরিফায়েড রাইডার (অফলাইন সহ)</span></label>
+
+      <p class="do-label">উপজেলা</p>
+      <select id="alertUpazila" class="do-select" style="width:100%;">
+        <option value="">সব উপজেলা</option>
+        {upazilaList.map((u) => <option value={u}>{u}</option>)}
+      </select>
+
+      <p class="do-label">মেসেজ <small>(চাইলে এডিট করুন)</small></p>
+      <textarea id="alertMessage" class="do-textarea" rows="3" maxlength="300"></textarea>
+
+      <p class="do-hint">যারা আগেই অফার দিয়েছেন, বা নোটিফিকেশন বন্ধ রেখেছেন তাদের কাছে যাবে না। একই অর্ডারে ৫ মিনিটে একবারই পাঠানো যায়।</p>
+      <p class="do-alert-result" id="alertResult" style="display:none;"></p>
+
+      <button type="button" class="do-btn primary" id="alertSend"><i class="fas fa-paper-plane"></i> এলার্ট পাঠান</button>
+    </div>
+  </div>
+
+  <ChatModal />
+
+  <style is:global>
+    .do-page { min-height: 60vh; padding: 48px 0 110px; }
+
+    .do-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .do-spinner { width: 34px; height: 34px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: doSpin 0.8s linear infinite; }
+    @keyframes doSpin { to { transform: rotate(360deg); } }
+    .do-inline-loading { display: flex; justify-content: center; padding: 26px 0; }
+
+    .do-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: 0.88rem; margin-bottom: 18px; }
+    .do-back:hover { color: #FF6B35; }
+
+    .do-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+    .do-head h1 { font-size: 1.45rem; font-weight: 800; color: #1B2A4A; display: flex; align-items: center; gap: 10px; margin: 0 0 4px; }
+    .do-head h1 i { color: #0EA5E9; }
+    .do-head p { font-size: 0.84rem; color: #8FA0BC; margin: 0; }
+    .do-sound { flex: none; width: 42px; height: 42px; border-radius: 50%; border: 1.5px solid #E5EAF0; background: #fff; color: #1B2A4A; cursor: pointer; font-size: 1rem; }
+    .do-sound.off { color: #9AA8BC; background: #F1F5F9; }
+
+    /* সামারি */
+    .do-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+    @media (min-width: 720px) { .do-stats { grid-template-columns: repeat(6, 1fr); } }
+    .do-stat { background: #fff; border-radius: 16px; padding: 12px 8px; text-align: center; border: 1px solid #EEF3F9; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04); }
+    .do-stat b { display: block; font-size: 1.3rem; font-weight: 800; color: #1B2A4A; }
+    .do-stat span { display: block; font-size: 0.68rem; color: #8FA0BC; font-weight: 600; margin-top: 2px; }
+    .do-stat.live b { color: #0EA5E9; }
+    .do-stat.ok b { color: #16A34A; }
+    .do-stat.warn.has b { color: #EF4444; }
+    .do-stat.warn.has { border-color: #FECACA; background: #FFF5F5; }
+
+    /* সার্চ */
+    .do-search { position: relative; margin-bottom: 14px; }
+    .do-search i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #9AA8BC; font-size: 0.85rem; }
+    .do-search input { width: 100%; padding: 13px 14px 13px 38px; border: 1.5px solid #E5EAF0; border-radius: 14px; font-size: 0.92rem; font-family: inherit; background: #fff; color: #1B2A4A; box-sizing: border-box; }
+    .do-search input:focus { outline: none; border-color: #FF6B35; }
+
+    /* ট্যাব */
+    .do-tabs { display: flex; gap: 6px; background: #EEF3F9; padding: 5px; border-radius: 16px; margin-bottom: 14px; }
+    .do-tab { flex: 1; border: none; background: transparent; padding: 10px 6px; border-radius: 12px; font-size: 0.84rem; font-weight: 700; color: #5A6E85; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .do-tab.active { background: #fff; color: #1B2A4A; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08); }
+    .do-tab em { font-style: normal; font-size: 0.68rem; background: #EF4444; color: #fff; border-radius: 99px; padding: 1px 7px; display: none; }
+    .do-tab em.show { display: inline-block; }
+    .do-dot { width: 8px; height: 8px; border-radius: 50%; background: #EF4444; animation: doPulse 1.8s infinite; }
+    @keyframes doPulse { 70% { box-shadow: 0 0 0 7px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+    @media (prefers-reduced-motion: reduce) { .do-dot { animation: none; } }
+
+    /* ফিল্টার */
+    .do-filters { margin-bottom: 14px; }
+    .do-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .do-chip { border: 1.5px solid #E5EAF0; background: #fff; border-radius: 99px; padding: 7px 14px; font-size: 0.78rem; font-weight: 700; color: #5A6E85; cursor: pointer; font-family: inherit; }
+    .do-chip.active { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+    .do-filter-row { display: flex; gap: 10px; margin-bottom: 10px; }
+    .do-select { flex: 1; min-width: 0; padding: 10px 12px; border: 1.5px solid #E5EAF0; border-radius: 12px; background: #fff; font-size: 0.84rem; font-family: inherit; color: #1B2A4A; }
+    .do-date { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 0.68rem; font-weight: 700; color: #8FA0BC; }
+    .do-date input { padding: 9px 10px; border: 1.5px solid #E5EAF0; border-radius: 12px; font-family: inherit; font-size: 0.84rem; color: #1B2A4A; background: #fff; }
+
+    /* ইউজার সামারি */
+    .do-users { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+    .do-user { background: linear-gradient(135deg, #1B2A4A, #2B3F6B); color: #fff; border-radius: 18px; padding: 14px 16px; }
+    .do-user h4 { margin: 0; font-size: 1rem; font-weight: 800; }
+    .do-user h4 small { font-weight: 600; opacity: 0.75; margin-left: 6px; }
+    .do-user-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+    .do-user-grid div { background: rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 8px 4px; text-align: center; }
+    .do-user-grid b { display: block; font-size: 1.1rem; }
+    .do-user-grid span { font-size: 0.62rem; opacity: 0.8; }
+    .do-user-sub { font-size: 0.72rem; opacity: 0.8; margin: 10px 0 4px; font-weight: 700; }
+    .do-user-note { font-size: 0.78rem; color: #5A6E85; margin: 0 0 4px; }
+
+    /* কার্ড */
+    .do-list { display: flex; flex-direction: column; gap: 12px; }
+    .do-card { background: #fff; border-radius: 18px; padding: 14px 16px; border: 1px solid #EEF3F9; box-shadow: 0 3px 14px rgba(15, 23, 42, 0.05); cursor: pointer; transition: transform 0.15s; }
+    .do-card:active { transform: scale(0.99); }
+    .do-card.fresh { animation: doFresh 2.4s ease-out; }
+    @keyframes doFresh { 0% { background: #FFF3C4; } 100% { background: #fff; } }
+    .do-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .do-no { font-size: 0.78rem; font-weight: 800; color: #1B2A4A; background: #EEF3F9; padding: 3px 10px; border-radius: 8px; letter-spacing: 0.3px; }
+    .do-no.ride { background: #EAF6FF; color: #0369A1; }
+    .do-badge { font-size: 0.68rem; font-weight: 800; padding: 3px 10px; border-radius: 99px; }
+    .do-badge.s-open { background: #E0F2FE; color: #0369A1; }
+    .do-badge.s-confirmed { background: #FEF3C7; color: #B45309; }
+    .do-badge.s-delivered { background: #EDE9FE; color: #6D28D9; }
+    .do-badge.s-completed { background: #DCFCE7; color: #15803D; }
+    .do-badge.s-cancelled { background: #F1F5F9; color: #64748B; }
+    .do-badge.s-expired { background: #F1F5F9; color: #64748B; }
+    .do-badge.s-disputed { background: #FEE2E2; color: #B91C1C; }
+    .do-route { font-size: 0.86rem; color: #1B2A4A; font-weight: 600; margin: 0 0 8px; line-height: 1.45; }
+    .do-route small { display: block; color: #8FA0BC; font-weight: 500; font-size: 0.74rem; }
+    .do-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.75rem; color: #5A6E85; }
+    .do-meta span i { margin-right: 4px; color: #9AA8BC; }
+    .do-price { color: #FF6B35; font-weight: 800; }
+    .do-role { font-size: 0.66rem; font-weight: 800; padding: 2px 8px; border-radius: 6px; background: #FFF0EA; color: #FF6B35; }
+    .do-card-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+    .do-btn { border: none; border-radius: 12px; padding: 10px 14px; font-size: 0.8rem; font-weight: 800; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .do-btn.primary { background: #FF6B35; color: #fff; width: 100%; padding: 13px; font-size: 0.9rem; margin-top: 8px; }
+    .do-btn.primary:disabled { opacity: 0.55; cursor: not-allowed; }
+    .do-btn.ghost { background: #F1F5F9; color: #1B2A4A; }
+    .do-btn.alert { background: #FFF0EA; color: #E8531D; }
+    .do-btn.blue { background: #E0F2FE; color: #0369A1; }
+
+    .do-more { display: block; margin: 16px auto 0; padding: 11px 26px; border-radius: 99px; border: 1.5px solid #E5EAF0; background: #fff; font-weight: 700; color: #1B2A4A; cursor: pointer; font-family: inherit; }
+    .do-empty { text-align: center; padding: 60px 0; color: #9AA8BC; }
+    .do-empty i { font-size: 2.2rem; margin-bottom: 10px; }
+    .do-empty p { margin: 0; font-weight: 600; }
+
+    /* ফিড */
+    .do-feed-item { display: flex; gap: 12px; align-items: flex-start; background: #fff; border-radius: 16px; padding: 12px 14px; border: 1px solid #EEF3F9; cursor: pointer; }
+    .do-feed-ic { flex: none; width: 38px; height: 38px; border-radius: 12px; background: #EEF3F9; display: flex; align-items: center; justify-content: center; font-size: 1.05rem; }
+    .do-feed-body { flex: 1; min-width: 0; }
+    .do-feed-body b { display: block; font-size: 0.86rem; color: #1B2A4A; }
+    .do-feed-body small { display: block; font-size: 0.74rem; color: #8FA0BC; margin-top: 2px; line-height: 1.4; }
+    .do-feed-time { flex: none; font-size: 0.68rem; color: #9AA8BC; font-weight: 600; }
+
+    /* মোডাল */
+    .do-overlay { position: fixed; inset: 0; z-index: 1050; background: rgba(15, 23, 42, 0.55); display: none; align-items: flex-end; justify-content: center; }
+    .do-overlay.active { display: flex; }
+    .do-sheet { position: relative; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; background: #fff; border-radius: 26px 26px 0 0; padding: 10px 18px calc(24px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+    @media (min-width: 720px) { .do-overlay { align-items: center; } .do-sheet { border-radius: 26px; } }
+    .do-grip { width: 42px; height: 5px; border-radius: 5px; background: #E5EAF0; margin: 0 auto 12px; }
+    .do-x { position: absolute; right: 14px; top: 14px; width: 34px; height: 34px; border-radius: 50%; border: none; background: #F1F5F9; color: #1B2A4A; cursor: pointer; }
+    .do-sheet-title { font-size: 1.15rem; font-weight: 800; color: #1B2A4A; margin: 4px 0 4px; }
+    .do-sheet-sub { font-size: 0.82rem; color: #8FA0BC; margin: 0 0 8px; }
+    .do-sec { margin-top: 16px; }
+    .do-sec h5 { margin: 0 0 6px; font-size: 0.7rem; font-weight: 800; color: #9AA8BC; text-transform: uppercase; letter-spacing: 0.4px; }
+    .do-text { font-size: 0.88rem; color: #1B2A4A; margin: 0; line-height: 1.5; word-break: break-word; }
+    .do-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .do-party { background: #F8FAFC; border-radius: 12px; padding: 10px 12px; }
+    .do-party small { display: block; font-size: 0.64rem; font-weight: 700; color: #9AA8BC; }
+    .do-party b { display: block; font-size: 0.88rem; color: #1B2A4A; margin: 2px 0; }
+    .do-party a { font-size: 0.78rem; color: #0369A1; text-decoration: none; font-weight: 700; }
+    .do-offer { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; padding: 8px 0; border-top: 1px dashed #E5EAF0; color: #1B2A4A; }
+    .do-offer:first-of-type { border-top: none; }
+    .do-reason { background: #FFF5F5; border: 1px solid #FECACA; border-radius: 12px; padding: 10px 12px; font-size: 0.84rem; color: #7F1D1D; }
+    .do-tl { position: relative; margin: 0; padding: 0 0 0 20px; list-style: none; }
+    .do-tl::before { content: ''; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px; background: #E5EAF0; }
+    .do-tl li { position: relative; padding: 0 0 12px; font-size: 0.82rem; color: #1B2A4A; }
+    .do-tl li::before { content: ''; position: absolute; left: -19px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: #0EA5E9; border: 2px solid #fff; box-shadow: 0 0 0 1px #0EA5E9; }
+    .do-tl li small { display: block; color: #8FA0BC; font-size: 0.72rem; margin-top: 1px; }
+    .do-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .do-actions .do-btn { flex: 1 1 140px; }
+    .do-cooldown { font-size: 0.74rem; color: #B45309; font-weight: 700; margin-top: 6px; }
+
+    .do-label { font-size: 0.78rem; font-weight: 800; color: #1B2A4A; margin: 14px 0 6px; }
+    .do-label small { font-weight: 500; color: #9AA8BC; }
+    .do-radio { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; color: #1B2A4A; padding: 6px 0; cursor: pointer; }
+    .do-textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #E5EAF0; border-radius: 12px; font-family: inherit; font-size: 0.86rem; color: #1B2A4A; box-sizing: border-box; resize: vertical; }
+    .do-textarea:focus { outline: none; border-color: #FF6B35; }
+    .do-hint { font-size: 0.74rem; color: #8FA0BC; margin: 10px 0 0; line-height: 1.45; }
+    .do-alert-result { font-size: 0.84rem; font-weight: 700; margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; }
+    .do-alert-result.ok { background: #DCFCE7; color: #15803D; }
+    .do-alert-result.err { background: #FEE2E2; color: #B91C1C; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    // ================= হেল্পার =================
+    const $ = (id) => document.getElementById(id);
+    const PAGE = 20;
+    const POLL_MS = 15000;
+
+    const STATUS_LABEL = {
+      open: 'খোলা', confirmed: 'কনফার্ম', delivered: 'ডেলিভারড', completed: 'সম্পন্ন',
+      cancelled: 'বাতিল', expired: 'মেয়াদ শেষ', disputed: 'ডিসপিউট',
+    };
+
+    const EVENT_INFO = {
+      created: { icon: '🆕', text: 'নতুন রিকোয়েস্ট এসেছে' },
+      offer_made: { icon: '💬', text: 'অফার এসেছে' },
+      status_confirmed: { icon: '✅', text: 'কনফার্ম হয়েছে' },
+      pickup_done: { icon: '📍', text: 'পিকআপ সম্পন্ন' },
+      status_delivered: { icon: '📦', text: 'হিরো ডেলিভারড মার্ক করেছেন' },
+      status_completed: { icon: '🏁', text: 'সম্পন্ন হয়েছে' },
+      status_cancelled: { icon: '❌', text: 'বাতিল হয়েছে' },
+      status_disputed: { icon: '⚠️', text: 'ডিসপিউট খোলা হয়েছে' },
+      dispute_resolved: { icon: '⚖️', text: 'ডিসপিউট নিষ্পত্তি হয়েছে' },
+      rider_alert: { icon: '🔔', text: 'রাইডারদের এলার্ট পাঠানো হয়েছে' },
+      status_open: { icon: '🔓', text: 'আবার খোলা হয়েছে' },
+    };
+
+    function esc(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function bn(value) {
+      return String(value).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+    }
+
+    function money(value) {
+      if (value === null || value === undefined || value === '') return '—';
+      return '৳' + bn(Math.round(Number(value)));
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return '';
+      const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+      const m = Math.floor(diff / 60000);
+      if (m < 1) return 'এইমাত্র';
+      if (m < 60) return bn(m) + ' মিনিট আগে';
+      const h = Math.floor(m / 60);
+      if (h < 24) return bn(h) + ' ঘণ্টা আগে';
+      return bn(Math.floor(h / 24)) + ' দিন আগে';
+    }
+
+    function fullDate(iso) {
+      if (!iso) return '—';
+      return new Date(iso).toLocaleString('bn-BD', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function catIcon(cat) { return cat === 'ride' ? '🏍️' : '📦'; }
+    function catName(cat) { return cat === 'ride' ? 'রাইড' : 'ডেলিভারি'; }
+
+    // ================= স্টেট =================
+    const state = {
+      tab: 'live',
+      cat: '',
+      filter: '',
+      status: '',
+      upazila: '',
+      from: '',
+      to: '',
+      q: '',
+      offset: 0,
+      total: 0,
+      loading: false,
+      feed: [],
+      feedOldestId: null,
+      currentOrder: null,
+      sound: true,
+      initialized: false,
+    };
+
+    try { state.sound = localStorage.getItem('sf_do_sound') !== 'off'; } catch (e) { /* স্টোরেজ না থাকলে সমস্যা নেই */ }
+
+    // ================= বীপ =================
+    let audioCtx = null;
+    function beep() {
+      if (!state.sound) return;
+      try {
+        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.45);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.5);
+      } catch (e) { /* ব্রাউজার ব্লক করলে চুপচাপ বাদ */ }
+    }
+
+    function renderSoundBtn() {
+      const btn = $('doSoundBtn');
+      btn.classList.toggle('off', !state.sound);
+      btn.innerHTML = state.sound ? '<i class="fas fa-bell"></i>' : '<i class="fas fa-bell-slash"></i>';
+    }
+
+    // ================= সামারি =================
+    async function loadOverview() {
+      const { data, error } = await supabase.rpc('admin_orders_overview');
+      if (error || !data) return;
+      $('stToday').textContent = bn(data.today_total ?? 0);
+      const live = (data.live_open || 0) + (data.live_confirmed || 0) + (data.live_delivered || 0) + (data.disputed || 0);
+      $('stLive').textContent = bn(live);
+      $('stDispute').textContent = bn(data.disputed ?? 0);
+      $('stDisputeBox').classList.toggle('has', (data.disputed || 0) > 0);
+      $('stDone').textContent = bn(data.today_completed ?? 0);
+      $('stCancel').textContent = bn(data.today_cancelled ?? 0);
+      $('stRiders').textContent = bn(data.online_riders ?? 0);
+
+      const tabCount = $('tabLiveCount');
+      tabCount.textContent = bn(live);
+      tabCount.classList.toggle('show', live > 0);
+
+      const chip = $('noOfferChip');
+      chip.textContent = '⏳ অফারহীন' + (data.no_offer ? ' (' + bn(data.no_offer) + ')' : '');
+    }
+
+    // ================= স্ট্যাটাস ফিল্টারের অপশন =================
+    function fillStatusOptions() {
+      const sel = $('fStatus');
+      const opts = state.tab === 'history'
+        ? [['', 'সব স্ট্যাটাস'], ['completed', 'সম্পন্ন'], ['cancelled', 'বাতিল'], ['expired', 'মেয়াদ শেষ']]
+        : [['', 'সব স্ট্যাটাস'], ['open', 'খোলা'], ['confirmed', 'কনফার্ম'], ['delivered', 'ডেলিভারড'], ['disputed', 'ডিসপিউট']];
+      sel.innerHTML = opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+      sel.value = state.status;
+      if (sel.value !== state.status) { state.status = ''; sel.value = ''; }
+    }
+
+    // ================= অর্ডার কার্ড =================
+    function orderCard(o, { fresh = false } = {}) {
+      const eff = o.eff_status || o.status;
+      const route = o.pickup_address && o.drop_address
+        ? `${esc(o.pickup_address)} → ${esc(o.drop_address)}`
+        : esc(o.drop_address || o.pickup_address || o.description || '');
+      const customer = o.customer || {};
+      const rider = o.rider;
+      const canAlert = eff === 'open';
+      const roleTag = o.role ? `<span class="do-role">${o.role === 'customer' ? 'কাস্টমার' : 'রাইডার'} হিসেবে</span>` : '';
+
+      return `
+        <div class="do-card ${fresh ? 'fresh' : ''}" data-no="${esc(o.order_no)}" data-id="${esc(o.id)}" data-eff="${esc(eff)}" data-cat="${esc(o.category)}" data-upazila="${esc(o.upazila || '')}" data-price="${esc(o.price ?? '')}">
+          <div class="do-card-top">
+            <span class="do-no ${o.category === 'ride' ? 'ride' : ''}">${catIcon(o.category)} #${esc(o.order_no)}</span>
+            <span style="display:flex;gap:6px;align-items:center;">${roleTag}<span class="do-badge s-${esc(eff)}">${STATUS_LABEL[eff] || esc(eff)}</span></span>
+          </div>
+          <p class="do-route">${route || '—'}<small>${esc(o.upazila || '')}${o.area_detail ? ' · ' + esc(o.area_detail) : ''}</small></p>
+          <div class="do-meta">
+            <span class="do-price">${money(o.price)}</span>
+            <span><i class="fas fa-user"></i>${esc(customer.name || 'কাস্টমার')}</span>
+            ${rider ? `<span><i class="fas fa-motorcycle"></i>${esc(rider.name || 'হিরো')}</span>` : ''}
+            ${eff === 'open' ? `<span><i class="fas fa-comments-dollar"></i>${bn(o.offers_count || 0)} অফার</span>` : ''}
+            <span><i class="fas fa-clock"></i>${timeAgo(o.created_at)}</span>
+          </div>
+          ${canAlert ? `<div class="do-card-actions"><button type="button" class="do-btn alert" data-act="alert"><i class="fas fa-bell"></i> রাইডারদের এলার্ট দিন</button></div>` : ''}
+        </div>`;
+    }
+
+    // ================= লিস্ট লোড (লাইভ / হিস্ট্রি) =================
+    let loadToken = 0;
+    async function loadOrders({ reset = true, silent = false } = {}) {
+      if (state.tab === 'feed') return;
+      const token = ++loadToken;
+      if (reset) state.offset = 0;
+
+      if (!silent) {
+        $('doLoading').style.display = 'flex';
+        if (reset) $('doList').innerHTML = '';
+      }
+      $('doEmpty').style.display = 'none';
+      $('doMore').style.display = 'none';
+      state.loading = true;
+
+      const toIso = state.to ? new Date(state.to + 'T23:59:59').toISOString() : null;
+      const fromIso = state.from ? new Date(state.from + 'T00:00:00').toISOString() : null;
+
+      const { data, error } = await supabase.rpc('admin_search_orders', {
+        p_query: state.q || null,
+        // সার্চ চলাকালীন লাইভ + হিস্ট্রি দুটোতেই খুঁজি — যেকোনো সময়ের অর্ডার পাওয়া যাবে
+        p_group: state.q ? 'all' : state.tab,
+        p_category: state.cat || null,
+        p_status: state.status || null,
+        p_upazila: state.upazila || null,
+        p_from: fromIso,
+        p_to: toIso,
+        p_filter: state.filter || null,
+        p_limit: PAGE,
+        p_offset: state.offset,
+      });
+
+      if (token !== loadToken) return; // নতুন রিকোয়েস্ট এসে গেছে, পুরনোটা বাদ
+      state.loading = false;
+      $('doLoading').style.display = 'none';
+
+      if (error) {
+        $('doList').innerHTML = `<p style="text-align:center;color:#D14343;padding:30px 0;">লোড করতে সমস্যা হয়েছে: ${esc(error.message)}</p>`;
+        return;
+      }
+
+      const items = data?.items || [];
+      state.total = data?.total || 0;
+
+      // নতুন কার্ড হাইলাইট (silent রিফ্রেশে আগে না থাকা কার্ড)
+      const existing = new Set([...$('doList').querySelectorAll('.do-card')].map((c) => c.dataset.no));
+      const html = items.map((o) => orderCard(o, { fresh: silent && !existing.has(o.order_no) })).join('');
+
+      if (reset) {
+        $('doList').innerHTML = html;
+      } else {
+        $('doList').insertAdjacentHTML('beforeend', html);
+      }
+
+      renderUsers(data?.users || [], data?.mode);
+
+      const shown = $('doList').querySelectorAll('.do-card').length;
+      if (shown === 0) {
+        const msg = state.q
+          ? 'এই সার্চে কোনো অর্ডার পাওয়া যায়নি'
+          : state.tab === 'live' ? 'এই মুহূর্তে কোনো চলমান অর্ডার নেই' : 'কোনো অর্ডার পাওয়া যায়নি';
+        $('doEmpty').querySelector('p').textContent = msg;
+        $('doEmpty').style.display = 'block';
+      }
+      $('doMore').style.display = shown < state.total ? 'block' : 'none';
+      state.offset = shown;
+    }
+
+    // ================= ইউজার সামারি =================
+    function renderUsers(users, mode) {
+      const box = $('doUsers');
+      if (mode !== 'user' || !users.length) {
+        box.style.display = 'none';
+        box.innerHTML = '';
+        return;
+      }
+      box.style.display = 'flex';
+      const note = users.length > 1
+        ? `<p class="do-user-note">${bn(users.length)} জন ইউজার মিলেছে — সবার অর্ডার নিচে একসাথে দেখাচ্ছে।</p>` : '';
+      box.innerHTML = note + users.map((u) => `
+        <div class="do-user">
+          <h4>${esc(u.name || 'নামহীন')}<small>${esc(u.phone || '')}</small></h4>
+          <p class="do-user-sub">কাস্টমার হিসেবে</p>
+          <div class="do-user-grid">
+            <div><b>${bn(u.cust_total)}</b><span>মোট</span></div>
+            <div><b>${bn(u.cust_completed)}</b><span>সম্পন্ন</span></div>
+            <div><b>${bn(u.cust_cancelled)}</b><span>বাতিল</span></div>
+            <div><b>${bn(u.cust_disputed)}</b><span>ডিসপিউট</span></div>
+          </div>
+          ${u.rider_total > 0 ? `
+            <p class="do-user-sub">রাইডার/হিরো হিসেবে</p>
+            <div class="do-user-grid" style="grid-template-columns:repeat(2,1fr);">
+              <div><b>${bn(u.rider_total)}</b><span>মোট জব</span></div>
+              <div><b>${bn(u.rider_completed)}</b><span>সম্পন্ন</span></div>
+            </div>` : ''}
+        </div>`).join('');
+    }
+
+    // ================= ফিড =================
+    function feedItem(ev, { fresh = false } = {}) {
+      const info = EVENT_INFO[ev.event_type] || { icon: '•', text: ev.event_type };
+      let extra = '';
+      if (ev.event_type === 'offer_made' && ev.meta?.price) extra = ' · ' + money(ev.meta.price);
+      if (ev.event_type === 'rider_alert' && ev.meta?.sent !== undefined) extra = ' · ' + bn(ev.meta.sent) + ' জনকে';
+      const note = ev.note && ev.event_type !== 'rider_alert' ? `<small>${esc(ev.note)}</small>` : '';
+      const who = ev.actor_name && ['rider_alert', 'dispute_resolved'].includes(ev.event_type) ? ` (${esc(ev.actor_name)})` : '';
+      return `
+        <div class="do-feed-item ${fresh ? 'do-card fresh' : ''}" data-no="${esc(ev.order_no)}" data-feed="1">
+          <span class="do-feed-ic">${info.icon}</span>
+          <div class="do-feed-body">
+            <b>${catIcon(ev.category)} #${esc(ev.order_no)} — ${info.text}${esc(extra)}${who}</b>
+            <small>${esc(ev.upazila || '')}</small>
+            ${note}
+          </div>
+          <span class="do-feed-time">${timeAgo(ev.created_at)}</span>
+        </div>`;
+    }
+
+    async function loadFeed({ more = false, silent = false } = {}) {
+      if (!silent) $('doLoading').style.display = 'flex';
+      $('doEmpty').style.display = 'none';
+      $('doMore').style.display = 'none';
+
+      const { data, error } = await supabase.rpc('admin_order_feed', {
+        p_limit: 40,
+        p_before: more ? state.feedOldestId : null,
+      });
+
+      $('doLoading').style.display = 'none';
+      if (error) {
+        $('doList').innerHTML = `<p style="text-align:center;color:#D14343;padding:30px 0;">ফিড লোড করতে সমস্যা: ${esc(error.message)}</p>`;
+        return;
+      }
+
+      const items = data || [];
+      if (more) {
+        state.feed = state.feed.concat(items);
+        $('doList').insertAdjacentHTML('beforeend', items.map((e) => feedItem(e)).join(''));
+      } else {
+        const known = new Set(state.feed.map((e) => e.id));
+        state.feed = items;
+        $('doList').innerHTML = items.map((e) => feedItem(e, { fresh: silent && !known.has(e.id) })).join('');
+      }
+      if (state.feed.length) state.feedOldestId = state.feed[state.feed.length - 1].id;
+
+      if (state.feed.length === 0) {
+        $('doEmpty').querySelector('p').textContent = 'এখনো কোনো আপডেট নেই';
+        $('doEmpty').style.display = 'block';
+      }
+      $('doMore').style.display = items.length >= 40 ? 'block' : 'none';
+    }
+
+    // ================= ট্যাব / রিফ্রেশ =================
+    function applyTabUi() {
+      document.querySelectorAll('.do-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === state.tab));
+      const isFeed = state.tab === 'feed';
+      $('doFilters').style.display = isFeed ? 'none' : '';
+      $('dateRow').style.display = state.tab === 'history' ? 'flex' : 'none';
+      $('noOfferChip').style.display = state.tab === 'live' ? '' : 'none';
+      $('doUsers').style.display = isFeed ? 'none' : $('doUsers').style.display;
+      fillStatusOptions();
+      document.querySelectorAll('#catChips .do-chip[data-cat]').forEach((c) => c.classList.toggle('active', c.dataset.cat === state.cat));
+      $('noOfferChip').classList.toggle('active', state.filter === 'no_offer');
+    }
+
+    function syncUrl() {
+      try {
+        const p = new URLSearchParams();
+        if (state.tab !== 'live') p.set('tab', state.tab);
+        if (state.filter) p.set('filter', state.filter);
+        if (state.q) p.set('q', state.q);
+        const open = state.currentOrder;
+        if (open) p.set('open', open);
+        const qs = p.toString();
+        history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+      } catch (e) { /* ইউআরএল আপডেট না হলেও সমস্যা নেই */ }
+    }
+
+    function refreshCurrent({ silent = true } = {}) {
+      if (state.tab === 'feed') return loadFeed({ silent });
+      return loadOrders({ reset: true, silent });
+    }
+
+    function switchTab(tab) {
+      state.tab = tab;
+      state.status = '';
+      if (tab !== 'live') state.filter = '';
+      if (tab === 'history') { state.from = ''; state.to = ''; $('fFrom').value = ''; $('fTo').value = ''; }
+      applyTabUi();
+      syncUrl();
+      if (tab === 'feed') {
+        $('doUsers').style.display = 'none';
+        $('doList').innerHTML = '';
+        loadFeed();
+      } else {
+        loadOrders();
+      }
+    }
+
+    // ================= ডিটেইল মোডাল =================
+    let cooldownTimer = null;
+
+    function openOverlay(id) { $(id).classList.add('active'); document.body.style.overflow = 'hidden'; }
+    function closeOverlay(id) {
+      $(id).classList.remove('active');
+      if (!document.querySelector('.do-overlay.active')) document.body.style.overflow = '';
+    }
+
+    async function openDetail(key) {
+      if (!key) return;
+      openOverlay('doDetailOverlay');
+      $('doDetailBody').innerHTML = '<div class="do-inline-loading"><div class="do-spinner"></div></div>';
+
+      const { data, error } = await supabase.rpc('admin_get_order', { p_key: key });
+      if (error || !data) {
+        $('doDetailBody').innerHTML = `<p style="text-align:center;padding:40px 0;color:#D14343;">${error ? 'লোড করতে সমস্যা: ' + esc(error.message) : 'এই নাম্বারে কোনো অর্ডার পাওয়া যায়নি'}</p>`;
+        return;
+      }
+
+      const o = data.order;
+      state.currentOrder = o.order_no;
+      state.currentDetail = data;
+      syncUrl();
+
+      const eff = o.eff_status;
+      const c = data.customer || {};
+      const r = data.rider;
+      const price = o.price;
+
+      const offersHtml = (data.offers || []).length
+        ? data.offers.map((f) => `
+            <div class="do-offer">
+              <span>${esc(f.name || 'হিরো')} <small style="color:#9AA8BC;">${esc(f.phone || '')}</small></span>
+              <span><b class="do-price">${money(f.price)}</b> <span class="do-badge s-${f.status === 'active' ? 'open' : 'cancelled'}">${esc(f.status)}</span></span>
+            </div>`).join('')
+        : '<p class="do-text" style="color:#9AA8BC;">কোনো অফার আসেনি</p>';
+
+      const tlHtml = (data.events || []).map((ev) => {
+        const info = EVENT_INFO[ev.event_type] || { icon: '•', text: ev.event_type };
+        let extra = '';
+        if (ev.event_type === 'offer_made' && ev.meta?.price) extra = ' (' + money(ev.meta.price) + ')';
+        if (ev.event_type === 'rider_alert' && ev.meta?.sent !== undefined) extra = ' (' + bn(ev.meta.sent) + ' জনকে)';
+        const sub = [ev.actor_name, ev.note && ev.event_type !== 'rider_alert' ? ev.note : ''].filter(Boolean).map(esc).join(' · ');
+        return `<li>${info.icon} ${info.text}${esc(extra)}<small>${fullDate(ev.created_at)}${sub ? ' · ' + sub : ''}</small></li>`;
+      }).join('');
+
+      const disputeHtml = (o.dispute_reason || eff === 'disputed' || o.disputed_at) ? `
+        <div class="do-sec">
+          <h5>ডিসপিউট</h5>
+          <div class="do-reason">${esc(o.dispute_reason || 'কারণ উল্লেখ নেই')}</div>
+          ${o.dispute_resolution ? `<p class="do-text" style="margin-top:8px;"><b>সিদ্ধান্ত:</b> ${o.dispute_resolution === 'resolve_completed' ? 'রাইডারের পক্ষে (সম্পন্ন)' : o.dispute_resolution === 'resolve_cancelled' ? 'ডিল বাতিল' : esc(o.dispute_resolution)}</p>` : ''}
+          ${eff === 'disputed' ? `<a class="do-btn blue" style="margin-top:8px;text-decoration:none;" href="/admin/delivery-disputes?q=${encodeURIComponent(o.order_no)}"><i class="fas fa-scale-balanced"></i> ডিসপিউট পেজে রিজলভ করুন</a>` : ''}
+        </div>` : '';
+
+      $('doDetailBody').innerHTML = `
+        <h3 class="do-sheet-title">${catIcon(o.category)} #${esc(o.order_no)} <span class="do-badge s-${esc(eff)}" style="margin-left:6px;">${STATUS_LABEL[eff] || esc(eff)}</span></h3>
+        <p class="do-sheet-sub">${catName(o.category)} · তৈরি: ${fullDate(o.created_at)} · ${timeAgo(o.created_at)}</p>
+
+        <div class="do-sec">
+          <h5>রুট</h5>
+          <p class="do-text"><b>পিকআপ:</b> ${esc(o.pickup_address || o.area_detail || '—')}${o.pickup_instructions ? `<br><small style="color:#8FA0BC;">${esc(o.pickup_instructions)}</small>` : ''}</p>
+          <p class="do-text" style="margin-top:6px;"><b>${o.category === 'ride' ? 'গন্তব্য' : 'ডেলিভারি'}:</b> ${esc(o.drop_address || '—')}${o.drop_instructions ? `<br><small style="color:#8FA0BC;">${esc(o.drop_instructions)}</small>` : ''}</p>
+          <p class="do-text" style="margin-top:6px;color:#5A6E85;">${esc(o.upazila || '')}${o.vehicle_type ? ' · বাহন: ' + esc(o.vehicle_type) : ''}${o.seat_count ? ' · সিট: ' + bn(o.seat_count) : ''}</p>
+        </div>
+
+        ${o.description ? `<div class="do-sec"><h5>বিবরণ</h5><p class="do-text">${esc(o.description)}</p></div>` : ''}
+
+        <div class="do-sec">
+          <h5>দাম</h5>
+          <p class="do-text"><span class="do-price" style="font-size:1.1rem;">${money(price)}</span>
+            ${o.customer_asking_price ? ` <small style="color:#8FA0BC;">কাস্টমার চেয়েছেন ${money(o.customer_asking_price)}</small>` : ''}</p>
+        </div>
+
+        <div class="do-sec">
+          <h5>দুই পক্ষ</h5>
+          <div class="do-parties">
+            <div class="do-party"><small>কাস্টমার</small><b>${esc(c.name || '—')}</b>${c.phone ? `<a href="tel:${esc(c.phone)}"><i class="fas fa-phone"></i> ${esc(c.phone)}</a>` : ''}</div>
+            <div class="do-party"><small>রাইডার / হিরো</small>${r ? `<b>${esc(r.name || '—')}</b>${r.phone ? `<a href="tel:${esc(r.phone)}"><i class="fas fa-phone"></i> ${esc(r.phone)}</a>` : ''}<small style="margin-top:3px;">${r.total_completed ? bn(r.total_completed) + 'টা সম্পন্ন' : ''}${r.avg_rating ? ' · ⭐ ' + bn(Number(r.avg_rating).toFixed(1)) : ''}</small>` : '<b style="color:#9AA8BC;">এখনো কেউ নেই</b>'}</div>
+          </div>
+        </div>
+
+        <div class="do-sec"><h5>অফার (${bn((data.offers || []).length)})</h5>${offersHtml}</div>
+        ${disputeHtml}
+
+        <div class="do-sec"><h5>টাইমলাইন</h5><ul class="do-tl">${tlHtml || '<li>কোনো ইভেন্ট নেই</li>'}</ul></div>
+
+        <div class="do-actions">
+          ${eff === 'open' ? `<button type="button" class="do-btn alert" id="detailAlertBtn"><i class="fas fa-bell"></i> রাইডারদের এলার্ট দিন</button>` : ''}
+          ${data.chat_count > 0 ? `<button type="button" class="do-btn ghost" id="detailChatBtn"><i class="fas fa-comment-dots"></i> চ্যাট দেখুন (${bn(data.chat_count)})</button>` : ''}
+        </div>
+        <p class="do-cooldown" id="detailCooldown" style="display:none;"></p>`;
+
+      $('detailAlertBtn')?.addEventListener('click', () => openAlert(data));
+      $('detailChatBtn')?.addEventListener('click', () => {
+        closeDetail();
+        window.openChatModal?.({
+          requestId: o.id,
+          otherPartyName: `${c.name || 'কাস্টমার'} ↔ ${r?.name || 'রাইডার'}`,
+          readOnly: true,
+        });
+      });
+
+      startCooldownLabel(data.alert_cooldown_secs || 0);
+    }
+
+    function closeDetail() {
+      closeOverlay('doDetailOverlay');
+      state.currentOrder = null;
+      state.currentDetail = null;
+      clearInterval(cooldownTimer);
+      syncUrl();
+    }
+
+    function startCooldownLabel(secs) {
+      clearInterval(cooldownTimer);
+      const label = $('detailCooldown');
+      const btn = $('detailAlertBtn');
+      if (!label) return;
+      let left = secs;
+      const tick = () => {
+        if (left > 0) {
+          label.style.display = 'block';
+          label.textContent = `⏱️ আবার এলার্ট দেওয়া যাবে ${bn(Math.floor(left / 60))}:${bn(String(left % 60).padStart(2, '0'))} মিনিট পর`;
+          if (btn) btn.disabled = true;
+          left -= 1;
+        } else {
+          label.style.display = 'none';
+          if (btn) btn.disabled = false;
+          clearInterval(cooldownTimer);
+        }
+      };
+      tick();
+      if (left > 0) cooldownTimer = setInterval(tick, 1000);
+    }
+
+    // ================= এলার্ট মোডাল =================
+    let alertTarget = null;
+
+    function openAlert(src) {
+      // src = admin_get_order এর ডেটা, অথবা কার্ড থেকে {order:{...}}
+      alertTarget = src.order;
+      const o = alertTarget;
+      $('alertOrderLine').textContent = `${catName(o.category)} অর্ডার #${o.order_no} · ${o.upazila || ''} · ${money(o.price)}`;
+      $('alertUpazila').value = o.upazila || '';
+      document.querySelector('input[name="alertScope"][value="online"]').checked = true;
+      const icon = o.category === 'ride' ? '🏍️ নতুন রাইড রিকোয়েস্ট' : '📦 নতুন ডেলিভারি রিকোয়েস্ট';
+      $('alertMessage').value = `${icon} #${o.order_no} — ${o.upazila || ''}${o.price ? ', ' + money(o.price) : ''}। অফার দিন!`;
+      const res = $('alertResult');
+      res.style.display = 'none';
+      res.className = 'do-alert-result';
+      $('alertSend').disabled = false;
+      openOverlay('doAlertOverlay');
+    }
+
+    async function sendAlert() {
+      if (!alertTarget) return;
+      const btn = $('alertSend');
+      const res = $('alertResult');
+      btn.disabled = true;
+      res.style.display = 'none';
+
+      const scope = document.querySelector('input[name="alertScope"]:checked')?.value || 'online';
+      const { data, error } = await supabase.rpc('admin_alert_riders', {
+        p_request_id: alertTarget.id,
+        p_message: $('alertMessage').value.trim() || null,
+        p_scope: scope,
+        p_upazila: $('alertUpazila').value || null,
+      });
+
+      res.style.display = 'block';
+      if (error) {
+        res.className = 'do-alert-result err';
+        res.textContent = 'পাঠানো যায়নি: ' + error.message;
+        btn.disabled = false;
+        return;
+      }
+      if (!data?.ok) {
+        res.className = 'do-alert-result err';
+        if (data?.reason === 'cooldown') {
+          const s = data.retry_in || 0;
+          res.textContent = `এই অর্ডারে সম্প্রতি এলার্ট দেওয়া হয়েছে। ${bn(Math.floor(s / 60))} মিনিট ${bn(s % 60)} সেকেন্ড পর আবার চেষ্টা করুন।`;
+        } else if (data?.reason === 'not_open') {
+          res.textContent = 'অর্ডারটি আর খোলা নেই, তাই এলার্ট দেওয়া যাবে না।';
+        } else {
+          res.textContent = 'অর্ডারটি পাওয়া যায়নি।';
+        }
+        btn.disabled = false;
+        return;
+      }
+
+      res.className = 'do-alert-result ok';
+      res.textContent = data.sent > 0
+        ? `✅ ${bn(data.sent)} জন রাইডারকে পাঠানো হয়েছে`
+        : 'মিলে যাওয়া কোনো রাইডার পাওয়া যায়নি (উপজেলা/স্কোপ বদলে দেখুন)';
+      if (data.sent > 0) {
+        setTimeout(() => {
+          closeOverlay('doAlertOverlay');
+          if ($('doDetailOverlay').classList.contains('active') && state.currentOrder) openDetail(state.currentOrder);
+          refreshCurrent();
+        }, 1400);
+      } else {
+        btn.disabled = false;
+      }
+    }
+
+    // ================= রিয়েলটাইম + পোলিং =================
+    let refreshTimer = null;
+    function scheduleRefresh() {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        loadOverview();
+        refreshCurrent({ silent: true });
+      }, 600);
+    }
+
+    function startLive() {
+      supabase
+        .channel('admin-order-events')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'order_events' }, (payload) => {
+          const type = payload?.new?.event_type;
+          if (type === 'created') beep();
+          scheduleRefresh();
+          if (state.currentOrder) {
+            // খোলা ডিটেইল মোডাল থাকলে সেটাও রিফ্রেশ (শুধু এই অর্ডারের ইভেন্ট হলে)
+            const cur = state.currentDetail?.order?.id;
+            if (cur && payload?.new?.request_id === cur) openDetail(state.currentOrder);
+          }
+        })
+        .subscribe();
+
+      setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          loadOverview();
+          refreshCurrent({ silent: true });
+        }
+      }, POLL_MS);
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') scheduleRefresh();
+      });
+    }
+
+    // ================= ইভেন্ট বাইন্ডিং =================
+    function bindEvents() {
+      // ট্যাব
+      document.querySelectorAll('.do-tab').forEach((t) => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+      // ক্যাটাগরি চিপ ও অফারহীন ফিল্টার
+      document.querySelectorAll('#catChips .do-chip[data-cat]').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          state.cat = chip.dataset.cat;
+          applyTabUi();
+          loadOrders();
+        });
+      });
+      $('noOfferChip').addEventListener('click', () => {
+        state.filter = state.filter === 'no_offer' ? '' : 'no_offer';
+        applyTabUi();
+        syncUrl();
+        loadOrders();
+      });
+
+      $('fStatus').addEventListener('change', (e) => { state.status = e.target.value; loadOrders(); });
+      $('fUpazila').addEventListener('change', (e) => { state.upazila = e.target.value; loadOrders(); });
+      $('fFrom').addEventListener('change', (e) => { state.from = e.target.value; loadOrders(); });
+      $('fTo').addEventListener('change', (e) => { state.to = e.target.value; loadOrders(); });
+
+      // সার্চ (ডিবাউন্স)
+      let searchTimer = null;
+      $('doSearch').addEventListener('input', (e) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          state.q = e.target.value.trim();
+          syncUrl();
+          // ফিড ট্যাবে থাকলে সার্চের জন্য লাইভ ট্যাবের লিস্টে চলে আসি
+          if (state.tab === 'feed' && state.q) {
+            switchTab('live');
+          } else if (state.tab === 'feed') {
+            loadFeed();
+          } else {
+            loadOrders();
+          }
+        }, 350);
+      });
+
+      // আরও দেখুন
+      $('doMore').addEventListener('click', () => {
+        if (state.tab === 'feed') loadFeed({ more: true });
+        else loadOrders({ reset: false, silent: true });
+      });
+
+      // কার্ড / ফিড ক্লিক (ডেলিগেশন)
+      $('doList').addEventListener('click', (e) => {
+        const alertBtn = e.target.closest('[data-act="alert"]');
+        const card = e.target.closest('[data-no]');
+        if (!card) return;
+
+        if (alertBtn) {
+          e.stopPropagation();
+          openAlert({
+            order: {
+              id: card.dataset.id,
+              order_no: card.dataset.no,
+              category: card.dataset.cat,
+              upazila: card.dataset.upazila,
+              price: card.dataset.price ? Number(card.dataset.price) : null,
+            },
+          });
+          return;
+        }
+        openDetail(card.dataset.no);
+      });
+
+      // মোডাল বন্ধ
+      $('doDetailClose').addEventListener('click', closeDetail);
+      $('doDetailOverlay').addEventListener('click', (e) => { if (e.target === $('doDetailOverlay')) closeDetail(); });
+      $('doAlertClose').addEventListener('click', () => closeOverlay('doAlertOverlay'));
+      $('doAlertOverlay').addEventListener('click', (e) => { if (e.target === $('doAlertOverlay')) closeOverlay('doAlertOverlay'); });
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if ($('doAlertOverlay').classList.contains('active')) closeOverlay('doAlertOverlay');
+        else if ($('doDetailOverlay').classList.contains('active')) closeDetail();
+      });
+
+      $('alertSend').addEventListener('click', sendAlert);
+
+      // শব্দ অন/অফ
+      $('doSoundBtn').addEventListener('click', () => {
+        state.sound = !state.sound;
+        try { localStorage.setItem('sf_do_sound', state.sound ? 'on' : 'off'); } catch (e) { /* ঠিক আছে */ }
+        renderSoundBtn();
+        if (state.sound) beep();
+      });
+    }
+
+    // ================= শুরু =================
+    window.addEventListener('smartfeni:admin-ready', () => {
+      if (state.initialized) return;
+      state.initialized = true;
+
+      const params = new URLSearchParams(location.search);
+      const tab = params.get('tab');
+      if (['live', 'history', 'feed'].includes(tab)) state.tab = tab;
+      if (params.get('filter') === 'no_offer') state.filter = 'no_offer';
+      if (params.get('q')) { state.q = params.get('q'); $('doSearch').value = state.q; }
+
+      renderSoundBtn();
+      bindEvents();
+      applyTabUi();
+      loadOverview();
+
+      if (state.tab === 'feed') loadFeed();
+      else loadOrders();
+
+      startLive();
+
+      const open = params.get('open');
+      if (open) openDetail(open);
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
