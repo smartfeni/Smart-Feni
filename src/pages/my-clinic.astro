@@ -5,18 +5,19 @@
 // (my-shop.astro / my-club.astro-র প্যাটার্নে ট্যাব-ভিত্তিক)
 //
 // কে ঢুকতে পারবে:
-//   • clinic_reps-এ সক্রিয় প্রতিনিধি (ক্লিনিকও সক্রিয় হতে হবে)
-//   • অ্যাডমিন (যেকোনো সক্রিয় ক্লিনিক বেছে দেখতে/টেস্ট করতে পারে)
+//   • শুধু clinic_reps-এ সক্রিয় প্রতিনিধি (ক্লিনিকও সক্রিয় হতে হবে)
+//   • অ্যাডমিন এখানে ঢোকে না — অ্যাডমিন হলে /admin/doctors?tab=serials-এ রিডাইরেক্ট
+//     (পুরনো নোটিফিকেশন লিংক /my-clinic?tab=serials যাতে ভাঙে না)
 //   একাধিক ক্লিনিকে থাকলে উপরে ক্লিনিক বাছাইয়ের ড্রপডাউন
 //
 // ট্যাব:
-//   সিরিয়াল রিকোয়েস্ট — SerialsTab (শুধু "সিরিয়াল পাবেন" প্রতিনিধি/অ্যাডমিন)
+//   সিরিয়াল রিকোয়েস্ট — SerialsTab (শুধু "সিরিয়াল পাবেন" প্রতিনিধি)
 //   ডাক্তার — DoctorsTab: ডাক্তার যোগ/এডিট, চেম্বার ও সময়সূচি, সিরিয়ালের নম্বর (সব প্রতিনিধি)
 //
 // ডিপ-লিংক: /my-clinic?tab=serials (নোটিফিকেশন থেকে), ?tab=doctors
 //
 // ট্যাব কম্পোনেন্ট 'smartfeni:clinic-ready' ইভেন্টে
-//   { clinic, isReceiver, isAdmin, userId } পায় (ক্লিনিক বদলালে আবার)
+//   { clinic, isReceiver, isAdmin: false, userId } পায় (ক্লিনিক বদলালে আবার)
 // SerialsTab 'smartfeni:serial-count' ইভেন্টে ট্যাবের ব্যাজ সংখ্যা পাঠায়
 // ============================================================
 
@@ -108,7 +109,6 @@ import DoctorsTab from '../components/clinic-dashboard/DoctorsTab.astro';
     const STORAGE_KEY = 'sf_my_clinic';
 
     let userId = null;
-    let isAdmin = false;
     let clinics = [];        // [{ ...clinic, isReceiver }]
     let current = null;
     let activeTab = null;
@@ -127,15 +127,12 @@ import DoctorsTab from '../components/clinic-dashboard/DoctorsTab.astro';
 
       $('mcClinicName').textContent = clinic.name;
 
-      const canSerials = clinic.isReceiver || isAdmin;
+      const canSerials = !!clinic.isReceiver;
       $('mcSerialsTabBtn').style.display = canSerials ? 'flex' : 'none';
       $('mcSerialBadge').style.display = 'none';
 
       const role = $('mcRole');
-      if (isAdmin) {
-        role.textContent = 'অ্যাডমিন হিসেবে দেখছেন';
-        role.className = 'mc-role';
-      } else if (clinic.isReceiver) {
+      if (clinic.isReceiver) {
         role.textContent = '✓ এই ক্লিনিকের সিরিয়াল রিকোয়েস্ট আপনি পান';
         role.className = 'mc-role on';
       } else {
@@ -150,7 +147,7 @@ import DoctorsTab from '../components/clinic-dashboard/DoctorsTab.astro';
       activateTab(target);
 
       window.dispatchEvent(new CustomEvent('smartfeni:clinic-ready', {
-        detail: { clinic, isReceiver: !!clinic.isReceiver, isAdmin, userId },
+        detail: { clinic, isReceiver: !!clinic.isReceiver, isAdmin: false, userId },
       }));
     }
 
@@ -159,23 +156,24 @@ import DoctorsTab from '../components/clinic-dashboard/DoctorsTab.astro';
       if (!session) { window.location.href = '/'; return; }
       userId = session.user.id;
 
+      // অ্যাডমিনের জন্য আলাদা জায়গা: /admin/doctors-এর "সিরিয়াল রিকোয়েস্ট" ট্যাব
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single();
-      isAdmin = profile?.role === 'admin';
-
-      if (isAdmin) {
-        const { data } = await supabase.from('clinics').select('*').eq('is_active', true).order('name');
-        clinics = (data || []).map((c) => ({ ...c, isReceiver: false }));
-      } else {
-        const { data } = await supabase
-          .from('clinic_reps')
-          .select('receives_serials, clinics!inner(*)')
-          .eq('user_id', userId)
-          .eq('is_active', true);
-        clinics = (data || [])
-          .filter((r) => r.clinics && r.clinics.is_active)
-          .map((r) => ({ ...r.clinics, isReceiver: !!r.receives_serials }))
-          .sort((a, b) => a.name.localeCompare(b.name, 'bn'));
+      if (profile?.role === 'admin') {
+        const qs = new URLSearchParams(window.location.search);
+        const wantedTab = qs.get('tab') === 'doctors' ? '' : '?tab=serials';
+        window.location.replace('/admin/doctors' + wantedTab);
+        return;
       }
+
+      const { data } = await supabase
+        .from('clinic_reps')
+        .select('receives_serials, clinics!inner(*)')
+        .eq('user_id', userId)
+        .eq('is_active', true);
+      clinics = (data || [])
+        .filter((r) => r.clinics && r.clinics.is_active)
+        .map((r) => ({ ...r.clinics, isReceiver: !!r.receives_serials }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'bn'));
 
       $('mcLoading').style.display = 'none';
 
