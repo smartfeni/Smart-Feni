@@ -8,6 +8,10 @@
 //     নাম লেখার সময় find_similar_doctors দিয়ে ডুপ্লিকেট সাজেশন
 //   • চেম্বার + দিনভিত্তিক একাধিক স্লট ম্যানেজমেন্ট
 //   • শুধু admin: publish/ড্রাফট, মার্জ (merge_doctors), ডিলিট
+//   • শুধু admin: "সিরিয়াল রিকোয়েস্ট" ট্যাব — ক্লিনিক বেছে সেই ক্লিনিকের সিরিয়াল
+//     রিকোয়েস্ট ধরা/কনফার্ম/বাতিল (SerialsTab, প্রতিনিধির পেজের একই কম্পোনেন্ট)।
+//     ১২ ঘণ্টার সতর্কতা নোটিফিকেশন এখানে আসে (/my-clinic থেকে অ্যাডমিন রিডাইরেক্ট হয়)।
+//     ডিপ-লিংক: ?tab=serials&clinic=<id>
 //   • moderator শুধু draft/pending পর্যন্ত সেট করতে পারে
 //   • ছবি আপলোডে ক্রপ বক্স (৩:৪, ৬০০×৮০০): টেনে সরানো + জুম + কার্ডের
 //     তির্যক কাটার গাইড — যাতে সবার ছবি একই মাপে ঠিকমতো ফ্রেম হয়
@@ -16,6 +20,7 @@
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
+import SerialsTab from '../../components/clinic-dashboard/SerialsTab.astro';
 ---
 
 <BaseLayout title="ডাক্তার ম্যানেজমেন্ট | অ্যাডমিন">
@@ -35,6 +40,17 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <h1>ডাক্তার ম্যানেজমেন্ট</h1>
           <p class="admin-subtitle" id="resultCount"></p>
         </div>
+
+        <!-- ===== ট্যাব (শুধু admin-এর জন্য দেখায়) ===== -->
+        <div class="dr-tabs" id="drTabs" style="display:none;">
+          <button type="button" class="dr-tab active" data-tab="doctors"><i class="fas fa-user-doctor"></i> ডাক্তার</button>
+          <button type="button" class="dr-tab" data-tab="serials">
+            <i class="fas fa-bell-concierge"></i> সিরিয়াল রিকোয়েস্ট
+            <span class="dr-badge" id="drSerialBadge" style="display:none;">0</span>
+          </button>
+        </div>
+
+        <div id="drPanelDoctors">
 
         <button class="cta-toggle-btn" id="newDoctorBtn" type="button">
           <i class="fas fa-plus"></i> নতুন ডাক্তার যোগ করুন
@@ -66,6 +82,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         <div id="emptyState" class="empty-state" style="display:none;">
           <i class="fas fa-user-doctor"></i>
           <p id="emptyText">কোনো ডাক্তার পাওয়া যায়নি</p>
+        </div>
+
+        </div>
+
+        <!-- ===== সিরিয়াল রিকোয়েস্ট প্যানেল (শুধু admin) ===== -->
+        <div id="drPanelSerials" style="display:none;">
+          <select id="drClinicSelect" class="form-input dr-clinic-select" aria-label="ক্লিনিক বাছুন"></select>
+          <div class="dr-clinic-hint" id="drClinicHint"></div>
+          <SerialsTab />
         </div>
 
       </div>
@@ -295,6 +320,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .doctors-container { display: flex; flex-direction: column; gap: 12px; }
     .empty-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px 0; color: #B0BCCB; }
     .empty-state i { font-size: 2.4rem; }
+
+    .dr-tabs { display: flex; gap: 8px; background: #fff; border-radius: 40px; padding: 5px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); margin-bottom: 18px; }
+    .dr-tab { flex: 1; border: none; background: transparent; padding: 12px 8px; border-radius: 40px; font-weight: 700; font-size: 0.86rem; color: #5A6E85; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .dr-tab.active { background: #FF6B35; color: #fff; }
+    .dr-badge { background: #D14343; color: #fff; font-size: 0.68rem; font-weight: 800; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 20px; display: inline-flex; align-items: center; justify-content: center; }
+    .dr-tab.active .dr-badge { background: #fff; color: #D14343; }
+    .dr-clinic-select { width: 100%; margin-bottom: 8px; font-weight: 700; }
+    .dr-clinic-hint { font-size: 0.78rem; color: #8FA0BC; margin-bottom: 14px; line-height: 1.55; }
+    .dr-clinic-hint.warn { color: #B42318; font-weight: 700; }
 
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); z-index: 100; align-items: flex-start; justify-content: center; padding: 20px; overflow-y: auto; }
     .modal-overlay.open { display: flex; }
@@ -1271,10 +1305,108 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     $('mgSearch').addEventListener('input', runMergeSearch);
 
+    // ===== সিরিয়াল রিকোয়েস্ট ট্যাব (শুধু admin) =====
+    // SerialsTab 'smartfeni:clinic-ready' ইভেন্টে { clinic, isReceiver, isAdmin, userId } পায়।
+    // admin কোনো ক্লিনিকের "প্রতিনিধি" নয়, তাই isReceiver=false, isAdmin=true পাঠাই।
+    let serialUserId = null;
+    let serialClinics = [];      // [{ ...clinic, open, late }]
+    let serialsActive = false;
+
+    function setDrTab(target) {
+      $('drPanelDoctors').style.display = target === 'doctors' ? 'block' : 'none';
+      $('drPanelSerials').style.display = target === 'serials' ? 'block' : 'none';
+      document.querySelectorAll('.dr-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === target));
+      serialsActive = target === 'serials';
+      if (serialsActive) loadSerialPanel();
+    }
+
+    function clinicLabel(c) {
+      return `${c.late ? '⚠ ' : ''}${c.name}${c.open ? ` (${toBn(c.open)})` : ''}`;
+    }
+
+    function updateSerialHint(c) {
+      const hint = $('drClinicHint');
+      if (!c) { hint.textContent = ''; hint.className = 'dr-clinic-hint'; return; }
+      if (c.late) {
+        hint.textContent = `⚠ এই ক্লিনিকের ${toBn(c.late)}টা রিকোয়েস্টে প্রতিনিধি ১২ ঘণ্টায়ও সাড়া দেননি।`;
+        hint.className = 'dr-clinic-hint warn';
+      } else {
+        hint.textContent = c.open ? `চলমান রিকোয়েস্ট: ${toBn(c.open)}টা` : 'এখন কোনো চলমান রিকোয়েস্ট নেই';
+        hint.className = 'dr-clinic-hint';
+      }
+    }
+
+    function dispatchClinic(c) {
+      updateSerialHint(c);
+      window.dispatchEvent(new CustomEvent('smartfeni:clinic-ready', {
+        detail: { clinic: c, isReceiver: false, isAdmin: true, userId: serialUserId },
+      }));
+    }
+
+    async function loadSerialPanel() {
+      const [{ data: clinics }, { data: open }] = await Promise.all([
+        supabase.from('clinics').select('*').eq('is_active', true).order('name'),
+        supabase.from('serial_requests').select('clinic_id, admin_notified_at').in('status', ['pending', 'processing']),
+      ]);
+
+      const counts = {};
+      (open || []).forEach((r) => {
+        const x = counts[r.clinic_id] || (counts[r.clinic_id] = { open: 0, late: 0 });
+        x.open += 1;
+        if (r.admin_notified_at) x.late += 1;
+      });
+
+      serialClinics = (clinics || []).map((c) => ({ ...c, open: counts[c.id]?.open || 0, late: counts[c.id]?.late || 0 }))
+        .sort((a, b) => (b.late - a.late) || (b.open - a.open) || String(a.name).localeCompare(String(b.name), 'bn'));
+
+      const total = serialClinics.reduce((n, c) => n + c.open, 0);
+      const badge = $('drSerialBadge');
+      badge.textContent = total > 99 ? '৯৯+' : toBn(total);
+      badge.style.display = total > 0 ? 'inline-flex' : 'none';
+
+      const sel = $('drClinicSelect');
+      if (!serialClinics.length) {
+        sel.innerHTML = '';
+        sel.style.display = 'none';
+        $('drClinicHint').textContent = 'কোনো সক্রিয় ক্লিনিক নেই। আগে /admin/clinics থেকে ক্লিনিক যোগ করুন।';
+        return;
+      }
+      sel.style.display = 'block';
+
+      const prev = sel.value;
+      const wanted = new URLSearchParams(window.location.search).get('clinic');
+      sel.innerHTML = serialClinics.map((c) => `<option value="${esc(c.id)}">${esc(clinicLabel(c))}</option>`).join('');
+      const pick = serialClinics.find((c) => c.id === prev) || serialClinics.find((c) => c.id === wanted) || serialClinics[0];
+      sel.value = pick.id;
+      dispatchClinic(pick);
+    }
+
+    async function initSerialTab() {
+      const { data: { session } } = await supabase.auth.getSession();
+      serialUserId = session?.user?.id || null;
+      $('drTabs').style.display = 'flex';
+      $('drTabs').addEventListener('click', (e) => {
+        const b = e.target.closest('.dr-tab');
+        if (b) setDrTab(b.dataset.tab);
+      });
+      $('drClinicSelect').addEventListener('change', () => {
+        const c = serialClinics.find((x) => x.id === $('drClinicSelect').value);
+        if (c) dispatchClinic(c);
+      });
+
+      // ব্যাজের সংখ্যা ট্যাব না খুলেও দেখাতে একবার কাউন্ট আনি
+      const { data: open } = await supabase.from('serial_requests').select('id').in('status', ['pending', 'processing']);
+      const n = (open || []).length;
+      if (n > 0) { $('drSerialBadge').textContent = n > 99 ? '৯৯+' : toBn(n); $('drSerialBadge').style.display = 'inline-flex'; }
+
+      if (new URLSearchParams(window.location.search).get('tab') === 'serials') setDrTab('serials');
+    }
+
     // ===== গার্ড =====
     window.addEventListener('smartfeni:admin-ready', async (e) => {
       currentRole = e.detail.role;
       isAdmin = currentRole === 'admin';
+      if (isAdmin) initSerialTab(); // moderator সিরিয়াল ট্যাব দেখবে না
       await loadSpecialties();
       await loadDoctors();
     });
