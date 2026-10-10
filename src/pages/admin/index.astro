@@ -28,6 +28,10 @@
 //           data-admin-only দিয়ে চিহ্নিত।
 // আপডেট ১২: "জরুরি নাম্বার" কার্ড যোগ (/admin/emergency-contacts) — "কনটেন্ট" গ্রুপে।
 //           admin ও moderator দুজনেই দেখতে পাবে। ব্যাজ/স্ট্রিপ নেই (পেন্ডিং ধারণা নেই)।
+// আপডেট ১৩: "ডেলিভারি ও রাইড অর্ডার" কার্ড যোগ (/admin/delivery-orders) —
+//           চলমান অর্ডারের কাউন্ট ব্যাজ (admin_orders_overview RPC, মডারেটরও পায়),
+//           "এখনই দেখুন" স্ট্রিপে "অফারহীন অর্ডার" চিপ। ডিসপিউট ব্যাজ এখন RPC থেকেও
+//           আসে, তাই মডারেটরের ক্ষেত্রেও কাউন্ট ঠিক দেখায়।
 // ============================================================
 
 export const prerender = false;
@@ -142,6 +146,12 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <span class="adm-ic"><i class="fas fa-motorcycle"></i></span>
           <b>ডেলিভারি হিরো ভেরিফিকেশন</b>
           <small>রাইডার আবেদন যাচাই, approve/reject</small>
+        </a>
+        <a href="/admin/delivery-orders" class="adm-card" style="--c:#0EA5E9;" data-search="ডেলিভারি ও রাইড অর্ডার লাইভ অর্ডার হিস্ট্রি অর্ডার নাম্বার সার্চ রাইডার এলার্ট">
+          <span class="adm-badge" id="ordersLiveBadge" style="display:none;">0</span>
+          <span class="adm-ic"><i class="fas fa-route"></i></span>
+          <b>ডেলিভারি ও রাইড অর্ডার</b>
+          <small>লাইভ অর্ডার, হিস্ট্রি, অর্ডার নাম্বারে সার্চ ও রাইডার এলার্ট</small>
         </a>
         <a href="/admin/delivery-disputes" class="adm-card" style="--c:#EF4444;" data-search="ডেলিভারি ডিসপিউট রিপোর্ট করা সমস্যা দেখুন ও রিজলভ করুন">
           <span class="adm-badge" id="disputePendingBadge" style="display:none;">0</span>
@@ -333,6 +343,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         { count: disputePendingCount },
         { count: doctorPendingCount },
         { count: withdrawPendingCount },
+        { data: ordersOverview },
       ] = await Promise.all([
         supabase.from('profiles').select('*', { count: 'exact', head: true }),
         supabase.from('listings').select('*', { count: 'exact', head: true }),
@@ -343,7 +354,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         supabase.from('doctors').select('*', { count: 'exact', head: true }).or('status.eq.pending,admin_seen.eq.false'),
         // শুধু admin দেখতে পায় (RLS) — moderator এর জন্য কাউন্ট null আসে, কার্ডও লুকানো থাকে
         supabase.from('withdraw_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        // চলমান অর্ডারের সারাংশ — admin ও moderator দুজনেই পায় (সার্ভারে role চেক)
+        supabase.rpc('admin_orders_overview'),
       ]);
+
+      const ov = ordersOverview || {};
+      const liveOrders = (ov.live_open || 0) + (ov.live_confirmed || 0) + (ov.live_delivered || 0) + (ov.disputed || 0);
+      const noOfferCount = ov.no_offer || 0;
+      // মডারেটরের জন্য delivery_requests সরাসরি পড়া যায় না, তাই RPC এর কাউন্ট নেওয়া হয়
+      const disputeCount = ov.disputed ?? disputePendingCount;
 
       const statUsers = document.getElementById('statUsers');
       const statListings = document.getElementById('statListings');
@@ -354,7 +373,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
       setBadge('riderPendingBadge', riderPendingCount);
       setBadge('botChatPendingBadge', botChatPendingCount);
-      setBadge('disputePendingBadge', disputePendingCount);
+      setBadge('disputePendingBadge', disputeCount);
+      setBadge('ordersLiveBadge', liveOrders);
       setBadge('doctorPendingBadge', doctorPendingCount);
       setBadge('withdrawPendingBadge', withdrawPendingCount);
 
@@ -362,7 +382,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         { count: isAdmin ? withdrawPendingCount : 0, label: 'উইথড্র আবেদন', href: '/admin/referrals', color: '#FF6B35' },
         { count: pendingCount, label: 'লিস্টিং রিভিউ বাকি', href: '/admin/listings', color: '#3B82F6' },
         { count: riderPendingCount, label: 'রাইডার আবেদন', href: '/admin/delivery-riders', color: '#FF6B35' },
-        { count: disputePendingCount, label: 'ডিসপিউট', href: '/admin/delivery-disputes', color: '#EF4444' },
+        { count: disputeCount, label: 'ডিসপিউট', href: '/admin/delivery-disputes', color: '#EF4444' },
+        { count: noOfferCount, label: 'অফারহীন অর্ডার', href: '/admin/delivery-orders?tab=live&filter=no_offer', color: '#0EA5E9' },
         { count: doctorPendingCount, label: 'ডাক্তার রিভিউ', href: '/admin/doctors', color: '#0D9488' },
         { count: botChatPendingCount, label: 'Bot Chat', href: '/admin/bot-chats', color: '#6366F1' },
       ]);
