@@ -10,6 +10,10 @@
 // থাকলে lightbox এ দেখা যাবে) — সব প্রমাণ একসাথে দেখে এডমিন
 // সিদ্ধান্ত নিবে।
 //
+// আপডেট: প্রতিটা কার্ডে অর্ডার নাম্বার (SFD-১০০১ / SFR-১০০১) দেখায়, উপরে
+// সার্চ বক্স (অর্ডার নাম্বার / নাম / ফোন দিয়ে ফিল্টার), আর কার্ডে
+// "অর্ডার ডিটেইলস" লিংক → /admin/delivery-orders?open=<নাম্বার>।
+//
 // দুইটা resolve বাটন — resolveDispute() (deliveryClient.js, আগে
 // থেকেই আছে) কল করে:
 //   - "রাইডারের পক্ষে (সম্পন্ন হিসেবে গণ্য)" → resolve_completed
@@ -39,6 +43,12 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
           <h1><i class="fas fa-triangle-exclamation"></i> ডেলিভারি ডিসপিউট</h1>
           <p>উভয় পক্ষের তথ্য ও প্রমাণ দেখে সিদ্ধান্ত নিন</p>
         </div>
+
+        <div class="dd-search">
+          <i class="fas fa-magnifying-glass"></i>
+          <input type="search" id="disputeSearch" placeholder="অর্ডার নাম্বার, নাম বা ফোন দিয়ে খুঁজুন" autocomplete="off" />
+        </div>
+        <a href="/admin/delivery-orders" class="dd-all-orders-link"><i class="fas fa-list"></i> সব অর্ডার ও হিস্ট্রি দেখুন</a>
 
         <div id="disputeListLoading" class="dd-loading" style="display:none;">
           <div class="admin-spinner"></div>
@@ -134,6 +144,71 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
     .dd-header p {
       font-size: 0.84rem;
       color: #8FA0BC;
+    }
+
+    .dd-search {
+      position: relative;
+      margin-bottom: 10px;
+    }
+
+    .dd-search i {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #9AA8BC;
+      font-size: 0.85rem;
+    }
+
+    .dd-search input {
+      width: 100%;
+      padding: 12px 14px 12px 38px;
+      border: 1.5px solid #E5EAF0;
+      border-radius: 14px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      background: #fff;
+      color: #1B2A4A;
+      box-sizing: border-box;
+    }
+
+    .dd-search input:focus {
+      outline: none;
+      border-color: #FF6B35;
+    }
+
+    .dd-all-orders-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #FF6B35;
+      text-decoration: none;
+      margin-bottom: 16px;
+    }
+
+    .dd-order-no {
+      display: inline-block;
+      font-size: 0.74rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      background: #EEF3F9;
+      padding: 3px 10px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      letter-spacing: 0.3px;
+    }
+
+    .dd-details-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #3B82F6;
+      text-decoration: none;
+      margin-bottom: 12px;
     }
 
     .dd-list {
@@ -437,7 +512,7 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
       const { data, error } = await supabase
         .from('delivery_requests')
         .select(`
-          id, description, upazila, area_detail, final_price, dispute_reason, disputed_at, created_at,
+          id, order_no, description, upazila, area_detail, final_price, dispute_reason, disputed_at, created_at,
           customer_profile_id, accepted_rider_id,
           customer:profiles!delivery_requests_customer_profile_id_fkey(full_name, phone),
           accepted_rider:delivery_riders!delivery_requests_accepted_rider_id_fkey(profile_id, profiles!delivery_riders_profile_id_fkey(full_name, phone))
@@ -485,9 +560,15 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
           ? `<div class="dd-proofs-row">${proofs.map((url) => `<div class="dd-proof-thumb" data-img="${url}"><img src="${url}" alt="পেমেন্ট প্রুফ" /></div>`).join('')}</div>`
           : `<p class="dd-no-proof">কোনো পেমেন্ট প্রুফ আপলোড করা হয়নি</p>`;
 
+        // সার্চের জন্য কার্ডে লুকানো টেক্সট
+        card.dataset.search = [req.order_no, customerName, customerPhone, riderName, riderPhone]
+          .join(' ')
+          .toLowerCase();
+
         card.innerHTML = `
           <div class="dd-card-top">
             <div>
+              <span class="dd-order-no">#${req.order_no || ''}</span>
               <p class="dd-price">৳${req.final_price || 0}</p>
               <p class="dd-date">রিপোর্ট: ${req.disputed_at ? formatDate(req.disputed_at) : '—'}</p>
             </div>
@@ -506,6 +587,8 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
               <p class="dd-party-phone"><i class="fas fa-phone"></i> ${riderPhone}</p>
             </div>
           </div>
+
+          <a class="dd-details-link" href="/admin/delivery-orders?open=${encodeURIComponent(req.order_no || '')}"><i class="fas fa-circle-info"></i> অর্ডার ডিটেইলস ও টাইমলাইন</a>
 
           <p class="dd-section-label">ডেলিভারি বিবরণ</p>
           <p class="dd-desc">${req.description || ''}</p>
@@ -567,6 +650,25 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
       });
     }
 
+    // ===== সার্চ: অর্ডার নাম্বার / নাম / ফোন =====
+    function normalizeQuery(value) {
+      return String(value || '').trim().toLowerCase().replace(/^#/, '');
+    }
+
+    document.getElementById('disputeSearch')?.addEventListener('input', (e) => {
+      const q = normalizeQuery(e.target.value);
+      const digits = q.replace(/\D/g, '');
+      let visible = 0;
+      disputeList.querySelectorAll('.dd-card').forEach((card) => {
+        const hay = card.dataset.search || '';
+        const hayDigits = hay.replace(/\D/g, '');
+        const match = !q || hay.includes(q) || (digits.length >= 4 && hayDigits.includes(digits));
+        card.style.display = match ? '' : 'none';
+        if (match) visible += 1;
+      });
+      disputeEmpty.style.display = visible === 0 && disputeList.children.length > 0 ? 'block' : 'none';
+    });
+
     // ===== lightbox =====
     const lightboxOverlay = document.getElementById('ddLightboxOverlay');
     const lightboxImg = document.getElementById('ddLightboxImg');
@@ -584,8 +686,15 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
       if (e.target === lightboxOverlay) lightboxOverlay.classList.remove('active');
     });
 
-    window.addEventListener('smartfeni:admin-ready', () => {
-      loadDisputes();
+    window.addEventListener('smartfeni:admin-ready', async () => {
+      await loadDisputes();
+      // অর্ডার পেজ থেকে ?q=SFD-১০০১ নিয়ে এলে সার্চ বক্সে বসিয়ে ফিল্টার চালাই
+      const q = new URLSearchParams(window.location.search).get('q');
+      const input = document.getElementById('disputeSearch');
+      if (q && input) {
+        input.value = q;
+        input.dispatchEvent(new Event('input'));
+      }
     });
 
     initAdminGuard();
