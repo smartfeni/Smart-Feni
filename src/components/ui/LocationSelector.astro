@@ -29,7 +29,27 @@
 //    ডেটাবেজে যায় না। 'smartfeni:upazila-changed' ইভেন্টে detail.upazila
 //    (slug, আগের মতোই) + নতুন detail.union (ইউনিয়ন বা null)।
 //
-// ডেটা/হেল্পার: src/data/feniAreas.js, geojson: public/data/feni_unions.geojson
+// ============================================================
+// নতুন আপডেট ২ — ৪ লেভেলের আলাদা রঙের বর্ডার + দেশ ভিউ
+// ============================================================
+// ১. বর্ডারের রঙ (feniAreas.js-এর BORDER_COLORS থেকে): দেশ নেভি, জেলা (ফেনী)
+//    কমলা (সবচেয়ে বোল্ড — গ্লো + সাদা হ্যালো + লাইন), উপজেলা বেগুনি,
+//    ইউনিয়ন টিল। উপজেলার ফিল আগের মতো উপজেলা-ভেদে আলাদা হালকা রঙ।
+// ২. ধাপ ১-এও এখন ইউনিয়নের সরু টিল বর্ডার দেখায় (আগে শুধু ধাপ ২-এ)।
+// ৩. "দেশ দেখুন" বাটন → বাংলাদেশ ভিউতে জুম-আউট: বাংলাদেশের বাইরে হালকা
+//    মাস্ক, দেশের নেভি বর্ডার, ফেনী কমলা ফিল + পালস। ফেনীতে ট্যাপ করলে
+//    (বা "ফেনীতে ফিরুন") আগের ফেনী ভিউতে ফেরে। দেশের ফাইল (ADM0) অনেক
+//    সরলীকৃত, তাই ফেনীর কাছে এর লাইন ইউনিয়ন বর্ডার থেকে সরে যায় — এজন্য
+//    দেশের বর্ডার শুধু দেশ ভিউতেই আঁকা হয়, ফেনী ভিউতে নয়।
+// ৪. লেজেন্ড (বাম-ওপরে): রঙের চাবি + প্রতিটা লেভেল অন/অফ। ফেনী ভিউতে
+//    জেলা/উপজেলা/ইউনিয়ন, দেশ ভিউতে দেশ/জেলা দেখায়।
+// ৫. লোড: public/data/bangladesh.geojson প্রথমবার "দেশ দেখুন" চাপলেই লোড হয়
+//    (ফেনী ভিউয়ের লোড সময় বাড়ে না)। লোড ব্যর্থ হলে নোটিস, ফেনী ভিউ ঠিক থাকে।
+// ৬. OSM টাইল, GPS "আমার লোকেশন", সেভ লজিক, localStorage, ইভেন্ট ও Android
+//    ব্যাক বাটন — সব আগের মতোই।
+//
+// ডেটা/হেল্পার: src/data/feniAreas.js, geojson: public/data/feni_unions.geojson,
+// public/data/bangladesh.geojson (দেশ ভিউ)
 // Android ব্যাক বাটন: শিটের root ক্লাস "ls-overlay" + ".active" এবং ক্লোজ
 // বাটনের aria-label "বন্ধ করুন" — native-bridge.js-এর closeTopOverlay নিজে ধরে।
 // ============================================================
@@ -69,6 +89,29 @@
       <i class="fas fa-crosshairs"></i>
       <span>আমার লোকেশন</span>
     </button>
+
+    <!-- রঙের চাবি + লেভেল অন/অফ -->
+    <div class="ls-legend" id="lsLegend" data-view="feni" role="group" aria-label="বর্ডারের রঙ">
+      <button type="button" class="ls-leg-row" data-level="country" aria-pressed="true">
+        <span class="ls-leg-line"></span><span>দেশ</span>
+      </button>
+      <button type="button" class="ls-leg-row" data-level="district" aria-pressed="true">
+        <span class="ls-leg-line"></span><span>জেলা (ফেনী)</span>
+      </button>
+      <button type="button" class="ls-leg-row" data-level="upazila" aria-pressed="true">
+        <span class="ls-leg-line"></span><span>উপজেলা</span>
+      </button>
+      <button type="button" class="ls-leg-row" data-level="union" aria-pressed="true">
+        <span class="ls-leg-line"></span><span>ইউনিয়ন</span>
+      </button>
+    </div>
+
+    <!-- ফেনী ভিউ ↔ বাংলাদেশ ভিউ -->
+    <button type="button" class="ls-country-btn" id="lsCountryBtn">
+      <i class="fas fa-earth-asia"></i>
+      <span>দেশ দেখুন</span>
+    </button>
+
     <div class="ls-loading" id="lsLoading">
       <i class="fas fa-spinner fa-spin"></i>
       <span>ম্যাপ লোড হচ্ছে…</span>
@@ -421,6 +464,96 @@
     cursor: not-allowed;
   }
 
+  /* ---------- লেজেন্ড (রঙের চাবি + অন/অফ) ---------- */
+  .ls-legend {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #E5EAF0;
+    border-radius: 14px;
+    padding: 4px;
+    box-shadow: 0 4px 14px rgba(27, 42, 74, 0.16);
+  }
+
+  .ls-leg-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    background: none;
+    border: none;
+    padding: 6px 10px 6px 8px;
+    border-radius: 10px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    font-family: inherit;
+    color: #1B2A4A;
+    text-align: left;
+    cursor: pointer;
+    transition: opacity 0.15s ease, background 0.15s ease;
+  }
+
+  .ls-leg-row:hover {
+    background: #F8FAFC;
+  }
+
+  .ls-leg-row[aria-pressed='false'] {
+    opacity: 0.45;
+  }
+
+  .ls-leg-line {
+    width: 22px;
+    height: 0;
+    flex-shrink: 0;
+    border-top: var(--w, 3px) solid var(--c, #94a3b8);
+    border-radius: 3px;
+  }
+
+  .ls-leg-row[aria-pressed='false'] .ls-leg-line {
+    border-top-color: #94a3b8;
+  }
+
+  /* ফেনী ভিউতে দেশ নেই, দেশ ভিউতে উপজেলা/ইউনিয়ন নেই */
+  .ls-legend[data-view='feni'] .ls-leg-row[data-level='country'],
+  .ls-legend[data-view='country'] .ls-leg-row[data-level='upazila'],
+  .ls-legend[data-view='country'] .ls-leg-row[data-level='union'] {
+    display: none;
+  }
+
+  /* ---------- ফেনী ↔ দেশ ভিউ বাটন ---------- */
+  .ls-country-btn {
+    position: absolute;
+    right: 12px;
+    bottom: 38px; /* নিচে Leaflet attribution-এর জায়গা ছেড়ে */
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #1B2A4A;
+    color: #fff;
+    border: none;
+    border-radius: 30px;
+    padding: 10px 16px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    font-family: inherit;
+    box-shadow: 0 4px 14px rgba(27, 42, 74, 0.3);
+    cursor: pointer;
+  }
+
+  .ls-country-btn i {
+    color: #FF6B35;
+  }
+
+  .ls-country-btn:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
+
   /* ---------- ফলব্যাক লিস্ট ---------- */
   .ls-fallback {
     flex: 1;
@@ -472,6 +605,39 @@
   }
 </style>
 
+<!-- Leaflet divIcon-এর ভেতরের HTML-এ Astro scoped CSS লাগে না — তাই গ্লোবাল -->
+<style is:global>
+  .ls-pulse {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+
+  .ls-pulse span {
+    position: absolute;
+    left: -20px;
+    top: -20px;
+    width: 40px;
+    height: 40px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border: 2.5px solid #FF6B35;
+    animation: lsPulse 1.8s ease-out infinite;
+  }
+
+  .ls-pulse span:nth-child(2) {
+    animation-delay: 0.9s;
+  }
+
+  @keyframes lsPulse {
+    0% { transform: scale(0.35); opacity: 0.95; }
+    100% { transform: scale(1.7); opacity: 0; }
+  }
+</style>
+
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { trackEvent } from '../../lib/analytics.js';
@@ -488,6 +654,11 @@
     getUpazilaBorders,
     getDistrictBorder,
     getLabelPoints,
+    BORDER_COLORS,
+    loadBangladeshGeo,
+    getBangladeshRings,
+    getBangladeshMask,
+    getBangladeshBounds,
   } from '../../data/feniAreas.js';
 
   const DEFAULT_UPAZILA = 'feni-sadar';
@@ -514,6 +685,8 @@
   const selectedEl = document.getElementById('lsSelected') as HTMLElement;
   const saveBtn = document.getElementById('lsSave') as HTMLButtonElement;
   const fallbackOptions = sheet.querySelectorAll('.upazila-option');
+  const legendEl = document.getElementById('lsLegend') as HTMLElement;
+  const countryBtn = document.getElementById('lsCountryBtn') as HTMLButtonElement;
 
   // শিটকে <body>-তে সরানো — হেডারের z-index/stacking context থেকে মুক্ত
   document.body.appendChild(sheet);
@@ -537,6 +710,21 @@
   let pendingUnion: string | null = null;
   let locating = false;
   let openToken = 0;
+
+  // ৪ লেভেলের বর্ডার + দেশ ভিউ
+  let viewMode: 'feni' | 'country' = 'feni';
+  let viewToken = 0;
+  let viewBusy = false;
+  let bd: any = null; // বাংলাদেশের GeoJSON (প্রথমবার "দেশ দেখুন" চাপলে লোড)
+  let bdBounds: any = null;
+  let countryGroup: any = null;
+  let feniMinZoom = 0;
+  let distGlow: any = null;
+  let distHalo: any = null;
+  let distLine: any = null;
+  const vis: Record<string, boolean> = { country: true, district: true, upazila: true, union: true };
+  const COUNTRY_MIN_ZOOM = 5;
+  const COUNTRY_MAX_ZOOM = 9;
 
   function esc(s: string) {
     return String(s).replace(/[&<>"']/g, (c) =>
@@ -690,39 +878,86 @@
 
     // ওভারলে প্যান — টাইলের ওপরে, মার্কারের নিচে/ওপরে ক্রমানুসারে
     const panes: Array<[string, number]> = [
-      ['sfAreas', 420],
-      ['sfBorders', 430],
-      ['sfDistrictHalo', 440],
-      ['sfDistrictLine', 450],
+      ['sfMask', 410],         // দেশ ভিউ: বাংলাদেশের বাইরের মাস্ক
+      ['sfAreas', 420],        // ফিল (ট্যাপযোগ্য)
+      ['sfUnionLines', 425],   // ইউনিয়নের সরু টিল বর্ডার
+      ['sfBorders', 430],      // উপজেলার বেগুনি বর্ডার
+      ['sfCountry', 432],      // দেশের নেভি বর্ডার (শুধু দেশ ভিউ)
+      ['sfDistrictGlow', 436], // জেলা: কমলা গ্লো
+      ['sfDistrictHalo', 440], // জেলা: সাদা হ্যালো
+      ['sfDistrictLine', 450], // জেলা: কমলা লাইন
       ['sfLabels', 460],
     ];
     panes.forEach(([name, z]) => {
       map.createPane(name);
       map.getPane(name).style.zIndex = String(z);
     });
-    // লেবেল প্যান ট্যাপ আটকাবে না
+    // মাস্ক/লেবেল প্যান ট্যাপ আটকাবে না
+    map.getPane('sfMask').style.pointerEvents = 'none';
     map.getPane('sfLabels').style.pointerEvents = 'none';
 
     layerGroup = Lf.layerGroup().addTo(map);
 
-    // ফেনী জেলার পুরো বাইরের সীমানা — সবসময় বোল্ড (সাদা হ্যালো + কমলা লাইন)
+    // ইউনিয়নের সরু বর্ডার — সব ধাপে স্থায়ী (ভেতরে কোনো রঙ নেই)
+    Lf.geoJSON(geo, {
+      pane: 'sfUnionLines',
+      interactive: false,
+      style: () => ({ color: BORDER_COLORS.union, weight: 1.2, opacity: 0.8, fill: false }),
+    }).addTo(map);
+
+    // ফেনী জেলার পুরো বাইরের সীমানা — সবচেয়ে বোল্ড (গ্লো + সাদা হ্যালো + কমলা লাইন)
     const border = getDistrictBorder(geo);
-    Lf.polyline(border, {
+    distGlow = Lf.polyline(border, {
+      pane: 'sfDistrictGlow', color: BORDER_COLORS.district, weight: 18, opacity: 0.2,
+      lineCap: 'round', lineJoin: 'round', interactive: false,
+    }).addTo(map);
+    distHalo = Lf.polyline(border, {
       pane: 'sfDistrictHalo', color: '#ffffff', weight: 11, opacity: 0.95,
       lineCap: 'round', lineJoin: 'round', interactive: false,
     }).addTo(map);
-    Lf.polyline(border, {
-      pane: 'sfDistrictLine', color: '#FF6B35', weight: 5, opacity: 1,
+    distLine = Lf.polyline(border, {
+      pane: 'sfDistrictLine', color: BORDER_COLORS.district, weight: 5, opacity: 1,
       lineCap: 'round', lineJoin: 'round', interactive: false,
     }).addTo(map);
 
     // ফেনীর সীমানায় আটকানো
     const bounds = getFeniBounds(geo, 0);
     map.fitBounds(bounds, { padding: [14, 14] });
-    map.setMaxBounds(getFeniBounds(geo, 0.05));
-    map.setMinZoom(map.getZoom() - 0.5);
+    feniMinZoom = map.getZoom() - 0.5;
+    applyFeniLimits();
 
+    applyPaneVisibility();
     mapReady = true;
+  }
+
+  // ফেনী ভিউয়ের সীমা: ম্যাপ ফেনীর বাইরে প্যান/জুম-আউট করা যায় না
+  function applyFeniLimits() {
+    map.setMaxBounds(getFeniBounds(geo, 0.05));
+    map.setMinZoom(feniMinZoom);
+  }
+
+  // লেজেন্ডের অন/অফ ও বর্তমান ভিউ অনুযায়ী প্যান দেখানো/লুকানো
+  function applyPaneVisibility() {
+    if (!map) return;
+    const show = (name: string, on: boolean) => {
+      const pane = map.getPane(name);
+      if (pane) pane.style.display = on ? '' : 'none';
+    };
+    show('sfUnionLines', vis.union && viewMode === 'feni');
+    show('sfBorders', vis.upazila);
+    show('sfCountry', vis.country);
+    show('sfDistrictGlow', vis.district);
+    show('sfDistrictHalo', vis.district);
+    show('sfDistrictLine', vis.district);
+  }
+
+  // জেলার বর্ডারের মোটা-সরু: ফেনী ভিউতে বোল্ড, দেশ ভিউতে (ফেনী ছোট) একটু সরু
+  function applyDistrictStyle() {
+    if (!distLine) return;
+    const c = viewMode === 'country';
+    distGlow.setStyle({ weight: c ? 12 : 18 });
+    distHalo.setStyle({ weight: c ? 6 : 11 });
+    distLine.setStyle({ weight: c ? 3 : 5 });
   }
 
   function clearLayers() {
@@ -781,7 +1016,7 @@
 
       layerGroup.addLayer(
         Lf.polyline(borders[u.id], {
-          pane: 'sfBorders', color: u.color, weight: 3, opacity: 1,
+          pane: 'sfBorders', color: BORDER_COLORS.upazila, weight: 3, opacity: 1,
           lineCap: 'round', lineJoin: 'round', interactive: false,
         })
       );
@@ -807,9 +1042,11 @@
   // ধাপ ২: নির্দিষ্ট উপজেলার ইউনিয়ন
   // ------------------------------------------------------------
   function unionStyle(color: string, selected: boolean) {
+    // ইউনিয়নের বর্ডার টিল (BORDER_COLORS.union); নির্বাচিতটা গাঢ় টিলে মোটা।
+    // ফিল উপজেলার নিজের রঙে হালকা। লেজেন্ডে ইউনিয়ন অফ থাকলে বর্ডার বন্ধ।
     return selected
-      ? { color: '#1B2A4A', weight: 3.5, opacity: 1, fillColor: color, fillOpacity: 0.5 }
-      : { color, weight: 1.6, opacity: 0.95, fillColor: color, fillOpacity: 0.14 };
+      ? { stroke: true, color: '#155E75', weight: 3.5, opacity: 1, fillColor: color, fillOpacity: 0.5 }
+      : { stroke: vis.union, color: BORDER_COLORS.union, weight: 1.8, opacity: 0.95, fillColor: color, fillOpacity: 0.14 };
   }
 
   function setUnionSelection(name: string | null, color: string) {
@@ -856,7 +1093,7 @@
       );
       layerGroup.addLayer(
         Lf.polyline(borders[o.id], {
-          pane: 'sfBorders', color: '#64748b', weight: 1.5, opacity: 0.7, dashArray: '4 4', interactive: false,
+          pane: 'sfBorders', color: BORDER_COLORS.upazila, weight: 1.5, opacity: 0.55, dashArray: '4 4', interactive: false,
         })
       );
     });
@@ -887,7 +1124,7 @@
     // উপজেলার বাইরের সীমানা — একটু মোটা
     layerGroup.addLayer(
       Lf.polyline(borders[upazilaId], {
-        pane: 'sfBorders', color: u.color, weight: 4.5, opacity: 1,
+        pane: 'sfBorders', color: BORDER_COLORS.upazila, weight: 4.5, opacity: 1,
         lineCap: 'round', lineJoin: 'round', interactive: false,
       })
     );
@@ -915,9 +1152,179 @@
   }
 
   // ------------------------------------------------------------
+  // দেশ ভিউ (বাংলাদেশ + ফেনী হাইলাইট) ↔ ফেনী ভিউ
+  // ------------------------------------------------------------
+  function updateViewUI() {
+    const isCountry = viewMode === 'country';
+    legendEl.dataset.view = viewMode;
+    const icon = countryBtn.querySelector('i') as HTMLElement;
+    const text = countryBtn.querySelector('span') as HTMLElement;
+    icon.className = isCountry ? 'fas fa-location-dot' : 'fas fa-earth-asia';
+    text.textContent = isCountry ? 'ফেনীতে ফিরুন' : 'দেশ দেখুন';
+    if (isCountry) {
+      backBtn.hidden = false;
+      titleEl.textContent = 'বাংলাদেশ';
+      subEl.textContent = 'ফেনী হাইলাইট করা আছে — ফেনীতে ট্যাপ করুন';
+    }
+  }
+
+  function buildCountryLayers() {
+    if (countryGroup) return;
+    countryGroup = Lf.layerGroup();
+
+    // বাংলাদেশের বাইরের অংশ হালকা ঢাকা (hole = বাংলাদেশ; evenodd দরকার)
+    countryGroup.addLayer(
+      Lf.polygon(getBangladeshMask(bd), {
+        pane: 'sfMask', stroke: false, fillColor: BORDER_COLORS.country, fillOpacity: 0.22,
+        fillRule: 'evenodd', interactive: false,
+      })
+    );
+
+    // দেশের বর্ডার
+    countryGroup.addLayer(
+      Lf.polyline(getBangladeshRings(bd), {
+        pane: 'sfCountry', color: BORDER_COLORS.country, weight: 2.5, opacity: 1,
+        lineCap: 'round', lineJoin: 'round', interactive: false,
+      })
+    );
+
+    // ফেনীর কমলা ফিল — ট্যাপ করলে ফেনী ভিউতে ঢোকে
+    countryGroup.addLayer(
+      Lf.geoJSON(geo, {
+        pane: 'sfAreas',
+        style: () => ({ stroke: false, fillColor: BORDER_COLORS.district, fillOpacity: 0.4 }),
+        onEachFeature: (_f: any, layer: any) => {
+          layer.on('click', () => leaveCountryView(true));
+        },
+      })
+    );
+
+    // ফেনী ছোট দেখায় — তাই বড় অদৃশ্য ট্যাপ এরিয়া + পালস + লেবেল
+    const fb = getFeniBounds(geo, 0);
+    const feniCenter = [(fb[0][0] + fb[1][0]) / 2, (fb[0][1] + fb[1][1]) / 2];
+    countryGroup.addLayer(
+      Lf.circleMarker(feniCenter, {
+        pane: 'sfAreas', radius: 30, stroke: false,
+        fillColor: BORDER_COLORS.district, fillOpacity: 0.01,
+      }).on('click', () => leaveCountryView(true))
+    );
+    countryGroup.addLayer(
+      labelMarker(feniCenter, '<div class="ls-pulse"><span></span><span></span></div>')
+    );
+    countryGroup.addLayer(
+      labelMarker(
+        feniCenter,
+        '<div style="position:absolute;left:0;top:0;transform:translate(-50%,-200%);' +
+          'white-space:nowrap;pointer-events:none;font-weight:800;font-size:13px;color:#fff;' +
+          'background:#FF6B35;padding:3px 10px;border-radius:12px;' +
+          'box-shadow:0 2px 8px rgba(255,107,53,0.5);">ফেনী</div>'
+      )
+    );
+
+    // "বাংলাদেশ" লেবেল — দেশের মাঝামাঝি
+    const bb = bdBounds;
+    if (bb) {
+      const c = [(bb[0][0] + bb[1][0]) / 2, (bb[0][1] + bb[1][1]) / 2];
+      countryGroup.addLayer(
+        labelMarker(
+          c,
+          '<div style="position:absolute;left:0;top:0;transform:translate(-50%,-50%);' +
+            'white-space:nowrap;pointer-events:none;font-weight:800;font-size:14px;color:#fff;' +
+            'background:rgba(27,42,74,0.85);padding:4px 12px;border-radius:12px;">বাংলাদেশ</div>'
+        )
+      );
+    }
+  }
+
+  async function enterCountryView() {
+    if (viewMode === 'country' || viewBusy || !mapReady) return;
+    viewBusy = true;
+    countryBtn.disabled = true;
+    setNote('');
+
+    try {
+      if (!bd) {
+        bd = await loadBangladeshGeo();
+        bdBounds = getBangladeshBounds(bd);
+      }
+    } catch (err) {
+      console.error('[LocationSelector] বাংলাদেশের ম্যাপ লোড ব্যর্থ:', err);
+      setNote('বাংলাদেশের ম্যাপ লোড হয়নি — আবার চেষ্টা করুন');
+      viewBusy = false;
+      countryBtn.disabled = false;
+      return;
+    }
+
+    // লোডের সময় শিট বন্ধ হয়ে গেলে কিছু করার নেই
+    if (!sheet.classList.contains('active') || !bdBounds) {
+      viewBusy = false;
+      countryBtn.disabled = false;
+      return;
+    }
+
+    buildCountryLayers();
+    viewMode = 'country';
+    const token = ++viewToken;
+
+    map.removeLayer(layerGroup);
+    countryGroup.addTo(map);
+    applyDistrictStyle();
+    applyPaneVisibility();
+    updateViewUI();
+    updateFooter();
+
+    // সীমা আগে খুলে তারপর উড়ে যাওয়া (নইলে ফেনীর সীমা আটকে দেবে)
+    map.setMaxBounds(null);
+    map.setMinZoom(COUNTRY_MIN_ZOOM);
+    map.flyToBounds(bdBounds, { padding: [10, 10], duration: 0.9 });
+    map.once('moveend', () => {
+      if (token !== viewToken || viewMode !== 'country') return;
+      map.setMaxBounds(bdBounds);
+      map.setMaxZoom(COUNTRY_MAX_ZOOM);
+    });
+
+    viewBusy = false;
+    countryBtn.disabled = false;
+  }
+
+  function leaveCountryView(animate: boolean) {
+    if (viewMode !== 'country' || !map) return;
+    viewMode = 'feni';
+    const token = ++viewToken;
+
+    map.removeLayer(countryGroup);
+    map.addLayer(layerGroup);
+    map.setMaxZoom(19);
+    applyDistrictStyle();
+    applyPaneVisibility();
+    updateViewUI();
+    pendingUnion = null;
+
+    if (!animate) {
+      map.setMaxBounds(null);
+      map.fitBounds(getFeniBounds(geo, 0), { padding: [14, 14], animate: false });
+      applyFeniLimits();
+      renderStep1(false);
+      return;
+    }
+
+    renderStep1(true); // ফেনীতে উড়ে যায়
+    map.once('moveend', () => {
+      if (token !== viewToken || viewMode !== 'feni') return;
+      applyFeniLimits();
+    });
+  }
+
+  // ------------------------------------------------------------
   // ফুটার ও নোটিস
   // ------------------------------------------------------------
   function updateFooter() {
+    if (viewMode === 'country') {
+      selectedEl.innerHTML =
+        '<i class="fas fa-location-dot"></i>ফেনী জেলা<small>ফেনীতে ট্যাপ করুন — তারপর নিজের উপজেলা বেছে নিন</small>';
+      saveBtn.disabled = true;
+      return;
+    }
     if (step === 2 && pendingUpazila) {
       const u: any = UPAZILAS.find((x: any) => x.id === pendingUpazila);
       let html = `<i class="fas fa-location-dot"></i>${esc(u.name)} উপজেলা`;
@@ -994,7 +1401,9 @@
       if (firstTime) createMap();
       else map.invalidateSize();
 
-      renderStep1(!firstTime);
+      // আগের বার দেশ ভিউতে বন্ধ করে থাকলে সরাসরি ফেনী ভিউতে ফেরা
+      if (viewMode === 'country') leaveCountryView(false);
+      else renderStep1(!firstTime);
       loadingEl.hidden = true;
     } catch (err) {
       console.error('[LocationSelector] ম্যাপ লোড ব্যর্থ:', err);
@@ -1051,6 +1460,7 @@
           if (step === 2) goStep1();
           return;
         }
+        if (viewMode === 'country') leaveCountryView(false);
         drawUserDot(lat, lng);
         trackEvent('upazila_locate_used', { upazila: area.upazilaId });
         enterUpazila(area.upazilaId, area.union);
@@ -1117,7 +1527,35 @@
 
   hint.addEventListener('click', () => openSheet());
   closeBtn.addEventListener('click', () => closeSheet());
-  backBtn.addEventListener('click', () => goStep1());
+  backBtn.addEventListener('click', () => {
+    if (viewMode === 'country') leaveCountryView(true);
+    else goStep1();
+  });
+
+  // ফেনী ভিউ ↔ দেশ ভিউ
+  countryBtn.addEventListener('click', () => {
+    if (viewMode === 'country') leaveCountryView(true);
+    else enterCountryView();
+  });
+
+  // লেজেন্ড: রঙ বসানো + লেভেল অন/অফ
+  const LEGEND_WEIGHT: Record<string, string> = { country: '3px', district: '5px', upazila: '3px', union: '1.5px' };
+  legendEl.querySelectorAll('.ls-leg-row').forEach((row) => {
+    const el = row as HTMLElement;
+    const level = el.dataset.level as string;
+    el.style.setProperty('--c', (BORDER_COLORS as Record<string, string>)[level]);
+    el.style.setProperty('--w', LEGEND_WEIGHT[level] || '3px');
+    el.addEventListener('click', () => {
+      vis[level] = !vis[level];
+      el.setAttribute('aria-pressed', String(vis[level]));
+      if (!mapReady) return;
+      applyPaneVisibility();
+      // ধাপ ২-এ ইউনিয়নের বর্ডার ফিলের সাথেই আঁকা — তাই আবার আঁকতে হয়
+      if (level === 'union' && viewMode === 'feni' && step === 2 && pendingUpazila) {
+        renderStep2(pendingUpazila);
+      }
+    });
+  });
 
   saveBtn.addEventListener('click', () => {
     if (step !== 2 || !pendingUpazila) return;
