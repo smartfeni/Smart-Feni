@@ -14,6 +14,9 @@
 // সার্চ বক্স (অর্ডার নাম্বার / নাম / ফোন দিয়ে ফিল্টার), আর কার্ডে
 // "অর্ডার ডিটেইলস" লিংক → /admin/delivery-orders?open=<নাম্বার>।
 //
+// আপডেট: delivery-proofs bucket এখন PRIVATE — পেমেন্ট প্রুফ ছবি
+// দেখানোর আগে storageSigned.js দিয়ে signed URL বানানো হয়।
+//
 // দুইটা resolve বাটন — resolveDispute() (deliveryClient.js, আগে
 // থেকেই আছে) কল করে:
 //   - "রাইডারের পক্ষে (সম্পন্ন হিসেবে গণ্য)" → resolve_completed
@@ -495,6 +498,9 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
     import { resolveDispute } from '../../lib/deliveryClient.js';
+    import { getSignedUrls } from '../../lib/storageSigned.js';
+
+    const PROOF_BUCKET = 'delivery-proofs';
 
     const disputeList = document.getElementById('disputeList');
     const disputeEmpty = document.getElementById('disputeEmpty');
@@ -545,6 +551,11 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
         const existing = proofsMap.get(p.request_id) || [];
         proofsMap.set(p.request_id, [...existing, ...(p.image_urls || [])]);
       });
+
+      // delivery-proofs bucket private — দেখানোর আগে সব ছবির signed URL বানাই
+      for (const [reqId, urls] of Array.from(proofsMap.entries())) {
+        proofsMap.set(reqId, await getSignedUrls(supabase, PROOF_BUCKET, urls));
+      }
 
       data.forEach((req) => {
         const card = document.createElement('div');
