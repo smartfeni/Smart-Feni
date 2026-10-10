@@ -28,6 +28,11 @@
 //
 // আপডেট (U3.5): Supabase Storage এর ছবি লোডের আগে DNS/TLS preconnect।
 //
+// আপডেট (Pull-to-Refresh ফিক্স): থ্রেশহোল্ডে ডাবল resistance বাগ ঠিক (এখন
+// প্রায় ১২০px টান লাগে); মডাল/শিট/ম্যাপ/স্ক্রলযোগ্য কন্টেইনার ও দুই আঙুলের
+// pinch-এ pull বন্ধ; touchcancel হ্যান্ডেল; মডাল খোলা থাকলে ব্রাউজারের নিজস্ব
+// pull-to-refresh-ও CSS দিয়ে বন্ধ।
+//
 // আপডেট (অ্যাপ ডাউনলোড গেট): AppDownloadPrompt গ্লোবালি মাউন্ট করা
 // হলো, এবং সেটা <body>-র একদম প্রথম এলিমেন্ট — এটা জরুরি! কম্পোনেন্টের
 // inline স্ক্রিপ্ট বাকি পেজ রেন্ডারের আগেই Android ডিটেক্ট করে গেট
@@ -450,6 +455,13 @@ const localBusinessSchema = {
     @keyframes sf-ptr-spin {
       to { transform: rotate(360deg); }
     }
+
+    /* কোনো মডাল/ড্রয়ার/শিট খুললে (body-তে overflow:hidden) ব্রাউজারের নিজস্ব
+       pull-to-refresh আর scroll-chaining বন্ধ — সাইন-আপ ফর্ম/ম্যাপে স্ক্রল করার
+       সময় হঠাৎ রিফ্রেশ হবে না। সাধারণ পেজে আগের মতোই কাজ করে। */
+    html:has(body[style*="overflow: hidden"]) {
+      overscroll-behavior-y: none;
+    }
   </style>
 </head>
 <body>
@@ -509,48 +521,99 @@ const localBusinessSchema = {
 
     if (isNativeApp()) {
       const indicator = document.getElementById('sf-ptr-indicator');
-      const PULL_THRESHOLD = 70; // px, এর বেশি টানলে ছাড়ার পর রিফ্রেশ হবে
+      const PULL_THRESHOLD = 60; // রাবার-ব্যান্ড হওয়ার পরের দূরত্ব (px) — প্রায় ১২০px আঙুল টান লাগবে
       const MAX_PULL = 100;
       const RESISTANCE = 0.5; // রাবার-ব্যান্ড ইফেক্ট
 
       let startY = 0;
+      let startX = 0;
       let pulling = false;
       let refreshing = false;
+      let lastPull = 0;
+
+      // টাচ যেখান থেকে শুরু হয়েছে সেখানে pull-to-refresh চলবে কি না
+      function canStartPull(target) {
+        // মডাল/ড্রয়ার/শিট খোলা থাকলে body লক থাকে — তখন বন্ধ
+        if (document.body.style.overflow === 'hidden') return false;
+        if (window.scrollY > 0) return false;
+
+        let el = target instanceof Element ? target : null;
+        while (el && el !== document.body && el !== document.documentElement) {
+          // ম্যাপ বা opt-out করা এলিমেন্ট
+          if (el.classList && el.classList.contains('leaflet-container')) return false;
+          if (el.hasAttribute && el.hasAttribute('data-no-ptr')) return false;
+
+          // ভেতরে স্ক্রলযোগ্য কন্টেইনার হলে সেখানকার স্ক্রল নিজের কাজ করুক
+          const st = window.getComputedStyle(el);
+          const oy = st.overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) return false;
+
+          // fixed overlay (মডাল/শিট/ড্রয়ার) এর ভেতরে হলে বন্ধ
+          if (st.position === 'fixed') return false;
+
+          el = el.parentElement;
+        }
+        return true;
+      }
+
+      function resetIndicator() {
+        indicator.style.transform = 'translateY(-60px)';
+        indicator.classList.remove('sf-ptr-visible');
+      }
+
+      function cancelPull() {
+        if (!pulling) return;
+        pulling = false;
+        lastPull = 0;
+        resetIndicator();
+      }
 
       document.addEventListener('touchstart', (e) => {
-        if (refreshing || window.scrollY > 0) return;
+        if (refreshing) return;
+        // দুই আঙুল (pinch-zoom) হলে সাথে সাথে বাতিল
+        if (e.touches.length !== 1) { cancelPull(); return; }
+        if (!canStartPull(e.target)) { pulling = false; return; }
         startY = e.touches[0].clientY;
+        startX = e.touches[0].clientX;
+        lastPull = 0;
         pulling = true;
       }, { passive: true });
 
       document.addEventListener('touchmove', (e) => {
         if (!pulling || refreshing) return;
 
-        const deltaY = e.touches[0].clientY - startY;
-        if (deltaY <= 0) return;
+        if (e.touches.length !== 1) { cancelPull(); return; }
 
-        const pullDistance = Math.min(deltaY * RESISTANCE, MAX_PULL);
-        indicator.style.transform = `translateY(${-60 + pullDistance}px)`;
+        const deltaY = e.touches[0].clientY - startY;
+        const deltaX = e.touches[0].clientX - startX;
+
+        // উপরের দিকে গেলে, পেজ স্ক্রল হয়ে গেলে, বা টান আড়াআড়ি হলে বাতিল
+        if (deltaY <= 0 || window.scrollY > 0 || Math.abs(deltaX) > deltaY * 0.8) {
+          cancelPull();
+          return;
+        }
+
+        lastPull = Math.min(deltaY * RESISTANCE, MAX_PULL);
+        indicator.style.transform = `translateY(${-60 + lastPull}px)`;
         indicator.classList.add('sf-ptr-visible');
       }, { passive: true });
 
-      document.addEventListener('touchend', (e) => {
+      document.addEventListener('touchcancel', cancelPull, { passive: true });
+
+      document.addEventListener('touchend', () => {
         if (!pulling || refreshing) return;
         pulling = false;
 
-        const deltaY = e.changedTouches[0].clientY - startY;
-        const pullDistance = Math.min(deltaY * RESISTANCE, MAX_PULL);
-
-        if (pullDistance >= PULL_THRESHOLD * RESISTANCE) {
+        if (lastPull >= PULL_THRESHOLD) {
           refreshing = true;
           indicator.style.transform = 'translateY(20px)';
           indicator.classList.add('sf-ptr-loading');
           window.location.reload();
         } else {
-          indicator.style.transform = 'translateY(-60px)';
-          indicator.classList.remove('sf-ptr-visible');
+          lastPull = 0;
+          resetIndicator();
         }
-      });
+      }, { passive: true });
     }
   </script>
 
