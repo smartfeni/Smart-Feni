@@ -1,17 +1,10 @@
 name: Build Signed Android AAB
 
+# শুধু ম্যানুয়ালি চলবে (GitHub → Actions → Build Signed Android AAB → Run workflow)।
+# নেটিভ কিছু (AndroidManifest, প্লাগিন, capacitor.config.json, versionCode) বদলালে তবেই চালান;
+# src/ এর ওয়েব বদল Vercel ডেপ্লয়েই অ্যাপে পৌঁছে যায়।
 on:
   workflow_dispatch: {}
-  push:
-    branches:
-      - main
-    paths:
-      - "android/**"
-      - "src/**"
-      - "package.json"
-      - "package-lock.json"
-      - "capacitor.config.json"
-      - ".github/workflows/build-android.yml"
 
 jobs:
   build:
@@ -24,7 +17,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -35,12 +28,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Ensure Android assets directory exists
+        run: mkdir -p android/app/src/main/assets
+
       - name: Sync Capacitor Android project
         run: npx cap sync android
 
       - name: Decode keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/signing.keystore
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$GITHUB_WORKSPACE/android/app/signing.keystore"
 
       - name: Build signed release AAB
         working-directory: android
@@ -50,7 +46,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           ./gradlew bundleRelease \
-            -Pandroid.injected.signing.store.file=app/signing.keystore \
+            -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/android/app/signing.keystore" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
@@ -63,4 +59,4 @@ jobs:
 
       - name: Clean up keystore
         if: always()
-        run: rm -f android/app/signing.keystore
+        run: rm -f "$GITHUB_WORKSPACE/android/app/signing.keystore"
