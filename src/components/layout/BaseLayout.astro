@@ -1,4 +1,3 @@
-<!-- path: src/components/layout/BaseLayout.astro -->
 ---
 // ============================================================
 // কম্পোনেন্ট: বেস লেআউট
@@ -26,6 +25,25 @@
 // পাস না করায় ফুটার অটোমেটিক হাইড থাকবে।
 //
 // আপডেট (U3.5): Supabase Storage এর ছবি লোডের আগে DNS/TLS preconnect।
+//
+// আপডেট (Pull-to-Refresh ফিক্স): থ্রেশহোল্ডে ডাবল resistance বাগ ঠিক (এখন
+// প্রায় ১২০px টান লাগে); মডাল/শিট/ম্যাপ/স্ক্রলযোগ্য কন্টেইনার ও দুই আঙুলের
+// pinch-এ pull বন্ধ; touchcancel হ্যান্ডেল; মডাল খোলা থাকলে ব্রাউজারের নিজস্ব
+// pull-to-refresh-ও CSS দিয়ে বন্ধ।
+//
+// আপডেট (অ্যাপ ডাউনলোড গেট): AppDownloadPrompt গ্লোবালি মাউন্ট করা
+// হলো, এবং সেটা <body>-র একদম প্রথম এলিমেন্ট — এটা জরুরি! কম্পোনেন্টের
+// inline স্ক্রিপ্ট বাকি পেজ রেন্ডারের আগেই Android ডিটেক্ট করে গেট
+// অন করে, যেন হোমপেজের এক ঝলক (flash) না দেখা যায়। এটা নিচে সরাবেন না।
+//
+// আপডেট (ফ্লোটিং অ্যাক্টিভিটি বার): ActivityBar গ্লোবালি মাউন্ট করা হলো
+// (BottomNav এর ঠিক পরে)। এটা নিজে থেকেই শুধু হোম পেজে ('/') এবং
+// লগইন থাকলে চলমান অর্ডার/রিকোয়েস্ট দেখায়; বাকি পেজে কিছু করে না।
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৩): src/lib/errorReporter.js থেকে
+// initErrorReporter() প্রথম <script> ব্লকে একবার কল করা হলো। এতে প্রতিটা
+// পেজে অপ্রত্যাশিত JS এরর ও unhandled promise rejection অটো
+// report_client_error-এ যায় এবং window.SFReportError সব পেজে পাওয়া যায়।
 // ============================================================
 
 import Header from './Header.astro';
@@ -37,6 +55,8 @@ import HamburgerMenu from './HamburgerMenu.astro';
 import PostFlowDrawer from './PostFlowDrawer.astro';
 import ChatWidget from '../ChatWidget.astro';
 import NotificationPermissionPrompt from '../shared/NotificationPermissionPrompt.astro';
+import AppDownloadPrompt from '../shared/AppDownloadPrompt.astro';
+import ActivityBar from './ActivityBar.astro';
 
 export interface Props {
   title: string;
@@ -438,9 +458,17 @@ const localBusinessSchema = {
     @keyframes sf-ptr-spin {
       to { transform: rotate(360deg); }
     }
+
+    /* কোনো মডাল/ড্রয়ার/শিট খুললে (body-তে overflow:hidden) ব্রাউজারের নিজস্ব
+       pull-to-refresh আর scroll-chaining বন্ধ — সাইন-আপ ফর্ম/ম্যাপে স্ক্রল করার
+       সময় হঠাৎ রিফ্রেশ হবে না। সাধারণ পেজে আগের মতোই কাজ করে। */
+    html:has(body[style*="overflow: hidden"]) {
+      overscroll-behavior-y: none;
+    }
   </style>
 </head>
 <body>
+  <AppDownloadPrompt />
   <Header />
   <div id="sf-ptr-indicator" class="sf-ptr-indicator">
     <div class="sf-ptr-spinner"></div>
@@ -450,6 +478,7 @@ const localBusinessSchema = {
   </main>
   {showFooter && <Footer />}
   <BottomNav />
+  <ActivityBar />
   <CategoryDrawer />
   <NotificationDrawer />
   <HamburgerMenu />
@@ -461,6 +490,7 @@ const localBusinessSchema = {
 
   <script>
     import { initBackButtonHandler } from '../../lib/native-bridge.js';
+    import { initErrorReporter } from '../../lib/errorReporter.js';
 
     window.deferredInstallPrompt = null;
 
@@ -481,6 +511,9 @@ const localBusinessSchema = {
       });
     }
 
+    // এরর মনিটরিং (ধাপ ৩): গ্লোবাল JS এরর/unhandled rejection ধরা শুরু
+    initErrorReporter();
+
     initBackButtonHandler();
   </script>
 
@@ -495,48 +528,99 @@ const localBusinessSchema = {
 
     if (isNativeApp()) {
       const indicator = document.getElementById('sf-ptr-indicator');
-      const PULL_THRESHOLD = 70; // px, এর বেশি টানলে ছাড়ার পর রিফ্রেশ হবে
+      const PULL_THRESHOLD = 60; // রাবার-ব্যান্ড হওয়ার পরের দূরত্ব (px) — প্রায় ১২০px আঙুল টান লাগবে
       const MAX_PULL = 100;
       const RESISTANCE = 0.5; // রাবার-ব্যান্ড ইফেক্ট
 
       let startY = 0;
+      let startX = 0;
       let pulling = false;
       let refreshing = false;
+      let lastPull = 0;
+
+      // টাচ যেখান থেকে শুরু হয়েছে সেখানে pull-to-refresh চলবে কি না
+      function canStartPull(target) {
+        // মডাল/ড্রয়ার/শিট খোলা থাকলে body লক থাকে — তখন বন্ধ
+        if (document.body.style.overflow === 'hidden') return false;
+        if (window.scrollY > 0) return false;
+
+        let el = target instanceof Element ? target : null;
+        while (el && el !== document.body && el !== document.documentElement) {
+          // ম্যাপ বা opt-out করা এলিমেন্ট
+          if (el.classList && el.classList.contains('leaflet-container')) return false;
+          if (el.hasAttribute && el.hasAttribute('data-no-ptr')) return false;
+
+          // ভেতরে স্ক্রলযোগ্য কন্টেইনার হলে সেখানকার স্ক্রল নিজের কাজ করুক
+          const st = window.getComputedStyle(el);
+          const oy = st.overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) return false;
+
+          // fixed overlay (মডাল/শিট/ড্রয়ার) এর ভেতরে হলে বন্ধ
+          if (st.position === 'fixed') return false;
+
+          el = el.parentElement;
+        }
+        return true;
+      }
+
+      function resetIndicator() {
+        indicator.style.transform = 'translateY(-60px)';
+        indicator.classList.remove('sf-ptr-visible');
+      }
+
+      function cancelPull() {
+        if (!pulling) return;
+        pulling = false;
+        lastPull = 0;
+        resetIndicator();
+      }
 
       document.addEventListener('touchstart', (e) => {
-        if (refreshing || window.scrollY > 0) return;
+        if (refreshing) return;
+        // দুই আঙুল (pinch-zoom) হলে সাথে সাথে বাতিল
+        if (e.touches.length !== 1) { cancelPull(); return; }
+        if (!canStartPull(e.target)) { pulling = false; return; }
         startY = e.touches[0].clientY;
+        startX = e.touches[0].clientX;
+        lastPull = 0;
         pulling = true;
       }, { passive: true });
 
       document.addEventListener('touchmove', (e) => {
         if (!pulling || refreshing) return;
 
-        const deltaY = e.touches[0].clientY - startY;
-        if (deltaY <= 0) return;
+        if (e.touches.length !== 1) { cancelPull(); return; }
 
-        const pullDistance = Math.min(deltaY * RESISTANCE, MAX_PULL);
-        indicator.style.transform = `translateY(${-60 + pullDistance}px)`;
+        const deltaY = e.touches[0].clientY - startY;
+        const deltaX = e.touches[0].clientX - startX;
+
+        // উপরের দিকে গেলে, পেজ স্ক্রল হয়ে গেলে, বা টান আড়াআড়ি হলে বাতিল
+        if (deltaY <= 0 || window.scrollY > 0 || Math.abs(deltaX) > deltaY * 0.8) {
+          cancelPull();
+          return;
+        }
+
+        lastPull = Math.min(deltaY * RESISTANCE, MAX_PULL);
+        indicator.style.transform = `translateY(${-60 + lastPull}px)`;
         indicator.classList.add('sf-ptr-visible');
       }, { passive: true });
 
-      document.addEventListener('touchend', (e) => {
+      document.addEventListener('touchcancel', cancelPull, { passive: true });
+
+      document.addEventListener('touchend', () => {
         if (!pulling || refreshing) return;
         pulling = false;
 
-        const deltaY = e.changedTouches[0].clientY - startY;
-        const pullDistance = Math.min(deltaY * RESISTANCE, MAX_PULL);
-
-        if (pullDistance >= PULL_THRESHOLD * RESISTANCE) {
+        if (lastPull >= PULL_THRESHOLD) {
           refreshing = true;
           indicator.style.transform = 'translateY(20px)';
           indicator.classList.add('sf-ptr-loading');
           window.location.reload();
         } else {
-          indicator.style.transform = 'translateY(-60px)';
-          indicator.classList.remove('sf-ptr-visible');
+          lastPull = 0;
+          resetIndicator();
         }
-      });
+      }, { passive: true });
     }
   </script>
 
@@ -569,6 +653,12 @@ const localBusinessSchema = {
     window.showToast = function (message, type = 'success', duration = 3000) {
       const overlay = document.getElementById('sf-toast-overlay');
       if (!overlay) return;
+
+      // একই মেসেজ ১ সেকেন্ডের মধ্যে দুইবার এলে একবারই দেখাবে
+      // (পেজের নিজের showToast কল + নিচের অটো-টোস্ট একসাথে এলে ডবল হবে না)
+      const now = Date.now();
+      if (window.__sfLastToast && window.__sfLastToast.m === message && now - window.__sfLastToast.t < 1000) return;
+      window.__sfLastToast = { m: message, t: now };
 
       // আগের টোস্ট থাকলে সরিয়ে নতুনটা দেখাবে
       overlay.innerHTML = '';
@@ -603,6 +693,43 @@ const localBusinessSchema = {
         }, 250);
       }, duration);
     };
+
+    // ============================================================
+    // অটো-টোস্ট: যেকোনো মেসেজ এলিমেন্টে show-error / show-success ক্লাস বসলেই
+    // (form-msg, form-message, edit-message, modal-message, auth-message ইত্যাদি)
+    // লেখাটা সবকিছুর ওপরে টোস্টে দেখায় এবং ফর্মের ওপরের ইনলাইন লেখা লুকিয়ে দেয়,
+    // কারণ ইনলাইন মেসেজ সেভ বাটন চাপার সময় স্ক্রিনের বাইরে থাকে।
+    // কোনো পেজকে আলাদা করে বদলাতে হয় না। টোস্ট না থাকলে ইনলাইনই দেখায়।
+    // ============================================================
+    (function () {
+      const MSG_CLASS = /(msg|message)/i;
+
+      function handle(el) {
+        if (!el || el.nodeType !== 1 || typeof el.className !== 'string') return;
+        const cls = el.className;
+        if (!MSG_CLASS.test(cls)) return;
+        const isError = /\bshow-error\b/.test(cls);
+        const isSuccess = /\bshow-success\b/.test(cls);
+        if (!isError && !isSuccess) return;
+        const text = (el.textContent || '').trim();
+        if (!text || typeof window.showToast !== 'function') return;
+        window.showToast(text, isError ? 'error' : 'success', isError ? 3500 : 2500);
+        el.style.display = 'none';
+      }
+
+      function start() {
+        if (!document.body) return;
+        new MutationObserver(function (mutations) {
+          for (const m of mutations) handle(m.target);
+        }).observe(document.body, { attributes: true, attributeFilter: ['class'], subtree: true });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+      } else {
+        start();
+      }
+    })();
 
     // ============================================================
     // গ্লোবাল Mandatory Field ভ্যালিডেশন হেল্পার

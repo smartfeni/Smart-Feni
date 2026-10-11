@@ -11,9 +11,23 @@
 // user_notifications এ ইনসার্ট করে দেয়, যেটা আবার push notification
 // ট্রিগার (trg_notify_push_on_insert) চালু করে দেয় — তাই এখানে
 // আলাদা করে নোটিফিকেশন পাঠানোর কোনো কোড লাগে না।
+//
+// chat-images bucket এখন PRIVATE। DB-তে image_url আগের মতোই সেভ হয়
+// (পুরনো public URL ফরম্যাট), কিন্তু দেখানোর সময় এই ফাইল signed URL
+// বানিয়ে দেয় (storageSigned.js) — তাই UI কম্পোনেন্টে কিছু বদলাতে হয় না।
 // ============================================================
 
 import { supabase } from './supabase.js';
+import { getSignedUrl } from './storageSigned.js';
+
+const CHAT_BUCKET = 'chat-images';
+
+// মেসেজ row-এর image_url কে signed URL দিয়ে বদলে দেয় (ছবি না থাকলে যেমন আছে তেমন)
+async function withSignedImage(row) {
+  if (!row || !row.image_url) return row;
+  const signed = await getSignedUrl(supabase, CHAT_BUCKET, row.image_url);
+  return { ...row, image_url: signed };
+}
 
 // একটা রিকোয়েস্টের সব মেসেজ আনা (পুরনো থেকে নতুন, সময়ক্রমে)
 export async function getChatMessages(requestId) {
@@ -27,7 +41,8 @@ export async function getChatMessages(requestId) {
     return { data: [], error: error.message };
   }
 
-  return { data: data || [], error: null };
+  const signed = await Promise.all((data || []).map(withSignedImage));
+  return { data: signed, error: null };
 }
 
 // নতুন মেসেজ পাঠানো — টেক্সট, ছবি, বা দুটোই একসাথে হতে পারে
@@ -60,18 +75,24 @@ export async function sendChatMessage(requestId, message, imageUrl = null) {
 // চ্যাট ছবি Supabase Storage-এ আপলোড করা (compressImage দিয়ে আগে
 // থেকেই কম্প্রেস করা ফাইল আসবে বলে ধরে নেওয়া হচ্ছে — কলিং কোডে
 // imageCompress.js ব্যবহার করা উচিত, payment-proof আপলোডের প্যাটার্নে)
+//
+// রিটার্ন:
+//   url        → DB-তে সেভ করার মান (sendChatMessage-এ এটাই দেবে)
+//   previewUrl → সাথে সাথে স্ক্রিনে দেখানোর signed URL (bucket private বলে
+//                url সরাসরি <img>-এ কাজ করবে না)
 export async function uploadChatImage(requestId, file) {
   const fileName = `${requestId}/${Date.now()}-${file.name}`;
   const { data: uploadData, error: uploadError } = await supabase.storage
-    .from('chat-images')
+    .from(CHAT_BUCKET)
     .upload(fileName, file);
 
   if (uploadError) {
-    return { url: null, error: uploadError.message };
+    return { url: null, previewUrl: null, error: uploadError.message };
   }
 
-  const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(uploadData.path);
-  return { url: urlData.publicUrl, error: null };
+  const { data: urlData } = supabase.storage.from(CHAT_BUCKET).getPublicUrl(uploadData.path);
+  const previewUrl = await getSignedUrl(supabase, CHAT_BUCKET, uploadData.path);
+  return { url: urlData.publicUrl, previewUrl, error: null };
 }
 
 // অন্য পক্ষের পাঠানো মেসেজগুলো "পড়া হয়েছে" মার্ক করা (চ্যাট খোলার সময় কল হবে)
@@ -110,9 +131,9 @@ export async function getUnreadCount(requestId) {
 }
 
 // একটা রিকোয়েস্টের চ্যাটে রিয়েলটাইম সাবস্ক্রাইব করা — নতুন মেসেজ এলে
-// onInsert(row) কল হবে। রিটার্ন হওয়া channel টা caller-কেই পরে
-// supabase.removeChannel(channel) দিয়ে ক্লিন-আপ করতে হবে (মডাল বন্ধ
-// হওয়ার সময়), নাহলে মেমরি লিক হবে।
+// onInsert(row) কল হবে (row.image_url আগে থেকেই signed করা)। রিটার্ন হওয়া
+// channel টা caller-কেই পরে supabase.removeChannel(channel) দিয়ে ক্লিন-আপ
+// করতে হবে (মডাল বন্ধ হওয়ার সময়), নাহলে মেমরি লিক হবে।
 export function subscribeToChatMessages(requestId, onInsert) {
   const channel = supabase
     .channel(`delivery-chat-${requestId}`)
@@ -124,7 +145,10 @@ export function subscribeToChatMessages(requestId, onInsert) {
         table: 'delivery_chat_messages',
         filter: `request_id=eq.${requestId}`,
       },
-      (payload) => onInsert(payload.new)
+      async (payload) => {
+        const row = await withSignedImage(payload.new);
+        onInsert(row);
+      }
     )
     .subscribe();
 

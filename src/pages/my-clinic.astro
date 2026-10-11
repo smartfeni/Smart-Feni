@@ -1,0 +1,219 @@
+<!-- path: src/pages/my-clinic.astro -->
+---
+// ============================================================
+// পেজ: আমার ক্লিনিক (/my-clinic) — ক্লিনিক প্রতিনিধির ড্যাশবোর্ড
+// (my-shop.astro / my-club.astro-র প্যাটার্নে ট্যাব-ভিত্তিক)
+//
+// কে ঢুকতে পারবে:
+//   • শুধু clinic_reps-এ সক্রিয় প্রতিনিধি (ক্লিনিকও সক্রিয় হতে হবে)
+//   • অ্যাডমিন এখানে ঢোকে না — অ্যাডমিন হলে /admin/doctors?tab=serials-এ রিডাইরেক্ট
+//     (পুরনো নোটিফিকেশন লিংক /my-clinic?tab=serials যাতে ভাঙে না)
+//   একাধিক ক্লিনিকে থাকলে উপরে ক্লিনিক বাছাইয়ের ড্রপডাউন
+//
+// ট্যাব:
+//   সিরিয়াল রিকোয়েস্ট — SerialsTab (শুধু "সিরিয়াল পাবেন" প্রতিনিধি)
+//   ডাক্তার — DoctorsTab: ডাক্তার যোগ/এডিট, চেম্বার ও সময়সূচি, সিরিয়ালের নম্বর (সব প্রতিনিধি)
+//
+// ডিপ-লিংক: /my-clinic?tab=serials (নোটিফিকেশন থেকে), ?tab=doctors
+//
+// ট্যাব কম্পোনেন্ট 'smartfeni:clinic-ready' ইভেন্টে
+//   { clinic, isReceiver, isAdmin: false, userId } পায় (ক্লিনিক বদলালে আবার)
+// SerialsTab 'smartfeni:serial-count' ইভেন্টে ট্যাবের ব্যাজ সংখ্যা পাঠায়
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../components/layout/BaseLayout.astro';
+import SerialsTab from '../components/clinic-dashboard/SerialsTab.astro';
+import DoctorsTab from '../components/clinic-dashboard/DoctorsTab.astro';
+---
+
+<BaseLayout title="আমার ক্লিনিক | স্মার্ট ফেনী">
+  <div class="mc-page">
+    <div class="container">
+
+      <div id="mcLoading" class="mc-state">
+        <div class="mc-spinner"></div>
+        <p>লোড হচ্ছে...</p>
+      </div>
+
+      <div id="mcNoAccess" class="mc-state" style="display:none;">
+        <i class="fas fa-hospital-user"></i>
+        <h2>আপনি কোনো ক্লিনিকের প্রতিনিধি নন</h2>
+        <p>ক্লিনিকের প্রতিনিধি হতে চাইলে স্মার্ট ফেনীর সাথে যোগাযোগ করুন। অ্যাডমিন নিয়োগ দিলে এখানে আপনার ক্লিনিক দেখা যাবে।</p>
+        <a href="/" class="mc-home-btn">হোমে ফিরে যান</a>
+      </div>
+
+      <div id="mcContent" style="display:none;">
+
+        <div class="mc-header">
+          <h1><i class="fas fa-hospital"></i> <span id="mcClinicName"></span></h1>
+          <select id="mcClinicSelect" class="mc-select" style="display:none;" aria-label="ক্লিনিক বদলান"></select>
+          <p class="mc-role" id="mcRole"></p>
+        </div>
+
+        <div class="mc-tabs" id="mcTabs">
+          <button type="button" class="mc-tab" data-tab="serials" id="mcSerialsTabBtn">
+            <i class="fas fa-bell-concierge"></i> সিরিয়াল রিকোয়েস্ট
+            <span class="mc-badge" id="mcSerialBadge" style="display:none;">0</span>
+          </button>
+          <button type="button" class="mc-tab" data-tab="doctors">
+            <i class="fas fa-user-doctor"></i> ডাক্তার
+          </button>
+        </div>
+
+        <div class="mc-panel" data-panel="serials" style="display:none;">
+          <SerialsTab />
+        </div>
+
+        <div class="mc-panel" data-panel="doctors" style="display:none;">
+          <DoctorsTab />
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .mc-page { min-height: 70vh; padding: 32px 0 90px; background: #F8FAFC; }
+    .mc-state { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; padding: 90px 16px; color: #8FA0BC; }
+    .mc-state i { font-size: 2.6rem; color: #B0BCCB; }
+    .mc-state h2 { font-size: 1.15rem; color: #1B2A4A; }
+    .mc-state p { font-size: 0.9rem; line-height: 1.65; max-width: 420px; }
+    .mc-home-btn { margin-top: 8px; background: #FF6B35; color: #fff; text-decoration: none; font-weight: 700; padding: 12px 22px; border-radius: 14px; }
+    .mc-spinner { width: 34px; height: 34px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: mcSpin 0.8s linear infinite; }
+    @keyframes mcSpin { to { transform: rotate(360deg); } }
+
+    .mc-header { margin-bottom: 18px; }
+    .mc-header h1 { font-size: 1.45rem; font-weight: 700; color: #1B2A4A; display: flex; align-items: center; gap: 10px; line-height: 1.35; }
+    .mc-header h1 i { color: #FF6B35; }
+    .mc-select { width: 100%; margin-top: 12px; padding: 12px 14px; border-radius: 14px; border: 1.5px solid #E5EAF0; background: #fff; font-size: 0.9rem; font-family: inherit; color: #1B2A4A; font-weight: 700; }
+    .mc-select:focus { outline: none; border-color: #FF6B35; }
+    .mc-role { margin-top: 8px; font-size: 0.8rem; font-weight: 700; color: #8FA0BC; }
+    .mc-role.on { color: #1B7A3C; }
+
+    .mc-tabs { display: flex; gap: 8px; background: #fff; border-radius: 40px; padding: 5px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); margin-bottom: 18px; }
+    .mc-tab { flex: 1; border: none; background: transparent; padding: 12px 8px; border-radius: 40px; font-weight: 700; font-size: 0.84rem; color: #5A6E85; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 6px; position: relative; }
+    .mc-tab.active { background: #FF6B35; color: #fff; }
+    .mc-badge { background: #D14343; color: #fff; font-size: 0.68rem; font-weight: 800; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 20px; display: inline-flex; align-items: center; justify-content: center; }
+    .mc-tab.active .mc-badge { background: #fff; color: #D14343; }
+
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+
+    const BN = '০১২৩৪৫৬৭৮৯';
+    const toBn = (n) => String(n).replace(/\d/g, (d) => BN[d]);
+    const $ = (id) => document.getElementById(id);
+    const STORAGE_KEY = 'sf_my_clinic';
+
+    let userId = null;
+    let clinics = [];        // [{ ...clinic, isReceiver }]
+    let current = null;
+    let activeTab = null;
+
+    function activateTab(target) {
+      activeTab = target;
+      document.querySelectorAll('.mc-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === target));
+      document.querySelectorAll('.mc-panel').forEach((p) => {
+        p.style.display = p.dataset.panel === target ? 'block' : 'none';
+      });
+    }
+
+    function applyClinic(clinic) {
+      current = clinic;
+      try { localStorage.setItem(STORAGE_KEY, clinic.id); } catch (_) { /* উপেক্ষা */ }
+
+      $('mcClinicName').textContent = clinic.name;
+
+      const canSerials = !!clinic.isReceiver;
+      $('mcSerialsTabBtn').style.display = canSerials ? 'flex' : 'none';
+      $('mcSerialBadge').style.display = 'none';
+
+      const role = $('mcRole');
+      if (clinic.isReceiver) {
+        role.textContent = '✓ এই ক্লিনিকের সিরিয়াল রিকোয়েস্ট আপনি পান';
+        role.className = 'mc-role on';
+      } else {
+        role.textContent = 'সিরিয়াল রিকোয়েস্ট এই ক্লিনিকে অন্য প্রতিনিধি দেখছেন';
+        role.className = 'mc-role';
+      }
+
+      // ট্যাব ঠিক করা: ডিপ-লিংক > বর্তমান ট্যাব > ভূমিকা অনুযায়ী ডিফল্ট
+      const wanted = new URLSearchParams(window.location.search).get('tab');
+      let target = activeTab || wanted || (canSerials ? 'serials' : 'doctors');
+      if (target === 'serials' && !canSerials) target = 'doctors';
+      activateTab(target);
+
+      window.dispatchEvent(new CustomEvent('smartfeni:clinic-ready', {
+        detail: { clinic, isReceiver: !!clinic.isReceiver, isAdmin: false, userId },
+      }));
+    }
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { window.location.href = '/'; return; }
+      userId = session.user.id;
+
+      // অ্যাডমিনের জন্য আলাদা জায়গা: /admin/doctors-এর "সিরিয়াল রিকোয়েস্ট" ট্যাব
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single();
+      if (profile?.role === 'admin') {
+        const qs = new URLSearchParams(window.location.search);
+        const wantedTab = qs.get('tab') === 'doctors' ? '' : '?tab=serials';
+        window.location.replace('/admin/doctors' + wantedTab);
+        return;
+      }
+
+      const { data } = await supabase
+        .from('clinic_reps')
+        .select('receives_serials, clinics!inner(*)')
+        .eq('user_id', userId)
+        .eq('is_active', true);
+      clinics = (data || [])
+        .filter((r) => r.clinics && r.clinics.is_active)
+        .map((r) => ({ ...r.clinics, isReceiver: !!r.receives_serials }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'bn'));
+
+      $('mcLoading').style.display = 'none';
+
+      if (clinics.length === 0) {
+        $('mcNoAccess').style.display = 'flex';
+        return;
+      }
+      $('mcContent').style.display = 'block';
+
+      // ক্লিনিক বাছাই (একাধিক হলে)
+      if (clinics.length > 1) {
+        const sel = $('mcClinicSelect');
+        sel.innerHTML = clinics.map((c) => `<option value="${c.id}">${String(c.name).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]))}</option>`).join('');
+        sel.style.display = 'block';
+        sel.addEventListener('change', () => {
+          const c = clinics.find((x) => x.id === sel.value);
+          if (c) applyClinic(c);
+        });
+      }
+
+      let saved = null;
+      try { saved = localStorage.getItem(STORAGE_KEY); } catch (_) { /* উপেক্ষা */ }
+      const start = clinics.find((c) => c.id === saved) || clinics[0];
+      if (clinics.length > 1) $('mcClinicSelect').value = start.id;
+      applyClinic(start);
+    }
+
+    $('mcTabs').addEventListener('click', (e) => {
+      const btn = e.target.closest('.mc-tab');
+      if (!btn) return;
+      activateTab(btn.dataset.tab);
+    });
+
+    window.addEventListener('smartfeni:serial-count', (e) => {
+      const n = (e.detail?.pending || 0);
+      const badge = $('mcSerialBadge');
+      if (n > 0) { badge.textContent = n > 99 ? '৯৯+' : toBn(n); badge.style.display = 'inline-flex'; }
+      else badge.style.display = 'none';
+    });
+
+    init();
+  </script>
+</BaseLayout>

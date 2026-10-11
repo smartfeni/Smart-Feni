@@ -32,12 +32,127 @@
 //      Facebook থেকে) সরাসরি অ্যাপের সঠিক পেজে যাওয়া। অ্যাপ চালু থাকা
 //      অবস্থায় (appUrlOpen) ও বন্ধ অবস্থা থেকে খোলা হলে (getLaunchUrl)
 //      দুটোই ধরে। assetlinks.json ইতিমধ্যে সাইটে আছে (D1)।
+//   ৭) ড্যাশবোর্ড রিডাইরেক্ট — অ্যাপ চালুর পর (শুধু হোম থেকে, শুধু প্রতি
+//      অ্যাপ সেশনে একবার) get_my_active_work() এর redirect দেখে: রাইডারের
+//      চলমান জব থাকলে হিরো পেজে, শপ মালিক/মডারেটরের পেন্ডিং অর্ডার থাকলে
+//      /my-shop এ পাঠায়। নোটিফিকেশনে ট্যাপ বা লিংক থেকে খোলা হলে করে না।
+//      splash সরানোর আগে সর্বোচ্চ ১.২ সেকেন্ড অপেক্ষা করে (হোমের ঝলক এড়াতে)।
+//   ৮) Back বাটন এখন ফ্লোটিং অ্যাক্টিভিটি বারের বটম শিটও বন্ধ করে।
+//   ৯) রেফার সিস্টেম — অ্যাপ প্রথমবার খুললে Google Play Install Referrer থেকে
+//      রেফার কোড (ref_XXXXXXXX) পড়ে নেটিভ Preferences-এ রাখে (sf_pending_ref),
+//      আর ডিভাইস আইডি (Android ID) দেয়। সাইন আপের সময় AuthModal এগুলো
+//      apply_referral() এ পাঠাবে। নেটিভ অংশ: InstallReferrerPlugin.java।
 // ============================================================
 
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 
 export function isNativeApp() {
   return Capacitor.isNativePlatform();
+}
+
+// ---------------- Referral: Install Referrer + Device ID ----------------
+// রেফার লিংক (smartfeni.com/r/<কোড>) Play Store-এ খোলে "&referrer=ref_<কোড>" সহ।
+// অ্যাপ ইনস্টল হয়ে প্রথমবার খুললে Play Install Referrer API সেই মান দেয়।
+// কোডটা Preferences-এ (sf_pending_ref) থাকে — সাইন আপ শেষে apply করে মুছে ফেলা হয়।
+// প্লাগিন না থাকলে (পুরোনো অ্যাপ ভার্সন) বা ওয়েবসাইটে সব ফাংশন চুপচাপ null দেয়।
+const InstallReferrer = registerPlugin('InstallReferrer');
+
+const REF_PENDING_KEY = 'sf_pending_ref';
+const REF_CHECKED_KEY = 'sf_ref_checked_v1';
+const REFERRER_TIMEOUT_MS = 4000;
+const DEVICE_ID_TIMEOUT_MS = 3000;
+
+let referrerCapturePromise = null;
+let cachedDeviceId = null;
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
+
+// "ref_ABCD2345" বা "utm_source=...&ref_ABCD2345" থেকে ৮ অক্ষরের কোড বের করে
+export function parseReferralCode(referrer) {
+  try {
+    if (!referrer) return null;
+    let text = String(referrer);
+    try {
+      text = decodeURIComponent(text);
+    } catch (err) {
+      // ডিকোড না হলে যেমন আছে তেমনই খোঁজা হবে
+    }
+    const match = text.match(/(?:^|[&?])ref_([A-Za-z0-9]{8})(?![A-Za-z0-9])/);
+    return match ? match[1].toUpperCase() : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function doCaptureInstallReferrer() {
+  try {
+    if (!isNativeApp()) return;
+
+    const { Preferences } = await import('@capacitor/preferences');
+    const checked = await Preferences.get({ key: REF_CHECKED_KEY });
+    if (checked.value === '1') return; // চূড়ান্ত উত্তর আগেই পাওয়া গেছে
+
+    const result = await withTimeout(InstallReferrer.getInstallReferrer(), REFERRER_TIMEOUT_MS);
+    const status = result?.status;
+
+    if (status === 'ok') {
+      const code = parseReferralCode(result.referrer);
+      if (code) await Preferences.set({ key: REF_PENDING_KEY, value: code });
+      await Preferences.set({ key: REF_CHECKED_KEY, value: '1' });
+    } else if (status === 'unsupported') {
+      await Preferences.set({ key: REF_CHECKED_KEY, value: '1' });
+    }
+    // 'unavailable' / 'error' হলে ফ্ল্যাগ বসাই না — পরের পেজ/অ্যাপ খোলায় আবার চেষ্টা হবে
+  } catch (err) {
+    // প্লাগিন নেই / টাইমআউট — অ্যাপ স্বাভাবিক চলবে, রেফার কাউন্ট হবে না
+  }
+}
+
+// প্রতি পেজে একবারের বেশি চলে না (একই promise ফেরত দেয়)
+export function captureInstallReferrer() {
+  if (!referrerCapturePromise) referrerCapturePromise = doCaptureInstallReferrer();
+  return referrerCapturePromise;
+}
+
+// সাইন আপের সময় ডাকা হয় — চেক শেষ না হলে অপেক্ষা করে, তারপর কোড পড়ে
+export async function getPendingReferralCode() {
+  try {
+    if (!isNativeApp()) return null;
+    await captureInstallReferrer();
+    const { Preferences } = await import('@capacitor/preferences');
+    const { value } = await Preferences.get({ key: REF_PENDING_KEY });
+    return value || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function clearPendingReferral() {
+  try {
+    if (!isNativeApp()) return;
+    const { Preferences } = await import('@capacitor/preferences');
+    await Preferences.remove({ key: REF_PENDING_KEY });
+  } catch (err) {
+    // মুছতে না পারলেও সার্ভার একই ইউজারের দ্বিতীয় রেফার গ্রহণ করে না
+  }
+}
+
+// "১ ফোন = ১ রেফার" চেকের জন্য ফোনের আইডি; না পেলে null (তখন রেফার কাউন্ট হবে না)
+export async function getNativeDeviceId() {
+  try {
+    if (!isNativeApp()) return null;
+    if (cachedDeviceId) return cachedDeviceId;
+    const result = await withTimeout(InstallReferrer.getDeviceId(), DEVICE_ID_TIMEOUT_MS);
+    cachedDeviceId = result?.id || null;
+    return cachedDeviceId;
+  } catch (err) {
+    return null;
+  }
 }
 
 // ---------------- Location ----------------
@@ -112,6 +227,7 @@ const OPEN_OVERLAY_SELECTOR = [
   '[class*="overlay"].active',
   '[class*="-modal"].open',
   '#sf-chat-panel.sf-open',
+  '.sf-act-sheet:not([hidden])',
 ].join(',');
 
 const CLOSE_BUTTON_SELECTOR = [
@@ -171,12 +287,19 @@ export async function initBackButtonHandler() {
   // BaseLayout প্রতিটা পেজ লোডে এই ফাংশন চালায় — তাই শেষ পেজ মনে রাখার কাজও এখানেই
   rememberLastUrl();
 
+  // রেফার: প্রথমবার খুললে Play Install Referrer থেকে কোড ধরে রাখে (পরে আর কিছু করে না)
+  captureInstallReferrer();
+
   const { App } = await import('@capacitor/app');
 
   // Deep link (cold start): অ্যাপ বন্ধ অবস্থা থেকে লিংক দিয়ে খোলা হলে —
   // splash সরানোর আগেই চেক করা হয়, যাতে হোমপেজ এক মুহূর্তের জন্যও না দেখিয়ে
   // সরাসরি লিংকের পেজে যাওয়া যায়
   await handleDeepLink(await App.getLaunchUrl().catch(() => null));
+
+  // ড্যাশবোর্ড রিডাইরেক্ট (শপ মালিক/রাইডারের কাজ থাকলে) — splash সরানোর আগে,
+  // যাতে হোম পেজের ঝলক না দেখা যায়
+  await maybeRedirectToDashboard();
 
   hideSplashWhenReady();
   initNotificationHandlers();
@@ -199,6 +322,48 @@ export async function initBackButtonHandler() {
   });
 }
 
+// ---------------- Dashboard Redirect on App Open ----------------
+// রাইডারের চলমান জব / শপ মালিকের পেন্ডিং অর্ডার থাকলে অ্যাপ খুলতেই ওই ড্যাশবোর্ডে।
+// সিদ্ধান্ত নেয় ডাটাবেস (get_my_active_work → redirect), এখানে শুধু নেভিগেট।
+// নিয়ম: প্রতি অ্যাপ সেশনে একবার (sessionStorage; অ্যাপ প্রসেস মারা গেলে রিসেট),
+// শুধু হোম ('/') থেকে, নোটিফিকেশন ট্যাপ/ডিপ লিংক থাকলে করে না।
+// replace() ব্যবহার — যাতে ড্যাশবোর্ড থেকে Back চাপলে হোমে ফিরে আবার
+// রিডাইরেক্টের চক্র না হয় (Back তখন অ্যাপ minimize করে)।
+const LAUNCH_REDIRECT_FLAG = 'sf_launch_redirect_done';
+const LAUNCH_REDIRECT_TIMEOUT_MS = 1200;
+let navigatingAway = false;
+
+async function maybeRedirectToDashboard() {
+  try {
+    if (!isNativeApp() || navigatingAway) return;
+    if (sessionStorage.getItem(LAUNCH_REDIRECT_FLAG) === '1') return;
+    sessionStorage.setItem(LAUNCH_REDIRECT_FLAG, '1'); // এই সেশনে আর নয়
+
+    if (window.location.pathname !== '/' || window.location.search) return;
+
+    const lookup = (async () => {
+      const { supabase } = await import('./supabase.js');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return null;
+
+      const { data, error } = await supabase.rpc('get_my_active_work');
+      if (error) return null;
+      return data?.redirect || null;
+    })().catch(() => null);
+
+    // splash বেশি সময় আটকে না রাখতে সর্বোচ্চ ১.২ সেকেন্ড অপেক্ষা
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), LAUNCH_REDIRECT_TIMEOUT_MS));
+    const target = await Promise.race([lookup, timeout]);
+
+    if (typeof target !== 'string' || !target.startsWith('/') || target.startsWith('//')) return;
+    if (navigatingAway || window.location.pathname !== '/') return; // ইতিমধ্যে অন্য পেজে যাচ্ছে
+
+    window.location.replace(target);
+  } catch (err) {
+    // ফেইল করলে অ্যাপ স্বাভাবিক হোম খুলবে
+  }
+}
+
 // ---------------- Deep Link Handling (D3) ----------------
 // getLaunchUrl() এর রেজাল্ট { url } আকারে, appUrlOpen ইভেন্টও { url } আকারে —
 // তাই দুই জায়গা থেকেই একই ফাংশনে পাঠানো যায়।
@@ -213,6 +378,7 @@ function handleDeepLink(data) {
     const target = url.pathname + url.search;
     if (target === window.location.pathname + window.location.search) return; // একই পেজ, কিছু করার নেই
 
+    navigatingAway = true; // ড্যাশবোর্ড রিডাইরেক্ট যেন লিংকের পেজ নষ্ট না করে
     window.location.href = target;
   } catch (err) {
     // ভুল/অসম্পূর্ণ লিংক হলে অ্যাপ স্বাভাবিক (হোমপেজ) খুলবে
@@ -313,10 +479,18 @@ function handleNotificationTap(event) {
     // শুধু নিজের সাইটের লিংক
     if (url.origin !== window.location.origin) return;
 
+    navigatingAway = true; // ড্যাশবোর্ড রিডাইরেক্ট যেন ট্যাপের পেজ নষ্ট না করে
     const notifId = data.notification_id;
-    const target = notifId
-      ? `${url.pathname}?notif=${encodeURIComponent(notifId)}`
-      : url.pathname + url.search;
+    const guestPromoId = data.guest_promo_id; // লগইন ছাড়া ডিভাইসের প্রমো (guest-broadcast)
+    let target;
+    if (notifId) {
+      target = `${url.pathname}?notif=${encodeURIComponent(notifId)}`;
+    } else if (guestPromoId && !data.action_url) {
+      // লিংক ছাড়া গেস্ট প্রমো — হোমে গিয়ে "অফার ও খবর" তালিকা খোলে
+      target = `/?promo=${encodeURIComponent(guestPromoId)}`;
+    } else {
+      target = url.pathname + url.search;
+    }
 
     window.location.href = target;
   } catch (err) {

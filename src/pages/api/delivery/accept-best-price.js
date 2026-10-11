@@ -1,4 +1,7 @@
 //
+// আপডেট (N20): ব্যর্থতার সঠিক কারণ দেখানো — রাইডার অফলাইন (is_active=false) হলে আলাদা মেসেজ,
+// আর RPC false দিলে রিকোয়েস্টের আসল স্ট্যাটাস আবার চেক করে ঠিক কারণ বলা (আগে সব ক্ষেত্রেই
+// ভুলভাবে 'অন্য কেউ আগে নিয়ে নিয়েছে' দেখাত)।
 // আপডেট (N19): sendNotification/sendBulkNotifications এ priority: 'high' যোগ — কাস্টমারকে কনফার্মেশন ও হারা হিরোকে ফলাফল সাথে সাথে জানা দরকার।
 // ============================================================
 // API এন্ডপয়েন্ট: হিরো বর্তমান সেরা মূল্যে সরাসরি Accept করবে
@@ -33,13 +36,20 @@ export async function POST({ request }) {
 
     const { data: heroRow, error: heroError } = await client
       .from('delivery_riders')
-      .select('id, vehicle_type, offers_delivery, offers_ride, verification_status, profiles!delivery_riders_profile_id_fkey(full_name)')
+      .select('id, vehicle_type, offers_delivery, offers_ride, verification_status, is_active, profiles!delivery_riders_profile_id_fkey(full_name)')
       .eq('profile_id', user.id)
       .maybeSingle();
 
     if (heroError || !heroRow || heroRow.verification_status !== 'approved') {
       return new Response(
         JSON.stringify({ error: 'তুমি এখনো ভেরিফাইড হিরো না' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (!heroRow.is_active) {
+      return new Response(
+        JSON.stringify({ error: 'তুমি এখন অফলাইন — রিকোয়েস্ট গ্রহণ করতে আগে পেজের অনলাইন টগল চালু করো' }),
         { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -92,9 +102,23 @@ export async function POST({ request }) {
     }
 
     if (!accepted) {
+      // RPC শুধু false দেয়, কারণ বলে না — তাই রিকোয়েস্টের স্ট্যাটাস আবার দেখে আসল কারণ বের করা
+      const { data: recheck } = await client
+        .from('delivery_requests')
+        .select('status')
+        .eq('id', requestId)
+        .maybeSingle();
+
+      if (recheck && recheck.status !== 'open') {
+        return new Response(
+          JSON.stringify({ error: 'দুঃখিত, অন্য কেউ আগে নিয়ে নিয়েছে' }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
       return new Response(
-        JSON.stringify({ error: 'দুঃখিত, অন্য কেউ আগে নিয়ে নিয়েছে' }),
-        { status: 409, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'গ্রহণ করা গেল না — তোমার হিরো অ্যাকাউন্ট ভেরিফাইড ও অনলাইন আছে কিনা, আর লগইন ঠিক আছে কিনা দেখো' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
     }
 

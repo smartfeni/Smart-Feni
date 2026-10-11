@@ -1,7 +1,7 @@
 ---
 // ============================================================
-// পেজ: /my-orders — কাস্টমারের নিজের অর্ডার হিস্ট্রি ও স্ট্যাটাস
-// ট্র্যাকিং
+// পেজ: /my-orders — কাস্টমারের নিজের অর্ডার ও সিরিয়াল রিকোয়েস্ট
+// হিস্ট্রি ও স্ট্যাটাস ট্র্যাকিং
 //
 // বার্গেনিং মডেল: "সেরা মূল্য" (anonymous reverse-auction) —
 // কাস্টমার শুধু বর্তমান সেরা মূল্য দেখে (সব active হিরো অফারের
@@ -9,16 +9,51 @@
 // গোপন থাকে। "নিশ্চিত করুন" চাপলে confirm-best-price.js এন্ডপয়েন্ট
 // (confirm_customer_deal RPC) কল হয় — এটা হিরোর নিজস্ব
 // accept-best-price.js এন্ডপয়েন্ট থেকে আলাদা।
+//
+// আপডেট (নতুন UI — প্রথম ধাপ):
+// - "দাম বাড়ান" ও "নিশ্চিত করুন" এখন পাশাপাশি দুটো বড় (৫৪px) বাটন;
+//   বাড়ানোর জন্য +৫/+১০/+২০ দ্রুত বাটন
+// - "নিশ্চিত করুন" চাপলে সরাসরি কনফার্ম হয় না — আগে বটম শিটে হালনাগাদ সেরা
+//   দাম দেখিয়ে জিজ্ঞেস করে ("৳X-এ নিশ্চিত করবেন? পরে বদলানো যাবে না"),
+//   ভুল চাপে ডিল ঠিক হয়ে যাওয়া আটকাতে। দাম ডাটাবেস থেকে নতুন করে আনা হয়
+//   (১৫ সেকেন্ডের পুরোনো রেন্ডারের দাম নয়)
+// - "চলমান / সম্পন্ন" দুটো ট্যাব
+// - ?req=<delivery_request_id> বা ?order=<shop_order_id> দিয়ে এলে (ফ্লোটিং
+//   অ্যাক্টিভিটি বার থেকে) সংশ্লিষ্ট কার্ডের ট্যাব খুলে স্ক্রল ও হাইলাইট
+// - ১৫ সেকেন্ডের অটো-রিফ্রেশ এখন বন্ধ থাকে যখন ইউজার কিছু টাইপ করছে বা
+//   কনফার্ম শিট খোলা (আগে রিফ্রেশে টাইপ করা দাম মুছে যেত)
+//
+// আপডেট (নতুন ফ্লো): কাস্টমারের শেষ "রিসিভড / যাত্রা সম্পন্ন" বাটন বাদ।
+// অর্ডারের পর একসেপ্ট, পিকআপ ও সম্পন্ন — সব হিরো করে; কাস্টমার শুধু সমস্যা
+// হলে "রিপোর্ট করুন" চাপে (সম্পন্ন হওয়ার ১ ঘণ্টা পর্যন্ত)। পেমেন্ট প্রুফ
+// আপলোডের বক্স এখন পিকআপের পর (confirmed) আর সম্পন্ন হওয়ার ১ ঘণ্টার মধ্যে
+// (completed) দেখায়; পুরোনো 'delivered' রিকোয়েস্টে আগের মতোই থাকে।
+//
+// আপডেট (নতুন UI — কার্ডের চেহারা): রুট (পিকআপ → ড্রপ) ডটেড লাইনে, "সেরা হিরো
+// অফার / আপনার প্রস্তাব" দুই বক্স, ৪ ধাপের প্রগ্রেস বার। স্টাইল src/styles/
+// hero-ui.css এ (শেয়ার্ড)। লজিক/বাটন/শিট/ট্যাব অপরিবর্তিত।
+//
+// আপডেট (ডাক্তারের সিরিয়াল রিকোয়েস্ট): শপ অর্ডার ও ডেলিভারির পাশে তৃতীয়
+// ধরনের কার্ড হিসেবে serial_requests (RLS: শুধু নিজের) এখানেই দেখায় —
+// আলাদা পেজ বা মেনু নেই।
+// - ৩ ধাপ: জমা হয়েছে → প্রসেসিং চলছে → কনফার্মড (বড় করে সিরিয়াল নম্বর)
+// - অপেক্ষায়/প্রসেসিংয়ে "অনুরোধ বাতিল করুন" (serial_patient_cancel RPC)
+// - ফোন ধরেনি / বাতিল / মেয়াদ শেষ হলে ধূসর-লাল নোটসহ "সম্পন্ন" ট্যাবে
+// - কনফার্ম হওয়া সিরিয়াল ডাক্তারের দিন (ঢাকার তারিখ) পার না হওয়া পর্যন্ত "চলমান"
+//   ট্যাবে থাকে, যাতে রোগী খুলেই সিরিয়াল নম্বর দেখতে পান
+// - ?serial=<id> দিয়ে এলে (নোটিফিকেশন থেকে) সংশ্লিষ্ট কার্ডে স্ক্রল ও হাইলাইট
+// - পেজের শিরোনাম: "আমার অর্ডার ও সিরিয়াল"
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
+import '../styles/hero-ui.css';
 import DisputeReasonModal from '../components/delivery/DisputeReasonModal.astro';
 import ChatModal from '../components/delivery/ChatModal.astro';
 ---
 
-<BaseLayout title="আমার অর্ডার | স্মার্ট ফেনী">
+<BaseLayout title="আমার অর্ডার ও সিরিয়াল | স্মার্ট ফেনী">
   <div class="my-orders-page">
     <div class="container">
 
@@ -30,12 +65,12 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       <div id="loginRequired" class="status-box" style="display:none;">
         <div class="status-icon-badge"><i class="fas fa-lock"></i></div>
         <h2>লগইন করুন</h2>
-        <p>অর্ডার দেখতে আগে লগইন করতে হবে</p>
+        <p>অর্ডার ও সিরিয়াল দেখতে আগে লগইন করতে হবে</p>
         <a href="/" class="primary-link-btn">হোমপেজে যান</a>
       </div>
 
       <div id="ordersContent" style="display:none;">
-        <h1 class="page-title"><i class="fas fa-receipt"></i> আমার অর্ডার</h1>
+        <h1 class="page-title"><i class="fas fa-receipt"></i> আমার অর্ডার ও সিরিয়াল</h1>
 
         <DisputeReasonModal />
         <ChatModal />
@@ -43,13 +78,28 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         <div id="emptyOrders" class="status-box" style="display:none;">
           <div class="status-icon-badge"><i class="fas fa-inbox"></i></div>
           <h2>কোনো অর্ডার নেই</h2>
-          <p>এখনো কোনো শপ থেকে অর্ডার বা ডেলিভারি রিকোয়েস্ট করেননি</p>
+          <p>এখনো কোনো শপ থেকে অর্ডার, ডেলিভারি রিকোয়েস্ট বা ডাক্তারের সিরিয়াল রিকোয়েস্ট করেননি</p>
           <a href="/shop" class="primary-link-btn">শপ দেখুন</a>
+        </div>
+
+        <div id="ordersTabs" class="mo-tabs" style="display:none;">
+          <button type="button" class="mo-tab active" data-tab="ongoing">চলমান <span id="tabCountOngoing"></span></button>
+          <button type="button" class="mo-tab" data-tab="done">সম্পন্ন</button>
         </div>
 
         <div id="ordersContainer" class="orders-list"></div>
       </div>
 
+    </div>
+  </div>
+
+  <div class="deal-sheet-overlay" id="dealSheet">
+    <div class="deal-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="dealSheetTitle">
+      <div class="deal-sheet-grip"></div>
+      <h3 id="dealSheetTitle"></h3>
+      <p id="dealSheetText"></p>
+      <button type="button" class="deal-sheet-ok" id="dealSheetOk"></button>
+      <button type="button" class="deal-sheet-cancel" id="dealSheetClose">না, ফিরে যান</button>
     </div>
   </div>
 
@@ -215,6 +265,11 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     .shop-icon-badge.ride-icon {
       background: #E9ECF5;
       color: #1B2A4A;
+    }
+
+    .shop-icon-badge.serial-icon {
+      background: #E8F6EC;
+      color: #1B7A3C;
     }
 
     .order-date {
@@ -749,12 +804,284 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       color: #1B7A3C;
       margin-top: 10px;
     }
+
+    /* ===== ডাক্তারের সিরিয়াল রিকোয়েস্ট কার্ড ===== */
+    .sr-info {
+      background: #F8FAFC;
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin: 12px 0 4px;
+    }
+
+    .sr-doctor {
+      font-size: 0.96rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      line-height: 1.4;
+    }
+
+    .sr-meta {
+      font-size: 0.78rem;
+      color: #5A6E85;
+      margin-top: 3px;
+      line-height: 1.5;
+    }
+
+    .sr-day {
+      font-size: 0.84rem;
+      color: #FF6B35;
+      font-weight: 700;
+      margin-top: 6px;
+    }
+
+    .sr-patient {
+      font-size: 0.74rem;
+      color: #9AA8BC;
+      margin-top: 8px;
+    }
+
+    .sr-serial-box {
+      background: #E8F6EC;
+      border: 1.5px solid #1B7A3C;
+      border-radius: 16px;
+      padding: 16px;
+      text-align: center;
+      margin: 12px 0 4px;
+    }
+
+    .sr-serial-label {
+      display: block;
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: #1B7A3C;
+      margin-bottom: 2px;
+    }
+
+    .sr-serial-no {
+      display: block;
+      font-size: 2.3rem;
+      font-weight: 800;
+      color: #1B7A3C;
+      line-height: 1.2;
+    }
+
+    .sr-serial-sub {
+      display: block;
+      font-size: 0.8rem;
+      color: #3A4A60;
+      margin-top: 4px;
+    }
+
+    .sr-note-line {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      color: #1B2A4A;
+      background: #fff;
+      border-radius: 10px;
+      padding: 8px 10px;
+      line-height: 1.5;
+    }
+
+    .sr-processing-note {
+      text-align: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #1D4FA8;
+      background: #EAF2FF;
+      padding: 10px;
+      border-radius: 12px;
+      margin-top: 10px;
+      line-height: 1.55;
+    }
+
+    .sr-off-note {
+      font-size: 0.74rem;
+      color: #8FA0BC;
+      margin-top: 8px;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    /* ===== নতুন UI: ট্যাব, বড় বাটন, কনফার্ম শিট ===== */
+    .mo-tabs {
+      display: flex;
+      background: #E9EEF5;
+      padding: 4px;
+      border-radius: 14px;
+      margin: 0 0 16px;
+    }
+
+    .mo-tab {
+      flex: 1;
+      border: none;
+      background: transparent;
+      padding: 11px 8px;
+      border-radius: 11px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      font-family: inherit;
+      color: #6C7A93;
+      cursor: pointer;
+    }
+
+    .mo-tab.active {
+      background: #fff;
+      color: #1B2A4A;
+      box-shadow: 0 2px 8px rgba(27, 42, 74, 0.1);
+    }
+
+    .tab-empty {
+      text-align: center;
+      color: #9AA8BC;
+      font-size: 0.88rem;
+      padding: 40px 0;
+    }
+
+    .deal-actions {
+      display: grid;
+      grid-template-columns: 1fr 1.4fr;
+      gap: 10px;
+      margin: 4px 0 8px;
+    }
+
+    .deal-actions .btn-increase-price {
+      background: #fff;
+      color: #1B2A4A;
+      border: 2px solid #1B2A4A;
+      min-height: 54px;
+      padding: 0 10px;
+      border-radius: 16px;
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    .deal-actions .btn-confirm-best-price {
+      min-height: 54px;
+      margin: 0;
+      padding: 0 10px;
+      border-radius: 16px;
+      font-size: 0.95rem;
+    }
+
+    .increase-price-row {
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .inc-chips {
+      display: flex;
+      gap: 8px;
+    }
+
+    .inc-chips button {
+      flex: 1;
+      min-height: 46px;
+      border: none;
+      border-radius: 13px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      font-size: 0.95rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .inc-input-line {
+      display: flex;
+      gap: 8px;
+    }
+
+    .increase-price-row input {
+      min-height: 48px;
+      border-radius: 13px;
+      font-size: 0.95rem;
+    }
+
+    .increase-price-row .inc-input-line button {
+      min-height: 48px;
+      padding: 0 18px;
+      border-radius: 13px;
+    }
+
+    .order-card-highlight {
+      outline: 2px solid #FF6B35;
+      outline-offset: 3px;
+    }
+
+    .deal-sheet-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 2200;
+      background: rgba(15, 23, 42, 0.55);
+      align-items: flex-end;
+      justify-content: center;
+    }
+
+    .deal-sheet-overlay.open {
+      display: flex;
+    }
+
+    .deal-sheet-panel {
+      width: 100%;
+      max-width: 520px;
+      background: #fff;
+      border-radius: 26px 26px 0 0;
+      padding: 10px 20px calc(22px + env(safe-area-inset-bottom));
+    }
+
+    .deal-sheet-grip {
+      width: 42px;
+      height: 5px;
+      border-radius: 5px;
+      background: #E5EAF0;
+      margin: 0 auto 16px;
+    }
+
+    .deal-sheet-panel h3 {
+      font-size: 1.25rem;
+      color: #1B2A4A;
+      margin: 0 0 8px;
+    }
+
+    .deal-sheet-panel p {
+      font-size: 0.92rem;
+      color: #6C7A93;
+      line-height: 1.6;
+      margin: 0 0 18px;
+    }
+
+    .deal-sheet-ok {
+      width: 100%;
+      min-height: 54px;
+      border: none;
+      border-radius: 16px;
+      background: #FF6B35;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .deal-sheet-cancel {
+      width: 100%;
+      min-height: 48px;
+      margin-top: 8px;
+      border: none;
+      background: transparent;
+      color: #6C7A93;
+      font-size: 0.92rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
   </style>
 
   <script>
     import { supabase } from '../lib/supabase.js';
     import { compressImages } from '../lib/imageCompress.js';
-    import { markReceived, submitReview, uploadPaymentProof, cancelRequest, expireRequests, confirmBestPrice, updateAskingPrice } from '../lib/deliveryClient.js';
+    import { submitReview, uploadPaymentProof, cancelRequest, expireRequests, confirmBestPrice, updateAskingPrice } from '../lib/deliveryClient.js';
 
     const loadingState = document.getElementById('loadingState');
     const loginRequired = document.getElementById('loginRequired');
@@ -768,8 +1095,89 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     const DELIVERY_STEPS = ['open', 'confirmed', 'picked_up', 'completed'];
     const DELIVERY_STEP_LABELS = { open: 'রিকোয়েস্ট', confirmed: 'কনফার্মড', picked_up: 'পিকআপ সম্পন্ন', completed: 'সম্পন্ন' };
 
+    // ডাক্তারের সিরিয়াল রিকোয়েস্টের ৩ ধাপ
+    const SERIAL_STEPS = ['pending', 'processing', 'confirmed'];
+    const SERIAL_STEP_LABELS = { pending: 'জমা হয়েছে', processing: 'প্রসেসিং চলছে', confirmed: 'কনফার্মড' };
+    const BN_WEEKDAYS = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+    const BN_MONTHS = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+
     let currentUserId = null;
     let refreshTimer = null;
+
+    // ট্যাব + ডিপ-লিংক স্টেট
+    let activeTab = 'ongoing';
+    let deepLinkHandled = false;
+    let lastData = null;
+    const deepLinkParams = new URLSearchParams(window.location.search);
+    const ordersTabs = document.getElementById('ordersTabs');
+    const tabCountOngoing = document.getElementById('tabCountOngoing');
+
+    // ============ কনফার্ম বটম শিট ============
+    // শিটটা পেজের কার্ড-কনটেইনারের বাইরে, তাই ১৫ সেকেন্ডের রিফ্রেশে বন্ধ হয় না
+    const dealSheet = document.getElementById('dealSheet');
+    const dealSheetTitle = document.getElementById('dealSheetTitle');
+    const dealSheetText = document.getElementById('dealSheetText');
+    const dealSheetOk = document.getElementById('dealSheetOk');
+    const dealSheetClose = document.getElementById('dealSheetClose');
+    let dealResolve = null;
+
+    function toBn(value) {
+      return String(value).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+    }
+
+    // ডাটাবেসের লেখা (ঠিকানা ইত্যাদি) নিরাপদে innerHTML এ বসানোর জন্য
+    function esc(value) {
+      const div = document.createElement('div');
+      div.textContent = value ?? '';
+      return div.innerHTML;
+    }
+
+    function askConfirm({ title, text, okLabel }) {
+      return new Promise((resolve) => {
+        dealSheetTitle.textContent = title;
+        dealSheetText.textContent = text;
+        dealSheetOk.textContent = okLabel;
+        dealResolve = resolve;
+        dealSheet.classList.add('open');
+      });
+    }
+
+    function closeDealSheet(result) {
+      dealSheet.classList.remove('open');
+      if (dealResolve) {
+        const resolve = dealResolve;
+        dealResolve = null;
+        resolve(result);
+      }
+    }
+
+    dealSheetOk.addEventListener('click', () => closeDealSheet(true));
+    dealSheetClose.addEventListener('click', () => closeDealSheet(false));
+    dealSheet.addEventListener('click', (e) => {
+      if (e.target === dealSheet) closeDealSheet(false);
+    });
+
+    // কনফার্মের ঠিক আগে ডাটাবেস থেকে হালনাগাদ সেরা (সর্বনিম্ন active) অফার আনা —
+    // কার্ডে দেখানো দাম ১৫ সেকেন্ড পর্যন্ত পুরোনো হতে পারে
+    async function fetchCurrentBestPrice(req) {
+      const { data, error } = await supabase
+        .from('delivery_offers')
+        .select('offer_price')
+        .eq('request_id', req.id)
+        .eq('status', 'active')
+        .order('offer_price', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (error || !data) return null;
+      return Number(data.offer_price);
+    }
+
+    // ইউজার কিছু টাইপ করছে বা শিট খোলা থাকলে অটো-রিফ্রেশে কার্ড নতুন করে আঁকা হবে না
+    function isUserInteracting() {
+      if (dealSheet.classList.contains('open')) return true;
+      const fields = ordersContainer.querySelectorAll('input, textarea');
+      return Array.from(fields).some((el) => el === document.activeElement || (el.value && el.value.trim() !== ''));
+    }
 
     function formatDate(iso) {
       return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -818,26 +1226,22 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       if (status === 'confirmed' && req.pickup_done_at) mapped = 'picked_up';
       if (status === 'delivered') mapped = 'picked_up';
 
-      const currentIndex = DELIVERY_STEPS.indexOf(mapped === 'open' ? 'open' : mapped);
-      const pickedUpLabel = req.category === 'ride' ? 'যাত্রা শুরু' : 'পিকআপ সম্পন্ন';
-      let dotsHtml = '';
-      DELIVERY_STEPS.forEach((step, i) => {
-        const isDone = i <= currentIndex;
-        dotsHtml += `<div class="step-dot ${isDone ? 'done' : ''}"><i class="fas fa-check"></i></div>`;
-        if (i < DELIVERY_STEPS.length - 1) {
-          dotsHtml += `<div class="step-line ${i < currentIndex ? 'done' : ''}"></div>`;
-        }
-      });
-      const labelsHtml = DELIVERY_STEPS
-        .map((s) => `<span>${s === 'picked_up' ? pickedUpLabel : DELIVERY_STEP_LABELS[s]}</span>`)
-        .join('');
-      return `<div class="status-stepper">${dotsHtml}</div><div class="step-label-row">${labelsHtml}</div>`;
+      // ৪ ধাপের প্রগ্রেস বার: অফারের অপেক্ষা → হিরো আসছে → পথে → সম্পন্ন
+      const isRideReq = req.category === 'ride';
+      const huLabels = ['অফারের অপেক্ষা', 'হিরো আসছে', isRideReq ? 'যাত্রা চলছে' : 'ডেলিভারি পথে', 'সম্পন্ন'];
+      let filled = 1;
+      if (mapped === 'confirmed') filled = 2;
+      else if (mapped === 'picked_up') filled = 3;
+      else if (mapped === 'completed') filled = 4;
+      const bars = [1, 2, 3, 4].map((n) => `<i class="${n <= filled ? 'f' : ''}"></i>`).join('');
+      return `<p class="hu-steplabel">${huLabels[filled - 1]}</p><div class="hu-progress">${bars}</div>`;
     }
 
     // ============ SHOP ORDER কার্ড (অপরিবর্তিত) ============
     function renderShopOrderCard(order) {
       const card = document.createElement('div');
       card.className = 'order-card';
+      card.dataset.orderId = order.id;
 
       const shop = order.shops;
       const itemsHtml = (order.order_items || [])
@@ -868,10 +1272,133 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       return card;
     }
 
+    // ============ ডাক্তারের সিরিয়াল রিকোয়েস্ট ============
+    // আজকের তারিখ (ঢাকা), YYYY-MM-DD
+    function todayDhaka() {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka' }).format(new Date());
+    }
+
+    function dhakaHour() {
+      return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Dhaka', hour: '2-digit', hourCycle: 'h23' }).format(new Date())) % 24;
+    }
+
+    function serialDayLabel(dateStr) {
+      const [y, m, d] = String(dateStr).split('-').map(Number);
+      const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      return `${BN_WEEKDAYS[wd]}, ${toBn(d)} ${BN_MONTHS[m - 1]}`;
+    }
+
+    function renderSerialStepper(status) {
+      const currentIndex = SERIAL_STEPS.indexOf(status);
+      let dotsHtml = '';
+      SERIAL_STEPS.forEach((step, i) => {
+        const isDone = i <= currentIndex;
+        dotsHtml += `<div class="step-dot ${isDone ? 'done' : ''}"><i class="fas fa-check"></i></div>`;
+        if (i < SERIAL_STEPS.length - 1) {
+          dotsHtml += `<div class="step-line ${i < currentIndex ? 'done' : ''}"></div>`;
+        }
+      });
+      const labelsHtml = SERIAL_STEPS.map((s) => `<span>${SERIAL_STEP_LABELS[s]}</span>`).join('');
+      return `<div class="status-stepper">${dotsHtml}</div><div class="step-label-row">${labelsHtml}</div>`;
+    }
+
+    function renderSerialCard(sr) {
+      const card = document.createElement('div');
+      card.className = 'order-card';
+      card.dataset.serialId = sr.id;
+
+      const hasPersonal = !!sr.patient_name;
+      const isOpen = sr.status === 'pending' || sr.status === 'processing';
+
+      let body = `
+        <div class="order-top-row">
+          <div>
+            <p class="order-shop-name"><span class="shop-icon-badge serial-icon"><i class="fas fa-ticket"></i></span> ডাক্তারের সিরিয়াল রিকোয়েস্ট</p>
+            <p class="order-date">${formatDate(sr.created_at)}</p>
+          </div>
+        </div>
+      `;
+
+      // অবস্থা: ধাপ বা নোট
+      if (sr.status === 'unreachable') {
+        body += `<div class="cancelled-note"><i class="fas fa-phone-slash"></i> প্রতিনিধি ফোনে যোগাযোগ করতে পারেননি</div>`;
+      } else if (sr.status === 'cancelled') {
+        body += `<div class="cancelled-note"><i class="fas fa-xmark"></i> অনুরোধটি বাতিল হয়েছে</div>`;
+      } else if (sr.status === 'expired') {
+        body += `<div class="cancelled-note"><i class="fas fa-hourglass-end"></i> মেয়াদ শেষ হয়েছে</div>`;
+      } else {
+        body += renderSerialStepper(sr.status);
+      }
+
+      // ডাক্তার, ক্লিনিক, দিন
+      body += `
+        <div class="sr-info">
+          <p class="sr-doctor">${esc(sr.doctor_name)}</p>
+          <p class="sr-meta"><i class="fas fa-hospital"></i> ${esc(sr.clinic_name)}</p>
+          <p class="sr-day"><i class="fas fa-calendar-day"></i> ${serialDayLabel(sr.requested_date)}</p>
+          ${hasPersonal ? `<p class="sr-patient">রোগী: ${esc(sr.patient_name)}</p>` : ''}
+        </div>
+      `;
+
+      if (sr.status === 'pending') {
+        const night = dhakaHour() < 9 || dhakaHour() >= 21;
+        body += `<div class="waiting-note">ক্লিনিকে অনুরোধ পাঠানো হয়েছে। প্রতিনিধি সিরিয়াল নিয়ে আপনাকে কল করে জানাবেন।${night ? ' এখন রাত, সকাল ৯টার পর কল পাবেন।' : ''}</div>`;
+      } else if (sr.status === 'processing') {
+        body += `<div class="sr-processing-note"><i class="fas fa-spinner fa-spin"></i> আপনার সিরিয়ালের জন্য চেষ্টা চলছে। প্রতিনিধি শীঘ্রই কল করে সিরিয়াল নম্বর জানাবেন, কল এলে ধরুন।</div>`;
+      } else if (sr.status === 'confirmed') {
+        body += `
+          <div class="sr-serial-box">
+            <span class="sr-serial-label">আপনার সিরিয়াল নম্বর</span>
+            <span class="sr-serial-no">${esc(sr.serial_no || '')}</span>
+            <span class="sr-serial-sub">${esc(sr.doctor_name)} · ${serialDayLabel(sr.requested_date)}</span>
+            ${sr.rep_note ? `<p class="sr-note-line"><i class="fas fa-circle-info"></i> ${esc(sr.rep_note)}</p>` : ''}
+          </div>
+        `;
+      } else if (sr.status === 'unreachable') {
+        body += `<p class="sr-off-note">প্রয়োজনে সরাসরি ক্লিনিকে কল করে সিরিয়াল নিন।</p>`;
+      } else if (sr.status === 'cancelled' && sr.rep_note) {
+        body += `<p class="sr-off-note">${esc(sr.rep_note)}</p>`;
+      }
+
+      if (isOpen) {
+        body += `<button class="btn-cancel-request" data-serial-cancel="${sr.id}"><i class="fas fa-ban"></i> অনুরোধ বাতিল করুন</button>`;
+      }
+
+      card.innerHTML = body;
+
+      card.querySelector('[data-serial-cancel]')?.addEventListener('click', async (e) => {
+        if (!confirm('সিরিয়াল রিকোয়েস্টটি বাতিল করতে চান?')) return;
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        const { error } = await supabase.rpc('serial_patient_cancel', { p_id: sr.id });
+        if (error) {
+          alert(error.message.includes('invalid_status') ? 'অনুরোধের অবস্থা বদলে গেছে, পেজ রিফ্রেশ হচ্ছে' : 'বাতিল করা যায়নি: ' + error.message);
+          btn.disabled = false;
+        }
+        refreshOrders();
+      });
+
+      return card;
+    }
+
     // ============ DELIVERY কার্ড ============
+    // পেমেন্ট প্রুফ আপলোড বক্স (confirmed-এ পিকআপের পর, completed-এ ১ ঘণ্টার মধ্যে)
+    function paymentProofBoxHtml(reqId) {
+      return `
+        <div class="payment-proof-box" data-request-id="${reqId}">
+          <label>
+            <i class="fas fa-camera"></i> পেমেন্ট প্রুফ আপলোড করুন
+            <input type="file" accept="image/*" multiple data-proof-input />
+          </label>
+          <div class="proof-thumbs" data-proof-thumbs></div>
+        </div>
+      `;
+    }
+
     function renderDeliveryCard(req) {
       const card = document.createElement('div');
       card.className = 'order-card';
+      card.dataset.reqId = req.id;
 
       const offers = req.delivery_offers || [];
       const acceptedRiderProfile = req.accepted_rider?.profiles;
@@ -889,12 +1416,15 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         <div class="order-top-row">
           <div>
             <p class="order-shop-name"><span class="shop-icon-badge ${req.category === 'ride' ? 'ride-icon' : 'delivery-icon'}"><i class="fas ${req.category === 'ride' ? 'fa-route' : 'fa-motorcycle'}"></i></span> ${req.category === 'ride' ? 'রাইড রিকোয়েস্ট' : 'হোম ডেলিভারি রিকোয়েস্ট'}</p>
-            <p class="order-date">${formatDate(req.created_at)}</p>
+            <p class="order-date">${req.order_no ? `<b style="color:#1B2A4A;letter-spacing:0.3px;">#${req.order_no}</b> · ` : ''}${formatDate(req.created_at)}</p>
           </div>
         </div>
         ${renderDeliveryStepper(req)}
         <p class="delivery-desc">${req.description || ''}</p>
-        <p class="delivery-area"><i class="fas fa-location-dot"></i> ${pickupText}${dropText ? ` → ${dropText}` : ''}</p>
+        <div class="hu-trip">
+          <div class="hu-trip-stop">${esc(pickupText) || '—'}<small>পিকআপ</small></div>
+          <div class="hu-trip-stop">${esc(dropText) || '—'}<small>${req.category === 'ride' ? 'গন্তব্য' : 'ডেলিভারি'}</small></div>
+        </div>
       `;
 
       if (req.status === 'open' || req.status === 'negotiating') {
@@ -904,9 +1434,15 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         }
 
         bodyHtml += `
-          <div class="best-price-box">
-            <span class="best-price-label">সেরা মূল্য (হিরো অফার)</span>
-            <span class="best-price-value">${lowestOffer !== null ? `৳${lowestOffer}` : '—'}</span>
+          <div class="hu-prices">
+            <div class="hu-price ${lowestOffer !== null ? 'best' : 'wait'}">
+              <small>সেরা হিরো অফার</small>
+              <b>${lowestOffer !== null ? `৳${toBn(lowestOffer)}` : 'অপেক্ষায়...'}</b>
+            </div>
+            <div class="hu-price">
+              <small>আপনার প্রস্তাব</small>
+              <b>৳${toBn(askingPrice)}</b>
+            </div>
           </div>
         `;
 
@@ -915,15 +1451,21 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         }
 
         bodyHtml += `
-          <div class="asking-price-row">
-            <span>আপনার প্রস্তাবিত মূল্য: ৳${askingPrice}</span>
-            <button type="button" class="btn-increase-price" data-action="show-increase">বাড়ান</button>
-          </div>
           <div class="increase-price-row">
-            <input type="number" placeholder="৳${askingPrice + 1} বা বেশি" min="${askingPrice + 1}" />
-            <button type="button" data-action="submit-increase"><i class="fas fa-paper-plane"></i></button>
+            <div class="inc-chips">
+              <button type="button" data-inc="5">+৫</button>
+              <button type="button" data-inc="10">+১০</button>
+              <button type="button" data-inc="20">+২০</button>
+            </div>
+            <div class="inc-input-line">
+              <input type="number" placeholder="৳${askingPrice + 1} বা বেশি" min="${askingPrice + 1}" />
+              <button type="button" data-action="submit-increase"><i class="fas fa-paper-plane"></i> পাঠান</button>
+            </div>
           </div>
-          <button class="btn-confirm-best-price" data-action="confirm-best" ${offers.length === 0 ? 'disabled' : ''}><i class="fas fa-check-circle"></i> এই মূল্যে নিশ্চিত করুন</button>
+          <div class="deal-actions">
+            <button type="button" class="btn-increase-price" data-action="show-increase">দাম বাড়ান</button>
+            <button type="button" class="btn-confirm-best-price" data-action="confirm-best" ${offers.length === 0 ? 'disabled' : ''}><i class="fas fa-check-circle"></i> নিশ্চিত করুন</button>
+          </div>
         `;
 
         bodyHtml += `<button class="btn-cancel-request" data-request-id="${req.id}"><i class="fas fa-ban"></i> রিকোয়েস্ট বাতিল করুন</button>`;
@@ -958,7 +1500,8 @@ import ChatModal from '../components/delivery/ChatModal.astro';
             ${acceptedRiderPhone ? `<a href="tel:${acceptedRiderPhone}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> কল করুন</a>` : ''}
             <button type="button" class="order-contact-btn order-chat-btn" data-chat-request-id="${req.id}" data-chat-other-name="${acceptedRiderProfile?.full_name || 'হিরো'}"><i class="fas fa-comment-dots"></i> চ্যাট</button>
           </div>
-          <button class="btn-received" data-request-id="${req.id}"><i class="fas fa-check-circle"></i> ${req.category === 'ride' ? 'যাত্রা সম্পন্ন হয়েছে' : 'পণ্য রিসিভড'}</button>
+          <div class="waiting-note">${req.category === 'ride' ? 'যাত্রা শেষে হিরো নিজেই সম্পন্ন মার্ক করবেন, আপনাকে নোটিফিকেশন যাবে' : 'ডেলিভারি শেষে হিরো নিজেই সম্পন্ন মার্ক করবেন, আপনাকে নোটিফিকেশন যাবে'}</div>
+          ${isPickupDone ? paymentProofBoxHtml(req.id) : ''}
           <button class="dispute-link" data-request-id="${req.id}">সমস্যা হয়েছে? রিপোর্ট করুন</button>
         `;
       } else if (req.status === 'delivered') {
@@ -996,6 +1539,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         const completedAt = req.updated_at ? new Date(req.updated_at).getTime() : 0;
         const withinDisputeWindow = Date.now() - completedAt <= 60 * 60 * 1000;
         if (withinDisputeWindow) {
+          bodyHtml += paymentProofBoxHtml(req.id);
           bodyHtml += `<button class="dispute-link" data-request-id="${req.id}">সমস্যা হয়েছে? রিপোর্ট করুন</button>`;
         }
       }
@@ -1009,13 +1553,35 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       // বর্তমান সেরা মূল্যে নিশ্চিত করা
       card.querySelector('[data-action="confirm-best"]')?.addEventListener('click', async (e) => {
         const btn = e.currentTarget;
+        if (btn.disabled) return;
+
+        // ১) হালনাগাদ সেরা দাম আনা
+        btn.disabled = true;
+        const freshPrice = await fetchCurrentBestPrice(req);
+        btn.disabled = false;
+
+        if (freshPrice === null) {
+          alert('এখন কোনো হিরোর অফার নেই। একটু অপেক্ষা করুন।');
+          refreshOrders();
+          return;
+        }
+
+        // ২) ভুল চাপ ঠেকাতে আগে জিজ্ঞেস করা
+        const ok = await askConfirm({
+          title: `৳${toBn(freshPrice)}-এ নিশ্চিত করবেন?`,
+          text: 'নিশ্চিত করলে এই হিরোর সাথে দাম ঠিক হয়ে যাবে এবং আর বদলানো যাবে না।',
+          okLabel: `হ্যাঁ, ৳${toBn(freshPrice)}-এ নিশ্চিত করুন`,
+        });
+        if (!ok) return;
+
+        // ৩) নিশ্চিত করা
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> নিশ্চিত করা হচ্ছে...';
         const { error } = await confirmBestPrice({ requestId: req.id });
         if (error) {
           alert(error);
           btn.disabled = false;
-          btn.innerHTML = '<i class="fas fa-check-circle"></i> এই মূল্যে নিশ্চিত করুন';
+          btn.innerHTML = '<i class="fas fa-check-circle"></i> নিশ্চিত করুন';
           return;
         }
         refreshOrders();
@@ -1026,6 +1592,15 @@ import ChatModal from '../components/delivery/ChatModal.astro';
       card.querySelector('[data-action="show-increase"]')?.addEventListener('click', () => {
         increaseRow.classList.toggle('active');
         if (increaseRow.classList.contains('active')) increaseRow.querySelector('input')?.focus();
+      });
+
+      increaseRow?.querySelectorAll('[data-inc]').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const base = Number(req.customer_asking_price ?? req.initial_price);
+          const input = increaseRow.querySelector('input');
+          input.value = String(base + Number(chip.dataset.inc));
+          input.focus();
+        });
       });
 
       card.querySelector('[data-action="submit-increase"]')?.addEventListener('click', async () => {
@@ -1049,18 +1624,6 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         if (!confirm('রিকোয়েস্টটি বাতিল করতে চাও?')) return;
         e.target.disabled = true;
         const { error } = await cancelRequest({ requestId: req.id });
-        if (error) {
-          alert(error);
-          e.target.disabled = false;
-          return;
-        }
-        refreshOrders();
-      });
-
-      // রিসিভড বাটন
-      card.querySelector('.btn-received')?.addEventListener('click', async (e) => {
-        e.target.disabled = true;
-        const { error } = await markReceived({ requestId: req.id });
         if (error) {
           alert(error);
           e.target.disabled = false;
@@ -1154,28 +1717,109 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     }
 
     // ============ মার্জ ও রেন্ডার ============
-    function renderAll(shopOrders, deliveryRequests, reviewedRequestIds) {
+    function isOngoingItem(item) {
+      if (item.__type === 'shop_order') return item.status === 'pending' || item.status === 'confirmed';
+      if (item.__type === 'serial') {
+        if (item.status === 'pending' || item.status === 'processing') return true;
+        // কনফার্ম হওয়া সিরিয়াল ডাক্তারের দিন পার না হওয়া পর্যন্ত "চলমান"-এ থাকে
+        if (item.status === 'confirmed') return String(item.requested_date) >= todayDhaka();
+        return false;
+      }
+      return ['open', 'negotiating', 'confirmed', 'delivered', 'disputed'].includes(item.status);
+    }
+
+    function syncTabButtons() {
+      ordersTabs.querySelectorAll('.mo-tab').forEach((b) => {
+        b.classList.toggle('active', b.dataset.tab === activeTab);
+      });
+    }
+
+    // ?req=<id> / ?order=<id> / ?serial=<id> থেকে আসা কার্ডে স্ক্রল ও হাইলাইট (শুধু প্রথমবার)
+    function findDeepLinkTarget(combined) {
+      const reqId = deepLinkParams.get('req');
+      const orderId = deepLinkParams.get('order');
+      const serialId = deepLinkParams.get('serial');
+      if (reqId) return combined.find((i) => i.__type === 'delivery' && i.id === reqId) || null;
+      if (orderId) return combined.find((i) => i.__type === 'shop_order' && i.id === orderId) || null;
+      if (serialId) return combined.find((i) => i.__type === 'serial' && i.id === serialId) || null;
+      return null;
+    }
+
+    function scrollToDeepLinkCard(target) {
+      const selector = target.__type === 'delivery'
+        ? `[data-req-id="${target.id}"]`
+        : target.__type === 'serial'
+          ? `[data-serial-id="${target.id}"]`
+          : `[data-order-id="${target.id}"]`;
+      const card = ordersContainer.querySelector(selector);
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('order-card-highlight');
+      setTimeout(() => card.classList.remove('order-card-highlight'), 2600);
+    }
+
+    function paint() {
+      const { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds } = lastData;
       ordersContainer.innerHTML = '';
 
       const combined = [
         ...shopOrders.map((o) => ({ ...o, __type: 'shop_order' })),
         ...deliveryRequests.map((d) => ({ ...d, __type: 'delivery', __hasReview: reviewedRequestIds.has(d.id) })),
+        ...serialRequests.map((s) => ({ ...s, __type: 'serial' })),
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       if (combined.length === 0) {
+        ordersTabs.style.display = 'none';
         emptyOrders.style.display = 'block';
         return;
       }
       emptyOrders.style.display = 'none';
+      ordersTabs.style.display = 'flex';
 
-      combined.forEach((item) => {
-        const card = item.__type === 'shop_order' ? renderShopOrderCard(item) : renderDeliveryCard(item);
+      let deepTarget = null;
+      if (!deepLinkHandled) {
+        deepLinkHandled = true;
+        deepTarget = findDeepLinkTarget(combined);
+        if (deepTarget) activeTab = isOngoingItem(deepTarget) ? 'ongoing' : 'done';
+      }
+
+      const ongoingCount = combined.filter(isOngoingItem).length;
+      tabCountOngoing.textContent = ongoingCount > 0 ? toBn(ongoingCount) : '';
+      syncTabButtons();
+
+      const visible = combined.filter((item) => (activeTab === 'ongoing') === isOngoingItem(item));
+
+      if (visible.length === 0) {
+        const msg = activeTab === 'ongoing' ? 'এখন কোনো চলমান অর্ডার বা সিরিয়াল নেই' : 'এখনো কোনো সম্পন্ন অর্ডার বা সিরিয়াল নেই';
+        ordersContainer.innerHTML = `<p class="tab-empty">${msg}</p>`;
+        return;
+      }
+
+      visible.forEach((item) => {
+        let card;
+        if (item.__type === 'shop_order') card = renderShopOrderCard(item);
+        else if (item.__type === 'serial') card = renderSerialCard(item);
+        else card = renderDeliveryCard(item);
         ordersContainer.appendChild(card);
       });
+
+      if (deepTarget) setTimeout(() => scrollToDeepLinkCard(deepTarget), 80);
     }
 
+    function renderAll(shopOrders, deliveryRequests, serialRequests, reviewedRequestIds) {
+      lastData = { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds };
+      paint();
+    }
+
+    ordersTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.mo-tab');
+      if (!btn || !lastData) return;
+      activeTab = btn.dataset.tab;
+      paint();
+    });
+
     async function loadOrders(userId, { silent = false } = {}) {
-      const [ordersRes, deliveryRes, reviewsRes] = await Promise.all([
+      const [ordersRes, deliveryRes, reviewsRes, serialRes] = await Promise.all([
         supabase
           .from('orders')
           .select('*, order_items(*), shops(name, slug, phone)')
@@ -1191,6 +1835,12 @@ import ChatModal from '../components/delivery/ChatModal.astro';
           .eq('customer_profile_id', userId)
           .order('created_at', { ascending: false }),
         supabase.from('delivery_reviews').select('request_id').eq('customer_profile_id', userId),
+        supabase
+          .from('serial_requests')
+          .select('id, doctor_name, clinic_name, requested_date, status, serial_no, rep_note, patient_name, created_at')
+          .eq('requester_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(60),
       ]);
 
       if (!silent) {
@@ -1206,6 +1856,10 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         return;
       }
 
+      // সিরিয়াল লোডে সমস্যা হলে বাকি অর্ডার দেখানো আটকাবে না
+      if (serialRes.error) console.error('সিরিয়াল লোড এরর:', serialRes.error.message);
+      const serialRequests = serialRes.error ? [] : (serialRes.data || []);
+
       const reviewedRequestIds = new Set((reviewsRes.data || []).map((r) => r.request_id));
 
       const deliveryRequests = (deliveryRes.data || []).map((req) => ({
@@ -1213,7 +1867,10 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         delivery_offers: (req.delivery_offers || []).filter((o) => o.status === 'active'),
       }));
 
-      renderAll(ordersRes.data || [], deliveryRequests, reviewedRequestIds);
+      // ইউজার কিছু টাইপ করছে বা কনফার্ম শিট খোলা থাকলে অটো-রিফ্রেশে কার্ড নতুন করে আঁকব না
+      if (silent && isUserInteracting()) return;
+
+      renderAll(ordersRes.data || [], deliveryRequests, serialRequests, reviewedRequestIds);
     }
 
     function refreshOrders() {

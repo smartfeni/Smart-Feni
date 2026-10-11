@@ -1,0 +1,686 @@
+---
+// ============================================================
+// পেজ: /refer — রেফার & রিওয়ার্ড (ইউজারের নিজস্ব ড্যাশবোর্ড)
+//
+// কী কী আছে:
+//   ১) পয়েন্ট ব্যালেন্স (১০ পয়েন্ট = ১ টাকা), মোট আয়, পাওয়া টাকা
+//   ২) রেফার লিংক (smartfeni.com/r/<কোড>) — কপি ও শেয়ার, সাথে "আগে সোশ্যাল
+//      মিডিয়ায় পোস্ট করুন" নির্দেশনা
+//   ৩) উইথড্র — ১০০০ পয়েন্টের নিচে বাটন লকড (ক্লিক নিবে না, ফর্মও খুলবে না);
+//      ১০০০+ হলে ফর্ম (বিকাশ নম্বর + সোশ্যাল পোস্ট লিংক), অ্যাডমিন যাচাই করে
+//      ম্যানুয়ালি পেমেন্ট দেয়; একটা আবেদন চলাকালীন নতুন আবেদন নয়
+//   ৪) পয়েন্ট হিস্ট্রি ও উইথড্র হিস্ট্রি ট্যাব
+//   ৫) প্রতিটা সেকশনে ছোট (i) বাটন — ক্লিক করলে তবেই পুরো নিয়ম/শর্তাবলী
+//
+// ডাটা ও নিয়ম সব সার্ভারে (Supabase RPC): get_my_referral_code(),
+// get_my_reward_summary(), request_withdraw(). ক্লায়েন্টের চেকগুলো শুধু সুবিধার
+// জন্য — আসল যাচাই সার্ভারে হয়।
+//
+// ⚠️ ১০০ রেফার লিমিট ইউজারকে জানানো হয় না — এই পেজে সেটার কোনো উল্লেখ বা ইঙ্গিত
+// রাখা যাবে না (নিয়মের লেখায় বা হিসাবে)। referral_total এ not_counted ও ধরা থাকে।
+//
+// Android back বাটনের জন্য: বটম শিটের ক্লাস "...overlay" + ".open" নিয়ম মানে এবং
+// বন্ধ বাটনের aria-label এ "বন্ধ" আছে (native-bridge.js এর closeTopOverlay এর জন্য)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="রেফার & রিওয়ার্ড | স্মার্ট ফেনী">
+  <div class="rf-page">
+    <div class="rf-container">
+
+      <div id="rfLoading" class="rf-state">
+        <div class="rf-spinner"></div>
+        <p>লোড হচ্ছে...</p>
+      </div>
+
+      <div id="rfLoginRequired" class="rf-state" style="display:none;">
+        <div class="rf-state-icon"><i class="fas fa-coins"></i></div>
+        <h2>রেফার & রিওয়ার্ড দেখতে লগইন করুন</h2>
+        <p>বন্ধুদের আমন্ত্রণ জানিয়ে আর লিস্টিং দিয়ে পয়েন্ট জিতুন।</p>
+        <button id="rfLoginBtn" class="rf-btn rf-btn-primary" type="button">লগইন / সাইন আপ</button>
+      </div>
+
+      <div id="rfContent" style="display:none;">
+
+        <h1 class="rf-title">রেফার &amp; রিওয়ার্ড</h1>
+
+        <!-- ব্যালেন্স কার্ড -->
+        <section class="rf-balance">
+          <div class="rf-balance-top">
+            <span class="rf-balance-label">আপনার পয়েন্ট</span>
+            <button type="button" class="rf-info-btn rf-info-light" data-rules="earn" aria-label="পয়েন্ট পাওয়ার নিয়ম">i</button>
+          </div>
+          <div class="rf-balance-points" id="rfPoints">০</div>
+          <div class="rf-balance-taka" id="rfTaka">≈ ৳০</div>
+          <div class="rf-balance-meta">
+            <div><span id="rfEarned">০</span><small>মোট অর্জিত পয়েন্ট</small></div>
+            <div><span id="rfReferralTotal">০</span><small>আপনার লিংকে জয়েন</small></div>
+            <div><span id="rfPaid">৳০</span><small>পেয়েছেন</small></div>
+          </div>
+        </section>
+
+        <!-- কীভাবে পয়েন্ট পাবেন -->
+        <section class="rf-earn">
+          <div class="rf-earn-item">
+            <span class="rf-earn-icon"><i class="fas fa-user-plus"></i></span>
+            <span><strong>১০০ পয়েন্ট</strong><small>প্রতি রেফারে</small></span>
+          </div>
+          <div class="rf-earn-item">
+            <span class="rf-earn-icon"><i class="fas fa-circle-check"></i></span>
+            <span><strong>১০ পয়েন্ট</strong><small>প্রতি অনুমোদিত লিস্টিংয়ে</small></span>
+          </div>
+        </section>
+
+        <!-- রেফার লিংক -->
+        <section class="rf-card">
+          <div class="rf-card-head">
+            <h2>আপনার রেফার লিংক</h2>
+            <button type="button" class="rf-info-btn" data-rules="referral" aria-label="রেফারের নিয়ম">i</button>
+          </div>
+
+          <div class="rf-post-hint">
+            <i class="fas fa-bullhorn"></i>
+            <span><strong>আগে পোস্ট করুন:</strong> আপনার লিংক সহ স্মার্ট ফেনী নিয়ে ফেসবুক/সোশ্যাল মিডিয়ায় একটা পোস্ট করুন। উইথড্রের সময় ওই পোস্টের লিংক দিতে হবে।</span>
+          </div>
+
+          <div class="rf-link-box">
+            <input id="rfLinkInput" type="text" readonly value="" aria-label="আপনার রেফার লিংক" />
+            <button id="rfCopyBtn" type="button" class="rf-btn rf-btn-light" aria-label="লিংক কপি করুন">
+              <i class="fas fa-copy"></i> কপি
+            </button>
+          </div>
+
+          <button id="rfShareBtn" type="button" class="rf-btn rf-btn-primary rf-btn-block">
+            <i class="fas fa-share-nodes"></i> লিংক শেয়ার করুন
+          </button>
+        </section>
+
+        <!-- উইথড্র -->
+        <section class="rf-card" id="rfWithdrawCard">
+          <div class="rf-card-head">
+            <h2>উইথড্র</h2>
+            <button type="button" class="rf-info-btn" data-rules="withdraw" aria-label="উইথড্রের নিয়ম">i</button>
+          </div>
+
+          <!-- লকড অবস্থা (<১০০০ পয়েন্ট) -->
+          <div id="rfWdLocked" style="display:none;">
+            <div class="rf-progress"><div class="rf-progress-bar" id="rfProgressBar"></div></div>
+            <p class="rf-wd-note" id="rfLockedNote"></p>
+            <button type="button" class="rf-btn rf-btn-primary rf-btn-block" disabled aria-disabled="true">
+              <i class="fas fa-lock"></i> উইথড্র করুন
+            </button>
+          </div>
+
+          <!-- চলমান আবেদন -->
+          <div id="rfWdPending" style="display:none;" class="rf-pending-box"></div>
+
+          <!-- খোলা অবস্থা (≥১০০০ পয়েন্ট, কোনো pending নেই) -->
+          <div id="rfWdOpen" style="display:none;">
+            <p class="rf-wd-note">আপনি উইথড্র করতে পারবেন 🎉 নিচের বাটনে চাপ দিয়ে আবেদন করুন।</p>
+            <button id="rfWdOpenBtn" type="button" class="rf-btn rf-btn-primary rf-btn-block">
+              <i class="fas fa-money-bill-transfer"></i> উইথড্র করুন
+            </button>
+
+            <form id="rfWdForm" style="display:none;" autocomplete="off">
+              <label class="rf-label" for="rfWdPoints">কত পয়েন্ট উইথড্র করবেন</label>
+              <input id="rfWdPoints" class="rf-input" type="number" inputmode="numeric" min="1000" step="10" />
+              <div class="rf-hint" id="rfWdAmountHint"></div>
+
+              <label class="rf-label" for="rfWdBkash">বিকাশ নম্বর (১১ ডিজিট)</label>
+              <input id="rfWdBkash" class="rf-input" type="tel" inputmode="numeric" maxlength="11" placeholder="01XXXXXXXXX" />
+
+              <label class="rf-label" for="rfWdPostLink">সোশ্যাল মিডিয়া পোস্টের লিংক <span class="rf-req">(বাধ্যতামূলক)</span></label>
+              <input id="rfWdPostLink" class="rf-input" type="url" inputmode="url" placeholder="https://facebook.com/..." />
+              <div class="rf-hint">যে পোস্টে আপনার রেফার লিংক আছে সেটার লিংক দিন। অ্যাডমিন যাচাই করার পরই পেমেন্ট হবে।</div>
+
+              <div id="rfWdError" class="rf-error" style="display:none;"></div>
+
+              <button id="rfWdSubmit" type="submit" class="rf-btn rf-btn-primary rf-btn-block">আবেদন জমা দিন</button>
+            </form>
+          </div>
+        </section>
+
+        <!-- হিস্ট্রি -->
+        <section class="rf-card">
+          <div class="rf-tabs" role="tablist">
+            <button type="button" class="rf-tab active" data-tab="points" role="tab">পয়েন্ট হিস্ট্রি</button>
+            <button type="button" class="rf-tab" data-tab="withdraw" role="tab">উইথড্র হিস্ট্রি</button>
+          </div>
+          <div id="rfTabPoints"></div>
+          <div id="rfTabWithdraw" style="display:none;"></div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- নিয়ম/শর্তাবলী বটম শিট (শুধু (i) চাপলে খোলে) -->
+  <div class="rf-sheet-overlay" id="rfRulesOverlay">
+    <div class="rf-sheet-backdrop" id="rfRulesBackdrop"></div>
+    <div class="rf-sheet" role="dialog" aria-modal="true" aria-labelledby="rfRulesTitle">
+      <div class="rf-sheet-head">
+        <h3 id="rfRulesTitle">নিয়মাবলী</h3>
+        <button type="button" class="rf-sheet-close" id="rfRulesClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      </div>
+      <ul class="rf-rules" id="rfRulesList"></ul>
+    </div>
+  </div>
+
+  <style is:global>
+    .rf-page { background: #F8FAFC; min-height: 100vh; padding: 16px 0 110px; }
+    .rf-container { max-width: 560px; margin: 0 auto; padding: 0 16px; }
+    .rf-title { font-size: 1.35rem; font-weight: 800; color: #1B2A4A; margin: 6px 0 14px; }
+
+    .rf-state { text-align: center; padding: 70px 20px; color: #5A6E85; }
+    .rf-state h2 { color: #1B2A4A; font-size: 1.1rem; margin: 12px 0 6px; }
+    .rf-state p { margin: 0 0 18px; font-size: 0.92rem; }
+    .rf-state-icon { font-size: 2.2rem; color: #FF6B35; }
+    .rf-spinner { width: 34px; height: 34px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; margin: 0 auto 12px; animation: rf-spin 0.8s linear infinite; }
+    @keyframes rf-spin { to { transform: rotate(360deg); } }
+
+    .rf-balance { background: linear-gradient(135deg, #1B2A4A 0%, #2B4170 100%); color: #fff; border-radius: 22px; padding: 18px 18px 16px; box-shadow: 0 10px 28px rgba(27, 42, 74, 0.22); }
+    .rf-balance-top { display: flex; align-items: center; justify-content: space-between; }
+    .rf-balance-label { font-size: 0.85rem; opacity: 0.8; font-weight: 600; }
+    .rf-balance-points { font-size: 2.6rem; font-weight: 800; line-height: 1.1; margin-top: 4px; }
+    .rf-balance-taka { font-size: 1rem; color: #FFB596; font-weight: 700; margin-top: 2px; }
+    .rf-balance-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.15); }
+    .rf-balance-meta div { text-align: center; }
+    .rf-balance-meta span { display: block; font-size: 1.05rem; font-weight: 800; }
+    .rf-balance-meta small { display: block; font-size: 0.68rem; opacity: 0.75; margin-top: 2px; line-height: 1.3; }
+
+    .rf-earn { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+    .rf-earn-item { background: #fff; border: 1px solid #E5EAF0; border-radius: 16px; padding: 12px; display: flex; gap: 10px; align-items: center; }
+    .rf-earn-icon { width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 107, 53, 0.12); color: #FF6B35; display: flex; align-items: center; justify-content: center; flex: 0 0 36px; }
+    .rf-earn-item strong { display: block; color: #1B2A4A; font-size: 0.92rem; }
+    .rf-earn-item small { display: block; color: #64748B; font-size: 0.72rem; line-height: 1.3; }
+
+    .rf-card { background: #fff; border: 1px solid #E5EAF0; border-radius: 20px; padding: 16px; margin-bottom: 12px; }
+    .rf-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .rf-card-head h2 { font-size: 1.02rem; font-weight: 800; color: #1B2A4A; margin: 0; }
+
+    .rf-info-btn { width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid #C5CFDD; background: transparent; color: #5A6E85; font-size: 0.78rem; font-weight: 800; font-style: italic; font-family: Georgia, serif; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+    .rf-info-light { border-color: rgba(255, 255, 255, 0.55); color: #fff; }
+
+    .rf-post-hint { display: flex; gap: 10px; background: #FFF4EC; border: 1px solid #FFD9C2; color: #7A4A1E; border-radius: 14px; padding: 10px 12px; font-size: 0.84rem; line-height: 1.55; margin-bottom: 12px; }
+    .rf-post-hint i { color: #FF6B35; margin-top: 3px; }
+
+    .rf-link-box { display: flex; gap: 8px; margin-bottom: 10px; }
+    .rf-link-box input { flex: 1; min-width: 0; border: 1.5px solid #E5EAF0; border-radius: 12px; padding: 11px 12px; font-size: 0.86rem; color: #1B2A4A; background: #F8FAFC; }
+
+    .rf-btn { border: none; border-radius: 12px; padding: 11px 16px; font-size: 0.92rem; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+    .rf-btn-primary { background: #FF6B35; color: #fff; }
+    .rf-btn-light { background: #F4F7FC; color: #1B2A4A; flex: 0 0 auto; }
+    .rf-btn-block { width: 100%; padding: 13px 16px; }
+    .rf-btn:disabled { background: #D5DCE6; color: #8FA0BC; cursor: not-allowed; }
+
+    .rf-progress { height: 8px; background: #EDF1F7; border-radius: 99px; overflow: hidden; margin-bottom: 8px; }
+    .rf-progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, #FF6B35, #FF9A6C); border-radius: 99px; transition: width 0.4s ease; }
+    .rf-wd-note { font-size: 0.86rem; color: #5A6E85; margin: 0 0 12px; line-height: 1.55; }
+
+    .rf-pending-box { background: #FFF8E6; border: 1px solid #F6E0A4; color: #6B5310; border-radius: 14px; padding: 12px 14px; font-size: 0.88rem; line-height: 1.6; }
+
+    .rf-label { display: block; font-size: 0.84rem; font-weight: 700; color: #1B2A4A; margin: 14px 0 6px; }
+    .rf-req { color: #D14343; font-weight: 600; }
+    .rf-input { width: 100%; border: 1.5px solid #E5EAF0; border-radius: 12px; padding: 12px; font-size: 0.95rem; color: #1B2A4A; background: #fff; }
+    .rf-input:focus { outline: none; border-color: #FF6B35; }
+    .rf-hint { font-size: 0.76rem; color: #64748B; margin-top: 5px; line-height: 1.5; }
+    .rf-error { background: #FFF0F0; color: #B42318; border-radius: 10px; padding: 10px 12px; font-size: 0.84rem; margin: 12px 0 0; }
+    #rfWdForm .rf-btn-block { margin-top: 16px; }
+    #rfWdOpenBtn { margin-bottom: 4px; }
+
+    .rf-tabs { display: flex; background: #F1F4F9; border-radius: 12px; padding: 4px; margin-bottom: 12px; }
+    .rf-tab { flex: 1; border: none; background: transparent; padding: 9px; border-radius: 9px; font-size: 0.86rem; font-weight: 700; color: #64748B; cursor: pointer; }
+    .rf-tab.active { background: #fff; color: #1B2A4A; box-shadow: 0 1px 4px rgba(27, 42, 74, 0.1); }
+
+    .rf-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 2px; border-bottom: 1px solid #EEF2F7; }
+    .rf-row:last-child { border-bottom: none; }
+    .rf-row-main { min-width: 0; }
+    .rf-row-title { font-size: 0.9rem; font-weight: 700; color: #1B2A4A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rf-row-sub { font-size: 0.74rem; color: #8090A6; margin-top: 2px; line-height: 1.45; }
+    .rf-row-note { font-size: 0.76rem; color: #5A6E85; margin-top: 3px; line-height: 1.45; word-break: break-word; }
+    .rf-plus { color: #1B7A3C; font-weight: 800; white-space: nowrap; }
+    .rf-minus { color: #B42318; font-weight: 800; white-space: nowrap; }
+    .rf-badge { display: inline-block; font-size: 0.7rem; font-weight: 800; padding: 2px 9px; border-radius: 99px; margin-left: 6px; }
+    .rf-badge-pending { background: #FFF2CC; color: #8A6500; }
+    .rf-badge-paid { background: #DDF5E4; color: #1B7A3C; }
+    .rf-badge-rejected { background: #FFE3E0; color: #B42318; }
+    .rf-empty { text-align: center; color: #8090A6; font-size: 0.88rem; padding: 22px 8px; }
+
+    /* বটম শিট — Android back বাটনের নিয়ম মানতে ক্লাস নাম "overlay" + ".open" */
+    .rf-sheet-overlay { position: fixed; inset: 0; z-index: 3500; display: none; }
+    .rf-sheet-overlay.open { display: block; }
+    .rf-sheet-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.55); }
+    .rf-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow-y: auto; background: #fff; border-radius: 22px 22px 0 0; padding: 18px 18px calc(24px + env(safe-area-inset-bottom, 0px)); }
+    .rf-sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .rf-sheet-head h3 { margin: 0; font-size: 1.05rem; font-weight: 800; color: #1B2A4A; }
+    .rf-sheet-close { border: none; background: #F1F4F9; width: 32px; height: 32px; border-radius: 50%; color: #1B2A4A; cursor: pointer; }
+    .rf-rules { margin: 0; padding-left: 20px; color: #3C4C66; font-size: 0.88rem; line-height: 1.75; }
+    .rf-rules li { margin-bottom: 6px; }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+
+    // ---------- ধ্রুবক (সার্ভারের নিয়মের সাথে মিলতে হবে) ----------
+    const MIN_WITHDRAW_POINTS = 1000;
+    const POINTS_PER_TAKA = 10;
+    const SITE_ORIGIN = 'https://smartfeni.com';
+
+    // ---------- নিয়ম/শর্তাবলী (শুধু (i) চাপলে দেখায়) ----------
+    const RULES = {
+      earn: {
+        title: 'পয়েন্ট পাওয়ার নিয়ম',
+        items: [
+          'প্রতিটা সফল রেফারে ১০০ পয়েন্ট পাবেন।',
+          'আপনার করা লিস্টিং অ্যাডমিন অনুমোদন (Approve) করলে ১০ পয়েন্ট পাবেন। প্রতিটা লিস্টিংয়ে একবারই পয়েন্ট দেওয়া হয়।',
+          'সরাসরি প্রকাশিত হওয়া পোস্ট (যেমন শপের প্রোডাক্ট) এবং অ্যাডমিন যে পোস্ট আপনার পক্ষ থেকে দেয় সেগুলোতে পয়েন্ট নেই।',
+          '১০ পয়েন্ট = ১ টাকা। ১০০০ পয়েন্ট হলে (৳১০০) উইথড্র করতে পারবেন।',
+          'ভুয়া তথ্য, একাধিক অ্যাকাউন্ট বা অপব্যবহার ধরা পড়লে পয়েন্ট কাউন্ট হবে না এবং অ্যাডমিন ব্যবস্থা নিতে পারে।',
+        ],
+      },
+      referral: {
+        title: 'রেফারের নিয়ম',
+        items: [
+          'আপনার ইউনিক লিংক থেকে কেউ স্মার্ট ফেনী অ্যাপ ডাউনলোড করে সাইন আপ করলে ১টা রেফার সম্পন্ন হবে।',
+          'নতুন ইউজারকে অবশ্যই আপনার লিংকে ক্লিক করে Google Play থেকে অ্যাপ ইনস্টল করতে হবে। অন্য কোনোভাবে ইনস্টল হলে রেফার ধরা যাবে না।',
+          'একটা ফোনে একবারের বেশি রেফার কাউন্ট হয় না। একই ফোন বা একই নম্বর দিয়ে আবার সাইন আপ করলে নতুন রেফার গণ্য হবে না।',
+          'নিজের লিংকে নিজে সাইন আপ করলে রেফার গণ্য হবে না।',
+          'রেফারের পয়েন্ট সাইন আপ সম্পন্ন হওয়ার পর কিছুক্ষণের মধ্যে যোগ হয়ে যায়, আপনি নোটিফিকেশন পাবেন।',
+          'উইথড্রের জন্য আপনার লিংক সহ একটা সোশ্যাল মিডিয়া পোস্ট করা বাধ্যতামূলক। তাই আগেই পোস্ট করে রাখুন।',
+        ],
+      },
+      withdraw: {
+        title: 'উইথড্রের নিয়ম ও শর্তাবলী',
+        items: [
+          'উইথড্র করতে কমপক্ষে ১০০০ পয়েন্ট (৳১০০) লাগবে। এর কম হলে আবেদনের ফর্ম খুলবে না।',
+          'পেমেন্ট শুধু বিকাশে (bKash) দেওয়া হয়। সঠিক ১১ ডিজিটের নম্বর দিন — ভুল নম্বরে পাঠানো টাকার দায় স্মার্ট ফেনী নেবে না।',
+          'আবেদনের সময় আপনার রেফার লিংক সহ সোশ্যাল মিডিয়া পোস্টের লিংক দিতে হবে। লিংক ছাড়া উইথড্র হবে না।',
+          'অ্যাডমিন পোস্ট ও আপনার তথ্য যাচাই করবেন। আবেদনের ২৪ ঘণ্টার মধ্যে যাচাই করে পেমেন্ট করা হবে।',
+          'পেমেন্ট পাঠানো হলে আপনি নোটিফিকেশন পাবেন।',
+          'আবেদন করার সাথে সাথে ওই পয়েন্ট আলাদা করে রাখা হয়। আবেদন বাতিল হলে কারণসহ জানানো হবে এবং পয়েন্ট ফেরত পাবেন।',
+          'একটা আবেদন চলাকালীন নতুন আবেদন করা যাবে না।',
+          'পোস্ট ভুয়া হলে, লিংকে রেফার লিংক না থাকলে বা অপব্যবহার ধরা পড়লে আবেদন বাতিল হতে পারে।',
+        ],
+      },
+    };
+
+    // ---------- DOM ----------
+    const $ = (id) => document.getElementById(id);
+    const loadingEl = $('rfLoading');
+    const loginEl = $('rfLoginRequired');
+    const contentEl = $('rfContent');
+
+    let state = { balance: 0, pendingWithdraw: false, code: null };
+
+    // ---------- ছোট সহায়ক ----------
+    function bn(n) {
+      return Number(n || 0).toLocaleString('bn-BD');
+    }
+
+    function fmtDate(iso) {
+      try {
+        return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' });
+      } catch (e) {
+        return '';
+      }
+    }
+
+    function toast(msg, type) {
+      if (typeof window.showToast === 'function') window.showToast(msg, type || 'success');
+    }
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    // ---------- নিয়ম শিট ----------
+    const rulesOverlay = $('rfRulesOverlay');
+
+    function openRules(kind) {
+      const data = RULES[kind];
+      if (!data) return;
+      $('rfRulesTitle').textContent = data.title;
+      const list = $('rfRulesList');
+      list.innerHTML = '';
+      data.items.forEach((t) => list.appendChild(el('li', '', t)));
+      rulesOverlay.classList.add('open');
+    }
+
+    function closeRules() {
+      rulesOverlay.classList.remove('open');
+    }
+
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest ? e.target.closest('[data-rules]') : null;
+      if (btn) openRules(btn.getAttribute('data-rules'));
+    });
+    $('rfRulesClose')?.addEventListener('click', closeRules);
+    $('rfRulesBackdrop')?.addEventListener('click', closeRules);
+
+    // ---------- কপি / শেয়ার ----------
+    function referralLink() {
+      return state.code ? `${SITE_ORIGIN}/r/${state.code}` : '';
+    }
+
+    function shareText() {
+      return `ফেনীর সব সেবা এক অ্যাপে! 📱 স্মার্ট ফেনী ডাউনলোড করুন 👇\n${referralLink()}`;
+    }
+
+    async function copyText(text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch (e) {
+        // নিচের ফলব্যাকে যাবে
+      }
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    $('rfCopyBtn')?.addEventListener('click', async () => {
+      if (!state.code) return;
+      const ok = await copyText(referralLink());
+      toast(ok ? 'লিংক কপি হয়েছে ✓' : 'কপি করা যায়নি, লিংকটা চেপে ধরে কপি করুন', ok ? 'success' : 'error');
+    });
+
+    $('rfShareBtn')?.addEventListener('click', async () => {
+      if (!state.code) return;
+      const text = shareText();
+      try {
+        if (navigator.share) {
+          await navigator.share({ text });
+          return;
+        }
+      } catch (e) {
+        if (e && e.name === 'AbortError') return; // ইউজার নিজেই বাতিল করেছে
+      }
+      const ok = await copyText(text);
+      toast(ok ? 'শেয়ারের লেখা কপি হয়েছে — এখন পোস্টে পেস্ট করুন ✓' : 'শেয়ার করা যায়নি', ok ? 'success' : 'error');
+    });
+
+    // ---------- ব্যালেন্স ও উইথড্র সেকশন ----------
+    function renderSummary(summary) {
+      const balance = Number(summary?.balance || 0);
+      state.balance = balance;
+      state.pendingWithdraw = !!summary?.pending_withdraw;
+
+      $('rfPoints').textContent = bn(balance);
+      $('rfTaka').textContent = `≈ ৳${bn(Math.floor(balance / POINTS_PER_TAKA))}`;
+      $('rfEarned').textContent = bn(summary?.total_earned);
+      $('rfReferralTotal').textContent = bn(summary?.referral_total);
+      $('rfPaid').textContent = `৳${bn(summary?.paid_taka)}`;
+
+      renderWithdrawState();
+    }
+
+    function renderWithdrawState() {
+      const locked = $('rfWdLocked');
+      const pending = $('rfWdPending');
+      const open = $('rfWdOpen');
+      locked.style.display = 'none';
+      pending.style.display = 'none';
+      open.style.display = 'none';
+
+      if (state.pendingWithdraw) {
+        pending.style.display = 'block';
+        pending.textContent = 'আপনার উইথড্র আবেদন যাচাই চলছে। ২৪ ঘণ্টার মধ্যে যাচাই করে পেমেন্ট করা হবে। পেমেন্ট হলে নোটিফিকেশন পাবেন।';
+        return;
+      }
+
+      if (state.balance < MIN_WITHDRAW_POINTS) {
+        locked.style.display = 'block';
+        const percent = Math.max(0, Math.min(100, Math.round((state.balance / MIN_WITHDRAW_POINTS) * 100)));
+        $('rfProgressBar').style.width = percent + '%';
+        const remaining = MIN_WITHDRAW_POINTS - state.balance;
+        $('rfLockedNote').textContent = `উইথড্র করতে কমপক্ষে ${bn(MIN_WITHDRAW_POINTS)} পয়েন্ট (৳${bn(MIN_WITHDRAW_POINTS / POINTS_PER_TAKA)}) লাগবে। আর ${bn(remaining)} পয়েন্ট বাকি।`;
+        return;
+      }
+
+      open.style.display = 'block';
+    }
+
+    function updateAmountHint() {
+      const input = $('rfWdPoints');
+      const points = parseInt(input.value, 10);
+      const hint = $('rfWdAmountHint');
+      if (!Number.isFinite(points) || points <= 0) {
+        hint.textContent = '';
+        return;
+      }
+      hint.textContent = `= ৳${bn(Math.floor(points / POINTS_PER_TAKA))} (ব্যালেন্স: ${bn(state.balance)} পয়েন্ট)`;
+    }
+
+    $('rfWdOpenBtn')?.addEventListener('click', () => {
+      // ক্লায়েন্টেও আবার চেক (আসল গার্ড সার্ভারে)
+      if (state.balance < MIN_WITHDRAW_POINTS || state.pendingWithdraw) return;
+      const input = $('rfWdPoints');
+      input.max = String(state.balance);
+      input.value = String(Math.floor(state.balance / 10) * 10);
+      updateAmountHint();
+      $('rfWdForm').style.display = 'block';
+      $('rfWdOpenBtn').style.display = 'none';
+    });
+
+    $('rfWdPoints')?.addEventListener('input', updateAmountHint);
+
+    function showWdError(message) {
+      const box = $('rfWdError');
+      box.textContent = message;
+      box.style.display = message ? 'block' : 'none';
+    }
+
+    $('rfWdForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      showWdError('');
+
+      const points = parseInt($('rfWdPoints').value, 10);
+      const bkash = $('rfWdBkash').value.trim();
+      const postLink = $('rfWdPostLink').value.trim();
+
+      if (!Number.isFinite(points) || points < MIN_WITHDRAW_POINTS) {
+        showWdError(`কমপক্ষে ${bn(MIN_WITHDRAW_POINTS)} পয়েন্ট দিন`);
+        return;
+      }
+      if (points % 10 !== 0) {
+        showWdError('পয়েন্ট ১০ এর গুণিতক হতে হবে (যেমন ১০০০, ১০১০)');
+        return;
+      }
+      if (points > state.balance) {
+        showWdError('আপনার এত পয়েন্ট নেই');
+        return;
+      }
+      if (!/^01[0-9]{9}$/.test(bkash)) {
+        showWdError('সঠিক বিকাশ নম্বর দিন (১১ ডিজিট, 01 দিয়ে শুরু)');
+        return;
+      }
+      if (!/^https?:\/\/\S{4,}$/i.test(postLink)) {
+        showWdError('সোশ্যাল মিডিয়া পোস্টের সঠিক লিংক দিন (https:// দিয়ে শুরু)');
+        return;
+      }
+
+      const submitBtn = $('rfWdSubmit');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'জমা হচ্ছে...';
+
+      try {
+        const { error } = await supabase.rpc('request_withdraw', {
+          p_points: points,
+          p_method: 'bkash',
+          p_account: bkash,
+          p_post_link: postLink,
+        });
+
+        if (error) {
+          showWdError(error.message || 'আবেদন জমা দেওয়া যায়নি, আবার চেষ্টা করুন');
+          return;
+        }
+
+        $('rfWdForm').reset();
+        $('rfWdForm').style.display = 'none';
+        $('rfWdOpenBtn').style.display = '';
+        toast('উইথড্র আবেদন সফল হয়েছে ✅ ২৪ ঘণ্টার মধ্যে যাচাই করে পেমেন্ট করা হবে', 'success');
+        await loadAll();
+      } catch (err) {
+        showWdError('ইন্টারনেট সমস্যা — একটু পরে আবার চেষ্টা করুন');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'আবেদন জমা দিন';
+      }
+    });
+
+    // ---------- হিস্ট্রি ----------
+    const LEDGER_LABEL = {
+      referral: 'নতুন রেফার',
+      listing_approved: 'লিস্টিং অনুমোদিত',
+      withdraw_hold: 'উইথড্র আবেদন',
+      withdraw_refund: 'পয়েন্ট ফেরত',
+    };
+
+    const WD_STATUS = {
+      pending: { label: 'যাচাই চলছে', cls: 'rf-badge-pending' },
+      paid: { label: 'পেমেন্ট হয়েছে', cls: 'rf-badge-paid' },
+      rejected: { label: 'বাতিল', cls: 'rf-badge-rejected' },
+    };
+
+    function renderPointsHistory(rows) {
+      const wrap = $('rfTabPoints');
+      wrap.innerHTML = '';
+      if (!rows.length) {
+        wrap.appendChild(el('div', 'rf-empty', 'এখনো কোনো পয়েন্ট নেই। রেফার করুন বা লিস্টিং দিন!'));
+        return;
+      }
+      rows.forEach((r) => {
+        const row = el('div', 'rf-row');
+        const main = el('div', 'rf-row-main');
+        main.appendChild(el('div', 'rf-row-title', LEDGER_LABEL[r.type] || 'পয়েন্ট'));
+        const sub = [r.type === 'listing_approved' ? r.note : null, fmtDate(r.created_at)].filter(Boolean).join(' • ');
+        main.appendChild(el('div', 'rf-row-sub', sub));
+        const amount = el('div', r.points >= 0 ? 'rf-plus' : 'rf-minus', `${r.points >= 0 ? '+' : '−'}${bn(Math.abs(r.points))}`);
+        row.appendChild(main);
+        row.appendChild(amount);
+        wrap.appendChild(row);
+      });
+    }
+
+    function renderWithdrawHistory(rows) {
+      const wrap = $('rfTabWithdraw');
+      wrap.innerHTML = '';
+      if (!rows.length) {
+        wrap.appendChild(el('div', 'rf-empty', 'এখনো কোনো উইথড্র আবেদন করেননি।'));
+        return;
+      }
+      rows.forEach((r) => {
+        const row = el('div', 'rf-row');
+        const main = el('div', 'rf-row-main');
+
+        const title = el('div', 'rf-row-title', `৳${bn(r.amount_taka)}`);
+        const st = WD_STATUS[r.status] || { label: r.status, cls: '' };
+        title.appendChild(el('span', `rf-badge ${st.cls}`, st.label));
+        main.appendChild(title);
+
+        main.appendChild(el('div', 'rf-row-sub', `${bn(r.points)} পয়েন্ট • বিকাশ ${r.account_number} • ${fmtDate(r.created_at)}`));
+        if (r.status === 'rejected' && r.admin_note) {
+          main.appendChild(el('div', 'rf-row-note', `কারণ: ${r.admin_note}`));
+        }
+        if (r.status === 'paid' && r.admin_note) {
+          main.appendChild(el('div', 'rf-row-note', `পেমেন্ট নোট: ${r.admin_note}`));
+        }
+        row.appendChild(main);
+        wrap.appendChild(row);
+      });
+    }
+
+    document.querySelectorAll('.rf-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.rf-tab').forEach((t) => t.classList.remove('active'));
+        tab.classList.add('active');
+        const isPoints = tab.getAttribute('data-tab') === 'points';
+        $('rfTabPoints').style.display = isPoints ? 'block' : 'none';
+        $('rfTabWithdraw').style.display = isPoints ? 'none' : 'block';
+      });
+    });
+
+    // ---------- ডাটা লোড ----------
+    async function loadAll() {
+      const [summaryRes, codeRes, ledgerRes, wdRes] = await Promise.all([
+        supabase.rpc('get_my_reward_summary'),
+        supabase.rpc('get_my_referral_code'),
+        supabase.from('points_ledger').select('type, points, note, created_at').order('created_at', { ascending: false }).limit(50),
+        supabase.from('withdraw_requests').select('amount_taka, points, account_number, status, admin_note, created_at').order('created_at', { ascending: false }).limit(30),
+      ]);
+
+      renderSummary(summaryRes.data || {});
+
+      if (codeRes.data) {
+        state.code = codeRes.data;
+        $('rfLinkInput').value = referralLink();
+      }
+
+      renderPointsHistory(ledgerRes.data || []);
+      renderWithdrawHistory(wdRes.data || []);
+    }
+
+    // ---------- শুরু ----------
+    let started = false;
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        loadingEl.style.display = 'none';
+        contentEl.style.display = 'none';
+        loginEl.style.display = 'block';
+        return;
+      }
+
+      if (started) return;
+      started = true;
+
+      try {
+        await loadAll();
+        loadingEl.style.display = 'none';
+        loginEl.style.display = 'none';
+        contentEl.style.display = 'block';
+      } catch (err) {
+        started = false;
+        loadingEl.style.display = 'none';
+        loginEl.style.display = 'block';
+        loginEl.querySelector('h2').textContent = 'লোড করা যায়নি';
+        loginEl.querySelector('p').textContent = 'ইন্টারনেট চেক করে পেজটা আবার খুলুন।';
+      }
+    }
+
+    $('rfLoginBtn')?.addEventListener('click', () => window.openAuthModal?.('login'));
+
+    supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' && !started) {
+        loadingEl.style.display = 'block';
+        loginEl.style.display = 'none';
+        init();
+      }
+    });
+
+    init();
+  </script>
+</BaseLayout>

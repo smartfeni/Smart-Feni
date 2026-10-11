@@ -1,8 +1,14 @@
 //
 // আপডেট (N19): sendNotification এ priority: 'high' যোগ — ডেলিভারি সম্পন্ন হওয়ার খবর কাস্টমারের কাছে সাথে সাথে যাওয়া দরকার।
 // ============================================================
-// API এন্ডপয়েন্ট: রাইডার ডেলিভারি কনফার্ম করবে (/api/delivery/confirm-delivery)
-// status: delivered -> completed
+// API এন্ডপয়েন্ট: রাইডার ডেলিভারি/রাইড সম্পন্ন করবে (/api/delivery/confirm-delivery)
+// status: confirmed -> completed  (কাস্টমারের "রিসিভড" ধাপ আর নেই)
+//
+// আপডেট (নতুন ফ্লো): অর্ডারের পর সব ধাপ রাইডারের — একসেপ্ট, পিকআপ, সম্পন্ন।
+// কাস্টমারের শেষ কনফার্ম বাদ; কাস্টমার শুধু সমস্যা হলে ডিসপিউট রিপোর্ট করে
+// (raise-dispute.js, সম্পন্ন হওয়ার ১ ঘণ্টা পর্যন্ত)। শর্ত: পিকআপ সম্পন্ন
+// (pickup_done_at) না হলে সম্পন্ন করা যায় না। পুরোনো চলমান রিকোয়েস্ট যেগুলো
+// ইতিমধ্যে 'delivered' অবস্থায় আছে সেগুলোও আগের মতো সম্পন্ন করা যায়।
 // এখানে delivery_riders এর stats (total_completed, total_earned) আপডেট হয়।
 // রাইডারের RLS scope এ delivery_requests.status আপডেট করার পারমিশন নেই
 // (শুধু কাস্টমার নিজের রিকোয়েস্ট আপডেট করতে পারে), তাই user token দিয়ে
@@ -50,7 +56,7 @@ export async function POST({ request }) {
     // রিকোয়েস্টটা এই রাইডারেরই কিনা এবং status delivered কিনা যাচাই
     const { data: deliveryRequest, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, accepted_rider_id, final_price')
+      .select('id, status, accepted_rider_id, final_price, pickup_done_at')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -68,9 +74,17 @@ export async function POST({ request }) {
       );
     }
 
-    if (deliveryRequest.status !== 'delivered') {
+    // নতুন ফ্লো: confirmed থেকে সরাসরি; পুরোনো 'delivered' রিকোয়েস্টও চলবে
+    if (deliveryRequest.status !== 'confirmed' && deliveryRequest.status !== 'delivered') {
       return new Response(
-        JSON.stringify({ error: 'কাস্টমার এখনো রিসিভড মার্ক করেনি' }),
+        JSON.stringify({ error: 'এই অবস্থায় সম্পন্ন করা যাবে না' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (deliveryRequest.status === 'confirmed' && !deliveryRequest.pickup_done_at) {
+      return new Response(
+        JSON.stringify({ error: 'আগে পিকআপ সম্পন্ন করুন, তারপর সম্পন্ন করা যাবে' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -87,7 +101,7 @@ export async function POST({ request }) {
       .from('delivery_requests')
       .update({ status: 'completed', updated_at: new Date().toISOString() })
       .eq('id', requestId)
-      .eq('status', 'delivered')
+      .in('status', ['confirmed', 'delivered'])
       .select()
       .single();
 
@@ -120,8 +134,8 @@ export async function POST({ request }) {
     await sendNotification(adminClient, {
       userId: updatedRequest.customer_profile_id,
       message: isRide
-        ? 'আপনার যাত্রা সম্পন্ন হয়েছে! হিরোকে একটা রিভিউ দিন'
-        : 'আপনার ডেলিভারি সম্পন্ন হয়েছে! হিরোকে একটা রিভিউ দিন',
+        ? 'আপনার যাত্রা সম্পন্ন হয়েছে! সমস্যা থাকলে ১ ঘণ্টার মধ্যে রিপোর্ট করুন, নইলে হিরোকে রিভিউ দিন'
+        : 'আপনার ডেলিভারি সম্পন্ন হয়েছে! সমস্যা থাকলে ১ ঘণ্টার মধ্যে রিপোর্ট করুন, নইলে হিরোকে রিভিউ দিন',
       category: 'delivery_hero',
       actionUrl: '/my-orders',
       priority: 'high',
