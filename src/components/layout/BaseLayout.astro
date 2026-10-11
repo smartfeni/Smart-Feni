@@ -647,6 +647,12 @@ const localBusinessSchema = {
       const overlay = document.getElementById('sf-toast-overlay');
       if (!overlay) return;
 
+      // একই মেসেজ ১ সেকেন্ডের মধ্যে দুইবার এলে একবারই দেখাবে
+      // (পেজের নিজের showToast কল + নিচের অটো-টোস্ট একসাথে এলে ডবল হবে না)
+      const now = Date.now();
+      if (window.__sfLastToast && window.__sfLastToast.m === message && now - window.__sfLastToast.t < 1000) return;
+      window.__sfLastToast = { m: message, t: now };
+
       // আগের টোস্ট থাকলে সরিয়ে নতুনটা দেখাবে
       overlay.innerHTML = '';
 
@@ -680,6 +686,43 @@ const localBusinessSchema = {
         }, 250);
       }, duration);
     };
+
+    // ============================================================
+    // অটো-টোস্ট: যেকোনো মেসেজ এলিমেন্টে show-error / show-success ক্লাস বসলেই
+    // (form-msg, form-message, edit-message, modal-message, auth-message ইত্যাদি)
+    // লেখাটা সবকিছুর ওপরে টোস্টে দেখায় এবং ফর্মের ওপরের ইনলাইন লেখা লুকিয়ে দেয়,
+    // কারণ ইনলাইন মেসেজ সেভ বাটন চাপার সময় স্ক্রিনের বাইরে থাকে।
+    // কোনো পেজকে আলাদা করে বদলাতে হয় না। টোস্ট না থাকলে ইনলাইনই দেখায়।
+    // ============================================================
+    (function () {
+      const MSG_CLASS = /(msg|message)/i;
+
+      function handle(el) {
+        if (!el || el.nodeType !== 1 || typeof el.className !== 'string') return;
+        const cls = el.className;
+        if (!MSG_CLASS.test(cls)) return;
+        const isError = /\bshow-error\b/.test(cls);
+        const isSuccess = /\bshow-success\b/.test(cls);
+        if (!isError && !isSuccess) return;
+        const text = (el.textContent || '').trim();
+        if (!text || typeof window.showToast !== 'function') return;
+        window.showToast(text, isError ? 'error' : 'success', isError ? 3500 : 2500);
+        el.style.display = 'none';
+      }
+
+      function start() {
+        if (!document.body) return;
+        new MutationObserver(function (mutations) {
+          for (const m of mutations) handle(m.target);
+        }).observe(document.body, { attributes: true, attributeFilter: ['class'], subtree: true });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+      } else {
+        start();
+      }
+    })();
 
     // ============================================================
     // গ্লোবাল Mandatory Field ভ্যালিডেশন হেল্পার
