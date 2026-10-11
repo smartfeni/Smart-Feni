@@ -1,0 +1,420 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — এরর লগ (/admin/errors)
+// শুধু admin (মডারেটর /admin-এ ফেরত যায়)।
+//   • app_error_logs টেবিলের এরর তালিকা (নতুন → পুরনো, last_seen_at অনুযায়ী)
+//   • ফিল্টার: স্ট্যাটাস (ডিফল্ট "খোলা"), ধরন, সার্চ (শিরোনাম/পেজ/অ্যাকশন/মেসেজ)
+//   • প্রতিটা কার্ডে: কতবার ঘটেছে, কতজন ইউজার, পেজ/অ্যাকশন, মেসেজ, ডিভাইস, সময়
+//   • "সমাধান হয়েছে" / "আবার খুলুন" এবং "কপি করুন" (Claude-কে পেস্ট করার জন্য)
+//   • সমাধান-করা এরর আবার ঘটলে report_client_error নিজেই আবার open করে দেয়
+// ডাটা: app_error_logs (RLS: শুধু admin SELECT/UPDATE; DELETE policy নেই)
+// অ্যাডমিন নোটিফিকেশনের লিংক /admin/errors এখানেই আসে।
+// ============================================================
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="এরর লগ | অ্যাডমিন">
+  <div class="er-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="er-loading">
+        <div class="er-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="er-content" style="display:none;">
+
+        <a href="/admin" class="er-back"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="er-header">
+          <div>
+            <h1>এরর লগ</h1>
+            <p class="er-subtitle" id="erSummary"></p>
+          </div>
+          <button type="button" class="er-refresh" id="erRefresh" aria-label="রিফ্রেশ"><i class="fas fa-rotate"></i></button>
+        </div>
+
+        <div class="er-toolbar">
+          <div class="er-search-wrap">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="text" class="er-input er-search" id="erSearch" placeholder="শিরোনাম, পেজ বা মেসেজ দিয়ে খুঁজুন..." autocomplete="off" />
+            <button type="button" class="er-search-clear" id="erClear" aria-label="মুছুন" style="display:none;"><i class="fas fa-xmark"></i></button>
+          </div>
+          <div class="er-filter-row">
+            <select class="er-input" id="erStatus">
+              <option value="">সব স্ট্যাটাস</option>
+              <option value="open">খোলা</option>
+              <option value="resolved">সমাধান হয়েছে</option>
+            </select>
+            <select class="er-input" id="erKind">
+              <option value="">সব ধরন</option>
+              <option value="db_block">ডাটাবেস ব্লক</option>
+              <option value="api_fail">API ফেইল</option>
+              <option value="js_crash">JS ক্র্যাশ</option>
+              <option value="other">অন্যান্য</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="erList" class="er-list"></div>
+
+        <div id="erEmpty" class="er-empty" style="display:none;">
+          <i class="fas fa-circle-check"></i>
+          <p id="erEmptyText">কোনো এরর পাওয়া যায়নি</p>
+        </div>
+
+        <button type="button" class="er-more" id="erMore" style="display:none;">আরও দেখান</button>
+
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .er-page { min-height: 60vh; padding: 32px 0 80px; }
+    .er-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .er-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: er-spin 0.8s linear infinite; }
+    @keyframes er-spin { to { transform: rotate(360deg); } }
+    .er-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: 0.88rem; margin-bottom: 20px; }
+    .er-back:hover { color: #FF6B35; }
+    .er-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+    .er-header h1 { font-size: 1.6rem; font-weight: 700; color: #1B2A4A; }
+    .er-subtitle { font-size: 0.85rem; color: #8FA0BC; margin-top: 4px; font-weight: 600; }
+    .er-refresh { flex-shrink: 0; width: 42px; height: 42px; border-radius: 50%; border: none; background: #fff; color: #5A6E85; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); cursor: pointer; font-size: 0.95rem; }
+    .er-refresh:hover { color: #FF6B35; }
+    .er-refresh.spinning i { animation: er-spin 0.7s linear infinite; }
+
+    .er-toolbar { background: #fff; border-radius: 18px; padding: 14px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); margin-bottom: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .er-search-wrap { position: relative; }
+    .er-search-wrap > i.fa-magnifying-glass { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #8FA0BC; pointer-events: none; }
+    .er-search { padding-left: 40px !important; padding-right: 38px !important; }
+    .er-search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: #F4F7FC; border: none; width: 28px; height: 28px; border-radius: 50%; color: #5A6E85; cursor: pointer; }
+    .er-filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .er-input { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1.5px solid #E5EAF0; font-size: 0.9rem; font-family: inherit; color: #1B2A4A; background: #FBFCFE; }
+    .er-input:focus { outline: none; border-color: #FF6B35; background: #fff; }
+
+    .er-list { display: flex; flex-direction: column; gap: 12px; }
+    .er-card { background: #fff; border-radius: 16px; padding: 14px 16px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); border-left: 5px solid #D14343; }
+    .er-card.resolved { border-left-color: #2ECC71; }
+    .er-card-top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .er-title { font-size: 0.95rem; font-weight: 700; color: #1B2A4A; word-break: break-word; }
+    .er-badge { padding: 3px 9px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+    .er-count { background: #1B2A4A; color: #fff; padding: 3px 9px; border-radius: 20px; font-size: 0.72rem; font-weight: 800; white-space: nowrap; }
+    .er-meta { font-size: 0.78rem; color: #5A6E85; margin-top: 6px; word-break: break-word; }
+    .er-meta b { color: #1B2A4A; }
+    .er-msg { margin-top: 8px; background: #F8FAFC; border-radius: 12px; padding: 10px 12px; font-size: 0.78rem; color: #1B2A4A; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-word; white-space: pre-wrap; max-height: 3.6em; overflow: hidden; cursor: pointer; }
+    .er-msg.open { max-height: none; }
+    .er-time { font-size: 0.74rem; color: #8FA0BC; margin-top: 8px; line-height: 1.6; }
+    .er-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+    .er-btn { border: none; padding: 8px 12px; border-radius: 10px; font-size: 0.76rem; font-weight: 700; cursor: pointer; white-space: nowrap; font-family: inherit; }
+    .er-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .er-btn.green { background: #EAFBF0; color: #1B7A3C; }
+    .er-btn.orange { background: #FFF0EA; color: #D14343; }
+    .er-btn.gray { background: #F4F7FC; color: #1B2A4A; }
+    .er-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px 0; color: #B0BCCB; }
+    .er-empty i { font-size: 2.4rem; }
+    .er-more { width: 100%; margin-top: 14px; background: #FFF0EA; color: #FF6B35; border: 1.5px dashed #FFD3BC; padding: 14px; border-radius: 16px; font-weight: 700; font-size: 0.9rem; cursor: pointer; font-family: inherit; }
+    .er-more:hover { background: #FF6B35; color: #fff; border-color: #FF6B35; }
+    .er-more:disabled { opacity: 0.6; cursor: not-allowed; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    // ===== কনস্ট্যান্ট =====
+    const PAGE_SIZE = 100;
+    const KIND_META = {
+      db_block: { label: 'ডাটাবেস ব্লক', bg: '#FFF0EA', color: '#D14343' },
+      api_fail: { label: 'API ফেইল', bg: '#FFF4D6', color: '#B7791F' },
+      js_crash: { label: 'JS ক্র্যাশ', bg: '#F1EAFF', color: '#6D3FD1' },
+      other: { label: 'অন্যান্য', bg: '#F4F7FC', color: '#5A6E85' },
+    };
+
+    // ===== স্টেট =====
+    let myUserId = null;
+    let items = [];
+    let hasMore = false;
+    let loading = false;
+    let searchTimer = null;
+
+    // ===== DOM =====
+    const $ = (id) => document.getElementById(id);
+    const listEl = $('erList');
+    const emptyEl = $('erEmpty');
+    const moreBtn = $('erMore');
+    const searchEl = $('erSearch');
+    const statusEl = $('erStatus');
+    const kindEl = $('erKind');
+
+    // ===== হেল্পার =====
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const BN_DIGITS = '০১২৩৪৫৬৭৮৯';
+    const toBn = (n) => String(n).replace(/\d/g, (d) => BN_DIGITS[d]);
+    const toast = (t, type = 'success') => window.showToast(t, type);
+
+    function fmtDateTime(iso) {
+      if (!iso) return '';
+      try {
+        return new Date(iso).toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka', dateStyle: 'medium', timeStyle: 'short' });
+      } catch (_) {
+        return iso;
+      }
+    }
+
+    function fmtAgo(iso) {
+      if (!iso) return '';
+      const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+      const min = Math.floor(diff / 60000);
+      if (min < 1) return 'এইমাত্র';
+      if (min < 60) return `${toBn(min)} মিনিট আগে`;
+      const hr = Math.floor(min / 60);
+      if (hr < 24) return `${toBn(hr)} ঘণ্টা আগে`;
+      const day = Math.floor(hr / 24);
+      if (day < 30) return `${toBn(day)} দিন আগে`;
+      return fmtDateTime(iso);
+    }
+
+    function deviceLabel(ua) {
+      const s = String(ua || '');
+      if (!s) return '';
+      let os = 'অজানা ডিভাইস';
+      if (/Android/i.test(s)) os = 'Android';
+      else if (/iPhone|iPad|iPod/i.test(s)) os = 'iOS';
+      else if (/Windows/i.test(s)) os = 'Windows';
+      else if (/Mac OS X|Macintosh/i.test(s)) os = 'Mac';
+      else if (/Linux/i.test(s)) os = 'Linux';
+      let br = '';
+      if (/Edg\//i.test(s)) br = 'Edge';
+      else if (/SamsungBrowser/i.test(s)) br = 'Samsung Browser';
+      else if (/Firefox/i.test(s)) br = 'Firefox';
+      else if (/Chrome|CriOS/i.test(s)) br = /; wv\)|Version\/[\d.]+ Chrome/i.test(s) ? 'অ্যাপ/WebView' : 'Chrome';
+      else if (/Safari/i.test(s)) br = 'Safari';
+      return br ? `${os} · ${br}` : os;
+    }
+
+    function buildCopyText(r) {
+      return [
+        `এরর: ${r.title || '(শিরোনাম নেই)'}`,
+        `ধরন: ${r.kind}`,
+        `পেজ: ${r.page || '-'}`,
+        `অ্যাকশন: ${r.action || '-'}`,
+        `মেসেজ: ${r.message || '-'}`,
+        r.code ? `কোড: ${r.code}` : '',
+        `কতবার: ${r.occurrences} · প্রভাবিত ইউজার: ${(r.user_ids || []).length}`,
+        `প্রথম দেখা: ${fmtDateTime(r.first_seen_at)} · শেষ দেখা: ${fmtDateTime(r.last_seen_at)}`,
+        `ডিভাইস: ${r.user_agent || '-'}`,
+        r.sentry_event_id ? `Sentry: ${r.sentry_event_id}` : '',
+      ].filter(Boolean).join('\n');
+    }
+
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (_) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.cssText = 'position:fixed;opacity:0;';
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return ok;
+        } catch (_) {
+          return false;
+        }
+      }
+    }
+
+    // ===== সারসংক্ষেপ (গণনা) =====
+    async function loadCounts() {
+      const [openRes, resolvedRes] = await Promise.all([
+        supabase.from('app_error_logs').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+        supabase.from('app_error_logs').select('id', { count: 'exact', head: true }).eq('status', 'resolved'),
+      ]);
+      const o = openRes.count ?? 0;
+      const r = resolvedRes.count ?? 0;
+      $('erSummary').textContent = `খোলা ${toBn(o)} · সমাধান হয়েছে ${toBn(r)}`;
+    }
+
+    // ===== তালিকা লোড =====
+    async function loadLogs(reset = true) {
+      if (loading) return;
+      loading = true;
+      if (reset) {
+        items = [];
+        listEl.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
+        emptyEl.style.display = 'none';
+        moreBtn.style.display = 'none';
+      } else {
+        moreBtn.disabled = true;
+        moreBtn.textContent = 'লোড হচ্ছে...';
+      }
+
+      let q = supabase.from('app_error_logs').select('*').order('last_seen_at', { ascending: false });
+      if (statusEl.value) q = q.eq('status', statusEl.value);
+      if (kindEl.value) q = q.eq('kind', kindEl.value);
+
+      // সার্চ: or-ফিল্টারের বিশেষ চিহ্ন বাদ দিয়ে
+      const term = searchEl.value.trim().replace(/[,()%*\\]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (term) {
+        const p = `%${term}%`;
+        q = q.or(`title.ilike.${p},page.ilike.${p},action.ilike.${p},message.ilike.${p}`);
+      }
+
+      const from = items.length;
+      const { data, error } = await q.range(from, from + PAGE_SIZE - 1);
+      loading = false;
+      moreBtn.disabled = false;
+      moreBtn.textContent = 'আরও দেখান';
+
+      if (error) {
+        listEl.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${esc(error.message)}</p>`;
+        return;
+      }
+
+      items = items.concat(data || []);
+      hasMore = (data || []).length === PAGE_SIZE;
+      render();
+    }
+
+    function render() {
+      $('erClear').style.display = searchEl.value ? 'block' : 'none';
+      listEl.innerHTML = '';
+
+      if (items.length === 0) {
+        const filtered = statusEl.value || kindEl.value || searchEl.value.trim();
+        $('erEmptyText').textContent = filtered ? 'এই ফিল্টারে কোনো এরর নেই' : 'এখনো কোনো এরর রেকর্ড হয়নি';
+        emptyEl.style.display = 'flex';
+        moreBtn.style.display = 'none';
+        return;
+      }
+      emptyEl.style.display = 'none';
+      items.forEach((r) => listEl.appendChild(renderCard(r)));
+      moreBtn.style.display = hasMore ? 'block' : 'none';
+    }
+
+    function renderCard(r) {
+      const card = document.createElement('div');
+      card.className = 'er-card' + (r.status === 'resolved' ? ' resolved' : '');
+      const km = KIND_META[r.kind] || KIND_META.other;
+      const users = (r.user_ids || []).length;
+      const device = deviceLabel(r.user_agent);
+
+      const meta = [
+        r.page ? `<b>পেজ:</b> ${esc(r.page)}` : '',
+        r.action ? `<b>অ্যাকশন:</b> ${esc(r.action)}` : '',
+        r.code ? `<b>কোড:</b> ${esc(r.code)}` : '',
+        `<b>প্রভাবিত ইউজার:</b> ${users >= 200 ? '২০০+' : toBn(users)} জন`,
+        device ? `<b>ডিভাইস:</b> <span title="${esc(r.user_agent)}">${esc(device)}</span>` : '',
+        r.sentry_event_id ? `<b>Sentry:</b> ${esc(r.sentry_event_id)}` : '',
+      ].filter(Boolean).join('<br>');
+
+      const resolvedLine = r.status === 'resolved' && r.resolved_at
+        ? `<br>সমাধান: ${esc(fmtDateTime(r.resolved_at))}` : '';
+
+      card.innerHTML = `
+        <div class="er-card-top">
+          <p class="er-title">${esc(r.title || 'অজানা সমস্যা')}</p>
+          <span class="er-badge" style="background:${km.bg};color:${km.color};">${km.label}</span>
+          <span class="er-count">× ${toBn(r.occurrences)}</span>
+          ${r.status === 'resolved' ? '<span class="er-badge" style="background:#EAFBF0;color:#1B7A3C;">সমাধান হয়েছে</span>' : ''}
+        </div>
+        <p class="er-meta">${meta}</p>
+        ${r.message ? `<div class="er-msg" title="ট্যাপ করে পুরোটা দেখুন">${esc(r.message)}</div>` : ''}
+        <p class="er-time">
+          শেষ দেখা: ${esc(fmtAgo(r.last_seen_at))} (${esc(fmtDateTime(r.last_seen_at))})<br>
+          প্রথম দেখা: ${esc(fmtDateTime(r.first_seen_at))}${resolvedLine}
+        </p>
+        <div class="er-actions"></div>
+      `;
+
+      const msgEl = card.querySelector('.er-msg');
+      if (msgEl) msgEl.addEventListener('click', () => msgEl.classList.toggle('open'));
+
+      const actions = card.querySelector('.er-actions');
+      const add = (html, cls, handler) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'er-btn ' + cls;
+        b.innerHTML = html;
+        b.addEventListener('click', () => handler(b));
+        actions.appendChild(b);
+      };
+
+      if (r.status === 'resolved') {
+        add('<i class="fas fa-rotate-left"></i> আবার খুলুন', 'orange', (b) => setStatus(r, 'open', b));
+      } else {
+        add('<i class="fas fa-check"></i> সমাধান হয়েছে', 'green', (b) => setStatus(r, 'resolved', b));
+      }
+      add('<i class="fas fa-copy"></i> কপি করুন', 'gray', async () => {
+        const ok = await copyText(buildCopyText(r));
+        toast(ok ? 'কপি হয়েছে ✓ — Claude-কে পেস্ট করুন' : 'কপি করা যায়নি', ok ? 'success' : 'error');
+      });
+
+      return card;
+    }
+
+    async function setStatus(r, status, btn) {
+      btn.disabled = true;
+      const payload = status === 'resolved'
+        ? { status: 'resolved', resolved_at: new Date().toISOString(), resolved_by: myUserId }
+        : { status: 'open', resolved_at: null, resolved_by: null };
+
+      const { error } = await supabase.from('app_error_logs').update(payload).eq('id', r.id);
+      if (error) {
+        btn.disabled = false;
+        toast('আপডেট ব্যর্থ: ' + error.message, 'error');
+        return;
+      }
+      toast(status === 'resolved' ? 'সমাধান হিসেবে চিহ্নিত হয়েছে ✓' : 'আবার খোলা হয়েছে');
+      loadCounts();
+      loadLogs(true);
+    }
+
+    // ===== ইভেন্ট =====
+    function reload() { loadLogs(true); }
+
+    statusEl.addEventListener('change', reload);
+    kindEl.addEventListener('change', reload);
+    searchEl.addEventListener('input', () => {
+      $('erClear').style.display = searchEl.value ? 'block' : 'none';
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(reload, 350);
+    });
+    $('erClear').addEventListener('click', () => { searchEl.value = ''; reload(); });
+    moreBtn.addEventListener('click', () => loadLogs(false));
+    $('erRefresh').addEventListener('click', async () => {
+      const b = $('erRefresh');
+      b.classList.add('spinning');
+      await Promise.all([loadCounts(), loadLogs(true)]);
+      setTimeout(() => b.classList.remove('spinning'), 400);
+    });
+
+    // ===== গার্ড =====
+    window.addEventListener('smartfeni:admin-ready', async (e) => {
+      // শুধু admin; মডারেটরকে ড্যাশবোর্ডে ফেরত পাঠাও
+      if (!e.detail || e.detail.role !== 'admin') {
+        window.location.replace('/admin');
+        return;
+      }
+
+      try {
+        const { data } = await supabase.auth.getSession();
+        myUserId = data?.session?.user?.id || null;
+      } catch (_) {}
+
+      // ডিফল্ট ফিল্টার "খোলা"; ?status=all দিলে সব, ?status=resolved দিলে সমাধান-করাগুলো
+      const params = new URLSearchParams(window.location.search);
+      const st = params.get('status');
+      statusEl.value = st === null ? 'open' : (st === 'open' || st === 'resolved' ? st : '');
+
+      await Promise.all([loadCounts(), loadLogs(true)]);
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
