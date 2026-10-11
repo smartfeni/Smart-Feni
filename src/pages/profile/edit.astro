@@ -40,9 +40,17 @@
 // গাড়ি, ছবি আপলোড, ফোন/পাসওয়ার্ড বদলের সার্ভার এরর) এখন errorReporter.js দিয়ে
 // অ্যাডমিন এরর লগে (/admin/errors) যায়। ইউজারের ভুল (খালি নাম, ভুল পাসওয়ার্ড,
 // ডুপ্লিকেট ইমেইল ইত্যাদি) রিপোর্ট হয় না। UI/মেসেজ/আচরণ অপরিবর্তিত।
+//
+// আপডেট (NOT_DONOR): সাইনআপে ব্লাড গ্রুপ বাধ্যতামূলক হওয়ায় "ডোনার হতে চাই না"
+// অপশন যোগ হয়েছে (profiles.blood_group = 'NOT_DONOR')। এখানে: এডিট ড্রপডাউনে
+// ওই অপশন সবার আগে; ভিউ ব্যাজে "ডোনার নন" দেখায়; ডোনার টগল চালু করা যায় না
+// (ব্লাড গ্রুপ বদলাতে বলা হয়); সেভের সময় NOT_DONOR হলে is_blood_donor বন্ধ হয়।
 // ============================================================
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
+
+// profiles.blood_group-এ যারা ডোনার হতে চান না তাদের মান
+const NOT_DONOR_VALUE = 'NOT_DONOR';
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
@@ -214,6 +222,7 @@ const upazilas = [
                   <i class="fas fa-droplet edit-input-icon"></i>
                   <select class="edit-input edit-select" id="editBloodGroup">
                     <option value="">নির্বাচন করুন</option>
+                    <option value={NOT_DONOR_VALUE}>ডোনার হতে চাই না</option>
                     {bloodGroups.map((bg) => <option value={bg}>{bg}</option>)}
                   </select>
                 </div>
@@ -1103,6 +1112,14 @@ const upazilas = [
   import { subscribeToPush } from '../../lib/push.js';
   import { reportError } from '../../lib/errorReporter.js';
 
+  // profiles.blood_group-এ যারা ডোনার হতে চান না তাদের মান (সাইনআপ মোডালের সাথে একই)
+  const NOT_DONOR_VALUE = 'NOT_DONOR';
+
+  // সত্যিকারের ব্লাড গ্রুপ আছে (খালি বা NOT_DONOR নয়)
+  function hasRealBloodGroup(profile) {
+    return !!profile?.blood_group && profile.blood_group !== NOT_DONOR_VALUE;
+  }
+
   // এরর মনিটরিং: DB ফেইল অ্যাডমিন লগে পাঠায় (fire-and-forget, কখনো throw করে না)
   function reportDbError(action, title, error) {
     reportError({ kind: 'db_block', action, title, message: error?.message, code: error?.code });
@@ -1254,7 +1271,10 @@ const upazilas = [
       viewAvatarPlaceholder.style.display = 'flex';
     }
 
-    if (profile.blood_group) {
+    if (profile.blood_group === NOT_DONOR_VALUE) {
+      viewBloodBadgeText.textContent = 'ডোনার নন';
+      viewBloodBadge.style.display = 'inline-flex';
+    } else if (profile.blood_group) {
       viewBloodBadgeText.textContent = profile.blood_group;
       viewBloodBadge.style.display = 'inline-flex';
     } else {
@@ -1279,13 +1299,16 @@ const upazilas = [
   }
 
   function updateDonorHint() {
-    const hasBloodGroup = !!currentProfile?.blood_group;
-    if (donorToggleHint) {
-      donorToggleHint.textContent = hasBloodGroup
-        ? 'জরুরি প্রয়োজনে অন্যরা আপনার তথ্য দেখতে পাবে'
-        : 'ব্লাড গ্রুপ যোগ করলে চালু করা যাবে (এডিট করুন থেকে)';
-      donorToggleHint.classList.remove('hint-error');
+    if (!donorToggleHint) return;
+
+    if (currentProfile?.blood_group === NOT_DONOR_VALUE) {
+      donorToggleHint.textContent = 'আপনি ডোনার হতে চান না বেছেছেন — চালু করতে "এডিট করুন" থেকে ব্লাড গ্রুপ বদলান';
+    } else if (hasRealBloodGroup(currentProfile)) {
+      donorToggleHint.textContent = 'জরুরি প্রয়োজনে অন্যরা আপনার তথ্য দেখতে পাবে';
+    } else {
+      donorToggleHint.textContent = 'ব্লাড গ্রুপ যোগ করলে চালু করা যাবে (এডিট করুন থেকে)';
     }
+    donorToggleHint.classList.remove('hint-error');
   }
 
   // ===== ডোনারের নোটিফিকেশন সতর্কতা (শুধু অ্যাপে) =====
@@ -1303,7 +1326,7 @@ const upazilas = [
 
   async function updateDonorNotifWarning() {
     updateDonorHint(); // আগে স্বাভাবিক লেখা
-    if (!isDonorOn || !currentProfile?.blood_group) return;
+    if (!isDonorOn || !hasRealBloodGroup(currentProfile)) return;
 
     const status = await getNativePushStatus();
     if (status === null || status === 'granted') return; // ওয়েব বা অনুমতি আছে — সতর্কতা নয়
@@ -1337,9 +1360,11 @@ const upazilas = [
   }
 
   donorToggleBtn?.addEventListener('click', async () => {
-    if (!currentProfile?.blood_group) {
+    if (!hasRealBloodGroup(currentProfile)) {
       if (donorToggleHint) {
-        donorToggleHint.textContent = 'আগে "এডিট করুন" থেকে ব্লাড গ্রুপ সিলেক্ট করুন';
+        donorToggleHint.textContent = currentProfile?.blood_group === NOT_DONOR_VALUE
+          ? 'ডোনার হতে হলে আগে "এডিট করুন" থেকে ব্লাড গ্রুপ সিলেক্ট করুন'
+          : 'আগে "এডিট করুন" থেকে ব্লাড গ্রুপ সিলেক্ট করুন';
         donorToggleHint.classList.add('hint-error');
       }
       return;
@@ -1650,7 +1675,8 @@ const upazilas = [
     };
     if (avatarUrl) updates.avatar_url = avatarUrl;
 
-    if (!updates.blood_group && isDonorOn) {
+    // ব্লাড গ্রুপ খালি বা "ডোনার হতে চাই না" হলে ডোনার লিস্ট থেকেও সরে যাবে
+    if ((!updates.blood_group || updates.blood_group === NOT_DONOR_VALUE) && isDonorOn) {
       updates.is_blood_donor = false;
     }
 
