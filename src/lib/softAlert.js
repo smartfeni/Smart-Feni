@@ -6,15 +6,13 @@
 // টোস্ট দেখায়। confirm() ছোঁয়া হয়নি — "বাতিল করবেন?"/"সম্পন্ন করবেন?" ধরনের
 // গুরুত্বপূর্ণ নিশ্চিতকরণ নেটিভ মডালেই থাকে।
 //
-// অ্যাডমিন পেজে (/admin) কিছু বদলায় না। showToast না থাকলে (ব্যতিক্রম) পুরনো নেটিভ
+// অ্যাডমিন পেজেও (/admin) এখন একই টোস্ট চলে। showToast না থাকলে (ব্যতিক্রম) পুরনো নেটিভ
 // alert-ই চলে, তাই কোনো মেসেজ হারাবে না।
 // ============================================================
 
 export function installSoftAlert() {
   if (typeof window === 'undefined' || window.__sfSoftAlertInstalled) return;
   window.__sfSoftAlertInstalled = true;
-
-  if (window.location.pathname.startsWith('/admin')) return;
 
   const nativeAlert = window.alert.bind(window);
 
