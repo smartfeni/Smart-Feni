@@ -32,6 +32,10 @@
 //           চলমান অর্ডারের কাউন্ট ব্যাজ (admin_orders_overview RPC, মডারেটরও পায়),
 //           "এখনই দেখুন" স্ট্রিপে "অফারহীন অর্ডার" চিপ। ডিসপিউট ব্যাজ এখন RPC থেকেও
 //           আসে, তাই মডারেটরের ক্ষেত্রেও কাউন্ট ঠিক দেখায়।
+// আপডেট ১৪ (এরর মনিটরিং, ধাপ ৫): নতুন "সিস্টেম" গ্রুপে "এরর লগ" কার্ড (/admin/errors) —
+//           শুধু admin। খোলা (status='open') এররের কাউন্ট ব্যাজ সহ, আর "এখনই দেখুন"
+//           স্ট্রিপে "খোলা এরর" চিপ (শুধু admin)। loadStats()-এ app_error_logs-এর একটা
+//           কাউন্ট কোয়েরি যোগ; বাকি সব আগের মতোই।
 // ============================================================
 
 export const prerender = false;
@@ -217,6 +221,18 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         </div>
       </section>
 
+      <section class="adm-group">
+        <div class="adm-h">সিস্টেম</div>
+        <div class="adm-grid">
+        <a href="/admin/errors" class="adm-card" id="errorsNavCard" data-admin-only="1" style="--c:#D14343;display:none;" data-search="এরর লগ সিস্টেম এরর সমস্যা বাগ ক্র্যাশ ইউজারের সমস্যা সমাধান">
+          <span class="adm-badge" id="errorOpenBadge" style="display:none;">0</span>
+          <span class="adm-ic"><i class="fas fa-bug"></i></span>
+          <b>এরর লগ</b>
+          <small>ইউজারের সামনে আসা সমস্যা দেখুন ও সমাধান চিহ্নিত করুন</small>
+        </a>
+        </div>
+      </section>
+
         <p class="adm-none" id="adminSearchEmpty" style="display:none;">কিছু পাওয়া যায়নি</p>
 
       </div>
@@ -344,6 +360,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         { count: doctorPendingCount },
         { count: withdrawPendingCount },
         { data: ordersOverview },
+        { count: errorOpenCount },
       ] = await Promise.all([
         supabase.from('profiles').select('*', { count: 'exact', head: true }),
         supabase.from('listings').select('*', { count: 'exact', head: true }),
@@ -356,6 +373,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         supabase.from('withdraw_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
         // চলমান অর্ডারের সারাংশ — admin ও moderator দুজনেই পায় (সার্ভারে role চেক)
         supabase.rpc('admin_orders_overview'),
+        // খোলা এরর — শুধু admin দেখতে পায় (RLS); moderator এর জন্য null আসে, কার্ডও লুকানো থাকে
+        supabase.from('app_error_logs').select('*', { count: 'exact', head: true }).eq('status', 'open'),
       ]);
 
       const ov = ordersOverview || {};
@@ -377,9 +396,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       setBadge('ordersLiveBadge', liveOrders);
       setBadge('doctorPendingBadge', doctorPendingCount);
       setBadge('withdrawPendingBadge', withdrawPendingCount);
+      setBadge('errorOpenBadge', isAdmin ? errorOpenCount : 0);
 
       renderAttention([
         { count: isAdmin ? withdrawPendingCount : 0, label: 'উইথড্র আবেদন', href: '/admin/referrals', color: '#FF6B35' },
+        { count: isAdmin ? errorOpenCount : 0, label: 'খোলা এরর', href: '/admin/errors', color: '#D14343' },
         { count: pendingCount, label: 'লিস্টিং রিভিউ বাকি', href: '/admin/listings', color: '#3B82F6' },
         { count: riderPendingCount, label: 'রাইডার আবেদন', href: '/admin/delivery-riders', color: '#FF6B35' },
         { count: disputeCount, label: 'ডিসপিউট', href: '/admin/delivery-disputes', color: '#EF4444' },
