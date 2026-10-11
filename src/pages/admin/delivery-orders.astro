@@ -1,4 +1,3 @@
-<!-- path: src/pages/admin/delivery-orders.astro -->
 ---
 // ============================================================
 // পেজ: অ্যাডমিন — ডেলিভারি ও রাইড অর্ডার মনিটরিং (/admin/delivery-orders)
@@ -11,9 +10,13 @@
 //   ৩) একটাই সার্চ বক্স — অর্ডার নাম্বার (SFD-1042 / 1042), ফোন নম্বর, অথবা নাম।
 //      ইউজার সার্চে সেই ইউজারের কাস্টমার ও রাইডার দুই ভূমিকার অর্ডারই আসে,
 //      সাথে ইউজার সামারি (মোট / সম্পন্ন / বাতিল / ডিসপিউট)
-//   ৪) অর্ডার ডিটেইল মোডাল — রুট, দুই পক্ষ, অফার লিস্ট, ডিসপিউট, পুরো টাইমলাইন, চ্যাট
+//   ৪) অর্ডার ডিটেইল মোডাল — রুট, দুই পক্ষ, অফার লিস্ট, ডিসপিউট, পেমেন্ট প্রুফ,
+//      পুরো টাইমলাইন, চ্যাট (যেকোনো স্ট্যাটাসের অর্ডারের — সম্পন্ন/বাতিল সহ)
 //   ৫) "🔔 রাইডারদের এলার্ট দিন" বাটন — open অর্ডারে; কনফার্মেশন মোডালে টার্গেট বেছে
 //      মেসেজ এডিট করা যায়; একই অর্ডারে ৫ মিনিট কুলডাউন (সার্ভারে চেক)
+//   ৫.১) "❌ অর্ডার বাতিল করুন" — admin/মডারেটর চলমান (open/confirmed/delivered) অর্ডার
+//      বাতিল করতে পারে, কারণ লেখা বাধ্যতামূলক (RPC admin_cancel_order); কাস্টমার ও
+//      accepted রাইডারের কাছে কারণসহ নোটিফিকেশন যায়; বাতিল অর্ডারের ডিটেইলে কারণ দেখায়
 //   ৬) লাইভ আপডেট — order_events এ Supabase Realtime + ১৫ সেকেন্ড পোলিং ফলব্যাক;
 //      নতুন অর্ডার এলে হালকা বীপ (🔔/🔕 বাটনে অন-অফ)
 //
@@ -22,6 +25,8 @@
 //
 // ডেটা সব RPC থেকে (সার্ভারে is_admin_or_mod চেক): admin_orders_overview,
 // admin_search_orders, admin_get_order, admin_order_feed, admin_alert_riders।
+// পেমেন্ট প্রুফ আলাদা query (delivery_payment_proofs, admin RLS) + delivery-proofs
+// bucket PRIVATE বলে storageSigned.js দিয়ে signed URL।
 // নোট: ডায়নামিক HTML JS দিয়ে তৈরি, তাই স্টাইল is:global এবং ক্লাস do- দিয়ে শুরু।
 // ============================================================
 
@@ -149,6 +154,31 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
     </div>
   </div>
 
+  <!-- ===== বাতিল মোডাল ===== -->
+  <div class="do-overlay" id="doCancelOverlay">
+    <div class="do-sheet" role="dialog" aria-label="অর্ডার বাতিল">
+      <div class="do-grip"></div>
+      <button type="button" class="do-x" id="doCancelClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      <h3 class="do-sheet-title">❌ অর্ডার বাতিল করুন</h3>
+      <p class="do-sheet-sub" id="cancelOrderLine"></p>
+
+      <p class="do-label">বাতিলের কারণ <small>(বাধ্যতামূলক — কাস্টমার ও রাইডার দেখতে পাবেন)</small></p>
+      <textarea id="cancelReason" class="do-textarea" rows="3" maxlength="300" placeholder="যেমন: ভুয়া অর্ডার, দুই পক্ষ বাতিলে রাজি, রাইডার পাওয়া যাচ্ছে না"></textarea>
+      <p class="do-hint" id="cancelCount">০/৩০০</p>
+
+      <p class="do-hint">বাতিল করলে এটা ফেরানো যাবে না। কারো স্ট্যাটে কিছু যোগ হবে না, আর কাস্টমার ও (থাকলে) রাইডারের কাছে নোটিফিকেশন যাবে।</p>
+      <p class="do-alert-result" id="cancelResult" style="display:none;"></p>
+
+      <button type="button" class="do-btn danger-solid" id="cancelSend"><i class="fas fa-ban"></i> নিশ্চিত, বাতিল করুন</button>
+    </div>
+  </div>
+
+  <!-- ===== পেমেন্ট প্রুফ lightbox ===== -->
+  <div class="do-lightbox" id="doLightbox">
+    <button type="button" class="do-lightbox-close" id="doLightboxClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+    <img id="doLightboxImg" src="" alt="" />
+  </div>
+
   <ChatModal />
 
   <style is:global>
@@ -249,6 +279,9 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
     .do-btn.ghost { background: #F1F5F9; color: #1B2A4A; }
     .do-btn.alert { background: #FFF0EA; color: #E8531D; }
     .do-btn.blue { background: #E0F2FE; color: #0369A1; }
+    .do-btn.danger { background: #FEE2E2; color: #B91C1C; }
+    .do-btn.danger-solid { background: #DC2626; color: #fff; width: 100%; padding: 13px; font-size: 0.9rem; margin-top: 10px; }
+    .do-btn.danger-solid:disabled { opacity: 0.55; cursor: not-allowed; }
 
     .do-more { display: block; margin: 16px auto 0; padding: 11px 26px; border-radius: 99px; border: 1.5px solid #E5EAF0; background: #fff; font-weight: 700; color: #1B2A4A; cursor: pointer; font-family: inherit; }
     .do-empty { text-align: center; padding: 60px 0; color: #9AA8BC; }
@@ -292,6 +325,15 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
     .do-actions .do-btn { flex: 1 1 140px; }
     .do-cooldown { font-size: 0.74rem; color: #B45309; font-weight: 700; margin-top: 6px; }
 
+    /* পেমেন্ট প্রুফ */
+    .do-proofs { display: flex; gap: 8px; flex-wrap: wrap; }
+    .do-proof-thumb { width: 72px; height: 72px; border-radius: 12px; overflow: hidden; cursor: pointer; border: 1px solid #EEF3F9; background: #F4F7FC; }
+    .do-proof-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .do-lightbox { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.88); z-index: 1100; align-items: center; justify-content: center; padding: 20px; }
+    .do-lightbox.active { display: flex; }
+    .do-lightbox img { max-width: 100%; max-height: 90vh; border-radius: 12px; }
+    .do-lightbox-close { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; border-radius: 50%; background: rgba(255, 255, 255, 0.15); border: none; color: #fff; font-size: 1.1rem; cursor: pointer; }
+
     .do-label { font-size: 0.78rem; font-weight: 800; color: #1B2A4A; margin: 14px 0 6px; }
     .do-label small { font-weight: 500; color: #9AA8BC; }
     .do-radio { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; color: #1B2A4A; padding: 6px 0; cursor: pointer; }
@@ -306,11 +348,13 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
+    import { getSignedUrls } from '../../lib/storageSigned.js';
 
     // ================= হেল্পার =================
     const $ = (id) => document.getElementById(id);
     const PAGE = 20;
     const POLL_MS = 15000;
+    const PROOF_BUCKET = 'delivery-proofs';
 
     const STATUS_LABEL = {
       open: 'খোলা', confirmed: 'কনফার্ম', delivered: 'ডেলিভারড', completed: 'সম্পন্ন',
@@ -673,6 +717,32 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       }
     }
 
+    // ================= পেমেন্ট প্রুফ lightbox =================
+    function openLightbox(url) {
+      $('doLightboxImg').src = url;
+      $('doLightbox').classList.add('active');
+    }
+
+    function closeLightbox() {
+      $('doLightbox').classList.remove('active');
+      $('doLightboxImg').src = '';
+    }
+
+    // অর্ডারের পেমেন্ট প্রুফ ছবি আনা (admin RLS) + signed URL বানানো। ব্যর্থ হলে খালি লিস্ট।
+    async function loadProofUrls(requestId) {
+      try {
+        const { data } = await supabase
+          .from('delivery_payment_proofs')
+          .select('image_urls')
+          .eq('request_id', requestId);
+        const raw = (data || []).flatMap((p) => p.image_urls || []);
+        if (raw.length === 0) return [];
+        return await getSignedUrls(supabase, PROOF_BUCKET, raw);
+      } catch (e) {
+        return [];
+      }
+    }
+
     // ================= ডিটেইল মোডাল =================
     let cooldownTimer = null;
 
@@ -703,6 +773,8 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       const r = data.rider;
       const price = o.price;
 
+      const proofUrls = await loadProofUrls(o.id);
+
       const offersHtml = (data.offers || []).length
         ? data.offers.map((f) => `
             <div class="do-offer">
@@ -726,6 +798,23 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
           <div class="do-reason">${esc(o.dispute_reason || 'কারণ উল্লেখ নেই')}</div>
           ${o.dispute_resolution ? `<p class="do-text" style="margin-top:8px;"><b>সিদ্ধান্ত:</b> ${o.dispute_resolution === 'resolve_completed' ? 'রাইডারের পক্ষে (সম্পন্ন)' : o.dispute_resolution === 'resolve_cancelled' ? 'ডিল বাতিল' : esc(o.dispute_resolution)}</p>` : ''}
           ${eff === 'disputed' ? `<a class="do-btn blue" style="margin-top:8px;text-decoration:none;" href="/admin/delivery-disputes?q=${encodeURIComponent(o.order_no)}"><i class="fas fa-scale-balanced"></i> ডিসপিউট পেজে রিজলভ করুন</a>` : ''}
+        </div>` : '';
+
+      const canCancel = ['open', 'confirmed', 'delivered'].includes(eff);
+
+      const cancelInfoHtml = (eff === 'cancelled' && o.cancel_reason) ? `
+        <div class="do-sec">
+          <h5>বাতিলের কারণ</h5>
+          <div class="do-reason">${esc(o.cancel_reason)}</div>
+          ${o.cancelled_at ? `<p class="do-text" style="margin-top:6px;color:#8FA0BC;font-size:0.76rem;">অ্যাডমিন/মডারেটর কর্তৃক · ${fullDate(o.cancelled_at)}</p>` : ''}
+        </div>` : '';
+
+      const proofsHtml = proofUrls.length > 0 ? `
+        <div class="do-sec">
+          <h5>পেমেন্ট প্রুফ (${bn(proofUrls.length)})</h5>
+          <div class="do-proofs">
+            ${proofUrls.map((u) => `<div class="do-proof-thumb" data-img="${esc(u)}"><img src="${esc(u)}" alt="পেমেন্ট প্রুফ" loading="lazy" /></div>`).join('')}
+          </div>
         </div>` : '';
 
       $('doDetailBody').innerHTML = `
@@ -757,16 +846,20 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
 
         <div class="do-sec"><h5>অফার (${bn((data.offers || []).length)})</h5>${offersHtml}</div>
         ${disputeHtml}
+        ${cancelInfoHtml}
+        ${proofsHtml}
 
         <div class="do-sec"><h5>টাইমলাইন</h5><ul class="do-tl">${tlHtml || '<li>কোনো ইভেন্ট নেই</li>'}</ul></div>
 
         <div class="do-actions">
           ${eff === 'open' ? `<button type="button" class="do-btn alert" id="detailAlertBtn"><i class="fas fa-bell"></i> রাইডারদের এলার্ট দিন</button>` : ''}
+          ${canCancel ? `<button type="button" class="do-btn danger" id="detailCancelBtn"><i class="fas fa-ban"></i> অর্ডার বাতিল করুন</button>` : ''}
           ${data.chat_count > 0 ? `<button type="button" class="do-btn ghost" id="detailChatBtn"><i class="fas fa-comment-dots"></i> চ্যাট দেখুন (${bn(data.chat_count)})</button>` : ''}
         </div>
         <p class="do-cooldown" id="detailCooldown" style="display:none;"></p>`;
 
       $('detailAlertBtn')?.addEventListener('click', () => openAlert(data));
+      $('detailCancelBtn')?.addEventListener('click', () => openCancel(data));
       $('detailChatBtn')?.addEventListener('click', () => {
         closeDetail();
         window.openChatModal?.({
@@ -774,6 +867,9 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
           otherPartyName: `${c.name || 'কাস্টমার'} ↔ ${r?.name || 'রাইডার'}`,
           readOnly: true,
         });
+      });
+      $('doDetailBody').querySelectorAll('.do-proof-thumb').forEach((thumb) => {
+        thumb.addEventListener('click', () => openLightbox(thumb.dataset.img));
       });
 
       startCooldownLabel(data.alert_cooldown_secs || 0);
@@ -877,6 +973,67 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       } else {
         btn.disabled = false;
       }
+    }
+
+    // ================= অর্ডার বাতিল (admin/মডারেটর) =================
+    let cancelTarget = null;
+
+    function openCancel(src) {
+      cancelTarget = src.order;
+      const o = cancelTarget;
+      $('cancelOrderLine').textContent = `${catName(o.category)} অর্ডার #${o.order_no} · ${o.upazila || ''} · ${money(o.price)}`;
+      $('cancelReason').value = '';
+      $('cancelCount').textContent = bn(0) + '/' + bn(300);
+      const res = $('cancelResult');
+      res.style.display = 'none';
+      res.className = 'do-alert-result';
+      $('cancelSend').disabled = false;
+      openOverlay('doCancelOverlay');
+    }
+
+    async function sendCancel() {
+      if (!cancelTarget) return;
+      const btn = $('cancelSend');
+      const res = $('cancelResult');
+      const reason = $('cancelReason').value.trim();
+
+      res.style.display = 'block';
+      if (reason.length < 3) {
+        res.className = 'do-alert-result err';
+        res.textContent = 'বাতিলের কারণ লিখুন (কমপক্ষে ৩ অক্ষর)।';
+        return;
+      }
+
+      btn.disabled = true;
+      const { data, error } = await supabase.rpc('admin_cancel_order', {
+        p_request_id: cancelTarget.id,
+        p_reason: reason,
+      });
+
+      if (error) {
+        res.className = 'do-alert-result err';
+        res.textContent = 'বাতিল করা যায়নি: ' + error.message;
+        btn.disabled = false;
+        return;
+      }
+      if (!data?.ok) {
+        res.className = 'do-alert-result err';
+        if (data?.reason === 'reason_required') res.textContent = 'বাতিলের কারণ লিখুন (কমপক্ষে ৩ অক্ষর)।';
+        else if (data?.reason === 'reason_too_long') res.textContent = 'কারণ সর্বোচ্চ ৩০০ অক্ষরের হতে পারে।';
+        else if (data?.reason === 'not_cancellable') res.textContent = 'এই অর্ডারটি এখন আর বাতিল করা যাবে না (স্ট্যাটাস: ' + (STATUS_LABEL[data.status] || data.status) + ')।';
+        else res.textContent = 'অর্ডারটি পাওয়া যায়নি।';
+        btn.disabled = false;
+        return;
+      }
+
+      res.className = 'do-alert-result ok';
+      res.textContent = '✅ অর্ডার বাতিল হয়েছে, দুই পক্ষকে জানানো হয়েছে';
+      setTimeout(() => {
+        closeOverlay('doCancelOverlay');
+        if ($('doDetailOverlay').classList.contains('active') && state.currentOrder) openDetail(state.currentOrder);
+        loadOverview();
+        refreshCurrent();
+      }, 1200);
     }
 
     // ================= রিয়েলটাইম + পোলিং =================
@@ -992,9 +1149,19 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       $('doDetailOverlay').addEventListener('click', (e) => { if (e.target === $('doDetailOverlay')) closeDetail(); });
       $('doAlertClose').addEventListener('click', () => closeOverlay('doAlertOverlay'));
       $('doAlertOverlay').addEventListener('click', (e) => { if (e.target === $('doAlertOverlay')) closeOverlay('doAlertOverlay'); });
+      $('doCancelClose').addEventListener('click', () => closeOverlay('doCancelOverlay'));
+      $('doCancelOverlay').addEventListener('click', (e) => { if (e.target === $('doCancelOverlay')) closeOverlay('doCancelOverlay'); });
+      $('cancelReason').addEventListener('input', (e) => {
+        $('cancelCount').textContent = bn(e.target.value.length) + '/' + bn(300);
+      });
+      $('cancelSend').addEventListener('click', sendCancel);
+      $('doLightboxClose').addEventListener('click', closeLightbox);
+      $('doLightbox').addEventListener('click', (e) => { if (e.target === $('doLightbox')) closeLightbox(); });
       document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
-        if ($('doAlertOverlay').classList.contains('active')) closeOverlay('doAlertOverlay');
+        if ($('doLightbox').classList.contains('active')) closeLightbox();
+        else if ($('doCancelOverlay').classList.contains('active')) closeOverlay('doCancelOverlay');
+        else if ($('doAlertOverlay').classList.contains('active')) closeOverlay('doAlertOverlay');
         else if ($('doDetailOverlay').classList.contains('active')) closeDetail();
       });
 
