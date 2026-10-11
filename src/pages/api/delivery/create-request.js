@@ -6,6 +6,9 @@
 // দিয়ে reject। ফ্রন্টএন্ডের নোটিশ বাইপাস করে সরাসরি API কল করলেও
 // অর্ডার তৈরি হবে না।
 //
+// আপডেট (নিজের অর্ডার): কাস্টমার নিজেও হিরো হলে ম্যাচিং হিরো তালিকা থেকে তাকে বাদ দেওয়া হয় —
+// নিজের রিকোয়েস্টের Telegram/in-app/push নোটিফিকেশন নিজের হিরো আইডিতে যাবে না।
+//
 // আপডেট (N19): sendBulkNotifications এ priority: 'high' যোগ — নতুন রিকোয়েস্ট মিলে যাওয়া হিরোদের কাছে জরুরি হিসেবে যাওয়া দরকার।
 // ============================================================
 // API এন্ডপয়েন্ট: কাস্টমার নতুন ডেলিভারি রিকোয়েস্ট তৈরি করবে (/api/delivery/create-request)
@@ -169,7 +172,9 @@ export async function POST({ request }) {
       .select('profile_id, profiles!delivery_riders_profile_id_fkey(telegram_chat_id)')
       .eq('verification_status', 'approved')
       .eq(finalCategory === 'ride' ? 'offers_ride' : 'offers_delivery', true)
-      .eq('upazila', upazila);
+      .eq('upazila', upazila)
+      // কাস্টমার নিজে হিরো হলে নিজের অর্ডারের নোটিফিকেশন (Telegram + in-app/push) নিজে পাবে না
+      .neq('profile_id', user.id);
 
     if (finalVehicleType !== 'any') {
       heroQuery = heroQuery.eq('vehicle_type', finalVehicleType);
