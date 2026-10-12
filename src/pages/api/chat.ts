@@ -16,6 +16,8 @@
 //         ৩) প্রতিটা রিকোয়েস্টে Supabase থেকে হালকা লাইভ স্ট্যাটস (মোট
 //            সক্রিয় লিস্টিং সংখ্যা, মোট সক্রিয় ক্লাব সংখ্যা) টেনে
 //            system prompt-এ যোগ করা হয় — real-time তথ্য থাকে
+// আপডেট (ধাপ ২): ইতিহাসের শুরুর model টার্ন বাদ ও পরপর একই role জোড়া (Gemini-র নিয়ম মানতে);
+//         ব্যর্থ/সীমার উত্তরে { error: true } — ক্লায়েন্ট এগুলো ইতিহাসে রাখে না।
 // আপডেট (এআই চ্যাট ধাপ ১):
 //         ১) রেট লিমিট: IP ঘণ্টায় ২০, দিনে ৮০, মোট দিনে ৩০০০ (check_ai_chat_limit RPC,
 //            শুধু service role)। মেসেজ সর্বোচ্চ ৫০০ অক্ষর, রিকোয়েস্ট বডি সীমিত।
@@ -187,8 +189,9 @@ async function hashIp(ip: string, salt: string): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function jsonReply(reply: string, status = 200): Response {
-  return new Response(JSON.stringify({ reply }), {
+// isError=true হলে ক্লায়েন্ট এই উত্তরটা কথোপকথনের ইতিহাসে (Gemini-তে ফেরত পাঠানো) রাখে না
+function jsonReply(reply: string, status = 200, isError = false): Response {
+  return new Response(JSON.stringify(isError ? { reply, error: true } : { reply }), {
     status,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
@@ -215,24 +218,24 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
   try {
     const raw = await request.text();
     if (raw.length > MAX_BODY_CHARS) {
-      return jsonReply('দুঃখিত, বার্তাটি অনেক বড়। ছোট করে লিখে পাঠান।', 413);
+      return jsonReply('দুঃখিত, বার্তাটি অনেক বড়। ছোট করে লিখে পাঠান।', 413, true);
     }
 
     let body: any;
     try {
       body = JSON.parse(raw);
     } catch {
-      return jsonReply('দুঃখিত, অনুরোধ বোঝা যায়নি। আবার লিখে পাঠান।', 400);
+      return jsonReply('দুঃখিত, অনুরোধ বোঝা যায়নি। আবার লিখে পাঠান।', 400, true);
     }
 
     const userMessage: string = (body?.message ?? '').toString().trim();
     const rawHistory = Array.isArray(body?.history) ? body.history : [];
 
     if (!userMessage) {
-      return jsonReply('দুঃখিত, কোনো প্রশ্ন পাওয়া যায়নি। আবার লিখে পাঠান।', 400);
+      return jsonReply('দুঃখিত, কোনো প্রশ্ন পাওয়া যায়নি। আবার লিখে পাঠান।', 400, true);
     }
     if (userMessage.length > MAX_MESSAGE_CHARS) {
-      return jsonReply(`সর্বোচ্চ ${MAX_MESSAGE_CHARS} অক্ষর লিখতে পারবেন, একটু ছোট করে লিখুন।`, 400);
+      return jsonReply(`সর্বোচ্চ ${MAX_MESSAGE_CHARS} অক্ষর লিখতে পারবেন, একটু ছোট করে লিখুন।`, 400, true);
     }
 
     const history: HistoryTurn[] = rawHistory
@@ -246,12 +249,22 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       .slice(-MAX_HISTORY_TURNS * 2)
       .map((h: any) => ({ role: h.role, text: h.text.toString().trim().slice(0, MAX_HISTORY_TEXT_CHARS) }));
 
+    // Gemini-র জন্য ইতিহাস গুছানো: শুরুতে model টার্ন (যেমন গ্রিটিং) থাকলে বাদ,
+    // পরপর একই role-এর টার্ন জোড়া লাগানো (ইউজার-এরর বার্তা বাদ গেলে এমন হতে পারে)
+    while (history.length > 0 && history[0].role === 'model') history.shift();
+    const tidy: HistoryTurn[] = [];
+    for (const h of history) {
+      const last = tidy[tidy.length - 1];
+      if (last && last.role === h.role) last.text = `${last.text}\n${h.text}`.slice(0, MAX_HISTORY_TEXT_CHARS);
+      else tidy.push({ ...h });
+    }
+
     const apiKey = import.meta.env.GEMINI_API_KEY;
 
     if (!apiKey) {
       console.error('Chat API: GEMINI_API_KEY missing in environment');
       await report('chat_no_api_key', 'AI চ্যাট: GEMINI_API_KEY নেই', 'GEMINI_API_KEY environment variable পাওয়া যায়নি');
-      return jsonReply('দুঃখিত, এই মুহূর্তে সহায়ক সাময়িকভাবে বন্ধ আছে। অনুগ্রহ করে সরাসরি যোগাযোগ করুন।');
+      return jsonReply('দুঃখিত, এই মুহূর্তে সহায়ক সাময়িকভাবে বন্ধ আছে। অনুগ্রহ করে সরাসরি যোগাযোগ করুন।', 200, true);
     }
 
     // ---------- রেট লিমিট (service role থাকলে) ----------
@@ -277,7 +290,9 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
         return jsonReply(
           reason === 'global_day'
             ? 'আজ সহায়কে অনেক প্রশ্ন এসেছে, তাই এখন উত্তর দেওয়া যাচ্ছে না। কাল আবার চেষ্টা করুন অথবা সরাসরি যোগাযোগ করুন।'
-            : 'অল্প সময়ে অনেক প্রশ্ন হয়ে গেছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।'
+            : 'অল্প সময়ে অনেক প্রশ্ন হয়ে গেছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।',
+          200,
+          true
         );
       }
     }
@@ -286,7 +301,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     const systemContext = buildSystemContext(liveStatsText);
 
     const contents = [
-      ...history.map((h) => ({
+      ...tidy.map((h) => ({
         role: h.role,
         parts: [{ text: h.text }],
       })),
@@ -325,7 +340,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
         geminiRes.status,
         geminiRes.status
       );
-      return jsonReply(REPLY_BUSY);
+      return jsonReply(REPLY_BUSY, 200, true);
     }
 
     const data = await geminiRes.json();
@@ -346,7 +361,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
         'AI চ্যাট: Gemini খালি উত্তর দিয়েছে',
         `finishReason=${finishReason || 'none'} blockReason=${String(data?.promptFeedback?.blockReason || 'none')}`
       );
-      return jsonReply('দুঃখিত, এই প্রশ্নের উত্তর বুঝতে পারিনি। অনুগ্রহ করে আরেকটু বিস্তারিত লিখুন।');
+      return jsonReply('দুঃখিত, এই প্রশ্নের উত্তর বুঝতে পারিনি। অনুগ্রহ করে আরেকটু বিস্তারিত লিখুন।', 200, true);
     }
 
     if (finishReason === 'MAX_TOKENS') {
@@ -361,6 +376,6 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       'AI চ্যাট: অপ্রত্যাশিত এরর',
       `${err?.name || 'Error'}: ${String(err?.message || err).slice(0, 120)}`
     );
-    return jsonReply('দুঃখিত, একটা সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।');
+    return jsonReply('দুঃখিত, একটা সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।', 200, true);
   }
 };
