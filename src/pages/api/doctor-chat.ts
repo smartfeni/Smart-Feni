@@ -12,15 +12,25 @@
 //
 // প্রাইভেসি: ইউজারের লেখা ডাটাবেজে/লগে সেভ হয় না। শুধু কাউন্ট (doctor_chat_stats)।
 // env: GEMINI_API_KEY, PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-// মডেল পুরনো হয়ে গেলে শুধু MODEL_NAME বদলান (chat.ts-এর মাইগ্রেশন ইতিহাস দেখুন)
+// মডেল পুরনো হয়ে গেলে শুধু src/lib/geminiConfig.js বদলান
+//
+// আপডেট (এআই চ্যাট ধাপ ১):
+//   • সার্ভার এরর (Gemini ব্যর্থ/কোটা, খারাপ JSON, লিমিট RPC ব্যর্থ, env নেই, অপ্রত্যাশিত)
+//     /admin/errors-এ রিপোর্ট হয়। প্রাইভেসি: ইউজারের লেখা বা AI-র উত্তর কখনো রিপোর্টে যায় না,
+//     শুধু কারণ/কোড (finishReason, HTTP স্ট্যাটাস)।
+//   • JSON কেটে গেলে (maxOutputTokens) এড়াতে সীমা ৫০০ → ১২০০; খারাপ JSON বা Gemini ৫xx হলে একবার আবার চেষ্টা
+//   • মডেল নাম geminiConfig.js থেকে
 
 export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
+import { geminiUrl } from '../../lib/geminiConfig.js';
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 // ===== কনফিগ (পরে সংখ্যা বদলাতে শুধু এখানে হাত দিন) =====
-const MODEL_NAME = 'gemini-3.1-flash-lite';
+const MAX_OUTPUT_TOKENS = 1200;
+const GEMINI_TIMEOUT_MS = 8000;
 const LIMIT_PER_IP_HOUR = 10;
 const LIMIT_PER_IP_DAY = 30;
 const LIMIT_GLOBAL_DAY = 800;
@@ -173,6 +183,10 @@ type কখন কী:
 `.trim();
 }
 
+function finishReasonOf(data: any): string {
+  return String(data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason || 'none');
+}
+
 function parseGemini(data: any): { type: string; specialties: string[]; reply: string } | null {
   const parts = data?.candidates?.[0]?.content?.parts;
   if (!Array.isArray(parts)) return null;
@@ -206,6 +220,10 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
   const db = supabaseUrl && serviceKey
     ? createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
     : null;
+
+  // এরর রিপোর্ট — ইউজারের লেখা/AI-র উত্তর কখনো নয়, শুধু কারণ ও কোড
+  const report = (action: string, title: string, message: string, code?: string | number, status?: number) =>
+    reportServerError(db, { route: '/api/doctor-chat', action, title, message, code, status });
 
   // কাউন্ট-অনলি স্ট্যাট (ব্যর্থ হলেও চ্যাট থামে না, কোনো ইউজার-টেক্সট নেই)
   const stat = async (kind: string, specialties: string[] = []) => {
@@ -247,6 +265,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
 
     if (!db || !apiKey) {
       console.error('doctor-chat: env missing (supabase/gemini)');
+      await report('doctor_chat_env_missing', 'ডাক্তার AI চ্যাট: env নেই', `gemini=${apiKey ? 'ok' : 'missing'} db=${db ? 'ok' : 'missing'}`);
       return json({ type: 'error', reply: ERROR_REPLY, specialties: [], phone: CONTACT_PHONE });
     }
 
@@ -265,6 +284,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     if (limitErr || !limitRes) {
       // সুরক্ষার জন্য ক্লোজড-ফেইল: লিমিট চেক না হলে Gemini কল হবে না
       console.error('doctor-chat: limit rpc failed', limitErr?.message);
+      await report('doctor_chat_limit_rpc', 'ডাক্তার AI চ্যাট: রেট লিমিট চেক ব্যর্থ', limitErr?.message || 'empty result', limitErr?.code);
       return json({ type: 'error', reply: ERROR_REPLY, specialties: [], phone: CONTACT_PHONE });
     }
     if (!limitRes.allowed) {
@@ -282,40 +302,74 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       .slice(-MAX_HISTORY_TURNS)
       .map((h: any) => ({ role: h.role, parts: [{ text: String(h.text).trim().slice(0, MAX_MESSAGE_CHARS) }] }));
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: buildSystemPrompt(specs) }] },
-          contents: [...history, { role: 'user', parts: [{ text: message }] }],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 500,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: 'OBJECT',
-              properties: {
-                type: { type: 'STRING', enum: ['recommend', 'clarify', 'emergency', 'out_of_scope'] },
-                specialties: { type: 'ARRAY', items: { type: 'STRING' } },
-                reply: { type: 'STRING' },
-              },
-              required: ['type', 'specialties', 'reply'],
-            },
+    const geminiBody = JSON.stringify({
+      system_instruction: { parts: [{ text: buildSystemPrompt(specs) }] },
+      contents: [...history, { role: 'user', parts: [{ text: message }] }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            type: { type: 'STRING', enum: ['recommend', 'clarify', 'emergency', 'out_of_scope'] },
+            specialties: { type: 'ARRAY', items: { type: 'STRING' } },
+            reply: { type: 'STRING' },
           },
-        }),
-      }
-    );
+          required: ['type', 'specialties', 'reply'],
+        },
+      },
+    });
 
-    if (!geminiRes.ok) {
-      console.error('doctor-chat: Gemini error', geminiRes.status, (await geminiRes.text()).slice(0, 300));
-      await stat('error');
-      return json({ type: 'error', reply: ERROR_REPLY, specialties: [], phone: CONTACT_PHONE });
+    // সর্বোচ্চ ২ বার চেষ্টা: Gemini ৫xx/নেটওয়ার্ক সমস্যা বা খারাপ JSON হলে একবার আবার; ৪xx/৪২৯-এ আবার নয়
+    let parsed: { type: string; specialties: string[]; reply: string } | null = null;
+    let failAction = '';
+    let failTitle = '';
+    let failMsg = '';
+    let failCode: string | number | undefined;
+    for (let attempt = 1; attempt <= 2 && !parsed; attempt++) {
+      let geminiRes: Response;
+      try {
+        geminiRes = await fetch(geminiUrl(apiKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+          body: geminiBody,
+        });
+      } catch (e: any) {
+        failAction = 'doctor_chat_gemini_network';
+        failTitle = 'ডাক্তার AI চ্যাট: Gemini-তে পৌঁছানো যায়নি';
+        failMsg = String(e?.name || 'Error');
+        continue;
+      }
+
+      if (!geminiRes.ok) {
+        const errText = (await geminiRes.text()).slice(0, 300);
+        console.error('doctor-chat: Gemini error', geminiRes.status, errText);
+        let errStatus = '';
+        try { errStatus = String(JSON.parse(errText)?.error?.status || ''); } catch { /* উপেক্ষা */ }
+        const quota = geminiRes.status === 429;
+        failAction = quota ? 'doctor_chat_gemini_quota' : 'doctor_chat_gemini_error';
+        failTitle = quota ? 'ডাক্তার AI চ্যাট: Gemini কোটা শেষ / রেট লিমিট' : 'ডাক্তার AI চ্যাট: Gemini API ব্যর্থ';
+        failMsg = errStatus || 'Gemini API non-OK response';
+        failCode = geminiRes.status;
+        if (geminiRes.status < 500) break; // ৪xx/৪২৯ আবার চেষ্টা করে লাভ নেই
+        continue;
+      }
+
+      let data: any = null;
+      try { data = await geminiRes.json(); } catch { data = null; }
+      parsed = parseGemini(data);
+      if (!parsed) {
+        failAction = 'doctor_chat_bad_json';
+        failTitle = 'ডাক্তার AI চ্যাট: Gemini-র উত্তর বোঝা যায়নি (JSON)';
+        failMsg = `finishReason=${finishReasonOf(data)}`;
+        failCode = undefined;
+      }
     }
 
-    const parsed = parseGemini(await geminiRes.json());
     if (!parsed) {
+      await report(failAction || 'doctor_chat_gemini_error', failTitle || 'ডাক্তার AI চ্যাট: Gemini ব্যর্থ', failMsg || 'unknown', failCode, typeof failCode === 'number' ? failCode : undefined);
       await stat('error');
       return json({ type: 'error', reply: ERROR_REPLY, specialties: [], phone: CONTACT_PHONE });
     }
@@ -360,6 +414,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     return json({ type: 'clarify', reply, specialties: [] });
   } catch (err: any) {
     console.error('doctor-chat: unexpected error', err?.message || err);
+    await report('doctor_chat_unexpected', 'ডাক্তার AI চ্যাট: অপ্রত্যাশিত এরর', `${err?.name || 'Error'}: ${String(err?.message || err).slice(0, 100)}`);
     return json({ type: 'error', reply: ERROR_REPLY, specialties: [], phone: CONTACT_PHONE });
   }
 };
