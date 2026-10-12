@@ -4,6 +4,7 @@
 //   import { reportError, initErrorReporter } from '../lib/errorReporter.js';
 //   reportError({ kind: 'db_block', action: 'profile_save', message: error.message, code: error.code, title: 'প্রোফাইল সেভ ফেইল' });
 //   initErrorReporter(); // BaseLayout থেকে একবার (ধাপ ৩)
+// মেসেজ থেকে টোকেন, ইমেইল, ফোন নম্বর ও URL query মুছে ফেলা হয় (ব্যক্তিগত তথ্য লগে জমে না)।
 // এই ফাইল কখনো throw করে না।
 
 const MAX_MSG = 300;
@@ -39,6 +40,8 @@ function isIgnorable(message, stack, filename) {
 function cleanMessage(message) {
   let m = String(message == null ? '' : message);
   m = m.replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[token]'); // JWT
+  m = m.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]'); // ইমেইল মাস্ক
+  m = m.replace(/(?:\+?88)?01[3-9]\d{8}/g, '[phone]'); // বাংলাদেশি ফোন নম্বর মাস্ক
   m = m.replace(/[?#][^\s"')\]]*/g, ''); // URL query / hash কেটে ফেলা
   m = m.replace(/\s+/g, ' ').trim();
   return m.slice(0, MAX_MSG);
