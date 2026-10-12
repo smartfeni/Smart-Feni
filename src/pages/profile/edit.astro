@@ -46,6 +46,9 @@
 // ওই অপশন সবার আগে; ভিউ ব্যাজে "ডোনার নন" দেখায়; ডোনার টগল চালু করা যায় না
 // (ব্লাড গ্রুপ বদলাতে বলা হয়); সেভের সময় NOT_DONOR হলে is_blood_donor বন্ধ হয়।
 //
+// আপডেট (ছবি আপলোড): ছবি ফেইল হলে ইউজারকে কারণ + সমাধান দেখায়; বাকি তথ্য সেভ হয়,
+// ফর্ম খোলা থাকে ও ছবি রাখা থাকে (আবার সেভ চাপা যায়)।
+//
 // আপডেট (একাধিক গাড়ি): একজন ইউজারের একাধিক car-rental লিস্টিং থাকতে পারে (আগে
 // .maybeSingle() ২+ রো পেলে PGRST116 দিত, কার্ড লুকিয়ে যেত)। এখন প্রতিটা গাড়ির আলাদা
 // ভাঁজ-করা কার্ড (ক্লিক করলে খোলে; একটাই থাকলে খোলা), শিরোনামে লিস্টিংয়ের title।
@@ -1645,6 +1648,52 @@ const upazilas = [
     reader.readAsDataURL(selectedPhotoFile);
   });
 
+  // ছবি আপলোড ফেইল হলে ইউজারকে কারণ + সমাধান বলার জন্য
+  function describeAvatarFailure(status, serverMsg) {
+    const msg = String(serverMsg || '');
+    if (status === 0) {
+      return {
+        reason: 'ইন্টারনেট সংযোগ পাওয়া যায়নি বা মাঝপথে ছুটে গেছে',
+        fix: 'নেট ঠিক আছে কিনা দেখে আবার "সেভ" চাপুন',
+      };
+    }
+    if (status === 401) {
+      return {
+        reason: 'লগইন সেশনের মেয়াদ শেষ হয়ে গেছে',
+        fix: 'পেজ রিফ্রেশ করুন (দরকার হলে আবার লগইন করুন), তারপর ছবি দিন',
+      };
+    }
+    if (status === 413 || /size|exceed|too large|payload/i.test(msg)) {
+      return {
+        reason: 'ছবির সাইজ অনেক বড়',
+        fix: 'অন্য একটি ছোট ছবি বেছে নিন',
+      };
+    }
+    if (status === 415 || /mime|not supported|unsupported|invalid.*type/i.test(msg)) {
+      return {
+        reason: 'এই ধরনের ছবি ফাইল সাপোর্ট করে না',
+        fix: 'JPG বা PNG ছবি বেছে নিন',
+      };
+    }
+    if (status === 400) {
+      return {
+        reason: 'ছবিটি সার্ভারে পৌঁছায়নি',
+        fix: 'ছবিটি আবার বেছে নিয়ে "সেভ" চাপুন',
+      };
+    }
+    if (status >= 500) {
+      return {
+        reason: 'সার্ভারে সাময়িক সমস্যা হয়েছে (আমাদের কাছে রিপোর্ট চলে গেছে)',
+        fix: 'কিছুক্ষণ পরে আবার "সেভ" চাপুন',
+      };
+    }
+    return {
+      reason: 'ছবি আপলোড করা যায়নি',
+      fix: 'আবার চেষ্টা করুন, সমস্যা থাকলে অন্য ছবি দিন',
+    };
+  }
+
+  // রিটার্ন: { url, problem } — সফল হলে problem = null, ব্যর্থ হলে url = null
   async function uploadAvatar(accessToken, file) {
     try {
       const formData = new FormData();
@@ -1656,20 +1705,36 @@ const upazilas = [
         body: formData,
       });
 
-      const result = await res.json();
+      // Vercel-এর নিজস্ব এরর (যেমন 413) HTML/টেক্সট হতে পারে — JSON না হলেও যেন না ভাঙে
+      let result = null;
+      try {
+        result = await res.json();
+      } catch (_) {
+        result = null;
+      }
 
       if (!res.ok) {
-        console.error('ছবি আপলোড এরর:', result.error);
+        console.error('ছবি আপলোড এরর:', result?.error);
         reportError({
           kind: 'api_fail',
           action: 'avatar_upload',
           title: 'প্রোফাইল ছবি আপলোড ব্যর্থ',
           message: `HTTP ${res.status}: ${result?.error || ''}`,
         });
-        return null;
+        return { url: null, problem: describeAvatarFailure(res.status, result?.error) };
       }
 
-      return result.url || null;
+      if (!result?.url) {
+        reportError({
+          kind: 'api_fail',
+          action: 'avatar_upload',
+          title: 'প্রোফাইল ছবি আপলোড ব্যর্থ',
+          message: 'HTTP 200 কিন্তু ছবির URL আসেনি',
+        });
+        return { url: null, problem: describeAvatarFailure(500, '') };
+      }
+
+      return { url: result.url, problem: null };
     } catch (err) {
       console.error('ছবি আপলোড নেটওয়ার্ক এরর:', err);
       reportError({
@@ -1678,7 +1743,7 @@ const upazilas = [
         title: 'প্রোফাইল ছবি আপলোড ব্যর্থ',
         message: err?.message || String(err),
       });
-      return null;
+      return { url: null, problem: describeAvatarFailure(0, '') };
     }
   }
 
@@ -1719,8 +1784,15 @@ const upazilas = [
     }
 
     let avatarUrl = null;
-    if (selectedPhotoFile && currentAccessToken) {
-      avatarUrl = await uploadAvatar(currentAccessToken, selectedPhotoFile);
+    let photoProblem = null;
+    if (selectedPhotoFile) {
+      if (currentAccessToken) {
+        const uploaded = await uploadAvatar(currentAccessToken, selectedPhotoFile);
+        avatarUrl = uploaded.url;
+        photoProblem = uploaded.problem;
+      } else {
+        photoProblem = describeAvatarFailure(401, '');
+      }
     }
 
     const updates = {
@@ -1748,6 +1820,18 @@ const upazilas = [
 
     currentProfile = { ...currentProfile, ...updates };
     renderProfileView(currentProfile);
+
+    if (photoProblem) {
+      // বাকি তথ্য সেভ হয়েছে, শুধু ছবি যায়নি — ফর্ম খোলা থাকবে, বেছে নেওয়া ছবিও থাকবে,
+      // যাতে ইউজার সমস্যা ঠিক করে আবার "সেভ" চাপতে পারে
+      showMsg(
+        profileMessage,
+        `তথ্য সেভ হয়েছে, কিন্তু ছবি আপলোড হয়নি। কারণ: ${photoProblem.reason}। সমাধান: ${photoProblem.fix}।`
+      );
+      return;
+    }
+
+    if (avatarUrl) selectedPhotoFile = null;
     showMsg(profileMessage, 'তথ্য সেভ হয়েছে ✓', 'success');
     setTimeout(closeEditMode, 900);
   });
