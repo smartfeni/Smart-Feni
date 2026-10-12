@@ -1,23 +1,17 @@
-<!-- path: src/pages/my-shop.astro -->
 ---
 // ============================================================
 // পেজ: আমার শপ (/my-shop) — ট্যাব-ভিত্তিক ড্যাশবোর্ড
-// (my-club.astro এর প্যাটার্নে রিফ্যাক্টর করা)
-// ট্যাব কম্পোনেন্টে ভাগ করা:
-//   ProfileEditTab — শপের প্রোফাইল
-//   ProductsTab — প্রোডাক্ট Add/Edit/Delete
-//   OrdersTab — অর্ডার হিস্ট্রি ও স্ট্যাটাস ট্র্যাকিং
-//   ModeratorsTab — মডারেটর ম্যানেজমেন্ট
-// profiles.shop_id দিয়ে shops টেবিলের সাথে লিংক (ওউনারের ক্ষেত্রে)
+// ট্যাব কম্পোনেন্ট: ProfileEditTab, ProductsTab, OrdersTab, ModeratorsTab
 //
-// ✅ ফিক্স করা হলো: এখন শপ ওউনার (is_shop_owner+shop_id) ছাড়াও
-// moderators টেবিলে entity_type='shop' + profile_id=user হিসেবে
-// যোগ করা মডারেটররাও এই পেজে ঢুকতে পারবে। মডারেটর হলে:
-//   - "মডারেটর" ট্যাব হাইড থাকবে (শুধু ওউনার মডারেটর ম্যানেজ করতে পারবে,
-//     RLS policy owner_manage_moderators অনুযায়ী)
-//   - can_edit_listings / can_delete_listings false হলে body তে
-//     mod-no-edit-listings / mod-no-delete ক্লাস বসবে (ProductsTab.astro
-//     এর CSS আগে থেকেই এই ক্লাসগুলো হ্যান্ডেল করার জন্য রেডি আছে)
+// ✅ আপডেট (একাধিক শপ):
+// - এক ইউজার একাধিক শপের ওউনার হতে পারে (shops.owner_id দিয়ে খোঁজা হয়,
+//   profiles.shop_id এখন শুধু ফলব্যাক)। মডারেটর হিসেবে যোগ করা শপও তালিকায় আসে।
+// - /my-shop → শপ ১টা হলে সরাসরি ড্যাশবোর্ড; একাধিক হলে আগে "শপ সিলেক্ট"
+//   তালিকা (প্রতিটা কার্ডে নতুন/পেন্ডিং অর্ডারের সংখ্যা ব্যাজ)।
+// - /my-shop?shop=<id> → সেই শপের ড্যাশবোর্ড। ?tab= আগের মতোই কাজ করে।
+// - একাধিক শপ থাকলে হেডারে "সব শপ" বাটন; "অর্ডার" ট্যাবেও পেন্ডিং সংখ্যা।
+// - মডারেটর পারমিশন এখন শপ-ভিত্তিক (যে শপ খোলা, তার পারমিশন)।
+// - ইভেন্ট smartfeni:shop-ready আগের মতোই (shopId, shop, isOwner, permissions)।
 // ============================================================
 
 export const prerender = false;
@@ -38,18 +32,35 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
         <p>লোড হচ্ছে...</p>
       </div>
 
+      <!-- ===== শপ সিলেক্টর (একাধিক শপ থাকলে) ===== -->
+      <div id="shopPicker" class="myshop-content" style="display:none;">
+        <div class="picker-head">
+          <h1><i class="fas fa-store"></i> আমার শপ</h1>
+          <p>কোন শপে যাবেন সিলেক্ট করুন</p>
+        </div>
+        <div id="shopPickerList" class="picker-list"></div>
+      </div>
+
       <div id="guardedContent" class="myshop-content" style="display:none;">
 
         <div class="myshop-header">
           <h1><i class="fas fa-store"></i> <span id="shopHeaderName"></span></h1>
-          <button type="button" class="profile-edit-link" id="profileEditLink">
-            <i class="fas fa-pen"></i> প্রোফাইল এডিট
-          </button>
+          <div class="header-actions">
+            <a href="/my-shop?all=1" class="all-shops-link" id="allShopsLink" style="display:none;">
+              <i class="fas fa-repeat"></i> সব শপ
+            </a>
+            <button type="button" class="profile-edit-link" id="profileEditLink">
+              <i class="fas fa-pen"></i> প্রোফাইল এডিট
+            </button>
+          </div>
         </div>
 
         <div class="myshop-tabs" id="myshopTabs">
           <button class="myshop-tab" data-tab="products"><i class="fas fa-box"></i> প্রোডাক্ট</button>
-          <button class="myshop-tab active" data-tab="orders"><i class="fas fa-receipt"></i> অর্ডার</button>
+          <button class="myshop-tab active" data-tab="orders">
+            <i class="fas fa-receipt"></i> অর্ডার
+            <span class="tab-badge" id="ordersTabBadge" style="display:none;"></span>
+          </button>
           <button class="myshop-tab" data-tab="moderators" id="moderatorsTabBtn"><i class="fas fa-users-gear"></i> মডারেটর</button>
         </div>
 
@@ -106,6 +117,29 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
       margin: 0 auto;
     }
 
+    .picker-head {
+      margin-bottom: 18px;
+    }
+
+    .picker-head h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .picker-head h1 i {
+      color: #FF6B35;
+    }
+
+    .picker-head p {
+      font-size: 0.86rem;
+      color: #5A6E85;
+    }
+
     .myshop-header {
       display: flex;
       align-items: center;
@@ -122,10 +156,38 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
       align-items: center;
       gap: 10px;
       margin-bottom: 0;
+      min-width: 0;
     }
 
     .myshop-header h1 i {
       color: #FF6B35;
+    }
+
+    .myshop-header h1 span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .header-actions {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .all-shops-link {
+      flex-shrink: 0;
+      color: #FF6B35;
+      font-size: 0.78rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      text-decoration: none;
+      padding: 6px 8px;
+      background: #FFF0EA;
+      border-radius: 20px;
     }
 
     .profile-edit-link {
@@ -185,13 +247,31 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
       color: #fff;
     }
 
+    .tab-badge {
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 10px;
+      background: #D92D20;
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .myshop-tab.active .tab-badge {
+      background: #fff;
+      color: #D92D20;
+    }
   </style>
 
   <!-- ============================================================
-       is:global জরুরি এখানে — ProfileEditTab, ProductsTab, OrdersTab,
-       ModeratorsTab আলাদা কম্পোনেন্ট, তাদের এলিমেন্টে my-shop.astro
-       এর scoped CSS পৌঁছায় না। তাই শেয়ার্ড ফর্ম/কার্ড ক্লাসগুলো এখানে
-       global করে দেওয়া হলো।
+       is:global জরুরি — ট্যাব কম্পোনেন্ট ও JS দিয়ে বানানো শপ কার্ডে
+       scoped CSS পৌঁছায় না, তাই শেয়ার্ড ক্লাস (dash-card, form-*, shop-pick-*)
+       এখানে global।
   ============================================================ -->
   <style is:global>
     .dash-card {
@@ -355,6 +435,100 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
       text-align: center;
       padding: 20px 0;
     }
+
+    /* ===== শপ সিলেক্টর কার্ড (JS দিয়ে বানানো) ===== */
+    .picker-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .shop-pick-card {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 16px;
+      background: #fff;
+      border: 1px solid #E5EAF0;
+      border-radius: 20px;
+      text-decoration: none;
+      color: #1B2A4A;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .shop-pick-card:active {
+      transform: scale(0.98);
+    }
+
+    .shop-pick-logo {
+      width: 56px;
+      height: 56px;
+      flex: 0 0 56px;
+      border-radius: 16px;
+      background: #FFF0EA;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      color: #FF6B35;
+      font-size: 1.4rem;
+    }
+
+    .shop-pick-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .shop-pick-info {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .shop-pick-name {
+      display: block;
+      font-size: 1rem;
+      font-weight: 800;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .shop-pick-sub {
+      display: block;
+      font-size: 0.78rem;
+      color: #8FA0BC;
+      font-weight: 600;
+      margin-top: 3px;
+    }
+
+    .shop-pick-sub.has-orders {
+      color: #D92D20;
+      font-weight: 700;
+    }
+
+    .shop-pick-badge {
+      min-width: 26px;
+      height: 26px;
+      padding: 0 8px;
+      border-radius: 13px;
+      background: #D92D20;
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .shop-pick-arrow {
+      color: #B6C2D3;
+      font-size: 0.8rem;
+      flex-shrink: 0;
+    }
   </style>
 
   <script>
@@ -362,8 +536,90 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
 
     const loadingState = document.getElementById('loadingState');
     const guardedContent = document.getElementById('guardedContent');
+    const shopPicker = document.getElementById('shopPicker');
+    const shopPickerList = document.getElementById('shopPickerList');
     const tabsBar = document.getElementById('myshopTabs');
     const moderatorsTabBtn = document.getElementById('moderatorsTabBtn');
+    const allShopsLink = document.getElementById('allShopsLink');
+    const ordersTabBadge = document.getElementById('ordersTabBadge');
+
+    const bn = (n) => Number(n).toLocaleString('bn-BD');
+
+    // শপ সিলেক্টর কার্ডে ট্যাব প্যারামিটার সাথে নিয়ে যাওয়া (ডিপলিংক হারাবে না)
+    function shopUrl(shopId) {
+      const params = new URLSearchParams();
+      params.set('shop', shopId);
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (tab) params.set('tab', tab);
+      return `/my-shop?${params.toString()}`;
+    }
+
+    // শপ id → পেন্ডিং অর্ডার সংখ্যা। RLS/এরর হলে খালি ম্যাপ (ব্যাজ দেখাবে না)
+    async function loadPendingCounts(shopIds) {
+      const counts = {};
+      if (!shopIds.length) return counts;
+      const { data, error } = await supabase
+        .from('orders')
+        .select('shop_id')
+        .in('shop_id', shopIds)
+        .eq('status', 'pending');
+      if (error || !data) return counts;
+      data.forEach((o) => {
+        counts[o.shop_id] = (counts[o.shop_id] || 0) + 1;
+      });
+      return counts;
+    }
+
+    function buildPicker(shops, counts) {
+      shopPickerList.innerHTML = '';
+      shops.forEach((shop) => {
+        const pending = counts[shop.id] || 0;
+
+        const card = document.createElement('a');
+        card.className = 'shop-pick-card';
+        card.href = shopUrl(shop.id);
+
+        const logo = document.createElement('span');
+        logo.className = 'shop-pick-logo';
+        if (shop.logo_image) {
+          const img = document.createElement('img');
+          img.src = shop.logo_image;
+          img.alt = shop.name || 'শপ';
+          logo.appendChild(img);
+        } else {
+          logo.innerHTML = '<i class="fas fa-store"></i>';
+        }
+
+        const info = document.createElement('span');
+        info.className = 'shop-pick-info';
+        const name = document.createElement('span');
+        name.className = 'shop-pick-name';
+        name.textContent = shop.name || 'শপ';
+        const sub = document.createElement('span');
+        sub.className = 'shop-pick-sub' + (pending > 0 ? ' has-orders' : '');
+        sub.textContent = pending > 0
+          ? `${bn(pending)}টা নতুন অর্ডার`
+          : (shop._isOwner ? 'ওউনার' : 'মডারেটর');
+        info.appendChild(name);
+        info.appendChild(sub);
+
+        card.appendChild(logo);
+        card.appendChild(info);
+
+        if (pending > 0) {
+          const badge = document.createElement('span');
+          badge.className = 'shop-pick-badge';
+          badge.textContent = bn(pending);
+          card.appendChild(badge);
+        }
+
+        const arrow = document.createElement('i');
+        arrow.className = 'fas fa-chevron-right shop-pick-arrow';
+        card.appendChild(arrow);
+
+        shopPickerList.appendChild(card);
+      });
+    }
 
     async function init() {
       const { data: { session } } = await supabase.auth.getSession();
@@ -371,97 +627,130 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
         window.location.href = '/';
         return;
       }
+      const uid = session.user.id;
 
+      // ============ ইউজারের সব শপ জোগাড় (ওউনার + মডারেটর) ============
       const { data: profile } = await supabase
         .from('profiles')
         .select('is_shop_owner, shop_id')
-        .eq('id', session.user.id)
+        .eq('id', uid)
         .single();
 
-      let shopId = null;
-      let isOwner = false;
-      let modPerms = null; // owner হলে null থাকবে (সব পারমিশন আছে ধরে নেওয়া হবে)
+      const { data: ownedShops } = await supabase
+        .from('shops')
+        .select('*')
+        .eq('owner_id', uid);
 
-      if (profile?.is_shop_owner && profile?.shop_id) {
-        // ============ কেস ১: শপ ওউনার ============
-        shopId = profile.shop_id;
-        isOwner = true;
-      } else {
-        // ============ কেস ২: মডারেটর কিনা চেক ============
-        const { data: modRow } = await supabase
-          .from('moderators')
-          .select('entity_id, can_edit_listings, can_delete_listings, can_manage_orders, can_edit_settings')
-          .eq('entity_type', 'shop')
-          .eq('profile_id', session.user.id)
+      const { data: modRows } = await supabase
+        .from('moderators')
+        .select('entity_id, can_edit_listings, can_delete_listings, can_manage_orders, can_edit_settings')
+        .eq('entity_type', 'shop')
+        .eq('profile_id', uid);
+
+      const shopMap = new Map();
+      (ownedShops || []).forEach((s) => shopMap.set(s.id, { ...s, _isOwner: true, _perms: null }));
+
+      // ফলব্যাক: owner_id খালি থাকলেও profiles.shop_id দিয়ে আসল ওউনারের শপ ধরা
+      if (profile?.is_shop_owner && profile?.shop_id && !shopMap.has(profile.shop_id)) {
+        const { data: legacyShop } = await supabase
+          .from('shops')
+          .select('*')
+          .eq('id', profile.shop_id)
           .maybeSingle();
-
-        if (modRow?.entity_id) {
-          shopId = modRow.entity_id;
-          isOwner = false;
-          modPerms = modRow;
-        }
+        if (legacyShop) shopMap.set(legacyShop.id, { ...legacyShop, _isOwner: true, _perms: null });
       }
 
-      if (!shopId) {
+      // মডারেটর শপ (যেগুলো ওউনার হিসেবে আগেই নেই)
+      const modIdsToFetch = (modRows || [])
+        .map((m) => m.entity_id)
+        .filter((id) => id && !shopMap.has(id));
+      if (modIdsToFetch.length) {
+        const { data: modShops } = await supabase
+          .from('shops')
+          .select('*')
+          .in('id', modIdsToFetch);
+        (modShops || []).forEach((s) => {
+          const perm = modRows.find((m) => m.entity_id === s.id) || null;
+          shopMap.set(s.id, { ...s, _isOwner: false, _perms: perm });
+        });
+      }
+
+      const shops = Array.from(shopMap.values())
+        .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+
+      if (!shops.length) {
         // না ওউনার, না মডারেটর — এই পেজে ঢোকার অনুমতি নেই
         window.location.href = '/';
         return;
       }
 
-      const { data: shop } = await supabase
-        .from('shops')
-        .select('*')
-        .eq('id', shopId)
-        .single();
+      const params = new URLSearchParams(window.location.search);
+      const wantedShopId = params.get('shop');
+      const showAll = params.get('all') === '1';
 
-      if (!shop) {
-        window.location.href = '/';
+      let chosen = null;
+      if (wantedShopId) {
+        chosen = shops.find((s) => s.id === wantedShopId) || null;
+      }
+      if (!chosen && shops.length === 1) {
+        chosen = shops[0];
+      }
+
+      // ============ একাধিক শপ, কোনোটা সিলেক্ট করা নেই → সিলেক্টর ============
+      if (!chosen || (showAll && shops.length > 1)) {
+        const counts = await loadPendingCounts(shops.map((s) => s.id));
+        buildPicker(shops, counts);
+        loadingState.style.display = 'none';
+        shopPicker.style.display = 'block';
         return;
       }
 
+      // ============ ড্যাশবোর্ড ============
+      const shop = chosen;
+      const isOwner = shop._isOwner;
+      const modPerms = shop._perms;
+
       document.getElementById('shopHeaderName').textContent = shop.name;
 
-      // ============ মডারেটর হলে UI পারমিশন অনুযায়ী রেস্ট্রিক্ট করা ============
-      if (!isOwner) {
-        // মডারেটর ট্যাব শুধু আসল ওউনারের জন্য — RLS policy
-        // owner_manage_moderators অনুযায়ী মডারেটর ম্যানেজ করার
-        // অনুমতি শুধু ওউনারের আছে
-        moderatorsTabBtn?.remove();
-
-        if (!modPerms?.can_edit_listings) {
-          document.body.classList.add('mod-no-edit-listings');
-        }
-        if (!modPerms?.can_delete_listings) {
-          document.body.classList.add('mod-no-delete');
-        }
-        if (!modPerms?.can_manage_orders) {
-          document.body.classList.add('mod-no-orders');
-        }
-        if (!modPerms?.can_edit_settings) {
-          document.body.classList.add('mod-no-settings');
-        }
+      if (shops.length > 1) {
+        allShopsLink.style.display = 'flex';
       }
 
-      // ?tab=orders|products|moderators|profile দিয়ে এলে (ফ্লোটিং অ্যাক্টিভিটি বার/
-      // অ্যাপ খোলার রিডাইরেক্ট থেকে) সেই ট্যাব খোলা। মডারেটর ট্যাব মডারেটরের জন্য
-      // সরিয়ে ফেলা হয়েছে, তাই বাটন না থাকলে ডিফল্ট ট্যাবই থাকে
+      // মডারেটর হলে UI পারমিশন অনুযায়ী রেস্ট্রিক্ট
+      document.body.classList.remove('mod-no-edit-listings', 'mod-no-delete', 'mod-no-orders', 'mod-no-settings');
+      if (!isOwner) {
+        // মডারেটর ট্যাব শুধু আসল ওউনারের জন্য (RLS: owner_manage_moderators)
+        moderatorsTabBtn?.remove();
+
+        if (!modPerms?.can_edit_listings) document.body.classList.add('mod-no-edit-listings');
+        if (!modPerms?.can_delete_listings) document.body.classList.add('mod-no-delete');
+        if (!modPerms?.can_manage_orders) document.body.classList.add('mod-no-orders');
+        if (!modPerms?.can_edit_settings) document.body.classList.add('mod-no-settings');
+      }
+
       applyTabFromUrl();
 
       loadingState.style.display = 'none';
       guardedContent.style.display = 'block';
 
+      // _isOwner/_perms সাহায্যকারী ফিল্ড বাদ দিয়ে আসল শপ অবজেক্ট পাঠানো
+      const { _isOwner, _perms, ...cleanShop } = shop;
+
       window.dispatchEvent(new CustomEvent('smartfeni:shop-ready', {
-        detail: { shopId: shop.id, shop, isOwner, permissions: modPerms },
+        detail: { shopId: cleanShop.id, shop: cleanShop, isOwner, permissions: modPerms },
       }));
+
+      // অর্ডার ট্যাবে পেন্ডিং সংখ্যা (ব্যাকগ্রাউন্ডে, পেজ আটকায় না)
+      const counts = await loadPendingCounts([cleanShop.id]);
+      const pending = counts[cleanShop.id] || 0;
+      if (pending > 0 && ordersTabBadge) {
+        ordersTabBadge.textContent = bn(pending);
+        ordersTabBadge.style.display = 'inline-flex';
+      }
     }
 
     // ============================================================
-    // আপডেট (UI পুনর্বিন্যাস): "প্রোফাইল" ট্যাব বার থেকে সরিয়ে
-    // হেডারে শপের নামের পাশে ছোট "প্রোফাইল এডিট" লিংক করা হলো, যাতে
-    // মেইন ট্যাব বারে বেশি প্রধান্য না পেয়ে ভুলে ক্লিক করে কিছু বদলে
-    // না যায়। activateTab() ফাংশন দুই জায়গা থেকেই (ট্যাব বার +
-    // প্রোফাইল এডিট লিংক) কল হয়। ডিফল্ট ট্যাব এখন "অর্ডার" (আগে
-    // "প্রোফাইল" ডিফল্ট ছিল)।
+    // ট্যাব: "প্রোফাইল" হেডারের ছোট লিংক, বাকিগুলো ট্যাব বার। ডিফল্ট "অর্ডার"।
     // ============================================================
     const profileEditLink = document.getElementById('profileEditLink');
 
