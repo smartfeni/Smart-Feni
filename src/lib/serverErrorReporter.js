@@ -1,9 +1,10 @@
 // src/lib/serverErrorReporter.js
 // সার্ভার-সাইড (API রুট) এরর রিপোর্টার: public.report_client_error() RPC কল করে।
 // ব্রাউজারের জন্য src/lib/errorReporter.js আলাদা — এটা শুধু সার্ভারে (window লাগে না)।
+// (src/pages/api/*.js থেকে ইমপোর্ট পাথ '../../lib/serverErrorReporter.js'; নেস্টেড ফোল্ডারে আরেক ধাপ ওপরে)
 //
 // ব্যবহার (API রুটে, service-role ক্লায়েন্ট দিয়ে):
-//   import { reportServerError } from '../../../lib/serverErrorReporter.js';
+//   import { reportServerError } from '../../lib/serverErrorReporter.js';
 //   await reportServerError(supabaseAdmin, {
 //     route: '/api/delete-user',
 //     action: 'delete_user_auth_delete',
