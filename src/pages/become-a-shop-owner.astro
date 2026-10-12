@@ -3,6 +3,10 @@
 // পেজ: /become-a-shop-owner — লগইন করা ইউজার শপ ওউনার হওয়ার জন্য
 // আবেদন করবে এখান থেকে। Admin পরে /admin/shops থেকে Approve করলে
 // dashboard access পাবে (shop_requests টেবিল ব্যবহার করে)।
+//
+// ✅ আপডেট (একাধিক শপ): আগে থেকে শপ থাকলে আর "ইতিমধ্যে শপ ওউনার" বলে
+// আটকানো হয় না — ফর্ম খোলা থাকে, উপরে ছোট নোটিশে "আপনার N টা শপ আছে"
+// + "আমার শপ" লিংক দেখায়। পেন্ডিং আবেদন থাকলে আগের মতোই নতুন আবেদন বন্ধ।
 // ============================================================
 
 export const prerender = false;
@@ -27,19 +31,18 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         <a href="/" class="primary-btn">হোমপেজে যান</a>
       </div>
 
-      <!-- ===== ইতিমধ্যে শপ ওউনার ===== -->
-      <div id="alreadyOwner" class="status-box" style="display:none;">
-        <i class="fas fa-store"></i>
-        <h2>আপনি ইতিমধ্যে একজন শপ ওউনার</h2>
-        <p>আপনার শপ ড্যাশবোর্ড থেকে ম্যানেজ করুন</p>
-        <a href="/my-shop" class="primary-btn">আমার শপ ড্যাশবোর্ড</a>
-      </div>
-
       <!-- ===== পেন্ডিং আবেদন আগে থেকেই আছে ===== -->
       <div id="pendingExists" class="status-box" style="display:none;">
         <i class="fas fa-hourglass-half"></i>
         <h2>আবেদন পর্যালোচনাধীন</h2>
         <p>আপনার আবেদনটি অ্যাডমিন টিম রিভিউ করছে। এপ্রুভ হলে আপনাকে জানানো হবে।</p>
+        <a href="/my-shop" class="primary-btn" id="pendingMyShopLink" style="display:none;">আমার শপ</a>
+      </div>
+
+      <!-- ===== আগে থেকে শপ আছে — তথ্য নোটিশ (ফর্ম খোলাই থাকে) ===== -->
+      <div id="existingShopsNotice" class="existing-notice" style="display:none;">
+        <span><i class="fas fa-store"></i> <span id="existingShopsText"></span></span>
+        <a href="/my-shop">আমার শপ</a>
       </div>
 
       <!-- ===== আবেদন বাতিল হয়েছিল — আবার আবেদনের সুযোগ ===== -->
@@ -51,8 +54,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       <div id="requestForm" class="form-card" style="display:none;">
         <div class="form-header">
           <i class="fas fa-store"></i>
-          <h1>শপ ওউনার হওয়ার আবেদন করুন</h1>
-          <p>ফর্মটি পূরণ করুন — অ্যাডমিন টিম রিভিউ করে এপ্রুভ করলে আপনি একটা নিজস্ব শপ পেজ ও ড্যাশবোর্ড পাবেন</p>
+          <h1 id="formTitle">শপ ওউনার হওয়ার আবেদন করুন</h1>
+          <p id="formSubtitle">ফর্মটি পূরণ করুন — অ্যাডমিন টিম রিভিউ করে এপ্রুভ করলে আপনি একটা নিজস্ব শপ পেজ ও ড্যাশবোর্ড পাবেন</p>
         </div>
 
         <p class="form-message" id="formMessage"></p>
@@ -145,6 +148,32 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       border-radius: 14px;
       font-weight: 700;
       font-size: 0.9rem;
+    }
+
+    .existing-notice {
+      max-width: 560px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: #EFF6FF;
+      color: #1D4ED8;
+      padding: 12px 18px;
+      border-radius: 14px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .existing-notice a {
+      flex-shrink: 0;
+      color: #fff;
+      background: #2563EB;
+      text-decoration: none;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 700;
     }
 
     .rejected-notice {
@@ -273,10 +302,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     const loadingState = document.getElementById('loadingState');
     const loginRequired = document.getElementById('loginRequired');
-    const alreadyOwner = document.getElementById('alreadyOwner');
     const pendingExists = document.getElementById('pendingExists');
+    const pendingMyShopLink = document.getElementById('pendingMyShopLink');
+    const existingShopsNotice = document.getElementById('existingShopsNotice');
+    const existingShopsText = document.getElementById('existingShopsText');
     const rejectedNotice = document.getElementById('rejectedNotice');
     const requestForm = document.getElementById('requestForm');
+    const formTitle = document.getElementById('formTitle');
+    const formSubtitle = document.getElementById('formSubtitle');
 
     const formMessage = document.getElementById('formMessage');
     const shopNameInput = document.getElementById('shopNameInput');
@@ -310,11 +343,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         .eq('id', session.user.id)
         .single();
 
-      if (profile?.is_shop_owner) {
-        loadingState.style.display = 'none';
-        alreadyOwner.style.display = 'block';
-        return;
-      }
+      // ইউজারের বর্তমান শপ সংখ্যা (একাধিক শপ সাপোর্ট) — এরর হলেও ফর্ম আটকায় না
+      let shopCount = 0;
+      const { count } = await supabase
+        .from('shops')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', session.user.id);
+      shopCount = count || 0;
+      const hasShops = shopCount > 0 || !!profile?.is_shop_owner;
 
       // আগের আবেদনের status চেক (সর্বশেষটা)
       const { data: existingRequests } = await supabase
@@ -329,8 +365,18 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       loadingState.style.display = 'none';
 
       if (latestRequest?.status === 'pending') {
+        if (hasShops) pendingMyShopLink.style.display = 'inline-flex';
         pendingExists.style.display = 'block';
         return;
+      }
+
+      if (hasShops) {
+        existingShopsText.textContent = shopCount > 0
+          ? `আপনার ${shopCount.toLocaleString('bn-BD')}টা শপ আছে`
+          : 'আপনার শপ আছে';
+        existingShopsNotice.style.display = 'flex';
+        formTitle.textContent = 'আরেকটা শপের আবেদন করুন';
+        formSubtitle.textContent = 'নতুন শপের তথ্য দিন — অ্যাডমিন টিম এপ্রুভ করলে এটা আপনার আগের শপের পাশে যোগ হবে';
       }
 
       if (latestRequest?.status === 'rejected') {
