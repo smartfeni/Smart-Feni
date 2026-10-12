@@ -54,6 +54,11 @@
 // ভাঁজ-করা কার্ড (ক্লিক করলে খোলে; একটাই থাকলে খোলা), শিরোনামে লিস্টিংয়ের title।
 // প্রতিটার গাড়ির ধরন (price) ও বিবরণ নিজের id ধরে সেভ হয়। অনলাইন/অফলাইন টগল সরানো
 // হয়েছে — গাড়ির লিস্টিং এখন সাধারণ লিস্টিংয়ের মতো।
+//
+// আপডেট (ডোনার টগল → গ্রুপ পিকার): সাইনআপে ডোনার টগল অফ থাকে। যার ব্লাড গ্রুপ আছে সে
+// সরাসরি টগল অন/অফ করে। যার গ্রুপ নেই (সাইনআপে "ডোনার হতে চাই না" টিক দিয়েছিল বা ফাঁকা)
+// সে টগল অন করতে চাইলে টগলের নিচে ব্লাড গ্রুপের ড্রপডাউন খোলে — গ্রুপ বেছে "চালু করুন"
+// চাপলে blood_group ও is_blood_donor একসাথে সেভ হয়।
 // ============================================================
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
@@ -126,11 +131,30 @@ const upazilas = [
             <div class="donor-toggle-row">
               <div class="donor-toggle-text">
                 <span class="donor-toggle-label">ব্লাড ডোনার লিস্টে আমাকে দেখাও</span>
-                <span class="donor-toggle-hint" id="donorToggleHint">ব্লাড গ্রুপ যোগ করলে চালু করা যাবে</span>
+                <span class="donor-toggle-hint" id="donorToggleHint">চালু করলে ব্লাড গ্রুপ বেছে নিতে হবে</span>
               </div>
               <button type="button" class="donor-toggle-switch" id="donorToggleBtn" role="switch" aria-checked="false">
                 <span class="donor-toggle-knob"></span>
               </button>
+            </div>
+
+            <!-- ===== ব্লাড গ্রুপ পিকার — গ্রুপ নেই এমন ইউজার টগল অন করতে চাইলে খোলে ===== -->
+            <div class="donor-group-picker" id="donorGroupPicker" style="display:none;">
+              <span class="donor-toggle-label">আপনার ব্লাড গ্রুপ বেছে নিন</span>
+              <div class="edit-select-wrap">
+                <i class="fas fa-droplet edit-input-icon"></i>
+                <select class="edit-input edit-select" id="donorGroupSelect">
+                  <option value="" disabled selected>নির্বাচন করুন</option>
+                  {bloodGroups.map((bg) => <option value={bg}>{bg}</option>)}
+                </select>
+              </div>
+              <p class="edit-message" id="donorGroupMessage"></p>
+              <div class="donor-group-actions">
+                <button class="edit-submit-outline" id="donorGroupCancel" type="button">বাতিল</button>
+                <button class="edit-submit" id="donorGroupConfirm" type="button">
+                  <i class="fas fa-check"></i> <span>ডোনার হিসেবে চালু করুন</span>
+                </button>
+              </div>
             </div>
 
             <!-- ===== সংগঠন (ঐচ্ছিক) — ইনস্ট্যান্ট সেভ, ডোনার টগলের ঠিক নিচে ===== -->
@@ -942,6 +966,37 @@ const upazilas = [
     transform: translateX(20px);
   }
 
+  /* ===== ব্লাড গ্রুপ পিকার (ডোনার টগল অন করার সময়, গ্রুপ না থাকলে) ===== */
+  .donor-group-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 14px 16px;
+    text-align: left;
+    margin-top: 10px;
+  }
+
+  .donor-group-picker .edit-message {
+    margin-bottom: 0;
+    padding: 8px 12px;
+  }
+
+  .donor-group-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  .donor-group-actions .edit-submit {
+    flex: 2;
+    margin-top: 0;
+  }
+
+  .donor-group-actions .edit-submit-outline {
+    flex: 1;
+  }
+
   /* ===== সংগঠন (ঐচ্ছিক) সিলেক্ট ===== */
   .club-select-row {
     display: flex;
@@ -1188,6 +1243,13 @@ const upazilas = [
   const donorToggleHint = document.getElementById('donorToggleHint');
   let isDonorOn = false;
 
+  // ===== ব্লাড গ্রুপ পিকার (টগল অন করার সময়, গ্রুপ না থাকলে) =====
+  const donorGroupPicker = document.getElementById('donorGroupPicker');
+  const donorGroupSelect = document.getElementById('donorGroupSelect');
+  const donorGroupMessage = document.getElementById('donorGroupMessage');
+  const donorGroupCancel = document.getElementById('donorGroupCancel');
+  const donorGroupConfirm = document.getElementById('donorGroupConfirm');
+
   // ===== সংগঠন (ঐচ্ছিক) সিলেক্ট =====
   const clubSelect = document.getElementById('clubSelect');
   const clubSelectMessage = document.getElementById('clubSelectMessage');
@@ -1309,14 +1371,27 @@ const upazilas = [
   function updateDonorHint() {
     if (!donorToggleHint) return;
 
-    if (currentProfile?.blood_group === NOT_DONOR_VALUE) {
-      donorToggleHint.textContent = 'আপনি ডোনার হতে চান না বেছেছেন — চালু করতে "এডিট করুন" থেকে ব্লাড গ্রুপ বদলান';
-    } else if (hasRealBloodGroup(currentProfile)) {
+    if (hasRealBloodGroup(currentProfile)) {
       donorToggleHint.textContent = 'জরুরি প্রয়োজনে অন্যরা আপনার তথ্য দেখতে পাবে';
     } else {
-      donorToggleHint.textContent = 'ব্লাড গ্রুপ যোগ করলে চালু করা যাবে (এডিট করুন থেকে)';
+      donorToggleHint.textContent = 'চালু করলে ব্লাড গ্রুপ বেছে নিতে হবে';
     }
     donorToggleHint.classList.remove('hint-error');
+  }
+
+  // ===== ব্লাড গ্রুপ পিকার খোলা/বন্ধ =====
+  function openDonorGroupPicker() {
+    if (!donorGroupPicker) return;
+    clearMsg(donorGroupMessage);
+    if (donorGroupSelect) donorGroupSelect.value = '';
+    donorGroupPicker.style.display = 'flex';
+  }
+
+  function closeDonorGroupPicker() {
+    if (!donorGroupPicker) return;
+    donorGroupPicker.style.display = 'none';
+    clearMsg(donorGroupMessage);
+    if (donorGroupSelect) donorGroupSelect.value = '';
   }
 
   // ===== ডোনারের নোটিফিকেশন সতর্কতা (শুধু অ্যাপে) =====
@@ -1368,17 +1443,18 @@ const upazilas = [
   }
 
   donorToggleBtn?.addEventListener('click', async () => {
-    if (!hasRealBloodGroup(currentProfile)) {
-      if (donorToggleHint) {
-        donorToggleHint.textContent = currentProfile?.blood_group === NOT_DONOR_VALUE
-          ? 'ডোনার হতে হলে আগে "এডিট করুন" থেকে ব্লাড গ্রুপ সিলেক্ট করুন'
-          : 'আগে "এডিট করুন" থেকে ব্লাড গ্রুপ সিলেক্ট করুন';
-        donorToggleHint.classList.add('hint-error');
+    const newValue = !isDonorOn;
+
+    // ব্লাড গ্রুপ নেই (ফাঁকা বা "ডোনার হতে চাই না") — অন করতে চাইলে গ্রুপের ড্রপডাউন খুলবে
+    if (newValue && !hasRealBloodGroup(currentProfile)) {
+      if (donorGroupPicker?.style.display === 'flex') {
+        closeDonorGroupPicker(); // আবার ট্যাপ করলে বন্ধ
+      } else {
+        openDonorGroupPicker();
       }
       return;
     }
 
-    const newValue = !isDonorOn;
     setDonorToggle(newValue);
 
     const { error } = await supabase
@@ -1405,6 +1481,43 @@ const upazilas = [
       window.dispatchEvent(new CustomEvent('smartfeni:ask-push'));
       watchPushPermissionThenUpdate();
     }
+  });
+
+  donorGroupCancel?.addEventListener('click', closeDonorGroupPicker);
+
+  // গ্রুপ বেছে "চালু করুন" — blood_group ও is_blood_donor একসাথে সেভ
+  donorGroupConfirm?.addEventListener('click', async () => {
+    clearMsg(donorGroupMessage);
+
+    const group = donorGroupSelect?.value;
+    if (!group) {
+      showMsg(donorGroupMessage, 'আগে ব্লাড গ্রুপ বেছে নিন');
+      return;
+    }
+
+    setLoading(donorGroupConfirm, true, 'চালু হচ্ছে...');
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ blood_group: group, is_blood_donor: true })
+      .eq('id', currentUserId);
+
+    setLoading(donorGroupConfirm, false);
+
+    if (error) {
+      reportDbError('profile_donor_enable', 'ডোনার চালু করা ব্যর্থ', error);
+      showMsg(donorGroupMessage, 'আপডেট ব্যর্থ, আবার চেষ্টা করুন');
+      return;
+    }
+
+    currentProfile = { ...currentProfile, blood_group: group, is_blood_donor: true };
+    if (bloodGroupSelect) bloodGroupSelect.value = group; // এডিট ফর্মের ড্রপডাউনও মিলিয়ে রাখা
+    closeDonorGroupPicker();
+    renderProfileView(currentProfile);
+
+    // ডোনার চালু হলো — অ্যাপে অনুমতি না থাকলে Android এর ডায়ালগ চাওয়া হবে
+    window.dispatchEvent(new CustomEvent('smartfeni:ask-push'));
+    watchPushPermissionThenUpdate();
   });
 
   // ===== সংগঠন (ঐচ্ছিক) — ক্লাব লিস্ট লোড ও ইনস্ট্যান্ট সেভ =====
@@ -1518,6 +1631,7 @@ const upazilas = [
   function openEditMode() {
     populateEditForm(currentProfile);
     clearMsg(profileMessage);
+    closeDonorGroupPicker();
     profileView.style.display = 'none';
     profileEditForm.style.display = 'block';
   }
