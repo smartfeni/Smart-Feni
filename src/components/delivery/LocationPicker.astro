@@ -42,7 +42,7 @@
 // ১. ম্যাপ: বর্তমান OSM টাইল হুবহু থাকে (স্কুল/বাজার/দোকানের নাম সব ঠিক)।
 //    ওপরে শুধু ওভারলে — ফেনী জেলার পুরো সীমানা বোল্ড (সাদা হ্যালো + কমলা),
 //    উপজেলা/ইউনিয়নের পাতলা বাউন্ডারি আর নাম (জুম কম হলে উপজেলার নাম,
-//    জুম বেশি হলে ইউনিয়নের নাম)। ওভারলে ট্যাপ আটকায় না। ম্যাপ ফেনীর
+//    জুম বেশি হলে ইউনিয়নের নাম)। (ট্যাপ/জুমের নতুন নিয়ম ৮ নং-এ।) ম্যাপ ফেনীর
 //    সীমানার বাইরে প্যান করা যায় না।
 // ২. পিন বসালে নিচে দেখায়: "ফুলগাজী উপজেলা · মুন্সিরহাট ইউনিয়ন"।
 // ৩. ফেনীর বাইরে পিন/GPS হলে লাল সতর্কবার্তা, পিন বসে না, সেভ হয় না।
@@ -59,6 +59,19 @@
 //    + wrap.dataset.lpUpazila / lpUnion এবং hidden .lp-out-upazila / .lp-out-union
 //    পিকআপ পিন থেকে ফর্মের উপজেলা ড্রপডাউন অটো-সিলেক্টের কাজ এই ইভেন্ট দিয়ে হবে।
 // ৭. enableSavedLocations prop (ডিফল্ট true) — false দিলে সেভড-ঠিকানা ফিচার বন্ধ।
+//
+// ৮. ⭐ হেডারের মতো জেলা → উপজেলা → ইউনিয়ন ফ্লো (ইউনিয়ন ট্যাপ/জুম):
+//    • শুরুতে শুধু ৬ উপজেলা (হালকা রঙ + নাম)। উপজেলায় ট্যাপ করলে, বা ম্যাপ
+//      ১২+ জুম করলে, সেই উপজেলার ইউনিয়নগুলো (বর্ডার + নাম) দেখায়।
+//    • ইউনিয়নে ট্যাপ করলে ম্যাপ সেই ইউনিয়নে জুম হয় এবং শুধু সেটা হাইলাইট হয়
+//      (বাকিগুলো ফিকে)। এই ট্যাপে পিন বসে না। এরপর হাইলাইট করা ইউনিয়নের
+//      ভেতরে ট্যাপ করলে পিন বসে (ম্যানুয়াল)। অন্য ইউনিয়নে ট্যাপ = হাইলাইট বদল।
+//    • জুম ১৪+ হলে ম্যাপের মাঝের ইউনিয়ন নিজে হাইলাইট হয় (ট্যাপ/পিন থেকে বাছা
+//      থাকলে সেটাই থাকে)। জুম ১১-এর নিচে নামলে আবার জেলা ভিউ।
+//    • অটো-লোকেট (GPS), সার্চ, সেভড ঠিকানা বা পিন ড্র্যাগে পিন বসলে পিন +
+//      উপজেলা/ইউনিয়ন হাইলাইট + জুম সব নিজে থেকেই হয়।
+//    • ম্যাপের নিচের বাম কোণে ছোট কন্ট্রোল: "← উপজেলা/জেলা" ব্যাক বাটন + হিন্ট।
+//    • geojson লোড না হলে এই পুরো ফ্লো বন্ধ — আগের মতো ম্যাপে ট্যাপ = পিন।
 //
 // ডেটা/হেল্পার: src/data/feniAreas.js, src/lib/savedLocations.js,
 // geojson: public/data/feni_unions.geojson
@@ -225,10 +238,13 @@ const {
   import { supabase } from '../../lib/supabase.js';
   import {
     UPAZILAS,
+    BORDER_COLORS,
     getUnionUpazilaId,
     loadFeniGeo,
     findAreaAt,
     getFeniBounds,
+    getUpazilaBounds,
+    getUpazilaFeatures,
     getUpazilaBorders,
     getDistrictBorder,
     getLabelPoints,
@@ -346,13 +362,17 @@ const {
   }
 
   // ম্যাপ ওভারলের নামের ছোট চিপ — inline style (Leaflet divIcon-এ scoped CSS লাগে না)
-  function chipHtml(text: string, color: string, size: number, bgAlpha: number) {
+  // active = true হলে (হাইলাইট করা ইউনিয়ন) রঙিন ব্যাকগ্রাউন্ড + সাদা লেখা
+  function chipHtml(text: string, color: string, size: number, bgAlpha: number, active = false) {
+    const bg = active ? color : `rgba(255,255,255,${bgAlpha})`;
+    const fg = active ? '#ffffff' : '#1B2A4A';
+    const bd = active ? '#155E75' : color;
     return (
       '<div style="position:absolute;left:0;top:0;transform:translate(-50%,-50%);' +
       'white-space:nowrap;pointer-events:none;font-weight:700;' +
-      `font-size:${size}px;line-height:1.2;color:#1B2A4A;` +
-      `background:rgba(255,255,255,${bgAlpha});padding:1px 6px;border-radius:9px;` +
-      `border:1px solid ${color};">` +
+      `font-size:${size}px;line-height:1.2;color:${fg};` +
+      `background:${bg};padding:1px 6px;border-radius:9px;` +
+      `border:1px solid ${bd};${active ? 'box-shadow:0 1px 4px rgba(0,0,0,.35);' : ''}">` +
       esc(text) +
       '</div>'
     );
@@ -413,8 +433,6 @@ const {
     let pendingArea: any = null;
     let markerToken = 0;
     let overlayDrawn = false;
-    let upLabels: any = null;
-    let unLabels: any = null;
 
     // ============ পেরেন্ট ফর্মের জন্য ইভেন্ট ============
     function emitLocation(source: string, lat: number | null, lng: number | null, address: string, area: any) {
@@ -442,13 +460,71 @@ const {
       );
     }
 
-    // ============ ম্যাপ ও ফেনী ওভারলে ============
+    // ============ ম্যাপ ও ফেনী ওভারলে (হেডারের মতো: জেলা → উপজেলা → ইউনিয়ন) ============
+    // স্টেট: view.up = কোন উপজেলার ভেতরে (null = জেলা ভিউ), view.un = হাইলাইট করা ইউনিয়ন
+    // (ইংরেজি shapeName), view.explicit = ট্যাপ/পিন থেকে বাছা (জুমে নিজে-নিজে বদলাবে না)
+    const Z_DISTRICT_MAX = 11; // এর নিচে জুম = জেলা ভিউ (শুধু উপজেলা)
+    const Z_ENTER_UPAZILA = 12; // জেলা ভিউ থেকে এই জুমে গেলে মাঝের উপজেলার ইউনিয়ন দেখায়
+    const Z_FOCUS_UNION = 14; // এই জুমে ম্যাপের মাঝের ইউনিয়ন নিজে হাইলাইট হয়
+
+    let view: { up: string | null; un: string | null; explicit: boolean } = { up: null, un: null, explicit: false };
+    let progUntil = 0; // কোড থেকে ম্যাপ সরানোর সময় জুম-লজিক কিছুক্ষণ বন্ধ রাখার টাইমস্ট্যাম্প
+    let areaGroup: any = null; // এই মুহূর্তে ম্যাপে থাকা পলিগন + চিপ
+    let upLayers: Record<string, any> = {};
+    let unLayers: Record<string, any> = {};
+    let upChips: Record<string, any> = {};
+    let unChips: Record<string, any> = {};
+    let navCtrlEl: HTMLElement | null = null;
+    let districtFitted = false;
+
+    function markProgrammatic(ms = 800) {
+      progUntil = Date.now() + ms;
+    }
+
+    function chipIcon(text: string, color: string, size: number, alpha: number, active = false) {
+      return L.divIcon({
+        className: '',
+        html: chipHtml(text, color, size, alpha, active),
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+      });
+    }
+
+    function upazilaColor(upId: string | null): string {
+      const u: any = UPAZILAS.find((x: any) => x.id === upId);
+      return u ? u.color : '#64748b';
+    }
+
+    function upazilaNameOf(upId: string | null): string {
+      const u: any = UPAZILAS.find((x: any) => x.id === upId);
+      return u ? u.name : '';
+    }
+
+    // উপজেলা পলিগন: 'full' = জেলা ভিউ, 'faint' = অন্য উপজেলা (ট্যাপ করলে সেখানে যাবে)
+    function upStyle(upId: string, mode: 'full' | 'faint') {
+      return mode === 'full'
+        ? { stroke: false, fill: true, fillColor: upazilaColor(upId), fillOpacity: 0.12 }
+        : { stroke: false, fill: true, fillColor: '#94a3b8', fillOpacity: 0.05 };
+    }
+
+    // ইউনিয়ন পলিগন: 'normal' = বাছা হয়নি, 'dim' = অন্যটা হাইলাইট, 'selected' = হাইলাইট
+    function unionStyle(name: string, mode: 'normal' | 'dim' | 'selected') {
+      const color = upazilaColor(getUnionUpazilaId(name));
+      if (mode === 'selected') {
+        return { stroke: true, color: '#155E75', weight: 3.5, opacity: 1, dashArray: null, fill: true, fillColor: color, fillOpacity: 0.16 };
+      }
+      if (mode === 'dim') {
+        return { stroke: true, color: BORDER_COLORS.union, weight: 1, opacity: 0.4, dashArray: '4 4', fill: true, fillColor: color, fillOpacity: 0.02 };
+      }
+      return { stroke: true, color: BORDER_COLORS.union, weight: 1.6, opacity: 0.95, dashArray: null, fill: true, fillColor: color, fillOpacity: 0.12 };
+    }
+
     function drawFeniOverlay() {
       if (!geo || overlayDrawn) return;
       overlayDrawn = true;
 
       const panes: Array<[string, number]> = [
-        ['lpUnions', 420],
+        ['lpAreas', 421],
         ['lpUpazilaLines', 425],
         ['lpDistrictHalo', 440],
         ['lpDistrictLine', 450],
@@ -458,19 +534,12 @@ const {
         map.createPane(name);
         map.getPane(name).style.zIndex = String(z);
       });
-      // ওভারলে ট্যাপ/ড্র্যাগ আটকাবে না — ক্লিক সরাসরি নিচের ম্যাপে যাবে
+      // শুধু লাইন/লেবেল প্যান ট্যাপ আটকাবে না (lpAreas-এর পলিগন ট্যাপযোগ্য — উপজেলা/ইউনিয়ন বাছার জন্য)
       panes.forEach(([name]) => {
-        map.getPane(name).style.pointerEvents = 'none';
+        if (name !== 'lpAreas') map.getPane(name).style.pointerEvents = 'none';
       });
 
-      // ইউনিয়নের পাতলা বাউন্ডারি (ভেতরে কোনো রঙ নেই — নিচের ম্যাপ হুবহু দেখা যায়)
-      L.geoJSON(geo, {
-        pane: 'lpUnions',
-        interactive: false,
-        style: () => ({ color: '#64748b', weight: 1, opacity: 0.6, fill: false }),
-      }).addTo(map);
-
-      // উপজেলার বাউন্ডারি — ইউনিয়নের চেয়ে একটু গাঢ়
+      // উপজেলার বাউন্ডারি
       const upBorders = getUpazilaBorders(geo);
       UPAZILAS.forEach((u: any) => {
         L.polyline(upBorders[u.id], {
@@ -489,40 +558,55 @@ const {
         lineCap: 'round', lineJoin: 'round', interactive: false,
       }).addTo(map);
 
-      // নাম: জুম কম হলে উপজেলা, বেশি হলে ইউনিয়ন
+      // ট্যাপযোগ্য পলিগন + নামের চিপ — একবারই বানানো, পরে শুধু যোগ/সরানো (renderView)
       const labels = getLabelPoints(geo);
-      upLabels = L.layerGroup();
-      unLabels = L.layerGroup();
+      areaGroup = L.layerGroup().addTo(map);
 
       UPAZILAS.forEach((u: any) => {
+        upLayers[u.id] = L.geoJSON(
+          { type: 'FeatureCollection', features: getUpazilaFeatures(geo, u.id) },
+          {
+            pane: 'lpAreas',
+            bubblingMouseEvents: false, // এই ট্যাপে পিন বসবে না
+            style: () => upStyle(u.id, 'full'),
+            onEachFeature: (_f: any, layer: any) => {
+              layer.on('click', () => onUpazilaTap(u.id));
+            },
+          }
+        );
         const pt = labels.upazilas[u.id];
-        if (!pt) return;
-        upLabels.addLayer(
-          L.marker(pt, {
+        if (pt) {
+          upChips[u.id] = L.marker(pt, {
             pane: 'lpLabels', interactive: false, keyboard: false,
-            icon: L.divIcon({ className: '', html: chipHtml(u.name, u.color, 12, 0.85), iconSize: [0, 0], iconAnchor: [0, 0] }),
-          })
-        );
+            icon: chipIcon(u.name, u.color, 12, 0.85),
+          });
+        }
       });
 
-      Object.keys(labels.unions).forEach((name) => {
-        const upId = getUnionUpazilaId(name);
-        const up: any = UPAZILAS.find((x: any) => x.id === upId);
-        unLabels.addLayer(
-          L.marker(labels.unions[name], {
+      (geo.features || []).forEach((f: any) => {
+        const name = f.properties && f.properties.shapeName;
+        const upId = name ? getUnionUpazilaId(name) : null;
+        if (!name || !upId) return;
+        unLayers[name] = L.geoJSON(f, {
+          pane: 'lpAreas',
+          bubblingMouseEvents: false,
+          style: () => unionStyle(name, 'normal'),
+          onEachFeature: (_f: any, layer: any) => {
+            layer.on('click', (e: any) => onUnionTap(name, e));
+          },
+        });
+        const pt = labels.unions[name];
+        if (pt) {
+          unChips[name] = L.marker(pt, {
             pane: 'lpLabels', interactive: false, keyboard: false,
-            icon: L.divIcon({
-              className: '',
-              html: chipHtml(getUnionBn(name), up ? up.color : '#64748b', 10, 0.78),
-              iconSize: [0, 0],
-              iconAnchor: [0, 0],
-            }),
-          })
-        );
+            icon: chipIcon(getUnionBn(name), upazilaColor(upId), 10, 0.78),
+          });
+        }
       });
 
-      map.on('zoomend', refreshLabels);
-      refreshLabels();
+      buildNavControl();
+      renderView();
+      map.on('moveend', syncFromView);
 
       // ফেনীর সীমানায় আটকানো
       map.options.maxBoundsViscosity = 1.0;
@@ -530,21 +614,171 @@ const {
       map.setMinZoom(10);
     }
 
-    function refreshLabels() {
-      if (!map || !upLabels || !unLabels) return;
-      const showUnions = map.getZoom() >= 12;
-      if (showUnions) {
-        if (map.hasLayer(upLabels)) map.removeLayer(upLabels);
-        if (!map.hasLayer(unLabels)) map.addLayer(unLabels);
+    // ---------- ভিউ আঁকা: স্টেট অনুযায়ী কোন পলিগন/চিপ ম্যাপে থাকবে ----------
+    function renderView() {
+      if (!map || !areaGroup) return;
+      areaGroup.clearLayers();
+
+      if (!view.up) {
+        // জেলা ভিউ: শুধু ৬ উপজেলা
+        UPAZILAS.forEach((u: any) => {
+          upLayers[u.id].setStyle(upStyle(u.id, 'full'));
+          areaGroup.addLayer(upLayers[u.id]);
+          if (upChips[u.id]) areaGroup.addLayer(upChips[u.id]);
+        });
       } else {
-        if (map.hasLayer(unLabels)) map.removeLayer(unLabels);
-        if (!map.hasLayer(upLabels)) map.addLayer(upLabels);
+        // অন্য উপজেলা: ফিকে, ট্যাপ করলে সেই উপজেলায় যাবে
+        UPAZILAS.filter((u: any) => u.id !== view.up).forEach((u: any) => {
+          upLayers[u.id].setStyle(upStyle(u.id, 'faint'));
+          areaGroup.addLayer(upLayers[u.id]);
+          if (upChips[u.id]) areaGroup.addLayer(upChips[u.id]);
+        });
+        // এই উপজেলার ইউনিয়ন
+        Object.keys(unLayers).forEach((name) => {
+          if (getUnionUpazilaId(name) !== view.up) return;
+          const mode: 'normal' | 'dim' | 'selected' = !view.un ? 'normal' : name === view.un ? 'selected' : 'dim';
+          unLayers[name].setStyle(unionStyle(name, mode));
+          areaGroup.addLayer(unLayers[name]);
+          if (unChips[name]) {
+            unChips[name].setIcon(
+              chipIcon(getUnionBn(name), upazilaColor(view.up), mode === 'dim' ? 9 : 11, mode === 'dim' ? 0.6 : 0.85, mode === 'selected')
+            );
+            areaGroup.addLayer(unChips[name]);
+          }
+        });
+        if (view.un && unLayers[view.un]) unLayers[view.un].bringToFront();
       }
+      updateNavControl();
+    }
+
+    function setViewState(up: string | null, un: string | null, explicit: boolean) {
+      view = { up, un: up ? un : null, explicit: !!up && !!un && explicit };
+      renderView();
+    }
+
+    // ---------- ট্যাপ/ব্যাক অ্যাকশন (কোনোটাতেই পিন বসে না, শুধু হাইলাইট + জুম) ----------
+    function fitDistrict(animate = true) {
+      if (!map || !geo) return;
+      markProgrammatic();
+      map.fitBounds(getFeniBounds(geo, 0.02), { animate });
+    }
+
+    function enterUpazila(upId: string) {
+      setViewState(upId, null, false);
+      const b = getUpazilaBounds(geo, upId);
+      if (b) {
+        markProgrammatic();
+        map.fitBounds(b, { padding: [16, 16] });
+      }
+    }
+
+    function selectUnion(name: string) {
+      const upId = getUnionUpazilaId(name);
+      if (!upId) return;
+      setViewState(upId, name, true);
+      const lyr = unLayers[name];
+      if (lyr) {
+        markProgrammatic();
+        map.fitBounds(lyr.getBounds(), { padding: [24, 24], maxZoom: 16 });
+      }
+    }
+
+    function onUpazilaTap(upId: string) {
+      enterUpazila(upId);
+    }
+
+    function onUnionTap(name: string, e: any) {
+      // হাইলাইট করা ইউনিয়নের ভেতরে ট্যাপ = ম্যানুয়াল পিন; অন্য ইউনিয়নে ট্যাপ = হাইলাইট বদল
+      if (view.un === name) {
+        handleNewPosition(e.latlng.lat, e.latlng.lng, false);
+        return;
+      }
+      selectUnion(name);
+    }
+
+    function onNavBack() {
+      if (view.un && view.up) {
+        enterUpazila(view.up);
+      } else {
+        setViewState(null, null, false);
+        fitDistrict();
+      }
+    }
+
+    // ---------- জুম/প্যান থেকে স্টেট সিঙ্ক (ইউজার নিজে জুম করলে) ----------
+    function syncFromView() {
+      if (!map || !geo || !areaGroup || Date.now() < progUntil) return;
+      const z = map.getZoom();
+
+      if (z < Z_DISTRICT_MAX) {
+        if (view.up || view.un) setViewState(null, null, false);
+        return;
+      }
+
+      const c = map.getCenter();
+      const area = findAreaAt(c.lat, c.lng, geo);
+
+      if (!view.up) {
+        if (z >= Z_ENTER_UPAZILA && area) setViewState(area.upazilaId, null, false);
+        return;
+      }
+      if (view.explicit) return; // ট্যাপ/পিন থেকে বাছা — জুমে সরবে না
+
+      if (z >= Z_FOCUS_UNION && area) {
+        if (view.un !== area.union || view.up !== area.upazilaId) setViewState(area.upazilaId, area.union, false);
+      } else if (z < Z_FOCUS_UNION && view.un) {
+        setViewState(view.up, null, false);
+      }
+    }
+
+    // ---------- নিচের বাম কোণের ছোট কন্ট্রোল: ব্যাক বাটন + হিন্ট ----------
+    function buildNavControl() {
+      const Ctl = L.Control.extend({
+        options: { position: 'bottomleft' },
+        onAdd() {
+          const div = L.DomUtil.create('div', '');
+          div.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:6px;max-width:80vw;';
+          L.DomEvent.disableClickPropagation(div);
+          navCtrlEl = div;
+          return div;
+        },
+      });
+      map.addControl(new Ctl());
+    }
+
+    function updateNavControl() {
+      if (!navCtrlEl) return;
+      navCtrlEl.innerHTML = '';
+
+      if (view.up) {
+        const back = document.createElement('button');
+        back.type = 'button';
+        back.setAttribute('aria-label', view.un ? 'উপজেলায় ফিরুন' : 'জেলা ভিউতে ফিরুন');
+        back.style.cssText =
+          'background:#fff;border:1px solid #cbd5e1;border-radius:999px;padding:9px 14px;' +
+          'font-family:inherit;font-weight:700;font-size:12.5px;line-height:1.2;color:#1B2A4A;' +
+          'box-shadow:0 1px 6px rgba(0,0,0,.25);cursor:pointer;';
+        back.innerHTML =
+          '<i class="fas fa-arrow-left"></i> ' + esc(view.un ? `${upazilaNameOf(view.up)} উপজেলা` : 'ফেনী জেলা');
+        back.addEventListener('click', onNavBack);
+        navCtrlEl.appendChild(back);
+      }
+
+      const hint = document.createElement('div');
+      hint.style.cssText =
+        'background:rgba(27,42,74,.9);color:#fff;border-radius:10px;padding:5px 10px;' +
+        'font-size:11.5px;line-height:1.35;box-shadow:0 1px 6px rgba(0,0,0,.25);';
+      hint.textContent = !view.up
+        ? 'উপজেলায় ট্যাপ করুন বা ম্যাপ জুম করুন'
+        : !view.un
+        ? 'ইউনিয়নে ট্যাপ করুন'
+        : 'পিন বসাতে হাইলাইট করা ইউনিয়নে ট্যাপ করুন';
+      navCtrlEl.appendChild(hint);
     }
 
     function ensureMap() {
       if (map) return;
-      map = L.map(mapEl, { zoomControl: true }).setView(FENI_CENTER, 14);
+      map = L.map(mapEl, { zoomControl: true }).setView(FENI_CENTER, geo ? 10 : 14);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors',
         maxZoom: 19,
@@ -552,6 +786,7 @@ const {
 
       drawFeniOverlay();
 
+      // পলিগনের বাইরে (বা geojson ছাড়া) ট্যাপ করলে আগের মতোই পিন
       map.on('click', (e: any) => {
         handleNewPosition(e.latlng.lat, e.latlng.lng, false);
       });
@@ -604,13 +839,18 @@ const {
           handleNewPosition(pos.lat, pos.lng, false);
         });
       }
-      if (panTo) map.setView([lat, lng], 16);
+      if (panTo) {
+        markProgrammatic();
+        map.setView([lat, lng], 16);
+      }
 
       pendingLat = lat;
       pendingLng = lng;
       pendingArea = area;
       showArea(area);
       updateStarVisibility();
+      // পিনের উপজেলা/ইউনিয়ন হাইলাইট (অটো-লোকেট, সার্চ, সেভড, ড্র্যাগ, ম্যানুয়াল — সব ক্ষেত্রে)
+      if (area) setViewState(area.upazilaId, area.union, true);
 
       if (knownAddress) {
         pendingAddress = knownAddress;
@@ -638,7 +878,12 @@ const {
         map.invalidateSize();
         if (marker) {
           const pos = marker.getLatLng();
+          markProgrammatic();
           map.setView(pos, 16);
+        } else if (geo && !districtFitted) {
+          // পিন নেই — জেলা ভিউ (শুধু উপজেলা) দিয়ে শুরু
+          districtFitted = true;
+          fitDistrict(false);
         }
       }, 50);
 
