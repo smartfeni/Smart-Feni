@@ -40,13 +40,12 @@
 // নতুন ইমেইল সেভের আগে uniqueness চেক যোগ হয়েছে যাতে নতুন করে আর
 // ডুপ্লিকেট তৈরি না হয়।
 // আপডেট ৯ (ব্লাড গ্রুপ বাধ্যতামূলক): সাইনআপে ব্লাড গ্রুপ এখন আবশ্যক।
-// ড্রপডাউনের একদম প্রথম অপশন "ডোনার হতে চাই না" (মান NOT_DONOR),
-// তারপর ৮টা গ্রুপ। NOT_DONOR কোনো রিকোয়েস্ট গ্রুপের সাথে মেলে না,
-// তাই ডোনার ম্যাচিংয়ে আসবে না।
+// ড্রপডাউনে আলাদা "ডোনার নই" অপশন নেই — তার বদলে ইমেইল হিন্টের নিচে ও
+// ব্লাড গ্রুপ ড্রপডাউনের উপরে একটা টিক বক্স "আমি ব্লাড ডোনার হতে চাই না"।
+// টিক দিলে ড্রপডাউন বন্ধ হয়ে যায় (বাধ্যতামূলক নয়) এবং profiles.blood_group-এ
+// NOT_DONOR সেভ হয়। NOT_DONOR কোনো রিকোয়েস্ট গ্রুপের সাথে মেলে না।
+// ডোনার টগল সাইনআপে চালু হয় না (প্রোফাইল থেকে নিজে চালু করতে হয়)।
 // ============================================================
-
-// এই মান profiles.blood_group-এ সেভ হয় — যারা ডোনার হতে চান না
-const NOT_DONOR_VALUE = 'NOT_DONOR';
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
@@ -165,14 +164,19 @@ const upazilas = [
       </div>
       <p class="auth-field-hint">ফোন নাম্বার অথবা এই ইমেইল — যেকোনো একটা দিয়ে পরে লগইন করা যাবে</p>
 
+      <!-- ডোনার হতে না চাইলে টিক দিন — ব্লাড গ্রুপ বাধ্যতামূলক থাকে না -->
+      <label class="auth-check-row" for="signupNotDonor">
+        <input type="checkbox" id="signupNotDonor" />
+        <span>আমি ব্লাড ডোনার হতে চাই না</span>
+      </label>
+
       <div class="auth-field-row">
         <div class="auth-field-col">
-          <label class="auth-label">ব্লাড গ্রুপ<span class="required-mark">*</span></label>
+          <label class="auth-label">ব্লাড গ্রুপ<span class="required-mark" id="signupBloodStar">*</span></label>
           <div class="auth-select-wrap">
             <i class="fas fa-droplet auth-input-icon"></i>
             <select class="auth-input auth-select" id="signupBloodGroup" required>
               <option value="" disabled selected>নির্বাচন করুন</option>
-              <option value={NOT_DONOR_VALUE}>ডোনার হতে চাই না</option>
               {bloodGroups.map((bg) => <option value={bg}>{bg}</option>)}
             </select>
           </div>
@@ -462,6 +466,36 @@ const upazilas = [
     background-position: right 14px center;
   }
 
+  /* ===== "ডোনার হতে চাই না" টিক বক্স ===== */
+  .auth-check-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 16px;
+    padding: 11px 14px;
+    background: #F8FAFC;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1B2A4A;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .auth-check-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: #FF6B35;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .auth-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
   .auth-forgot {
     display: block;
     width: 100%;
@@ -728,6 +762,34 @@ const upazilas = [
   });
 
   // ============================================================
+  // "ডোনার হতে চাই না" টিক বক্স — টিক দিলে ব্লাড গ্রুপ ড্রপডাউন বন্ধ
+  // ============================================================
+  const NOT_DONOR_VALUE = 'NOT_DONOR'; // profiles.blood_group-এ সেভ হওয়া মান
+  const notDonorCheck = document.getElementById('signupNotDonor');
+  const bloodGroupSelectEl = document.getElementById('signupBloodGroup');
+  const bloodStar = document.getElementById('signupBloodStar');
+
+  notDonorCheck?.addEventListener('change', () => {
+    const checked = notDonorCheck.checked;
+    if (!bloodGroupSelectEl) return;
+
+    if (checked) {
+      bloodGroupSelectEl.value = '';
+      bloodGroupSelectEl.disabled = true;
+      bloodGroupSelectEl.removeAttribute('required'); // SFValidateForm যেন আটকে না দেয়
+      bloodGroupSelectEl.classList.remove('field-invalid');
+      document
+        .querySelector('.field-error-msg[data-error-for="signupBloodGroup"]')
+        ?.classList.remove('show');
+      if (bloodStar) bloodStar.style.display = 'none';
+    } else {
+      bloodGroupSelectEl.disabled = false;
+      bloodGroupSelectEl.setAttribute('required', '');
+      if (bloodStar) bloodStar.style.display = '';
+    }
+  });
+
+  // ============================================================
   // Supabase Auth লজিক
   // ============================================================
 
@@ -791,7 +853,10 @@ const upazilas = [
     const phone = document.getElementById('signupPhone')?.value?.trim();
     const password = document.getElementById('signupPassword')?.value;
     const recoveryEmail = document.getElementById('signupEmail')?.value?.trim();
-    const bloodGroup = document.getElementById('signupBloodGroup')?.value;
+    const isNotDonor = !!document.getElementById('signupNotDonor')?.checked;
+    const bloodGroup = isNotDonor
+      ? NOT_DONOR_VALUE
+      : document.getElementById('signupBloodGroup')?.value;
     const upazila = document.getElementById('signupUpazila')?.value;
 
     clearMessage();
@@ -799,7 +864,8 @@ const upazilas = [
     if (!window.SFValidateForm(document.getElementById('signupPane'))) {
       return;
     }
-    // ব্লাড গ্রুপ বাধ্যতামূলক (SFValidateForm select না ধরলেও এখানে আটকাবে)
+    // ব্লাড গ্রুপ বাধ্যতামূলক — শুধু "ডোনার হতে চাই না" টিক দিলে ছাড়
+    // (SFValidateForm select না ধরলেও এখানে আটকাবে)
     if (!bloodGroup) {
       showMessage('ব্লাড গ্রুপ নির্বাচন করুন');
       return;
@@ -855,7 +921,7 @@ const upazilas = [
       const updates = {};
       if (avatarUrl) updates.avatar_url = avatarUrl;
       if (recoveryEmail) updates.recovery_email = recoveryEmail;
-      if (bloodGroup) updates.blood_group = bloodGroup; // A+ … O- অথবা NOT_DONOR
+      if (bloodGroup) updates.blood_group = bloodGroup; // A+ … O- অথবা NOT_DONOR (টিক দিলে)
       if (upazila) updates.upazila = upazila;
 
       if (Object.keys(updates).length > 0) {
