@@ -20,6 +20,10 @@
 //     শুধু কারণ/কোড (finishReason, HTTP স্ট্যাটাস)।
 //   • JSON কেটে গেলে (maxOutputTokens) এড়াতে সীমা ৫০০ → ১২০০; খারাপ JSON বা Gemini ৫xx হলে একবার আবার চেষ্টা
 //   • মডেল নাম geminiConfig.js থেকে
+// আপডেট (ধাপ ২): স্পেশালিটি কার্ডে প্রকাশিত ডাক্তারের সংখ্যা (doctor_count)। কোনো স্পেশালিটিতে
+//   ডাক্তার না থাকলে কার্ড দেখানো হয় না, উত্তরে সেটা বলা হয়, আর মেডিসিন (general-medicine) থাকলে সেটা দেখানো হয়।
+//   সংখ্যা doctors টেবিল (status='published') থেকে, ৫ মিনিট ক্যাশ; আনতে ব্যর্থ হলে আগের মতো সংখ্যা ছাড়া কার্ড।
+//   stat('recommend') এ যা চাওয়া হয়েছিল সেটাই গোনা হয় (ডাক্তার থাক বা না থাক) — চাহিদা বোঝার জন্য।
 
 export const prerender = false;
 
@@ -139,6 +143,28 @@ async function getSpecialties(db: any): Promise<Spec[]> {
   if (error || !data) throw new Error('specialties load failed');
   specCache = { at: Date.now(), rows: data };
   return data;
+}
+
+// প্রকাশিত ডাক্তার প্রতি স্পেশালিটিতে কতজন (স্লাগ → সংখ্যা)। ব্যর্থ হলে null (কার্ড সংখ্যা ছাড়া যাবে)
+let docCountCache: { at: number; map: Map<string, number> } | null = null;
+
+async function getDoctorCounts(db: any): Promise<Map<string, number> | null> {
+  try {
+    if (docCountCache && Date.now() - docCountCache.at < 5 * 60 * 1000) return docCountCache.map;
+    const { data, error } = await db.from('doctors').select('specialties').eq('status', 'published').limit(5000);
+    if (error || !Array.isArray(data)) return null;
+    const map = new Map<string, number>();
+    for (const row of data) {
+      const list = Array.isArray(row?.specialties) ? row.specialties : [];
+      for (const slug of new Set<string>(list.map((x: any) => String(x)))) {
+        map.set(slug, (map.get(slug) || 0) + 1);
+      }
+    }
+    docCountCache = { at: Date.now(), map };
+    return map;
+  } catch {
+    return null;
+  }
 }
 
 async function hashIp(ip: string, salt: string): Promise<string> {
@@ -401,7 +427,26 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
           reply = `এই ধরনের সমস্যায় সাধারণত ${picked.map((p) => p.name_bn).join(' বা ')} স্পেশালিটির ডাক্তার দেখানো হয়।`;
         }
         await stat('recommend', picked.map((p) => p.slug));
-        return json({ type: 'recommend', reply, specialties: picked });
+
+        // ---------- ডাক্তার আছে কিনা ----------
+        const counts = await getDoctorCounts(db);
+        if (!counts) return json({ type: 'recommend', reply, specialties: picked });
+
+        const withCount = picked.map((p) => ({ ...p, doctor_count: counts.get(p.slug) || 0 }));
+        const available = withCount.filter((p) => p.doctor_count > 0);
+        const missingNames = withCount.filter((p) => p.doctor_count === 0).map((p) => p.name_bn).join(' ও ');
+        let cards = available;
+
+        if (available.length === 0) {
+          const gm = validSlugs.get('general-medicine');
+          const gmCount = counts.get('general-medicine') || 0;
+          if (gm && gmCount > 0) cards = [{ slug: gm.slug, name_bn: gm.name_bn, doctor_count: gmCount }];
+          reply += ` ${missingNames} স্পেশালিটির ডাক্তার ডিরেক্টরিতে এখনো যোগ হয়নি।` +
+            (cards.length ? ' আপাতত মেডিসিনের ডাক্তার দেখাতে পারেন।' : '');
+        } else if (missingNames) {
+          reply += ` (${missingNames} স্পেশালিটির ডাক্তার এখনো তালিকায় নেই।)`;
+        }
+        return json({ type: 'recommend', reply, specialties: cards });
       }
       // AI যা বাছল তার কোনোটাই বৈধ না — প্রশ্ন করে এগোই
       await stat('clarify');
