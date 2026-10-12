@@ -8,11 +8,16 @@
 // ১. caller-এর token যাচাই → profiles.role admin/moderator কিনা চেক
 // ২. shops row fetch (আগের owner_id বের করা)
 // ৩. নতুন owner-কে ফোন নম্বর দিয়ে profiles এ খোঁজা
-// ৪. নতুন owner যদি আগে থেকেই অন্য শপের মালিক হয়, তাহলে আটকানো
-//    (এক অ্যাকাউন্ট = এক শপ — কনফ্লিক্ট এড়াতে)
-// ৫. shops.owner_id নতুন user_id তে বদলানো
-// ৬. পুরনো ওউনারের profiles রিসেট (is_shop_owner=false, shop_id=null)
-// ৭. নতুন ওউনারের profiles সেট (is_shop_owner=true, shop_id=shopId)
+// ৪. shops.owner_id নতুন user_id তে বদলানো
+// ৫. পুরনো ওউনারের profiles ঠিক করা: বাকি শপ না থাকলে রিসেট
+//    (is_shop_owner=false, shop_id=null); বাকি শপ থাকলে is_shop_owner=true থাকে,
+//    আর profiles.shop_id এই শপের হলে বাকি শপের একটায় সরানো হয়
+// ৬. নতুন ওউনারের profiles সেট: is_shop_owner=true; shop_id শুধু তখনই বসে
+//    যখন তার আগে কোনো shop_id নেই
+//
+// আপডেট (একাধিক শপ): "এক অ্যাকাউন্ট = এক শপ" বাধা সরানো হয়েছে — নতুন ওউনার
+// আগে থেকে অন্য শপের মালিক হলেও আরেকটা শপ পাবে। পুরনো ওউনারের আরও শপ থাকলে
+// তার ওউনার ফ্ল্যাগ আর রিসেট হয় না।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -100,14 +105,6 @@ export async function POST({ request }) {
       );
     }
 
-    // নতুন ওউনার যদি আগে থেকেই অন্য কোনো শপের মালিক হয়, আটকানো
-    if (newOwnerProfile.shop_id && newOwnerProfile.shop_id !== shopId) {
-      return new Response(
-        JSON.stringify({ error: 'এই অ্যাকাউন্ট ইতিমধ্যে অন্য একটা শপের মালিক — একটা অ্যাকাউন্ট দিয়ে একটাই শপ চালানো যায়' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
     // শপের owner_id বদলানো
     const { error: updateShopError } = await supabaseAdmin
       .from('shops')
@@ -121,18 +118,42 @@ export async function POST({ request }) {
       );
     }
 
-    // পুরনো ওউনার রিসেট (থাকলে, আর যদি নতুন-পুরনো একই না হয়)
+    // পুরনো ওউনারের প্রোফাইল ঠিক করা (থাকলে, আর যদি নতুন-পুরনো একই না হয়)
     if (shop.owner_id && shop.owner_id !== newOwnerProfile.id) {
-      await supabaseAdmin
-        .from('profiles')
-        .update({ is_shop_owner: false, shop_id: null })
-        .eq('id', shop.owner_id);
+      const [{ data: oldOwnerProfile }, { data: remainingShops }] = await Promise.all([
+        supabaseAdmin.from('profiles').select('shop_id').eq('id', shop.owner_id).maybeSingle(),
+        supabaseAdmin
+          .from('shops')
+          .select('id')
+          .eq('owner_id', shop.owner_id)
+          .order('created_at', { ascending: true }),
+      ]);
+
+      if (remainingShops && remainingShops.length > 0) {
+        // আরও শপ আছে → ওউনার ফ্ল্যাগ থাকবে; shop_id এই শপের হলে বাকি শপে সরানো
+        const oldUpdate = { is_shop_owner: true };
+        if (oldOwnerProfile?.shop_id === shopId || !oldOwnerProfile?.shop_id) {
+          oldUpdate.shop_id = remainingShops[0].id;
+        }
+        await supabaseAdmin.from('profiles').update(oldUpdate).eq('id', shop.owner_id);
+      } else {
+        // এটাই শেষ শপ ছিল → আগের মতো রিসেট
+        await supabaseAdmin
+          .from('profiles')
+          .update({ is_shop_owner: false, shop_id: null })
+          .eq('id', shop.owner_id);
+      }
     }
 
-    // নতুন ওউনার সেট
+    // নতুন ওউনার সেট — আগে থেকে shop_id থাকলে ওভাররাইট করা হয় না
+    const newOwnerUpdate = { is_shop_owner: true };
+    if (!newOwnerProfile.shop_id) {
+      newOwnerUpdate.shop_id = shopId;
+    }
+
     const { error: newOwnerUpdateError } = await supabaseAdmin
       .from('profiles')
-      .update({ is_shop_owner: true, shop_id: shopId })
+      .update(newOwnerUpdate)
       .eq('id', newOwnerProfile.id);
 
     if (newOwnerUpdateError) {
