@@ -13,6 +13,12 @@
 // এখন insert এর আগে বর্তমান সর্বোচ্চ shop_order বের করে তার +10
 // বসানো হচ্ছে, ফলে Approve করা শপও সবসময় লিস্টের শেষে distinct
 // order নিয়ে যোগ হবে (create-shop.js এর মতোই)।
+//
+// আপডেট (একাধিক শপ): আগে approve করলে সবসময় profiles.shop_id নতুন শপে
+// ওভাররাইট হতো। এখন is_shop_owner=true সবসময় সেট হয়, কিন্তু profiles.shop_id
+// শুধু তখনই বসে যখন ইউজারের আগে কোনো shop_id নেই (অর্থাৎ প্রথম শপ)। দ্বিতীয়
+// শপ approve করলে আগের shop_id অক্ষত থাকে। My Shop পেজ shops.owner_id দিয়ে
+// সব শপ খোঁজে, তাই দ্বিতীয় শপ ঠিকই দেখা যায়।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -162,9 +168,21 @@ export async function POST({ request }) {
       });
     }
 
+    // একাধিক শপ: আগে থেকে shop_id থাকলে সেটা ওভাররাইট করা হয় না
+    const { data: ownerProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('shop_id')
+      .eq('id', req.user_id)
+      .maybeSingle();
+
+    const profileUpdate = { is_shop_owner: true };
+    if (!ownerProfile?.shop_id) {
+      profileUpdate.shop_id = shopData.id;
+    }
+
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
-      .update({ is_shop_owner: true, shop_id: shopData.id })
+      .update(profileUpdate)
       .eq('id', req.user_id);
 
     if (profileError) {
