@@ -9,9 +9,12 @@
 // পাঠানো userId থেকে না নিয়ে, Authorization header-এর access
 // token থেকে সার্ভার নিজে যাচাই করে বের করে (নিরাপত্তার জন্য)।
 // আপডেট: আপলোডে cacheControl = ১ বছর (ছবি দ্রুত লোড হওয়ার জন্য)।
+// আপডেট (এরর মনিটরিং, ধাপ ৯): সার্ভারের ৫০০ এরর (কনফিগ, Storage আপলোড, অপ্রত্যাশিত)
+// public.report_client_error() দিয়ে /admin/errors-এ যায়। ৪০০/৪০১ (ইউজারের ভুল/সেশন) রিপোর্ট হয় না।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -23,6 +26,7 @@ function json(body, status) {
 }
 
 export async function POST({ request }) {
+  let reportClient = null;
   try {
     const authHeader = request.headers.get('authorization') || '';
     const token = authHeader.replace('Bearer ', '').trim();
@@ -35,12 +39,15 @@ export async function POST({ request }) {
     const serviceRoleKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceRoleKey) {
+      // সার্ভিস ক্লায়েন্ট নেই, তাই রিপোর্ট পাঠানো সম্ভব নয় — শুধু লগ
+      console.error('upload-avatar: সার্ভার কনফিগারেশন ঠিক নেই');
       return json({ error: 'সার্ভার কনফিগারেশন ঠিক নেই' }, 500);
     }
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportClient = supabaseAdmin;
 
     // টোকেন যাচাই করে আসল ইউজার আইডি বের করা হচ্ছে — ক্লায়েন্ট থেকে
     // পাঠানো কোনো userId কখনো সরাসরি বিশ্বাস করা হয় না
@@ -75,6 +82,14 @@ export async function POST({ request }) {
 
     if (uploadError) {
       console.error('avatar upload error:', uploadError.message);
+      await reportServerError(supabaseAdmin, {
+        route: '/api/upload-avatar',
+        action: 'avatar_upload_storage',
+        title: 'প্রোফাইল ছবি আপলোড ব্যর্থ (Storage)',
+        message: uploadError.message,
+        code: uploadError.statusCode || uploadError.code,
+        status: 500,
+      });
       return json({ error: 'ছবি আপলোড ব্যর্থ: ' + uploadError.message }, 500);
     }
 
@@ -83,6 +98,13 @@ export async function POST({ request }) {
     return json({ url: publicData?.publicUrl || null }, 200);
   } catch (err) {
     console.error('upload-avatar API এরর:', err);
+    await reportServerError(reportClient, {
+      route: '/api/upload-avatar',
+      action: 'avatar_upload_unexpected',
+      title: 'প্রোফাইল ছবি API অপ্রত্যাশিত এরর',
+      message: err?.message || String(err),
+      status: 500,
+    });
     return json({ error: 'অপ্রত্যাশিত সমস্যা হয়েছে' }, 500);
   }
 }
