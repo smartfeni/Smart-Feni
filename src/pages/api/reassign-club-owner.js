@@ -22,11 +22,36 @@
 // না থাকায় ম্যানুয়াল/অসম্পূর্ণ কোনো প্রসেসে) ভুলভাবে "অন্য ক্লাবের
 // মালিক" বলে ব্লক করে দিচ্ছিল। এখন থেকে is_club_owner === true এবং
 // club_id !== clubId — দুটো শর্তই সত্যি হলে তবেই ব্লক করবে।
+//
+// আপডেট (ফোন লুকআপ ফিক্স): profiles.phone-এ ফরম্যাট মিশ্র (01XXXXXXXXX,
+// +8801XXXXXXXXX ইত্যাদি)। আগে শুধু digits-only (8801…) দিয়ে খোঁজা হতো,
+// তাই "+880…" ফরম্যাটের অ্যাকাউন্ট মিলত না। এখন বাংলাদেশি নম্বরের সব
+// ফরম্যাট (01…, 8801…, +8801…) একসাথে খোঁজা হয়। একাধিক রো মিললে
+// ভুল ইউজারকে ওউনার না বানিয়ে এরর দেয়।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
 
 export const prerender = false;
+
+// ইনপুট নম্বর থেকে সম্ভাব্য সব সেভ-করা ফরম্যাটের তালিকা বানায়
+function buildPhoneCandidates(input) {
+  const raw = String(input || '').trim();
+  const digits = raw.replace(/\D/g, '');
+
+  let local = null; // 01XXXXXXXXX
+  if (/^8801\d{9}$/.test(digits)) local = digits.slice(2); // 8801XXXXXXXXX → 01XXXXXXXXX
+  else if (/^01\d{9}$/.test(digits)) local = digits;
+  else if (/^1\d{9}$/.test(digits)) local = '0' + digits;
+
+  if (local) {
+    const rest = local.slice(1); // 1XXXXXXXXX
+    return [local, '880' + rest, '+880' + rest];
+  }
+
+  // বাংলাদেশি মোবাইল প্যাটার্ন না হলে যেমন আছে তেমন + digits + plus-সহ
+  return Array.from(new Set([raw, digits, '+' + digits].filter(Boolean)));
+}
 
 export async function POST({ request }) {
   try {
@@ -94,20 +119,29 @@ export async function POST({ request }) {
       });
     }
 
-    // নতুন ওউনারকে ফোন নম্বর দিয়ে profiles এ খোঁজা
-    const digitsOnly = newOwnerPhone.replace(/\D/g, '');
-    const { data: newOwnerProfile, error: newOwnerError } = await supabaseAdmin
+    // নতুন ওউনারকে ফোন নম্বর দিয়ে profiles এ খোঁজা (সব ফরম্যাট ধরে)
+    const phoneCandidates = buildPhoneCandidates(newOwnerPhone);
+    const { data: phoneMatches, error: newOwnerError } = await supabaseAdmin
       .from('profiles')
       .select('id, is_club_owner, club_id, phone')
-      .eq('phone', digitsOnly)
-      .maybeSingle();
+      .in('phone', phoneCandidates)
+      .limit(2);
 
-    if (newOwnerError || !newOwnerProfile) {
+    if (newOwnerError || !phoneMatches || phoneMatches.length === 0) {
       return new Response(
         JSON.stringify({ error: 'এই ফোন নম্বরে কোনো অ্যাকাউন্ট পাওয়া যায়নি — নতুন ওউনারকে আগে সাইটে অ্যাকাউন্ট খুলতে হবে' }),
         { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    if (phoneMatches.length > 1) {
+      return new Response(
+        JSON.stringify({ error: 'এই নম্বরে একাধিক অ্যাকাউন্ট আছে — ভুল ইউজারকে ওউনার করা এড়াতে পরিবর্তন বন্ধ করা হলো। আগে ডুপ্লিকেট ঠিক করুন' }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const newOwnerProfile = phoneMatches[0];
 
     // নতুন ওউনার যদি আগে থেকেই সত্যিকারের অন্য কোনো ক্লাবের মালিক হয়,
     // আটকানো (is_club_owner=true হতে হবে, শুধু club_id সেট থাকলেই না —
