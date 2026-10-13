@@ -448,7 +448,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     async function loadCart() {
       const { data: cartItems, error } = await supabase
         .from('cart_items')
-        .select('id, quantity, listing_id, listings(id, title, price, images, user_id)')
+        .select('id, quantity, listing_id, listings(id, title, price, images, user_id, shop_id)')
         .eq('user_id', currentUserId);
 
       if (error) {
@@ -477,23 +477,27 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
       emptyCart.style.display = 'none';
 
-      const ownerIds = [...new Set(items.map((i) => i.listings.user_id))];
-      const { data: shops } = await supabase.from('shops').select('*').in('owner_id', ownerIds);
-      const shopByOwner = {};
-      (shops || []).forEach((s) => { shopByOwner[s.owner_id] = s; });
+      // ফিক্স (একাধিক শপ): শপ ধরা ও গ্রুপ করা হয় listings.shop_id দিয়ে —
+      // ওউনারের user_id দিয়ে নয়, তাই একই ওউনারের দুই শপ আলাদা গ্রুপে থাকে
+      const shopIds = [...new Set(items.map((i) => i.listings.shop_id).filter(Boolean))];
+      let shopById = {};
+      if (shopIds.length > 0) {
+        const { data: shops } = await supabase.from('shops').select('*').in('id', shopIds);
+        (shops || []).forEach((s) => { shopById[s.id] = s; });
+      }
 
       const groups = {};
       items.forEach((item) => {
-        const ownerId = item.listings.user_id;
-        if (!groups[ownerId]) groups[ownerId] = [];
-        groups[ownerId].push(item);
+        const key = item.listings.shop_id || `owner-${item.listings.user_id}`;
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(item);
       });
 
       shopGroupsContainer.innerHTML = '';
       let grand = 0;
 
-      Object.entries(groups).forEach(([ownerId, groupItems]) => {
-        const shop = shopByOwner[ownerId];
+      Object.entries(groups).forEach(([groupKey, groupItems]) => {
+        const shop = shopById[groupKey];
         const shopName = shop?.name || 'অজানা শপ';
 
         const groupEl = document.createElement('div');
