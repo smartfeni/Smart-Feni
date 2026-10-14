@@ -11,6 +11,18 @@
 //   <ChatModal />  ← পেজের যেকোনো জায়গায় একবার বসালেই হবে
 //   window.openChatModal({ requestId: req.id, otherPartyName: 'করিম' });
 //
+// এডমিন রিভিউ মোডে (readOnly: true) কে কাস্টমার আর কে রাইডার বোঝানোর জন্য
+// এই ঐচ্ছিক প্যারামিটারগুলোও দেওয়া যাবে:
+//   customerId, customerName, riderId, riderName
+// দিলে প্রতিটা মেসেজে নাম + "কাস্টমার"/"রাইডার" ট্যাগ ও আলাদা রঙ দেখাবে
+// (কাস্টমার বাঁয়ে, রাইডার ডানে)। না দিলে আগের মতোই চলবে।
+//
+// চ্যাটে ছবিতে ট্যাপ করলে অ্যাপের ভেতরেই ফুলস্ক্রিন ভিউয়ার খোলে
+// (ব্রাউজার খোলে না) — ভিউয়ারে ছবিতে ট্যাপ করলে জুম, বাইরে/✕ ট্যাপ করলে বন্ধ।
+//
+// মেসেজে গুগল ম্যাপ লিংক থাকলে নিচে "নেভিগেট করুন" বাটন আসে
+// (src/lib/mapLinks.js), রাইডার ট্যাপ করলেই গুগল ম্যাপ খোলে।
+//
 // মেসেজ পাঠানো/পড়া সরাসরি chatClient.js দিয়ে (RLS-সুরক্ষিত), কোনো
 // API endpoint লাগে না। নতুন মেসেজ এলে DB ট্রিগার অটো নোটিফিকেশন
 // পাঠিয়ে দেয়, তাই এখানে আলাদা করে কিছু করা লাগছে না।
@@ -24,13 +36,15 @@
         <div class="cm-header-avatar"><i class="fas fa-user"></i></div>
         <div>
           <p class="cm-header-name" id="cmOtherName">চ্যাট</p>
-          <p class="cm-header-sub">সরাসরি মেসেজ</p>
+          <p class="cm-header-sub" id="cmHeaderSub">সরাসরি মেসেজ</p>
         </div>
       </div>
       <button class="cm-close" id="cmClose" type="button" aria-label="বন্ধ করুন">
         <i class="fas fa-xmark"></i>
       </button>
     </div>
+
+    <div class="cm-legend" id="cmLegend" style="display:none;"></div>
 
     <div class="cm-messages" id="cmMessages">
       <p class="cm-loading" id="cmLoading">লোড হচ্ছে...</p>
@@ -53,17 +67,31 @@
   </div>
 </div>
 
+<!-- ফুলস্ক্রিন ছবি ভিউয়ার (অ্যাপের ভেতরেই, ব্রাউজার ছাড়া) -->
+<div class="cm-lb" id="cmLightbox" aria-hidden="true">
+  <button class="cm-lb-close" id="cmLbClose" type="button" aria-label="বন্ধ করুন">
+    <i class="fas fa-xmark"></i>
+  </button>
+  <div class="cm-lb-body" id="cmLbBody">
+    <img id="cmLbImg" alt="ছবি" />
+  </div>
+  <p class="cm-lb-hint">জুম করতে ছবিতে ট্যাপ করুন</p>
+</div>
+
 <script>
   import { getChatMessages, sendChatMessage, markMessagesRead, subscribeToChatMessages, uploadChatImage } from '../../lib/chatClient.js';
   import { compressImage } from '../../lib/imageCompress.js';
   import { supabase } from '../../lib/supabase.js';
   import { isNativeApp, capturePhoto } from '../../lib/native-bridge.js';
+  import { findMapLink, createNavButton } from '../../lib/mapLinks.js';
 
   const overlay = document.getElementById('cmOverlay');
   const closeBtn = document.getElementById('cmClose');
   const messagesEl = document.getElementById('cmMessages');
   const loadingEl = document.getElementById('cmLoading');
   const otherNameEl = document.getElementById('cmOtherName');
+  const headerSubEl = document.getElementById('cmHeaderSub');
+  const legendEl = document.getElementById('cmLegend');
   const inputEl = document.getElementById('cmInput');
   const sendBtn = document.getElementById('cmSendBtn');
   const cameraBtn = document.getElementById('cmCameraBtn');
@@ -72,31 +100,109 @@
   const galleryInput = document.getElementById('cmGalleryInput');
   const inputRowEl = document.getElementById('cmInputRow');
 
+  const lightboxEl = document.getElementById('cmLightbox');
+  const lbImgEl = document.getElementById('cmLbImg');
+  const lbBodyEl = document.getElementById('cmLbBody');
+  const lbCloseEl = document.getElementById('cmLbClose');
+
   let activeRequestId = null;
   let currentUserId = null;
   let activeChannel = null;
+  // এডমিন রিভিউ মোডের রোল তথ্য (না থাকলে null)
+  let roleInfo = null;
 
   function formatTime(iso) {
     return new Date(iso).toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' });
   }
 
+  // ---------- ছবি ভিউয়ার ----------
+  function openLightbox(url) {
+    if (!url) return;
+    lbImgEl.classList.remove('zoomed');
+    lbImgEl.src = url;
+    lbBodyEl.scrollTop = 0;
+    lbBodyEl.scrollLeft = 0;
+    lightboxEl.classList.add('active');
+    lightboxEl.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeLightbox() {
+    lightboxEl.classList.remove('active');
+    lightboxEl.setAttribute('aria-hidden', 'true');
+    lbImgEl.classList.remove('zoomed');
+    lbImgEl.removeAttribute('src');
+  }
+
+  lbCloseEl?.addEventListener('click', closeLightbox);
+  lightboxEl?.addEventListener('click', (e) => {
+    // ছবির বাইরে (কালো জায়গায়) ট্যাপ করলে বন্ধ
+    if (e.target === lightboxEl || e.target === lbBodyEl) closeLightbox();
+  });
+  lbImgEl?.addEventListener('click', () => {
+    lbImgEl.classList.toggle('zoomed');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && lightboxEl?.classList.contains('active')) closeLightbox();
+  });
+
+  // ---------- মেসেজ রেন্ডার ----------
+  // readOnly + roleInfo থাকলে sender_id দেখে 'customer' / 'rider' / null
+  function getRole(msg) {
+    if (!roleInfo) return null;
+    if (roleInfo.customerId && msg.sender_id === roleInfo.customerId) return 'customer';
+    if (roleInfo.riderId && msg.sender_id === roleInfo.riderId) return 'rider';
+    return null;
+  }
+
   function renderMessage(msg) {
-    const isMine = msg.sender_id === currentUserId;
+    const role = getRole(msg);
     const bubble = document.createElement('div');
-    bubble.className = `cm-msg ${isMine ? 'cm-msg-mine' : 'cm-msg-theirs'}`;
-    const imageHtml = msg.image_url ? `<img class="cm-msg-image" src="${msg.image_url}" alt="ছবি" />` : '';
-    const textHtml = msg.message ? `<p class="cm-msg-text"></p>` : '';
-    bubble.innerHTML = `
-      ${imageHtml}
-      ${textHtml}
-      <span class="cm-msg-time">${formatTime(msg.created_at)}</span>
-    `;
-    if (msg.message) {
-      bubble.querySelector('.cm-msg-text').textContent = msg.message;
+
+    if (roleInfo) {
+      // এডমিন রিভিউ: কাস্টমার বাঁয়ে (সাদা), রাইডার ডানে (কমলা)
+      bubble.className = `cm-msg ${role === 'rider' ? 'cm-msg-mine cm-role-rider' : 'cm-msg-theirs cm-role-customer'}`;
+      const roleEl = document.createElement('span');
+      roleEl.className = 'cm-msg-role';
+      if (role === 'rider') {
+        roleEl.textContent = `রাইডার${roleInfo.riderName ? ' · ' + roleInfo.riderName : ''}`;
+      } else if (role === 'customer') {
+        roleEl.textContent = `কাস্টমার${roleInfo.customerName ? ' · ' + roleInfo.customerName : ''}`;
+      } else {
+        roleEl.textContent = 'অজানা';
+      }
+      bubble.appendChild(roleEl);
+    } else {
+      const isMine = msg.sender_id === currentUserId;
+      bubble.className = `cm-msg ${isMine ? 'cm-msg-mine' : 'cm-msg-theirs'}`;
     }
-    bubble.querySelector('.cm-msg-image')?.addEventListener('click', () => {
-      window.open(msg.image_url, '_blank', 'noopener');
-    });
+
+    if (msg.image_url) {
+      const img = document.createElement('img');
+      img.className = 'cm-msg-image';
+      img.src = msg.image_url;
+      img.alt = 'ছবি';
+      img.addEventListener('click', () => openLightbox(msg.image_url));
+      bubble.appendChild(img);
+    }
+
+    if (msg.message) {
+      const textEl = document.createElement('p');
+      textEl.className = 'cm-msg-text';
+      textEl.textContent = msg.message;
+      bubble.appendChild(textEl);
+
+      // গুগল ম্যাপ লিংক থাকলে নেভিগেট বাটন
+      const mapLink = findMapLink(msg.message);
+      if (mapLink) {
+        bubble.appendChild(createNavButton(mapLink));
+      }
+    }
+
+    const timeEl = document.createElement('span');
+    timeEl.className = 'cm-msg-time';
+    timeEl.textContent = formatTime(msg.created_at);
+    bubble.appendChild(timeEl);
+
     return bubble;
   }
 
@@ -119,18 +225,54 @@
   }
 
   function closeModal() {
+    closeLightbox();
     overlay.classList.remove('active');
     document.body.style.overflow = '';
     cleanupChannel();
     activeRequestId = null;
+    roleInfo = null;
   }
 
-  window.openChatModal = async function ({ requestId, otherPartyName, readOnly = false }) {
+  function renderLegend() {
+    if (!roleInfo) {
+      legendEl.style.display = 'none';
+      legendEl.innerHTML = '';
+      return;
+    }
+    legendEl.innerHTML = '';
+    const customerChip = document.createElement('span');
+    customerChip.className = 'cm-legend-chip cm-legend-customer';
+    customerChip.textContent = `কাস্টমার: ${roleInfo.customerName || '—'}`;
+    const riderChip = document.createElement('span');
+    riderChip.className = 'cm-legend-chip cm-legend-rider';
+    riderChip.textContent = `রাইডার: ${roleInfo.riderName || '—'}`;
+    legendEl.appendChild(customerChip);
+    legendEl.appendChild(riderChip);
+    legendEl.style.display = 'flex';
+  }
+
+  window.openChatModal = async function ({
+    requestId,
+    otherPartyName,
+    readOnly = false,
+    customerId = null,
+    customerName = '',
+    riderId = null,
+    riderName = '',
+  }) {
     if (!requestId) return;
 
     activeRequestId = requestId;
     otherNameEl.textContent = otherPartyName || 'চ্যাট';
     inputRowEl.style.display = readOnly ? 'none' : 'flex';
+    headerSubEl.textContent = readOnly ? 'এডমিন রিভিউ (শুধু দেখা)' : 'সরাসরি মেসেজ';
+
+    // রোল লেবেল শুধু readOnly মোডে এবং অন্তত একজনের id থাকলে
+    roleInfo = readOnly && (customerId || riderId)
+      ? { customerId, customerName, riderId, riderName }
+      : null;
+    renderLegend();
+
     messagesEl.innerHTML = '';
     loadingEl.style.display = 'block';
     messagesEl.appendChild(loadingEl);
@@ -315,6 +457,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    min-width: 0;
   }
 
   .cm-header-avatar {
@@ -354,6 +497,34 @@
     cursor: pointer;
     font-size: 0.95rem;
     flex-shrink: 0;
+  }
+
+  /* এডমিন রিভিউ: কে কাস্টমার, কে রাইডার — হেডারের নিচের লেজেন্ড */
+  .cm-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 14px;
+    background: #fff;
+    border-bottom: 1.5px solid #F0F2F6;
+    flex-shrink: 0;
+  }
+
+  .cm-legend-chip {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
+
+  .cm-legend-customer {
+    background: #E8EEF8;
+    color: #1B2A4A;
+  }
+
+  .cm-legend-rider {
+    background: #FFF0EA;
+    color: #D9541F;
   }
 
   .cm-messages {
@@ -411,6 +582,21 @@
 
   .cm-msg-theirs .cm-msg-time {
     color: #A9B4C2;
+  }
+
+  /* এডমিন রিভিউয়ে বাবলের উপরের রোল ট্যাগ */
+  .cm-msg-role {
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+  }
+
+  .cm-role-customer .cm-msg-role {
+    color: #2F4B7C;
+  }
+
+  .cm-role-rider .cm-msg-role {
+    color: rgba(255, 255, 255, 0.92);
   }
 
   .cm-msg-text {
@@ -498,5 +684,77 @@
   .cm-send-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  /* ---------- ফুলস্ক্রিন ছবি ভিউয়ার ---------- */
+  .cm-lb {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    background: rgba(0, 0, 0, 0.94);
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .cm-lb.active {
+    display: flex;
+  }
+
+  .cm-lb-close {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+    right: 14px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.18);
+    color: #fff;
+    font-size: 1.05rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 2;
+  }
+
+  .cm-lb-body {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .cm-lb-body img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+    cursor: zoom-in;
+  }
+
+  .cm-lb-body img.zoomed {
+    max-width: none;
+    max-height: none;
+    width: 220%;
+    height: auto;
+    margin: auto;
+    cursor: zoom-out;
+  }
+
+  .cm-lb-hint {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.55);
+    pointer-events: none;
   }
 </style>
