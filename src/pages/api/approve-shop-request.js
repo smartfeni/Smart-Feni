@@ -3,8 +3,6 @@
 // শুধু এডমিন প্যানেল থেকে কল হবে (admin/moderator role যাচাই করে)।
 // নতুন account তৈরি করে না — shop_requests.user_id এর existing
 // account এর উপরেই shops row বসিয়ে দেয়, is_shop_owner=true করে দেয়।
-// Slug shop_name থেকে auto-generate হয় (clubs+shops দুটোতেই
-// uniqueness চেক করে, কনফ্লিক্ট হলে -2, -3 ইত্যাদি সাফিক্স যোগ হয়)।
 // Service role key শুধু এই সার্ভার ফাইলেই থাকে, ব্রাউজারে যায় না।
 //
 // আপডেট (shop_order ফিক্স): আগে shops row তৈরির সময় shop_order
@@ -19,28 +17,30 @@
 // শুধু তখনই বসে যখন ইউজারের আগে কোনো shop_id নেই (অর্থাৎ প্রথম শপ)। দ্বিতীয়
 // শপ approve করলে আগের shop_id অক্ষত থাকে। My Shop পেজ shops.owner_id দিয়ে
 // সব শপ খোঁজে, তাই দ্বিতীয় শপ ঠিকই দেখা যায়।
+//
+// আপডেট (স্লাগ — অ্যাডমিন ঠিক করবে): body-তে এখন ঐচ্ছিক `slug` আসে
+// ({ requestId, slug? })। অ্যাডমিন approve-এর সময় স্লাগ বক্সে যা দেয় সেটাই বসে।
+//  - slug দিলে: slugify + ফরম্যাট চেক → clubs ও shops দুই টেবিলে available কিনা চেক।
+//    কনফ্লিক্ট/reserved হলে কিছু তৈরি না করেই 409 + "Not Available" এরর
+//    (code: 'slug_unavailable', field: 'slug'); ফরম্যাট ভুল হলে 400 (field: 'slug')।
+//    আগের মতো চুপচাপ -2, -3 সাফিক্স বসানো হয় না।
+//  - slug না দিলে: আগের auto আচরণ (shop_name থেকে, সাফিক্স সহ) — শুধু API সরাসরি
+//    কল হলে কাজে লাগে। বাংলা নামে এখন "-" স্লাগ হয় না, "shop" থেকে শুরু হয়।
+// চেক আর insert-এর মাঝে অন্য কেউ একই স্লাগ নিয়ে ফেললে DB-র unique index
+// (23505) ধরে একই "Not Available" 409 ফেরত দেওয়া হয়।
+// স্লাগের নিয়মকানুন src/lib/slugRules.js-এ।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+import {
+  slugify,
+  validateSlugFormat,
+  checkSlugAvailability,
+  generateUniqueSlug,
+  notAvailableMessage,
+} from '../../lib/slugRules.js';
 
 export const prerender = false;
-
-const RESERVED_SLUGS = [
-  'housing', 'job', 'repair', 'car-rental', 'courier', 'emergency',
-  'blood', 'home-food', 'recycle', 'tuition', 'sports', 'lost-found',
-  'health', 'legal', 'event', 'laundry', 'doctor-directory', 'online-shop',
-  'clubs', 'admin', 'api', 'my-club', 'my-shop', 'services', 'profile',
-  'shop', 'about', 'contact', 'index',
-];
-
-function slugify(input) {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
-}
 
 export async function POST({ request }) {
   try {
@@ -53,7 +53,7 @@ export async function POST({ request }) {
       });
     }
 
-    const { requestId } = await request.json();
+    const { requestId, slug: requestedSlug } = await request.json();
 
     if (!requestId) {
       return new Response(JSON.stringify({ error: 'requestId আবশ্যক' }), {
@@ -114,24 +114,39 @@ export async function POST({ request }) {
       });
     }
 
-    // ইউনিক স্লাগ জেনারেট (clubs + shops দুটোতেই চেক করে, কনফ্লিক্ট হলে সাফিক্স)
-    const baseSlug = slugify(req.shop_name) || 'shop';
-    let finalSlug = baseSlug;
-    let suffix = 2;
+    // ============================================================
+    // স্লাগ ঠিক করা — অ্যাডমিন দিলে সেটা (কনফ্লিক্টে এরর), না দিলে auto
+    // শপ তৈরির আগেই সব চেক, যাতে এরর হলে কিছুই তৈরি না হয়
+    // ============================================================
+    let finalSlug;
+    const adminProvidedSlug = typeof requestedSlug === 'string' && requestedSlug.trim() !== '';
 
-    while (true) {
-      if (RESERVED_SLUGS.includes(finalSlug)) {
-        finalSlug = `${baseSlug}-${suffix}`;
-        suffix++;
-        continue;
+    if (adminProvidedSlug) {
+      finalSlug = slugify(requestedSlug);
+
+      const formatError = validateSlugFormat(finalSlug);
+      if (formatError) {
+        return new Response(JSON.stringify({ error: formatError, field: 'slug' }), {
+          status: 400, headers: { 'Content-Type': 'application/json' },
+        });
       }
-      const [{ data: clubHit }, { data: shopHit }] = await Promise.all([
-        supabaseAdmin.from('clubs').select('id').eq('slug', finalSlug).maybeSingle(),
-        supabaseAdmin.from('shops').select('id').eq('slug', finalSlug).maybeSingle(),
-      ]);
-      if (!clubHit && !shopHit) break;
-      finalSlug = `${baseSlug}-${suffix}`;
-      suffix++;
+
+      const availability = await checkSlugAvailability(supabaseAdmin, finalSlug);
+
+      if (availability.reason === 'error') {
+        return new Response(JSON.stringify({ error: 'স্লাগ চেক করা যায়নি — আবার চেষ্টা করুন' }), {
+          status: 500, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (!availability.available) {
+        return new Response(
+          JSON.stringify({ error: notAvailableMessage(finalSlug), field: 'slug', code: 'slug_unavailable' }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    } else {
+      finalSlug = await generateUniqueSlug(supabaseAdmin, req.shop_name);
     }
 
     // ============================================================
@@ -163,6 +178,13 @@ export async function POST({ request }) {
       .single();
 
     if (shopError) {
+      // চেকের পরে অন্য কেউ একই স্লাগ নিয়ে ফেললে unique index ধরবে
+      if (shopError.code === '23505') {
+        return new Response(
+          JSON.stringify({ error: notAvailableMessage(finalSlug), field: 'slug', code: 'slug_unavailable' }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       return new Response(JSON.stringify({ error: 'শপ তৈরি ব্যর্থ: ' + shopError.message }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
       });
