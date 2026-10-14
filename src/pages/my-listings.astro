@@ -21,6 +21,18 @@
 // - কার্ডের টাইটেল/ক্যাটাগরি/ছবি escape করা হয়েছে (innerHTML এ সরাসরি
 //   ইউজারের লেখা বসত)
 //
+// আপডেট (ক্যাটাগরি-ভিত্তিক গ্রুপ UI):
+// - উপরে স্ট্যাটাস চিপ (মোট / সক্রিয় / রিভিউ বাকি / বাতিল) — সংখ্যা সহ,
+//   ট্যাপ করলে ওই স্ট্যাটাসের পোস্টগুলোই দেখায়
+// - পোস্টগুলো ক্যাটাগরি অনুযায়ী গ্রুপে (services.js-এর ক্রমে); প্রতিটা
+//   গ্রুপের হেডারে আইকন, নাম, পোস্ট সংখ্যা; ট্যাপ করলে ভাঁজ/খোলে
+// - একটা গ্রুপে ১২টার বেশি হলে প্রথম ১২টা দেখায়, নিচে "আরো দেখান"
+// - গ্রুপ হেডারে ক্যাটাগরি থাকায় কার্ড থেকে ক্যাটাগরির ট্যাগ সরানো হয়েছে
+// - গাড়ি ভাড়া (car-rental): price কলামে দাম নয়, গাড়ির ধরন/মডেল থাকে —
+//   তাই কার্ডে "৳" ছাড়া দেখায়, এডিট ফর্মে লেবেল "গাড়ির ধরন / মডেল"
+//   (প্রোফাইল এডিট থেকে গাড়ির কার্ড সরে এখানে এসেছে; এডিট এখন
+//   অন্য লিস্টিংয়ের মতোই submit_listing_edit রিভিউ নিয়মে যায়)
+//
 // my-orders.astro এর একই প্যাটার্ন: loading/login-required/content
 // states, style is:global (কার্ড JS দিয়ে dynamically তৈরি হয় বলে
 // Astro এর scoped CSS এতে কাজ করে না)।
@@ -59,7 +71,26 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           <a href="/" class="primary-link-btn">হোমপেজে যান</a>
         </div>
 
-        <div id="listingsContainer" class="listings-grid"></div>
+        <!-- ===== স্ট্যাটাস চিপ (সামারি + ফিল্টার) ===== -->
+        <div class="ml-chips" id="summaryChips" style="display:none;">
+          <button type="button" class="ml-chip active" data-filter="all">
+            মোট <span class="ml-chip-num" data-count="all">0</span>
+          </button>
+          <button type="button" class="ml-chip" data-filter="active">
+            <span class="ml-chip-dot" style="background:#1B7A3C;"></span>সক্রিয় <span class="ml-chip-num" data-count="active">0</span>
+          </button>
+          <button type="button" class="ml-chip" data-filter="pending">
+            <span class="ml-chip-dot" style="background:#B36B00;"></span>রিভিউ বাকি <span class="ml-chip-num" data-count="pending">0</span>
+          </button>
+          <button type="button" class="ml-chip" data-filter="rejected">
+            <span class="ml-chip-dot" style="background:#D14343;"></span>বাতিল <span class="ml-chip-num" data-count="rejected">0</span>
+          </button>
+        </div>
+
+        <!-- ===== ক্যাটাগরি গ্রুপ (JS দিয়ে তৈরি হয়) ===== -->
+        <div id="listingsContainer" class="ml-groups"></div>
+
+        <p id="filterEmpty" class="ml-filter-empty" style="display:none;">এই স্ট্যাটাসে কোনো পোস্ট নেই</p>
       </div>
 
     </div>
@@ -86,7 +117,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       <label class="ml-form-label">বিবরণ</label>
       <textarea class="ml-form-input" id="mlEditDescription" rows="3"></textarea>
 
-      <label class="ml-form-label">দাম / রেট</label>
+      <label class="ml-form-label" id="mlEditPriceLabel">দাম / রেট</label>
       <input type="text" class="ml-form-input" id="mlEditPrice" />
 
       <label class="ml-form-label">উপজেলা</label>
@@ -191,12 +222,181 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 22px;
+      margin-bottom: 18px;
     }
 
     .page-title i {
       color: #FF6B35;
       font-size: 1.15rem;
+    }
+
+    /* ===== স্ট্যাটাস চিপ (সামারি + ফিল্টার) ===== */
+    .ml-chips {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      margin-bottom: 18px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+
+    .ml-chips::-webkit-scrollbar {
+      display: none;
+    }
+
+    .ml-chip {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #fff;
+      border: 1.5px solid #E5EAF0;
+      border-radius: 40px;
+      padding: 8px 14px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      font-family: inherit;
+      color: #5A6E85;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .ml-chip-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .ml-chip-num {
+      background: #F4F7FC;
+      color: #1B2A4A;
+      border-radius: 20px;
+      min-width: 22px;
+      padding: 1px 7px;
+      font-size: 0.72rem;
+      text-align: center;
+    }
+
+    .ml-chip.active {
+      background: #1B2A4A;
+      border-color: #1B2A4A;
+      color: #fff;
+    }
+
+    .ml-chip.active .ml-chip-num {
+      background: rgba(255, 255, 255, 0.18);
+      color: #fff;
+    }
+
+    /* ===== ক্যাটাগরি গ্রুপ ===== */
+    .ml-groups {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .ml-group {
+      background: #fff;
+      border: 1px solid #EEF3F9;
+      border-radius: 20px;
+      overflow: hidden;
+    }
+
+    .ml-group-head {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #fff;
+      border: none;
+      padding: 14px 16px;
+      cursor: pointer;
+      text-align: left;
+      font-family: inherit;
+    }
+
+    .ml-group-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    .ml-group-name {
+      flex: 1;
+      min-width: 0;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .ml-group-count {
+      background: #F4F7FC;
+      color: #5A6E85;
+      font-size: 0.74rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    .ml-group-chevron {
+      color: #8FA0BC;
+      font-size: 0.75rem;
+      transition: transform 0.25s ease;
+    }
+
+    .ml-group.collapsed .ml-group-chevron {
+      transform: rotate(-90deg);
+    }
+
+    .ml-group-body {
+      padding: 0 16px 18px;
+      border-top: 1px solid #EEF3F9;
+    }
+
+    .ml-group.collapsed .ml-group-body {
+      display: none;
+    }
+
+    .ml-group-body .listings-grid {
+      margin-top: 14px;
+    }
+
+    .ml-more {
+      display: block;
+      margin: 16px auto 0;
+      background: #F4F7FC;
+      border: none;
+      color: #1B2A4A;
+      font-weight: 700;
+      font-size: 0.8rem;
+      font-family: inherit;
+      padding: 10px 22px;
+      border-radius: 40px;
+      cursor: pointer;
+    }
+
+    .ml-more:hover {
+      background: #E5EAF0;
+    }
+
+    .ml-filter-empty {
+      text-align: center;
+      color: #8FA0BC;
+      font-size: 0.88rem;
+      font-weight: 600;
+      padding: 30px 0;
     }
 
     .listings-grid {
@@ -247,17 +447,6 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       padding: 12px 14px 14px;
     }
 
-    .ml-category {
-      display: inline-block;
-      font-size: 0.63rem;
-      font-weight: 700;
-      padding: 3px 9px;
-      border-radius: 20px;
-      background: #F4F7FC;
-      color: #5A6E85;
-      margin-bottom: 6px;
-    }
-
     .ml-title {
       font-size: 0.87rem;
       font-weight: 700;
@@ -273,6 +462,9 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       font-weight: 700;
       color: #FF6B35;
       margin-bottom: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     /* ===== এডিট রিভিউ নোটিশ (pending / প্রত্যাখ্যাত) ===== */
@@ -518,8 +710,15 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
   const listingsContent = document.getElementById('listingsContent');
   const emptyListings = document.getElementById('emptyListings');
   const container = document.getElementById('listingsContainer');
+  const summaryChips = document.getElementById('summaryChips');
+  const filterEmpty = document.getElementById('filterEmpty');
+  const chipButtons = document.querySelectorAll('.ml-chip');
+  const chipNums = document.querySelectorAll('.ml-chip-num');
 
-  const categoryNameMap = Object.fromEntries(categories.map((c) => [c.id, c.name]));
+  // ক্যাটাগরির নাম/আইকন/ক্রম — services.js-এর ক্রম অনুযায়ী গ্রুপ সাজানো হয়
+  const categoryMeta = Object.fromEntries(
+    categories.map((c, index) => [c.id, { name: c.name, icon: c.icon, order: index }])
+  );
 
   const statusLabels = {
     pending: { text: 'রিভিউ বাকি', bg: '#FFF3E0', color: '#B36B00' },
@@ -530,10 +729,31 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
   // প্রত্যাখ্যাত এডিটের নোটিশ কত দিন পর্যন্ত দেখাবে
   const REJECTED_NOTE_DAYS = 30;
 
+  // একটা গ্রুপে প্রথমে কয়টা কার্ড দেখাবে (বাকিগুলো "আরো দেখান" দিয়ে)
+  const GROUP_PAGE_SIZE = 12;
+
+  // গাড়ি ভাড়ার লিস্টিংয়ে price কলামে দাম নয়, গাড়ির ধরন/মডেল থাকে
+  const CAR_CATEGORY = 'car-rental';
+
   function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str ?? '';
     return div.innerHTML;
+  }
+
+  // কার্ডে দেখানোর দাম: গাড়ির জন্য "৳" ছাড়া
+  function formatPrice(item) {
+    if (!item.price) return '';
+    return item.category === CAR_CATEGORY ? item.price : `৳${item.price}`;
+  }
+
+  // অচেনা স্ট্যাটাস "রিভিউ বাকি" হিসেবে ধরা হয় (কার্ডের ব্যাজের নিয়মের সাথে মিল রেখে)
+  function statusKey(item) {
+    return statusLabels[item.status] ? item.status : 'pending';
+  }
+
+  function groupKey(item) {
+    return item.category || 'other';
   }
 
   let currentUserId = null;
@@ -542,6 +762,11 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
   let pendingByListing = {};
   let rejectedByListing = {};
   const cardsById = {};
+  const itemsById = {};
+
+  // categoryKey -> { el, grid, countEl, moreBtn, entries: [{item, card}], shown }
+  const groups = {};
+  let activeFilter = 'all';
 
   // ===== এডিট মোডাল এলিমেন্ট =====
   const editOverlay = document.getElementById('mlEditOverlay');
@@ -550,6 +775,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
   const editMessage = document.getElementById('mlEditMessage');
   const editTitleInput = document.getElementById('mlEditTitle');
   const editDescInput = document.getElementById('mlEditDescription');
+  const editPriceLabel = document.getElementById('mlEditPriceLabel');
   const editPriceInput = document.getElementById('mlEditPrice');
   const editUpazilaInput = document.getElementById('mlEditUpazila');
   const editPhoneInput = document.getElementById('mlEditPhone');
@@ -557,6 +783,135 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
   let editingId = null;
   let editingCard = null;
   let editingItem = null;
+
+  // ===== গ্রুপ তৈরি / ভিউ আপডেট =====
+  function createGroup(key) {
+    const meta = categoryMeta[key] || {
+      name: key === 'other' ? 'অন্যান্য' : key,
+      icon: 'fa-folder',
+      order: 999,
+    };
+
+    const el = document.createElement('section');
+    el.className = 'ml-group';
+    el.innerHTML = `
+      <button type="button" class="ml-group-head" aria-expanded="true">
+        <span class="ml-group-icon"><i class="fas ${escapeHtml(meta.icon)}"></i></span>
+        <span class="ml-group-name">${escapeHtml(meta.name)}</span>
+        <span class="ml-group-count">0</span>
+        <i class="fas fa-chevron-down ml-group-chevron"></i>
+      </button>
+      <div class="ml-group-body">
+        <div class="listings-grid"></div>
+        <button type="button" class="ml-more" style="display:none;"></button>
+      </div>
+    `;
+
+    const group = {
+      el,
+      grid: el.querySelector('.listings-grid'),
+      countEl: el.querySelector('.ml-group-count'),
+      moreBtn: el.querySelector('.ml-more'),
+      entries: [],
+      shown: GROUP_PAGE_SIZE,
+    };
+
+    const head = el.querySelector('.ml-group-head');
+    head.addEventListener('click', () => {
+      const collapsed = el.classList.toggle('collapsed');
+      head.setAttribute('aria-expanded', String(!collapsed));
+    });
+
+    group.moreBtn.addEventListener('click', () => {
+      group.shown += GROUP_PAGE_SIZE;
+      applyView();
+    });
+
+    return group;
+  }
+
+  // চিপের সংখ্যা, প্রতিটা গ্রুপের কার্ড (ফিল্টার + "আরো দেখান"), খালি অবস্থা — সব একসাথে হালনাগাদ
+  function applyView() {
+    const counts = { all: 0, active: 0, pending: 0, rejected: 0 };
+    Object.values(itemsById).forEach((item) => {
+      counts.all += 1;
+      counts[statusKey(item)] += 1;
+    });
+
+    chipNums.forEach((el) => {
+      el.textContent = String(counts[el.dataset.count] ?? 0);
+    });
+
+    if (counts.all === 0) {
+      summaryChips.style.display = 'none';
+      filterEmpty.style.display = 'none';
+      emptyListings.style.display = 'flex';
+      return;
+    }
+
+    emptyListings.style.display = 'none';
+    summaryChips.style.display = 'flex';
+
+    let visibleTotal = 0;
+
+    Object.values(groups).forEach((group) => {
+      const matching = group.entries.filter(
+        (entry) => activeFilter === 'all' || statusKey(entry.item) === activeFilter
+      );
+
+      group.entries.forEach((entry) => {
+        entry.card.style.display = 'none';
+      });
+      matching.forEach((entry, index) => {
+        entry.card.style.display = index < group.shown ? '' : 'none';
+      });
+
+      group.countEl.textContent = String(matching.length);
+      group.el.style.display = matching.length ? '' : 'none';
+
+      const rest = matching.length - group.shown;
+      if (rest > 0) {
+        group.moreBtn.style.display = 'block';
+        group.moreBtn.textContent = `আরো দেখান (${rest})`;
+      } else {
+        group.moreBtn.style.display = 'none';
+      }
+
+      visibleTotal += matching.length;
+    });
+
+    filterEmpty.style.display = visibleTotal ? 'none' : 'block';
+  }
+
+  chipButtons.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      activeFilter = chip.dataset.filter || 'all';
+      chipButtons.forEach((c) => c.classList.toggle('active', c === chip));
+      applyView();
+    });
+  });
+
+  // ডিলিটের পর কার্ড/গ্রুপ পরিষ্কার করে ভিউ হালনাগাদ
+  function removeItem(item) {
+    const key = groupKey(item);
+    const group = groups[key];
+
+    if (group) {
+      group.entries = group.entries.filter((entry) => entry.item.id !== item.id);
+      if (group.entries.length === 0) {
+        group.el.remove();
+        delete groups[key];
+      }
+    }
+
+    cardsById[item.id]?.remove();
+    delete cardsById[item.id];
+    delete itemsById[item.id];
+    delete pendingByListing[item.id];
+    delete rejectedByListing[item.id];
+
+    applyView();
+  }
 
   // ===== এডিট রিভিউ অবস্থা লোড (pending / rejected) =====
   async function loadEditStates() {
@@ -649,6 +1004,11 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     // pending এডিট থাকলে সেই তথ্যই খোলে, নইলে বর্তমান পাবলিক তথ্য
     const src = pendingByListing[item.id] || item;
 
+    // গাড়ি ভাড়ায় price কলামে গাড়ির ধরন/মডেল থাকে, দাম নয়
+    const isCar = item.category === CAR_CATEGORY;
+    editPriceLabel.textContent = isCar ? 'গাড়ির ধরন / মডেল' : 'দাম / রেট';
+    editPriceInput.placeholder = isCar ? 'যেমন: সিএনজি / টয়োটা পিকআপ' : '';
+
     editTitleInput.value = src.title || '';
     editDescInput.value = src.description || '';
     editPriceInput.value = src.price || '';
@@ -733,14 +1093,15 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       const titleEl = editingCard.querySelector('.ml-title');
       if (titleEl) titleEl.textContent = updates.title;
 
+      const priceText = formatPrice(editingItem);
       let priceEl = editingCard.querySelector('.ml-price');
-      if (updates.price) {
+      if (priceText) {
         if (priceEl) {
-          priceEl.textContent = `৳${updates.price}`;
+          priceEl.textContent = priceText;
         } else {
           priceEl = document.createElement('p');
           priceEl.className = 'ml-price';
-          priceEl.textContent = `৳${updates.price}`;
+          priceEl.textContent = priceText;
           titleEl?.after(priceEl);
         }
       } else if (priceEl) {
@@ -753,6 +1114,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     setTimeout(closeEdit, 700);
   });
 
+  // কার্ড তৈরি করে ফেরত দেয় (গ্রুপে বসানোর কাজ লোডের সময়)
   function renderCard(item) {
     const status = statusLabels[item.status] || statusLabels.pending;
     const card = document.createElement('div');
@@ -763,13 +1125,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       ? `<img src="${escapeHtml(item.images[0])}" alt="${escapeHtml(item.title || '')}" class="ml-photo" />`
       : `<div class="ml-icon-fallback"><i class="fas fa-image"></i></div>`;
 
+    const priceText = formatPrice(item);
+
     card.innerHTML = `
       <span class="ml-status-badge" style="background:${status.bg};color:${status.color};">${status.text}</span>
       ${photoHtml}
       <div class="ml-body">
-        <span class="ml-category">${escapeHtml(categoryNameMap[item.category] || item.category)}</span>
         <p class="ml-title">${escapeHtml(item.title || '')}</p>
-        ${item.price ? `<p class="ml-price">৳${escapeHtml(item.price)}</p>` : ''}
+        ${priceText ? `<p class="ml-price">${escapeHtml(priceText)}</p>` : ''}
         <div class="ml-note"></div>
         <div class="ml-actions">
           <a href="/listing/${item.id}" class="ml-btn ml-btn-view"><i class="fas fa-eye"></i> দেখুন</a>
@@ -801,17 +1164,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         return;
       }
 
-      card.remove();
-      delete cardsById[item.id];
-      delete pendingByListing[item.id];
-      delete rejectedByListing[item.id];
-
-      if (!container.children.length) {
-        emptyListings.style.display = 'flex';
-      }
+      removeItem(item);
     });
 
-    container.appendChild(card);
+    return card;
   }
 
   async function loadMyListings() {
@@ -842,8 +1198,27 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     // এডিট রিভিউয়ের অবস্থা আগে আনা হয় (ফেইল করলেও কার্ড দেখাবে)
     await loadEditStates();
 
-    data.forEach(renderCard);
+    // ক্যাটাগরি গ্রুপ — services.js-এর ক্রম অনুযায়ী, অচেনা ক্যাটাগরি সবার শেষে
+    const keys = [...new Set(data.map(groupKey))].sort(
+      (a, b) => (categoryMeta[a]?.order ?? 999) - (categoryMeta[b]?.order ?? 999)
+    );
+
+    keys.forEach((key) => {
+      const group = createGroup(key);
+      groups[key] = group;
+      container.appendChild(group.el);
+    });
+
+    data.forEach((item) => {
+      const card = renderCard(item);
+      const group = groups[groupKey(item)];
+      group.entries.push({ item, card });
+      group.grid.appendChild(card);
+      itemsById[item.id] = item;
+    });
+
     refreshAllNotes();
+    applyView();
   }
 
   loadMyListings();
