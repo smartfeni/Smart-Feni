@@ -1,5 +1,10 @@
 // path: src/pages/api/delivery/create-request.js
 //
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): ৩টা ৫০০ পথে serverErrorReporter.js দিয়ে
+// অ্যাডমিন এরর লগে রিপোর্ট (delivery_create_online_check, delivery_create_insert,
+// delivery_create_unexpected)। ৪০০/৪০১/৪০৯ (NO_RIDER_ONLINE) রিপোর্ট হয় না — এগুলো
+// ইউজারের ভুল বা স্বাভাবিক পরিস্থিতি। রেসপন্স ও লজিক অপরিবর্তিত।
+//
 // আপডেট (রাইডার অ্যাভেইলেবিলিটি): রিকোয়েস্ট তৈরির আগে সার্ভারে চেক —
 // সিলেক্ট করা উপজেলায় (এবং নির্দিষ্ট বাহন চাইলে সেই বাহনের) কোনো
 // approved + অনলাইন (is_active) রাইডার না থাকলে 409 + code: 'NO_RIDER_ONLINE'
@@ -24,14 +29,19 @@
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendTelegramBroadcast } from '../../../lib/telegramNotify.js';
 import { sendBulkNotifications } from '../../../lib/notify.js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
 const VALID_VEHICLE_TYPES = ['bike', 'cycle', 'cng', 'any'];
 const VALID_CATEGORIES = ['delivery', 'ride'];
 const EXPIRY_HOURS = 1;
+const ROUTE = '/api/delivery/create-request';
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
+  let reportClient = null;
+
   try {
     const { client, user, error: authError } = await getAuthedUser(request);
     if (authError) {
@@ -40,6 +50,7 @@ export async function POST({ request }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    reportClient = client;
 
     const {
       category,
@@ -108,6 +119,14 @@ export async function POST({ request }) {
     const { count: onlineRiderCount, error: onlineError } = await onlineQuery;
 
     if (onlineError) {
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_create_online_check',
+        title: 'ডেলিভারি রিকোয়েস্ট: রাইডার চেক ব্যর্থ',
+        message: onlineError.message,
+        code: onlineError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'রাইডারদের স্ট্যাটাস যাচাই করা যায়নি, একটু পর আবার চেষ্টা করুন' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -158,6 +177,14 @@ export async function POST({ request }) {
       .single();
 
     if (insertError) {
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_create_insert',
+        title: 'ডেলিভারি রিকোয়েস্ট তৈরি ব্যর্থ',
+        message: insertError.message,
+        code: insertError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'রিকোয়েস্ট তৈরি ব্যর্থ: ' + insertError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -213,6 +240,22 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    // লগইনের আগেই ক্র্যাশ করলে reportClient নেই — তখন service role client
+    let fallbackClient = reportClient;
+    if (!fallbackClient) {
+      try {
+        fallbackClient = getAdminClient().client || null;
+      } catch (_) {
+        fallbackClient = null;
+      }
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_create_unexpected',
+      title: 'ডেলিভারি রিকোয়েস্ট: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
