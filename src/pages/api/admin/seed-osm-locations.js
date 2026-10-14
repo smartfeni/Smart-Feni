@@ -20,6 +20,11 @@
 // উপজেলাও সঠিকভাবে বসে (ইউনিয়ন পলিগন থেকে), geojson লোড না হলে আগের মতো
 // নিকটতম উপজেলা কেন্দ্র ও কোনো ফিল্টার ছাড়া চলে (geoFilter: false)।
 //
+// Overpass কয়েকটা ছোট গ্রুপে ভাগ করে একটা একটা করে আনা হয় (একটা বড় কোয়েরি সার্ভারে
+// টাইমআউট/ব্যর্থ হতো)। প্রতি গ্রুপ আনার পরই ডাটাবেসে সেভ — মাঝপথে একটা গ্রুপ ব্যর্থ হলেও
+// বাকিগুলোর কাজ হারায় না। ব্যর্থ গ্রুপের নাম ও কারণ রেসপন্সে (failedGroups) আসে।
+// রেসপন্সে Overpass-এর "remark: runtime error" (সার্ভার টাইমআউট/ব্যস্ত) ধরা হয়।
+//
 // image_url ইচ্ছাকৃতভাবে upsert-এ নেই — অ্যাডমিন হাতে ছবি দিলে রিসিডে মুছে যাবে না।
 // ============================================================
 
@@ -33,6 +38,8 @@ const SITE_URL = 'https://smartfeni.com';
 const GEOJSON_URL = `${SITE_URL}/data/feni_unions.geojson`;
 
 const BATCH_SIZE = 200;
+const ATTEMPT_TIMEOUT_MS = 25000; // প্রতি সার্ভার-চেষ্টা
+const TOTAL_BUDGET_MS = 100000; // এর বেশি সময় গেলে বাকি গ্রুপ থামিয়ে pendingGroups-এ জানায়
 const MAX_NAME_LENGTH = 120;
 
 // প্রধান সার্ভার ব্যর্থ/ব্যস্ত হলে পরেরটায় চেষ্টা
@@ -58,32 +65,48 @@ const BBOX = '22.72,91.02,23.30,91.58';
 // শুধু নাম আছে এমন জায়গা (name বা name:bn)
 const NAMED = '[~"^name(:bn)?$"~"."]';
 
-const AMENITIES = [
-  'restaurant', 'fast_food', 'cafe', 'marketplace',
-  'hospital', 'clinic', 'doctors', 'pharmacy',
-  'school', 'college', 'university', 'kindergarten', 'library',
-  'bank', 'bus_station', 'ferry_terminal', 'fuel',
-  'police', 'fire_station', 'post_office', 'townhall', 'courthouse', 'community_centre',
-  'place_of_worship', 'cinema',
-].join('|');
-const SHOPS = 'mall|supermarket|department_store|marketplace';
-const TOURISM = 'hotel|guest_house|attraction|museum|viewpoint';
-const LEISURE = 'park|stadium|sports_centre';
-const PLACES = 'city|town|village|suburb|hamlet|neighbourhood|quarter|locality';
+// ছোট ছোট গ্রুপ — প্রতিটা আলাদা Overpass কোয়েরি (হালকা, দ্রুত)
+const GROUPS = [
+  {
+    key: 'food_hotel',
+    filters: [
+      `nwr["amenity"~"^(restaurant|fast_food|cafe)$"]`,
+      `nwr["tourism"~"^(hotel|guest_house)$"]`,
+    ],
+  },
+  {
+    key: 'health_education',
+    filters: [
+      `nwr["amenity"~"^(hospital|clinic|doctors|pharmacy|school|college|university|kindergarten|library)$"]`,
+    ],
+  },
+  {
+    key: 'market_bank_transport',
+    filters: [
+      `nwr["amenity"~"^(marketplace|bank|bus_station|ferry_terminal|fuel)$"]`,
+      `nwr["shop"~"^(mall|supermarket|department_store|marketplace)$"]`,
+      `nwr["railway"~"^(station|halt)$"]`,
+    ],
+  },
+  {
+    key: 'public_worship_leisure',
+    filters: [
+      `nwr["amenity"~"^(police|fire_station|post_office|townhall|courthouse|community_centre|place_of_worship|cinema)$"]`,
+      `nwr["office"="government"]`,
+      `nwr["tourism"~"^(attraction|museum|viewpoint)$"]`,
+      `nwr["leisure"~"^(park|stadium|sports_centre)$"]`,
+    ],
+  },
+  {
+    key: 'places',
+    filters: [`nwr["place"~"^(city|town|village|suburb|hamlet|neighbourhood|quarter|locality)$"]`],
+  },
+];
 
-const OVERPASS_QUERY = `
-[out:json][timeout:50];
-(
-  nwr["amenity"~"^(${AMENITIES})$"]${NAMED}(${BBOX});
-  nwr["shop"~"^(${SHOPS})$"]${NAMED}(${BBOX});
-  nwr["tourism"~"^(${TOURISM})$"]${NAMED}(${BBOX});
-  nwr["leisure"~"^(${LEISURE})$"]${NAMED}(${BBOX});
-  nwr["railway"~"^(station|halt)$"]${NAMED}(${BBOX});
-  nwr["office"="government"]${NAMED}(${BBOX});
-  nwr["place"~"^(${PLACES})$"]${NAMED}(${BBOX});
-);
-out center;
-`;
+function buildQuery(group) {
+  const body = group.filters.map((f) => `  ${f}${NAMED}(${BBOX});`).join('\n');
+  return `[out:json][timeout:25];\n(\n${body}\n);\nout center;`;
+}
 
 function nearestUpazila(lat, lng) {
   let best = null;
@@ -152,26 +175,52 @@ async function loadFeniGeoServer() {
   }
 }
 
-async function fetchOverpass() {
-  let lastStatus = null;
+// একটা গ্রুপের কোয়েরি চালানো। রিটার্ন: { elements | null, attempts: [কারণের তালিকা] }
+async function fetchGroup(group) {
+  const query = buildQuery(group);
+  const attempts = [];
+
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    const host = new URL(endpoint).host;
+    const t0 = Date.now();
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'text/plain',
-          'User-Agent': 'SmartFeni-LocationSeed/2.0 (info@smartfeni.com)',
+          'User-Agent': 'SmartFeni-LocationSeed/2.1 (info@smartfeni.com)',
         },
-        body: OVERPASS_QUERY,
-        signal: AbortSignal.timeout(55000),
+        body: query,
+        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
       });
-      if (res.ok) return { data: await res.json(), status: 200 };
-      lastStatus = res.status;
+      const ms = Date.now() - t0;
+
+      if (!res.ok) {
+        attempts.push(`${host}: HTTP ${res.status} (${ms}ms)`);
+        continue;
+      }
+
+      const text = await res.text();
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (e) {
+        attempts.push(`${host}: JSON নয় — ${text.slice(0, 80).replace(/\s+/g, ' ')} (${ms}ms)`);
+        continue;
+      }
+
+      const elements = Array.isArray(parsed.elements) ? parsed.elements : [];
+      // সার্ভার টাইমআউট/ব্যস্ত হলে Overpass 200 দেয় কিন্তু remark-এ runtime error লেখে
+      if (parsed.remark && /runtime error|timed out|out of memory/i.test(String(parsed.remark))) {
+        attempts.push(`${host}: ${String(parsed.remark).slice(0, 100)} (${ms}ms)`);
+        if (elements.length === 0) continue;
+      }
+      return { elements, attempts };
     } catch (e) {
-      lastStatus = 'network';
+      attempts.push(`${host}: ${e?.name || 'Error'} ${String(e?.message || '').slice(0, 80)} (${Date.now() - t0}ms)`);
     }
   }
-  return { data: null, status: lastStatus };
+  return { elements: null, attempts };
 }
 
 function json(body, status = 200) {
@@ -183,6 +232,7 @@ function json(body, status = 200) {
 
 export async function POST({ request }) {
   try {
+    const startedAt = Date.now();
     const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
     const serviceRoleKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!supabaseUrl || !serviceRoleKey) {
@@ -198,102 +248,125 @@ export async function POST({ request }) {
       return json({ error: 'শুধু অ্যাডমিন এই কাজ করতে পারবেন' }, 403);
     }
 
-    // geojson আর Overpass একসাথে আনা
-    const [geo, overpass] = await Promise.all([loadFeniGeoServer(), fetchOverpass()]);
+    // ঐচ্ছিক বডি: { "groups": ["places", "health_education"] } — শুধু ওই গ্রুপগুলো চালাতে।
+    // বডি না থাকলে (এখনকার অ্যাডমিন পেজ) সব গ্রুপ চলে।
+    let wanted = null;
+    try {
+      const body = await request.json();
+      if (body && Array.isArray(body.groups)) wanted = body.groups.map(String);
+    } catch (e) {
+      /* বডি নেই — সব গ্রুপ */
+    }
+    const groupsToRun = wanted ? GROUPS.filter((g) => wanted.includes(g.key)) : GROUPS;
 
-    if (!overpass.data) {
+    const geo = await loadFeniGeoServer();
+
+    let totalFromOsm = 0;
+    let skippedNoName = 0;
+    let outsideFeni = 0;
+    let duplicates = 0;
+    let inserted = 0;
+    let failed = 0;
+    let firstError = null;
+    const breakdown = {};
+    const failedGroups = []; // { group, attempts }
+    const pendingGroups = [];
+    const seenIds = new Set();
+    const seenSpots = new Set(); // একই নাম + কাছাকাছি জায়গা (node + way ডুপ্লিকেট) এড়াতে
+
+    for (const group of groupsToRun) {
+      if (Date.now() - startedAt > TOTAL_BUDGET_MS) {
+        pendingGroups.push(group.key);
+        continue;
+      }
+
+      const { elements, attempts } = await fetchGroup(group);
+      if (!elements) {
+        failedGroups.push({ group: group.key, attempts });
+        continue;
+      }
+      totalFromOsm += elements.length;
+
+      const rows = [];
+      for (const el of elements) {
+        const tags = el.tags || {};
+        const name = String(tags['name:bn'] || tags.name || '').trim().slice(0, MAX_NAME_LENGTH);
+        const lat = el.type === 'node' ? el.lat : el.center?.lat;
+        const lng = el.type === 'node' ? el.lon : el.center?.lon;
+
+        if (!name || typeof lat !== 'number' || typeof lng !== 'number') {
+          skippedNoName++;
+          continue;
+        }
+
+        let upazila;
+        if (geo) {
+          const area = findAreaAt(lat, lng, geo);
+          if (!area) {
+            outsideFeni++;
+            continue;
+          }
+          upazila = area.upazilaName || nearestUpazila(lat, lng);
+        } else {
+          upazila = nearestUpazila(lat, lng);
+        }
+
+        const externalId = `osm/${el.type}/${el.id}`;
+        const spotKey = `${name.toLowerCase()}|${lat.toFixed(3)}|${lng.toFixed(3)}`;
+        if (seenIds.has(externalId) || seenSpots.has(spotKey)) {
+          duplicates++;
+          continue;
+        }
+        seenIds.add(externalId);
+        seenSpots.add(spotKey);
+
+        const cat = categorize(tags);
+        breakdown[cat] = (breakdown[cat] || 0) + 1;
+
+        rows.push({ external_id: externalId, name, lat, lng, upazila, source: 'osm' });
+      }
+
+      // এই গ্রুপ সাথে সাথে সেভ — ব্যাচে upsert; ব্যাচ ব্যর্থ হলে একটা একটা করে চেষ্টা
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const chunk = rows.slice(i, i + BATCH_SIZE);
+        const { error } = await supabaseAdmin
+          .from('location_suggestions')
+          .upsert(chunk, { onConflict: 'external_id', ignoreDuplicates: false });
+
+        if (!error) {
+          inserted += chunk.length;
+          continue;
+        }
+
+        for (const row of chunk) {
+          const { error: rowError } = await supabaseAdmin
+            .from('location_suggestions')
+            .upsert(row, { onConflict: 'external_id', ignoreDuplicates: false });
+          if (rowError) {
+            failed++;
+            if (!firstError) firstError = rowError.message;
+          } else {
+            inserted++;
+          }
+        }
+      }
+    }
+
+    // সব গ্রুপ ব্যর্থ — কারণসহ এরর (অ্যাডমিন পেজ error টেক্সটই দেখায়)
+    if (failedGroups.length === groupsToRun.length && groupsToRun.length > 0) {
+      const detail = failedGroups
+        .slice(0, 2)
+        .map((g) => `${g.group} → ${g.attempts.join(' | ')}`)
+        .join(' ; ');
       return json(
-        { error: 'Overpass API থেকে ডাটা আনতে ব্যর্থ (স্ট্যাটাস: ' + overpass.status + ')। একটু পরে আবার চেষ্টা করুন।' },
+        { error: 'Overpass API থেকে ডাটা আনতে ব্যর্থ। কারণ: ' + detail, failedGroups },
         502
       );
     }
 
-    const elements = overpass.data.elements || [];
-
-    let skippedNoName = 0;
-    let outsideFeni = 0;
-    let duplicates = 0;
-    const breakdown = {};
-    const rows = new Map(); // external_id -> row
-    const seenSpots = new Set(); // একই নাম + কাছাকাছি জায়গা (node + way ডুপ্লিকেট) এড়াতে
-
-    for (const el of elements) {
-      const tags = el.tags || {};
-      const name = String(tags['name:bn'] || tags.name || '').trim().slice(0, MAX_NAME_LENGTH);
-      const lat = el.type === 'node' ? el.lat : el.center?.lat;
-      const lng = el.type === 'node' ? el.lon : el.center?.lon;
-
-      if (!name || typeof lat !== 'number' || typeof lng !== 'number') {
-        skippedNoName++;
-        continue;
-      }
-
-      let upazila;
-      if (geo) {
-        const area = findAreaAt(lat, lng, geo);
-        if (!area) {
-          outsideFeni++;
-          continue;
-        }
-        upazila = area.upazilaName || nearestUpazila(lat, lng);
-      } else {
-        upazila = nearestUpazila(lat, lng);
-      }
-
-      const externalId = `osm/${el.type}/${el.id}`;
-      const spotKey = `${name.toLowerCase()}|${lat.toFixed(3)}|${lng.toFixed(3)}`;
-      if (rows.has(externalId) || seenSpots.has(spotKey)) {
-        duplicates++;
-        continue;
-      }
-      seenSpots.add(spotKey);
-
-      const cat = categorize(tags);
-      breakdown[cat] = (breakdown[cat] || 0) + 1;
-
-      rows.set(externalId, {
-        external_id: externalId,
-        name,
-        lat,
-        lng,
-        upazila,
-        source: 'osm',
-      });
-    }
-
-    // ব্যাচে upsert (দ্রুত); কোনো ব্যাচ ব্যর্থ হলে একটা একটা করে চেষ্টা করে খারাপ রো আলাদা করা
-    const all = Array.from(rows.values());
-    let inserted = 0;
-    let failed = 0;
-    let firstError = null;
-
-    for (let i = 0; i < all.length; i += BATCH_SIZE) {
-      const chunk = all.slice(i, i + BATCH_SIZE);
-      const { error } = await supabaseAdmin
-        .from('location_suggestions')
-        .upsert(chunk, { onConflict: 'external_id', ignoreDuplicates: false });
-
-      if (!error) {
-        inserted += chunk.length;
-        continue;
-      }
-
-      for (const row of chunk) {
-        const { error: rowError } = await supabaseAdmin
-          .from('location_suggestions')
-          .upsert(row, { onConflict: 'external_id', ignoreDuplicates: false });
-        if (rowError) {
-          failed++;
-          if (!firstError) firstError = rowError.message;
-        } else {
-          inserted++;
-        }
-      }
-    }
-
     return json({
       success: true,
-      totalFromOsm: elements.length,
+      totalFromOsm,
       inserted,
       skippedNoName,
       failed,
@@ -301,7 +374,10 @@ export async function POST({ request }) {
       duplicates,
       geoFilter: !!geo,
       breakdown,
+      failedGroups,
+      pendingGroups,
       firstError,
+      seconds: Math.round((Date.now() - startedAt) / 1000),
     });
   } catch (err) {
     return json({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }, 500);
