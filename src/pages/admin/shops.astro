@@ -22,6 +22,20 @@
 // shop_order বসিয়ে দেয়, আর এই সেকেন্ডারি সর্ট ভবিষ্যতে কোনো টাই
 // হলে (দুইটা শপের shop_order সমান) স্টেবল/প্রেডিক্টেবল অর্ডার
 // নিশ্চিত করবে।
+//
+// আপডেট (স্লাগ — অ্যাডমিন ঠিক করবে):
+//   ক. পেন্ডিং আবেদন কার্ডে এখন স্লাগ বক্স + "চেক" বাটন আছে। শপের ইংরেজি নাম
+//      থেকে সাজেস্টেড স্লাগ আগে থেকে বসে (বাংলা নাম হলে ফাঁকা — অ্যাডমিনকে
+//      নিজে লিখতে হবে, ফাঁকা রেখে Approve করা যায় না)। টাইপ করার সময় লাইভ
+//      চেক হয়; clubs/shops/reserved-এর সাথে কনফ্লিক্ট হলে "Not Available"
+//      এরর দেখায় ও সার্ভারও approve আটকে দেয়।
+//   খ. প্রতিটা শপে নতুন "স্লাগ পরিবর্তন" বাটন (লিংক আইকন) → মোডাল, একই
+//      লাইভ চেক সহ (নিজের স্লাগ বাদ দিয়ে)। /api/update-shop-slug কল করে।
+//      সতর্কতা: স্লাগ বদলালে পুরনো লিংক কাজ করবে না।
+//   গ. সিকিউরিটি: আবেদনকারীর দেওয়া shop_name/phone/message আর শপের name/slug
+//      আগে innerHTML-এ সরাসরি বসত (অ্যাডমিন পেজে স্টোর্ড XSS ঝুঁকি) — এখন
+//      esc() দিয়ে এস্কেপ করা হয়।
+// স্লাগের নিয়মকানুন (slugify, reserved) src/lib/slugRules.js-এ।
 // ============================================================
 
 export const prerender = false;
@@ -122,6 +136,24 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       </div>
       <button class="create-btn" id="reassignSubmitBtn" type="button">
         <i class="fas fa-check"></i> <span id="reassignBtnText">পরিবর্তন করুন</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== স্লাগ (লিংক) পরিবর্তন মোডাল ===== -->
+  <div class="modal-overlay" id="slugOverlay">
+    <div class="modal-box">
+      <button class="modal-close" id="slugClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      <h2 class="modal-title"><i class="fas fa-link"></i> স্লাগ (লিংক) পরিবর্তন</h2>
+      <p class="modal-shop-name" id="slugShopName"></p>
+      <p class="slug-current" id="slugCurrent"></p>
+      <p class="form-message" id="slugMessage"></p>
+      <label class="form-label">নতুন স্লাগ (smartfeni.com/<b>rahims-shop</b>)</label>
+      <input type="text" class="form-input" id="slugEditInput" placeholder="rahims-shop" autocomplete="off" autocapitalize="none" />
+      <p class="slug-status" id="slugEditStatus"></p>
+      <p class="slug-warn"><i class="fas fa-triangle-exclamation"></i> স্লাগ বদলালে পুরনো লিংক (যা শেয়ার বা ছাপানো হয়েছে) আর কাজ করবে না।</p>
+      <button class="create-btn" id="slugSaveBtn" type="button">
+        <i class="fas fa-check"></i> <span id="slugSaveBtnText">স্লাগ সেভ করুন</span>
       </button>
     </div>
   </div>
@@ -283,6 +315,92 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       color: #D14343;
     }
 
+    .btn-approve:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+
+    /* ===== স্লাগ বক্স (পেন্ডিং আবেদন কার্ড + স্লাগ মোডাল) ===== */
+    .slug-box {
+      margin-top: 12px;
+      background: #F8FAFC;
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+
+    .slug-label {
+      display: block;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #5A6E85;
+      margin-bottom: 6px;
+    }
+
+    .slug-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .slug-row .form-input {
+      flex: 1;
+      min-width: 0;
+      padding: 9px 12px;
+      font-size: 0.85rem;
+    }
+
+    .slug-check-btn {
+      flex-shrink: 0;
+      background: #EFF6FF;
+      color: #2563EB;
+      border: none;
+      padding: 0 14px;
+      border-radius: 12px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .slug-status {
+      display: none;
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+
+    .slug-status.slug-ok {
+      display: block;
+      color: #1B7A3C;
+    }
+
+    .slug-status.slug-bad {
+      display: block;
+      color: #D14343;
+    }
+
+    .slug-status.slug-checking {
+      display: block;
+      color: #8FA0BC;
+    }
+
+    .slug-current {
+      font-size: 0.8rem;
+      color: #5A6E85;
+      font-weight: 600;
+      margin-bottom: 12px;
+      word-break: break-all;
+    }
+
+    .slug-warn {
+      font-size: 0.76rem;
+      color: #B45309;
+      background: #FFF7ED;
+      padding: 8px 10px;
+      border-radius: 10px;
+      margin-top: 12px;
+      line-height: 1.4;
+    }
+
     .cta-toggle-btn {
       width: 100%;
       display: flex;
@@ -421,7 +539,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       font-size: 2.4rem;
     }
 
-    /* ===== ওউনার পরিবর্তন মোডাল ===== */
+    /* ===== মোডাল (ওউনার পরিবর্তন + স্লাগ পরিবর্তন) ===== */
     .modal-overlay {
       display: none;
       position: fixed;
@@ -505,6 +623,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
+    import { slugify } from '../../lib/slugRules.js';
 
     const container = document.getElementById('shopsContainer');
     const emptyState = document.getElementById('emptyState');
@@ -527,6 +646,83 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     function clearMsg(el) {
       el.textContent = '';
       el.className = 'form-message';
+    }
+
+    // ইউজারের দেওয়া টেক্সট innerHTML-এ বসানোর আগে এস্কেপ (স্টোর্ড XSS ঠেকাতে)
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    // ===== স্লাগ লাইভ চেক (পেন্ডিং কার্ড + স্লাগ মোডাল দুটোতেই ব্যবহার) =====
+    function setSlugStatus(el, type, text) {
+      el.textContent = text || '';
+      el.className = 'slug-status' + (type ? ` slug-${type}` : '');
+    }
+
+    async function checkSlugOnServer(slug, excludeShopId) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/check-shop-slug', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ slug, excludeShopId }),
+        });
+        const result = await res.json();
+        if (!res.ok) {
+          return { available: false, error: result.error || 'স্লাগ চেক করা যায়নি' };
+        }
+        return result;
+      } catch (err) {
+        return { available: false, error: 'নেটওয়ার্ক ত্রুটি: ' + err.message };
+      }
+    }
+
+    // input-এ টাইপ করলে (৪৫০ms থেমে) আর "চেক" বাটনে চাপলে স্লাগ চেক করে স্ট্যাটাস দেখায়।
+    // getExcludeId: স্লাগ এডিটের সময় নিজের শপের id ফেরত দেয়; পেন্ডিং আবেদনে undefined।
+    function attachSlugChecker(input, statusEl, getExcludeId = () => undefined) {
+      let timer = null;
+      let seq = 0;
+
+      async function run() {
+        clearTimeout(timer);
+        const cleaned = slugify(input.value);
+        if (!cleaned) {
+          seq++;
+          setSlugStatus(statusEl, '', '');
+          return null;
+        }
+
+        const mySeq = ++seq;
+        setSlugStatus(statusEl, 'checking', 'চেক হচ্ছে...');
+        const result = await checkSlugOnServer(cleaned, getExcludeId());
+
+        // পরে আরেকটা চেক শুরু হয়ে গেলে এটার ফল বাদ
+        if (mySeq !== seq) return null;
+
+        if (result.available) {
+          setSlugStatus(statusEl, 'ok', `✓ Available — smartfeni.com/${cleaned}`);
+        } else {
+          setSlugStatus(statusEl, 'bad', result.error || 'Not Available');
+        }
+        return result;
+      }
+
+      input.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(run, 450);
+      });
+
+      input.addEventListener('blur', () => {
+        const cleaned = slugify(input.value);
+        if (input.value && cleaned !== input.value) input.value = cleaned;
+      });
+
+      return { run };
     }
 
     // ===== ম্যানুয়াল শপ তৈরি =====
@@ -605,23 +801,53 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const card = document.createElement('div');
         card.className = 'request-card';
         card.innerHTML = `
-          <p class="request-name">${req.shop_name}</p>
-          <p class="request-meta"><i class="fas fa-phone"></i> ${req.phone} · ${new Date(req.created_at).toLocaleDateString('bn-BD')}</p>
-          ${req.message ? `<p class="request-message">${req.message}</p>` : ''}
+          <p class="request-name">${esc(req.shop_name)}</p>
+          <p class="request-meta"><i class="fas fa-phone"></i> ${esc(req.phone)} · ${new Date(req.created_at).toLocaleDateString('bn-BD')}</p>
+          ${req.message ? `<p class="request-message">${esc(req.message)}</p>` : ''}
+          <div class="slug-box">
+            <label class="slug-label">স্লাগ (smartfeni.com/<b>…</b>)</label>
+            <div class="slug-row">
+              <input type="text" class="form-input slug-input" placeholder="ইংরেজিতে লিখুন, যেমন rahims-shop" autocomplete="off" autocapitalize="none" />
+              <button type="button" class="slug-check-btn">চেক</button>
+            </div>
+            <p class="slug-status"></p>
+          </div>
           <div class="request-actions">
             <button class="btn-approve"><i class="fas fa-check"></i> Approve</button>
             <button class="btn-reject"><i class="fas fa-xmark"></i> Reject</button>
           </div>
         `;
 
-        card.querySelector('.btn-approve').addEventListener('click', (e) => approveRequest(req, e.target.closest('button')));
+        const slugInput = card.querySelector('.slug-input');
+        const slugStatus = card.querySelector('.slug-status');
+
+        // শপের নাম ইংরেজি হলে সাজেস্টেড স্লাগ বসে; বাংলা হলে ফাঁকা থাকে (অ্যাডমিন নিজে লিখবে)
+        const suggested = slugify(req.shop_name);
+        if (suggested.length >= 3) slugInput.value = suggested;
+
+        const checker = attachSlugChecker(slugInput, slugStatus);
+        card.querySelector('.slug-check-btn').addEventListener('click', () => checker.run());
+        if (slugInput.value) checker.run();
+
+        card.querySelector('.btn-approve').addEventListener('click', (e) => {
+          approveRequest(req, e.target.closest('button'), slugInput, slugStatus);
+        });
         card.querySelector('.btn-reject').addEventListener('click', () => rejectRequest(req.id));
 
         requestsContainer.appendChild(card);
       });
     }
 
-    async function approveRequest(req, btn) {
+    async function approveRequest(req, btn, slugInput, slugStatus) {
+      const slug = slugify(slugInput.value);
+      slugInput.value = slug;
+
+      if (!slug) {
+        setSlugStatus(slugStatus, 'bad', 'স্লাগ দিন — শুধু ইংরেজি ছোট অক্ষর, সংখ্যা ও হাইফেন (যেমন rahims-shop)');
+        slugInput.focus();
+        return;
+      }
+
       const originalHtml = btn.innerHTML;
       btn.innerHTML = 'অপেক্ষা করুন...';
       btn.disabled = true;
@@ -634,12 +860,18 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             'Content-Type': 'application/json',
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ requestId: req.id }),
+          body: JSON.stringify({ requestId: req.id, slug }),
         });
         const result = await res.json();
 
         if (!res.ok) {
-          alert('Approve ব্যর্থ: ' + (result.error || 'অজানা ত্রুটি'));
+          if (result.field === 'slug') {
+            // স্লাগ কনফ্লিক্ট/ফরম্যাট এরর — alert না, বক্সের নিচেই দেখাও
+            setSlugStatus(slugStatus, 'bad', result.error || 'Not Available');
+            slugInput.focus();
+          } else {
+            alert('Approve ব্যর্থ: ' + (result.error || 'অজানা ত্রুটি'));
+          }
           btn.innerHTML = originalHtml;
           btn.disabled = false;
           return;
@@ -733,6 +965,94 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       reassignSubmitBtn.disabled = false;
     });
 
+    // ===== স্লাগ (লিংক) পরিবর্তন মোডাল =====
+    const slugOverlay = document.getElementById('slugOverlay');
+    const slugClose = document.getElementById('slugClose');
+    const slugShopName = document.getElementById('slugShopName');
+    const slugCurrent = document.getElementById('slugCurrent');
+    const slugMessage = document.getElementById('slugMessage');
+    const slugEditInput = document.getElementById('slugEditInput');
+    const slugEditStatus = document.getElementById('slugEditStatus');
+    const slugSaveBtn = document.getElementById('slugSaveBtn');
+    const slugSaveBtnText = document.getElementById('slugSaveBtnText');
+    let slugTargetShop = null;
+
+    // নিজের শপকে চেক থেকে বাদ দেওয়ার জন্য getter (মোডাল খোলার সময় slugTargetShop বদলায়)
+    attachSlugChecker(slugEditInput, slugEditStatus, () => slugTargetShop?.id);
+
+    function openSlugEdit(shop) {
+      slugTargetShop = shop;
+      slugShopName.textContent = shop.name;
+      slugCurrent.textContent = `বর্তমান: smartfeni.com/${shop.slug}`;
+      slugEditInput.value = shop.slug || '';
+      clearMsg(slugMessage);
+      setSlugStatus(slugEditStatus, '', '');
+      slugOverlay.classList.add('open');
+    }
+
+    function closeSlugEdit() {
+      slugOverlay.classList.remove('open');
+      slugTargetShop = null;
+    }
+
+    slugClose?.addEventListener('click', closeSlugEdit);
+    slugOverlay?.addEventListener('click', (e) => {
+      if (e.target === slugOverlay) closeSlugEdit();
+    });
+
+    slugSaveBtn?.addEventListener('click', async () => {
+      clearMsg(slugMessage);
+
+      const slug = slugify(slugEditInput.value);
+      slugEditInput.value = slug;
+
+      if (!slug) {
+        setSlugStatus(slugEditStatus, 'bad', 'স্লাগ দিন — শুধু ইংরেজি ছোট অক্ষর, সংখ্যা ও হাইফেন (যেমন rahims-shop)');
+        slugEditInput.focus();
+        return;
+      }
+
+      if (slug === slugTargetShop.slug) {
+        showMsg(slugMessage, 'এটাই বর্তমান স্লাগ — কোনো পরিবর্তন নেই');
+        return;
+      }
+
+      slugSaveBtnText.textContent = 'সেভ হচ্ছে...';
+      slugSaveBtn.disabled = true;
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/update-shop-slug', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ shopId: slugTargetShop.id, slug }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          if (result.field === 'slug') {
+            setSlugStatus(slugEditStatus, 'bad', result.error || 'Not Available');
+          } else {
+            showMsg(slugMessage, result.error || 'স্লাগ পরিবর্তন ব্যর্থ');
+          }
+        } else {
+          showMsg(slugMessage, 'স্লাগ পরিবর্তন হয়েছে ✓', 'success');
+          setTimeout(() => {
+            closeSlugEdit();
+            loadShops();
+          }, 800);
+        }
+      } catch (err) {
+        showMsg(slugMessage, 'নেটওয়ার্ক ত্রুটি: ' + err.message);
+      }
+
+      slugSaveBtnText.textContent = 'স্লাগ সেভ করুন';
+      slugSaveBtn.disabled = false;
+    });
+
     // ===== শপ তালিকা =====
     function renderShop(shop, index, total, ownerPhone) {
       const card = document.createElement('div');
@@ -744,8 +1064,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             <i class="fas fa-store"></i>
           </div>
           <div style="flex:1;min-width:0;">
-            <p style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${shop.name}</p>
-            <p style="font-size:0.78rem;color:#8FA0BC;">/${shop.slug} · ${ownerPhone || 'ওউনার নেই'} ${shop.is_active ? '' : '· নিষ্ক্রিয়'}</p>
+            <p style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${esc(shop.name)}</p>
+            <p style="font-size:0.78rem;color:#8FA0BC;">/${esc(shop.slug)} · ${esc(ownerPhone) || 'ওউনার নেই'} ${shop.is_active ? '' : '· নিষ্ক্রিয়'}</p>
           </div>
         </div>
         <div class="shop-actions" style="display:flex;gap:6px;flex-shrink:0;margin-top:12px;"></div>
@@ -773,6 +1093,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       reassignBtn.style.cssText = 'background:#EFF6FF;color:#2563EB;border:none;width:34px;height:34px;border-radius:10px;cursor:pointer;';
       reassignBtn.addEventListener('click', () => openReassign(shop));
       actions.appendChild(reassignBtn);
+
+      // ===== স্লাগ (লিংক) পরিবর্তন বাটন =====
+      const slugBtn = document.createElement('button');
+      slugBtn.innerHTML = '<i class="fas fa-link"></i>';
+      slugBtn.title = 'স্লাগ (লিংক) পরিবর্তন';
+      slugBtn.style.cssText = 'background:#F3F0FF;color:#6D4AE0;border:none;width:34px;height:34px;border-radius:10px;cursor:pointer;';
+      slugBtn.addEventListener('click', () => openSlugEdit(shop));
+      actions.appendChild(slugBtn);
 
       const toggleBtn = document.createElement('button');
       toggleBtn.textContent = shop.is_active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন';
@@ -883,7 +1211,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         .order('created_at', { ascending: true });
 
       if (error) {
-        container.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        container.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${esc(error.message)}</p>`;
         return;
       }
 
