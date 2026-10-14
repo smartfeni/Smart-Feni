@@ -17,6 +17,11 @@
 // আপডেট: delivery-proofs bucket এখন PRIVATE — পেমেন্ট প্রুফ ছবি
 // দেখানোর আগে storageSigned.js দিয়ে signed URL বানানো হয়।
 //
+// আপডেট: "চ্যাট হিস্ট্রি দেখুন" এ কাস্টমার ও রাইডারের profile id + নাম
+// ChatModal-কে দেওয়া হয়, যাতে প্রতিটা মেসেজে "কাস্টমার"/"রাইডার" লেবেল
+// দেখায়। কার্ডে বসানো ইউজারের লেখা টেক্সট (বিবরণ, কারণ, নাম ইত্যাদি) এখন
+// esc() দিয়ে এস্কেপ করা হয় (অ্যাডমিন পেজে HTML ইনজেকশন ঠেকাতে)।
+//
 // দুইটা resolve বাটন — resolveDispute() (deliveryClient.js, আগে
 // থেকেই আছে) কল করে:
 //   - "রাইডারের পক্ষে (সম্পন্ন হিসেবে গণ্য)" → resolve_completed
@@ -506,6 +511,13 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
     const disputeEmpty = document.getElementById('disputeEmpty');
     const disputeListLoading = document.getElementById('disputeListLoading');
 
+    // ইউজারের লেখা টেক্সট innerHTML-এ বসানোর আগে এস্কেপ (অ্যাডমিন পেজে HTML ইনজেকশন ঠেকাতে)
+    function esc(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     function formatDate(iso) {
       return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
@@ -530,7 +542,7 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
 
       if (error) {
         console.error('ডিসপিউট লোড এরর:', error.message);
-        disputeList.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করতে সমস্যা হয়েছে: ${error.message}</p>`;
+        disputeList.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করতে সমস্যা হয়েছে: ${esc(error.message)}</p>`;
         return;
       }
 
@@ -565,10 +577,13 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
         const customerPhone = req.customer?.phone || '—';
         const riderName = req.accepted_rider?.profiles?.full_name || 'রাইডার';
         const riderPhone = req.accepted_rider?.profiles?.phone || '—';
+        // চ্যাটের sender_id = profile id; ChatModal-এ লেবেল বসাতে এগুলো লাগে
+        const customerProfileId = req.customer_profile_id || null;
+        const riderProfileId = req.accepted_rider?.profile_id || null;
         const proofs = proofsMap.get(req.id) || [];
 
         const proofsHtml = proofs.length > 0
-          ? `<div class="dd-proofs-row">${proofs.map((url) => `<div class="dd-proof-thumb" data-img="${url}"><img src="${url}" alt="পেমেন্ট প্রুফ" /></div>`).join('')}</div>`
+          ? `<div class="dd-proofs-row">${proofs.map((url) => `<div class="dd-proof-thumb" data-img="${esc(url)}"><img src="${esc(url)}" alt="পেমেন্ট প্রুফ" /></div>`).join('')}</div>`
           : `<p class="dd-no-proof">কোনো পেমেন্ট প্রুফ আপলোড করা হয়নি</p>`;
 
         // সার্চের জন্য কার্ডে লুকানো টেক্সট
@@ -579,8 +594,8 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
         card.innerHTML = `
           <div class="dd-card-top">
             <div>
-              <span class="dd-order-no">#${req.order_no || ''}</span>
-              <p class="dd-price">৳${req.final_price || 0}</p>
+              <span class="dd-order-no">#${esc(req.order_no || '')}</span>
+              <p class="dd-price">৳${esc(req.final_price || 0)}</p>
               <p class="dd-date">রিপোর্ট: ${req.disputed_at ? formatDate(req.disputed_at) : '—'}</p>
             </div>
             <span class="dd-disputed-badge"><i class="fas fa-flag"></i> ডিসপিউটেড</span>
@@ -589,25 +604,25 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
           <div class="dd-parties-row">
             <div class="dd-party-box">
               <p class="dd-party-label">কাস্টমার</p>
-              <p class="dd-party-name">${customerName}</p>
-              <p class="dd-party-phone"><i class="fas fa-phone"></i> ${customerPhone}</p>
+              <p class="dd-party-name">${esc(customerName)}</p>
+              <p class="dd-party-phone"><i class="fas fa-phone"></i> ${esc(customerPhone)}</p>
             </div>
             <div class="dd-party-box">
               <p class="dd-party-label">রাইডার</p>
-              <p class="dd-party-name">${riderName}</p>
-              <p class="dd-party-phone"><i class="fas fa-phone"></i> ${riderPhone}</p>
+              <p class="dd-party-name">${esc(riderName)}</p>
+              <p class="dd-party-phone"><i class="fas fa-phone"></i> ${esc(riderPhone)}</p>
             </div>
           </div>
 
           <a class="dd-details-link" href="/admin/delivery-orders?open=${encodeURIComponent(req.order_no || '')}"><i class="fas fa-circle-info"></i> অর্ডার ডিটেইলস ও টাইমলাইন</a>
 
           <p class="dd-section-label">ডেলিভারি বিবরণ</p>
-          <p class="dd-desc">${req.description || ''}</p>
-          <p class="dd-area"><i class="fas fa-location-dot"></i> ${req.upazila || ''} — ${req.area_detail || ''}</p>
+          <p class="dd-desc">${esc(req.description || '')}</p>
+          <p class="dd-area"><i class="fas fa-location-dot"></i> ${esc(req.upazila || '')} — ${esc(req.area_detail || '')}</p>
 
           <p class="dd-section-label">অভিযোগের কারণ</p>
           <div class="dd-reason-box">
-            <p>${req.dispute_reason || 'কোনো কারণ উল্লেখ করা হয়নি'}</p>
+            <p>${esc(req.dispute_reason || 'কোনো কারণ উল্লেখ করা হয়নি')}</p>
           </div>
 
           <p class="dd-section-label">পেমেন্ট প্রুফ</p>
@@ -626,6 +641,10 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
             requestId: req.id,
             otherPartyName: `${customerName} ↔ ${riderName}`,
             readOnly: true,
+            customerId: customerProfileId,
+            customerName: req.customer?.full_name || '',
+            riderId: riderProfileId,
+            riderName: req.accepted_rider?.profiles?.full_name || '',
           });
         });
 
