@@ -21,6 +21,8 @@ const BUCKET = 'listing-images';
 const BACKUP_PREFIX = '_backup/';
 // এই ফোল্ডারগুলো কখনো ছোঁয়া হবে না
 const BLOCKED_PREFIXES = ['site/', 'screenshot-imports/', BACKUP_PREFIX];
+// site/ এর মধ্যে শুধু এই দুই ফোল্ডার ছোট করা যাবে (হোমপেজের ক্যাটাগরি ও ফিচার্ড ছবি)
+const ALLOWED_SITE_PREFIXES = ['site/categories/', 'site/featured/'];
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024; // Vercel body limit (৪.৫MB) এর নিচে থাকতে
 const CACHE_CONTROL = '31536000';
@@ -51,6 +53,7 @@ function isSafePath(path) {
 }
 
 function isBlocked(path) {
+  if (path === 'site/' || ALLOWED_SITE_PREFIXES.some((prefix) => path.startsWith(prefix))) return false;
   return BLOCKED_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
