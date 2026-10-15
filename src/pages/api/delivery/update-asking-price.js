@@ -1,3 +1,9 @@
+// path: src/pages/api/delivery/update-asking-price.js
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): serverErrorReporter.js দিয়ে অ্যাডমিন এরর লগে রিপোর্ট —
+// delivery_price_request_lookup, delivery_price_active_query, delivery_price_update,
+// delivery_price_unexpected। ৪০০/৪০১/৪০৩/৪০৪ এবং রেস কন্ডিশন (PGRST116) রিপোর্ট হয় না।
+// রেসপন্স ও লজিক অপরিবর্তিত।
 //
 // আপডেট (N19): sendBulkNotifications এ priority: 'high' যোগ — দাম বাড়ানো হিরোদের সাথে সাথে জানা দরকার।
 // ============================================================
@@ -9,10 +15,16 @@
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendBulkNotifications } from '../../../lib/notify.js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
+const ROUTE = '/api/delivery/update-asking-price';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
+  let reportClient = null;
+
   try {
     const { client, user, error: authError } = await getAuthedUser(request);
     if (authError) {
@@ -21,6 +33,7 @@ export async function POST({ request }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    reportClient = client;
 
     const { requestId, newPrice } = await request.json();
 
@@ -45,6 +58,18 @@ export async function POST({ request }) {
       .select('id, status, customer_asking_price, customer_profile_id')
       .eq('id', requestId)
       .maybeSingle();
+
+    if (reqError) {
+      // শুধু DB এরর রিপোর্ট; "পাওয়া যায়নি" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_price_request_lookup',
+        title: 'দাম বাড়ানো: রিকোয়েস্ট পড়া ব্যর্থ',
+        message: reqError.message,
+        code: reqError.code,
+        status: 404,
+      });
+    }
 
     if (reqError || !reqRow) {
       return new Response(
@@ -79,11 +104,23 @@ export async function POST({ request }) {
     // নাহলে কাস্টমার সরাসরি accept-best-price দিয়ে ওই হিরোর অফারই
     // নিয়ে নিতে পারবে, নতুন করে দাম বাড়িয়ে অফারকে ছাড়িয়ে যাওয়ার
     // দরকার নাই (এটাই নেগোসিয়েশনের জায়গা খোলা রাখে)
-    const { data: activeOffers } = await client
+    const { data: activeOffers, error: activeOffersError } = await client
       .from('delivery_offers')
       .select('offer_price, rider_profile_id')
       .eq('request_id', requestId)
       .eq('status', 'active');
+
+    if (activeOffersError) {
+      // শুধু রিপোর্ট — আচরণ অপরিবর্তিত (ফেইল হলে লিস্ট ফাঁকা ধরা হয়, মানে সর্বনিম্ন-অফার চেক এড়িয়ে যায়)
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_price_active_query',
+        title: 'দাম বাড়ানো: বর্তমান অফার তালিকা পড়া ব্যর্থ',
+        message: activeOffersError.message,
+        code: activeOffersError.code,
+        status: 200,
+      });
+    }
 
     const lowestOffer = (activeOffers || []).reduce(
       (min, o) => (o.offer_price < min ? o.offer_price : min),
@@ -106,6 +143,17 @@ export async function POST({ request }) {
       .single();
 
     if (updateError || !updated) {
+      // PGRST116 = কোনো রো মেলেনি (চেক ও আপডেটের মাঝে রিকোয়েস্ট আর open নেই, রেস) — রিপোর্ট নয়
+      if (updateError && updateError.code !== 'PGRST116') {
+        await reportServerError(reportClient, {
+          route: ROUTE,
+          action: 'delivery_price_update',
+          title: 'দাম আপডেট ব্যর্থ',
+          message: updateError.message,
+          code: updateError.code,
+          status: 500,
+        });
+      }
       return new Response(
         JSON.stringify({ error: 'দাম আপডেট ব্যর্থ: ' + (updateError?.message || 'অজানা কারণ') }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -137,6 +185,22 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    // লগইনের আগেই ক্র্যাশ করলে reportClient নেই — তখন service role client
+    let fallbackClient = reportClient;
+    if (!fallbackClient) {
+      try {
+        fallbackClient = getAdminClient().client || null;
+      } catch (_) {
+        fallbackClient = null;
+      }
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_price_unexpected',
+      title: 'দাম বাড়ানো: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

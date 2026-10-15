@@ -1,3 +1,10 @@
+// path: src/pages/api/delivery/raise-dispute.js
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): serverErrorReporter.js দিয়ে অ্যাডমিন এরর লগে রিপোর্ট —
+// delivery_dispute_request_lookup, delivery_dispute_admin_config, delivery_dispute_update,
+// delivery_dispute_admin_list, delivery_dispute_unexpected। ৪০০/৪০১/৪০৩/৪০৪ রিপোর্ট হয় না।
+// রেসপন্স ও লজিক অপরিবর্তিত।
+//
 // ============================================================
 // API এন্ডপয়েন্ট: ডেলিভারি নিয়ে ক্লেইম/সমস্যা রিপোর্ট (/api/delivery/raise-dispute)
 // কাস্টমার বা রাইডার — দুইজনেই status "delivered" অবস্থায় ডিসপিউট রেইজ করতে পারবে
@@ -14,10 +21,16 @@
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendBulkNotifications } from '../../../lib/notify.js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
+const ROUTE = '/api/delivery/raise-dispute';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
+  let reportClient = null;
+
   try {
     const { client, user, error: authError } = await getAuthedUser(request);
     if (authError) {
@@ -26,6 +39,7 @@ export async function POST({ request }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    reportClient = client;
 
     const { requestId, reason } = await request.json();
 
@@ -41,6 +55,18 @@ export async function POST({ request }) {
       .select('id, status, customer_profile_id, accepted_rider_id, updated_at')
       .eq('id', requestId)
       .maybeSingle();
+
+    if (reqError) {
+      // শুধু DB এরর রিপোর্ট; "পাওয়া যায়নি" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_dispute_request_lookup',
+        title: 'ডিসপিউট: রিকোয়েস্ট পড়া ব্যর্থ',
+        message: reqError.message,
+        code: reqError.code,
+        status: 404,
+      });
+    }
 
     if (reqError || !deliveryRequest) {
       return new Response(
@@ -96,6 +122,14 @@ export async function POST({ request }) {
 
     const { client: adminClient, error: adminError } = getAdminClient();
     if (adminError) {
+      // সার্ভিস-কী কনফিগ সমস্যা — ইউজারের client দিয়ে রিপোর্ট
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_dispute_admin_config',
+        title: 'ডিসপিউট: সার্ভার কনফিগ সমস্যা (service role)',
+        message: adminError,
+        status: 500,
+      });
       return new Response(JSON.stringify({ error: adminError }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -121,6 +155,14 @@ export async function POST({ request }) {
       .single();
 
     if (updateError || !updated) {
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_dispute_update',
+        title: 'ডিসপিউট রেইজ ব্যর্থ',
+        message: updateError?.message || 'update থেকে কোনো রো ফেরত আসেনি',
+        code: updateError?.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'ডিসপিউট রেইজ ব্যর্থ: ' + (updateError?.message || 'অজানা কারণ') }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -133,10 +175,22 @@ export async function POST({ request }) {
     // ব্যর্থ হলেও ডিসপিউট রেইজ সফল হয়েছে এই রেসপন্সে প্রভাব পড়বে না
     const categoryLabel = updated.category === 'ride' ? 'রাইড' : 'ডেলিভারি';
 
-    const { data: admins } = await adminClient
+    const { data: admins, error: adminsError } = await adminClient
       .from('profiles')
       .select('id')
       .eq('role', 'admin');
+
+    if (adminsError) {
+      // শুধু রিপোর্ট — ডিসপিউট সেভ হয়েছে, কিন্তু অ্যাডমিনদের নোটিফিকেশন যাবে না
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_dispute_admin_list',
+        title: 'ডিসপিউট: অ্যাডমিন তালিকা পড়া ব্যর্থ (নোটিফিকেশন যায়নি)',
+        message: adminsError.message,
+        code: adminsError.code,
+        status: 200,
+      });
+    }
 
     await sendBulkNotifications(adminClient, (admins || []).map((a) => a.id), () => ({
       message: `নতুন ডিসপিউট রিপোর্ট হয়েছে (${reporterLabel}) — ${categoryLabel} রিকোয়েস্ট`,
@@ -153,6 +207,22 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    // লগইনের আগেই ক্র্যাশ করলে reportClient নেই — তখন service role client
+    let fallbackClient = reportClient;
+    if (!fallbackClient) {
+      try {
+        fallbackClient = getAdminClient().client || null;
+      } catch (_) {
+        fallbackClient = null;
+      }
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_dispute_unexpected',
+      title: 'ডিসপিউট: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

@@ -1,3 +1,10 @@
+// path: src/pages/api/delivery/confirm-delivery.js
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): serverErrorReporter.js দিয়ে অ্যাডমিন এরর লগে রিপোর্ট —
+// delivery_complete_rider_lookup, delivery_complete_request_lookup, delivery_complete_admin_config,
+// delivery_complete_update, delivery_complete_stats, delivery_complete_unexpected।
+// ৪০০/৪০১/৪০৩/৪০৪ এবং রেস কন্ডিশন (PGRST116, দুইবার ক্লিক) রিপোর্ট হয় না।
+// রেসপন্স ও লজিক অপরিবর্তিত (stats ফেইলে আগের মতোই ইউজারকে এরর দেখানো হয় না, শুধু এখন রিপোর্ট হয়)।
 //
 // আপডেট (N19): sendNotification এ priority: 'high' যোগ — ডেলিভারি সম্পন্ন হওয়ার খবর কাস্টমারের কাছে সাথে সাথে যাওয়া দরকার।
 // ============================================================
@@ -17,10 +24,16 @@
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendNotification } from '../../../lib/notify.js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
+const ROUTE = '/api/delivery/confirm-delivery';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
+  let reportClient = null;
+
   try {
     const { client, user, error: authError } = await getAuthedUser(request);
     if (authError) {
@@ -29,6 +42,7 @@ export async function POST({ request }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    reportClient = client;
 
     const { requestId } = await request.json();
 
@@ -46,6 +60,18 @@ export async function POST({ request }) {
       .eq('profile_id', user.id)
       .maybeSingle();
 
+    if (riderError) {
+      // শুধু DB এরর রিপোর্ট; "প্রোফাইল নেই" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_complete_rider_lookup',
+        title: 'ডেলিভারি সম্পন্ন: রাইডার প্রোফাইল পড়া ব্যর্থ',
+        message: riderError.message,
+        code: riderError.code,
+        status: 403,
+      });
+    }
+
     if (riderError || !rider) {
       return new Response(
         JSON.stringify({ error: 'তোমার রাইডার প্রোফাইল পাওয়া যায়নি' }),
@@ -59,6 +85,18 @@ export async function POST({ request }) {
       .select('id, status, accepted_rider_id, final_price, pickup_done_at')
       .eq('id', requestId)
       .maybeSingle();
+
+    if (reqError) {
+      // শুধু DB এরর রিপোর্ট; "পাওয়া যায়নি" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_complete_request_lookup',
+        title: 'ডেলিভারি সম্পন্ন: রিকোয়েস্ট পড়া ব্যর্থ',
+        message: reqError.message,
+        code: reqError.code,
+        status: 404,
+      });
+    }
 
     if (reqError || !deliveryRequest) {
       return new Response(
@@ -91,6 +129,14 @@ export async function POST({ request }) {
 
     const { client: adminClient, error: adminError } = getAdminClient();
     if (adminError) {
+      // সার্ভিস-কী কনফিগ সমস্যা — ইউজারের client দিয়ে রিপোর্ট
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_complete_admin_config',
+        title: 'ডেলিভারি সম্পন্ন: সার্ভার কনফিগ সমস্যা (service role)',
+        message: adminError,
+        status: 500,
+      });
       return new Response(JSON.stringify({ error: adminError }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -106,6 +152,17 @@ export async function POST({ request }) {
       .single();
 
     if (updateReqError || !updatedRequest) {
+      // PGRST116 = কোনো রো মেলেনি (দুইবার ক্লিক/রেস) — রিপোর্ট নয়
+      if (updateReqError && updateReqError.code !== 'PGRST116') {
+        await reportServerError(reportClient, {
+          route: ROUTE,
+          action: 'delivery_complete_update',
+          title: 'ডেলিভারি সম্পন্ন করা ব্যর্থ',
+          message: updateReqError.message,
+          code: updateReqError.code,
+          status: 500,
+        });
+      }
       return new Response(
         JSON.stringify({ error: 'কনফার্ম ব্যর্থ: ' + (updateReqError?.message || 'অজানা কারণ') }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -126,6 +183,14 @@ export async function POST({ request }) {
       // request completed হয়ে গেছে কিন্তু stats আপডেট ব্যর্থ — এটা লগ করা দরকার,
       // কিন্তু ইউজারকে error দেখাচ্ছি না কারণ মূল কাজ (delivery completed) সফল হয়েছে
       console.error('Rider stats আপডেট ব্যর্থ:', statsError.message);
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_complete_stats',
+        title: 'ডেলিভারি সম্পন্ন: রাইডারের stats আপডেট ব্যর্থ',
+        message: statsError.message,
+        code: statsError.code,
+        status: 200,
+      });
     }
 
     // কাস্টমারকে জানানো — সম্পন্ন হয়েছে, রিভিউ দিতে বলা। best-effort,
@@ -150,6 +215,22 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    // লগইনের আগেই ক্র্যাশ করলে reportClient নেই — তখন service role client
+    let fallbackClient = reportClient;
+    if (!fallbackClient) {
+      try {
+        fallbackClient = getAdminClient().client || null;
+      } catch (_) {
+        fallbackClient = null;
+      }
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_complete_unexpected',
+      title: 'ডেলিভারি সম্পন্ন: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

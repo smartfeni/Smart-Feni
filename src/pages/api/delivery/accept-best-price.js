@@ -1,3 +1,9 @@
+// path: src/pages/api/delivery/accept-best-price.js
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): serverErrorReporter.js দিয়ে অ্যাডমিন এরর লগে রিপোর্ট —
+// delivery_accept_hero_lookup, delivery_accept_request_lookup, delivery_accept_rpc,
+// delivery_accept_losing_offers, delivery_accept_unexpected। ৪০০/৪০১/৪০৩/৪০৪/৪০৯ রিপোর্ট হয় না।
+// রেসপন্স ও লজিক অপরিবর্তিত।
 //
 // আপডেট (N20): ব্যর্থতার সঠিক কারণ দেখানো — রাইডার অফলাইন (is_active=false) হলে আলাদা মেসেজ,
 // আর RPC false দিলে রিকোয়েস্টের আসল স্ট্যাটাস আবার চেক করে ঠিক কারণ বলা (আগে সব ক্ষেত্রেই
@@ -12,10 +18,16 @@
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendTelegramBroadcast } from '../../../lib/telegramNotify.js';
 import { sendNotification, sendBulkNotifications } from '../../../lib/notify.js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
+const ROUTE = '/api/delivery/accept-best-price';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
+  let reportClient = null;
+
   try {
     const { client, user, error: authError } = await getAuthedUser(request);
     if (authError) {
@@ -24,6 +36,7 @@ export async function POST({ request }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    reportClient = client;
 
     const { requestId } = await request.json();
 
@@ -39,6 +52,18 @@ export async function POST({ request }) {
       .select('id, vehicle_type, offers_delivery, offers_ride, verification_status, is_active, profiles!delivery_riders_profile_id_fkey(full_name)')
       .eq('profile_id', user.id)
       .maybeSingle();
+
+    if (heroError) {
+      // শুধু DB এরর রিপোর্ট; "ভেরিফাইড না" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_accept_hero_lookup',
+        title: 'হিরো Accept: হিরো প্রোফাইল পড়া ব্যর্থ',
+        message: heroError.message,
+        code: heroError.code,
+        status: 403,
+      });
+    }
 
     if (heroError || !heroRow || heroRow.verification_status !== 'approved') {
       return new Response(
@@ -59,6 +84,18 @@ export async function POST({ request }) {
       .select('id, status, category, customer_asking_price, vehicle_type, customer_profile_id')
       .eq('id', requestId)
       .maybeSingle();
+
+    if (reqError) {
+      // শুধু DB এরর রিপোর্ট; "পাওয়া যায়নি" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_accept_request_lookup',
+        title: 'হিরো Accept: রিকোয়েস্ট পড়া ব্যর্থ',
+        message: reqError.message,
+        code: reqError.code,
+        status: 404,
+      });
+    }
 
     if (reqError || !reqRow) {
       return new Response(
@@ -95,6 +132,14 @@ export async function POST({ request }) {
     });
 
     if (rpcError) {
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_accept_rpc',
+        title: 'হিরো Accept ব্যর্থ (accept_service_request)',
+        message: rpcError.message,
+        code: rpcError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'গ্রহণ ব্যর্থ: ' + rpcError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -124,12 +169,24 @@ export async function POST({ request }) {
 
     // যেসব হিরো অফার দিয়েছিল কিন্তু এই হিরোর সরাসরি accept-এ হেরে
     // গেছে, তাদের জানানো (নিজেকে বাদ দিয়ে)
-    const { data: losingOffers } = await client
+    const { data: losingOffers, error: losingOffersError } = await client
       .from('delivery_offers')
       .select('rider_profile_id, profiles!delivery_offers_rider_profile_id_fkey(telegram_chat_id)')
       .eq('request_id', requestId)
       .eq('status', 'closed_by_other')
       .neq('rider_profile_id', user.id);
+
+    if (losingOffersError) {
+      // শুধু রিপোর্ট — accept সফল, কিন্তু হারা হিরোদের জানানো যায়নি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_accept_losing_offers',
+        title: 'হিরো Accept: হারা হিরোদের তালিকা পড়া ব্যর্থ',
+        message: losingOffersError.message,
+        code: losingOffersError.code,
+        status: 200,
+      });
+    }
 
     const losingChatIds = (losingOffers || [])
       .map((o) => o.profiles?.telegram_chat_id)
@@ -179,6 +236,22 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    // লগইনের আগেই ক্র্যাশ করলে reportClient নেই — তখন service role client
+    let fallbackClient = reportClient;
+    if (!fallbackClient) {
+      try {
+        fallbackClient = getAdminClient().client || null;
+      } catch (_) {
+        fallbackClient = null;
+      }
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_accept_unexpected',
+      title: 'হিরো Accept: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

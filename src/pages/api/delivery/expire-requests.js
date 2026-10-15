@@ -1,3 +1,10 @@
+// path: src/pages/api/delivery/expire-requests.js
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): serverErrorReporter.js দিয়ে অ্যাডমিন এরর লগে রিপোর্ট —
+// delivery_expire_update, delivery_expire_unexpected। কোনো auth নেই, তাই রিপোর্ট service role client দিয়ে।
+// service role কী না থাকলে (adminError) রিপোর্ট করার মতো client-ই থাকে না — সেটা আগের মতোই ৫০০ রেসপন্স।
+// রেসপন্স ও লজিক অপরিবর্তিত।
+//
 // ============================================================
 // API এন্ডপয়েন্ট: expired ওপেন রিকোয়েস্ট bulk cancel করা
 // (/api/delivery/expire-requests)
@@ -12,8 +19,11 @@
 // ============================================================
 
 import { getAdminClient } from '../../../lib/deliverySupabase.js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
+
+const ROUTE = '/api/delivery/expire-requests';
 
 export async function POST() {
   try {
@@ -35,6 +45,14 @@ export async function POST() {
       .select('id');
 
     if (error) {
+      await reportServerError(adminClient, {
+        route: ROUTE,
+        action: 'delivery_expire_update',
+        title: 'মেয়াদোত্তীর্ণ রিকোয়েস্ট বাতিল (housekeeping) ব্যর্থ',
+        message: error.message,
+        code: error.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'এক্সপায়ার চেক ব্যর্থ: ' + error.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -46,6 +64,19 @@ export async function POST() {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    let fallbackClient = null;
+    try {
+      fallbackClient = getAdminClient().client || null;
+    } catch (_) {
+      fallbackClient = null;
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_expire_unexpected',
+      title: 'মেয়াদোত্তীর্ণ রিকোয়েস্ট বাতিল: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

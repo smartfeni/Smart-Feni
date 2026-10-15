@@ -1,3 +1,9 @@
+// path: src/pages/api/delivery/rider-register.js
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): serverErrorReporter.js দিয়ে অ্যাডমিন এরর লগে রিপোর্ট —
+// delivery_rider_register_lookup, delivery_rider_register_insert, delivery_rider_register_unexpected।
+// ৪০০/৪০১ রিপোর্ট হয় না। রেসপন্স ও লজিক অপরিবর্তিত।
+//
 // ============================================================
 // API এন্ডপয়েন্ট: "ডেলিভারি হিরো হতে চাই" আবেদন (/api/delivery/rider-register)
 // লগইন করা ইউজার কল করবে। ছবি ও আইডি কার্ডের ছবি আগেই ক্লায়েন্ট থেকে
@@ -8,14 +14,19 @@
 // এডমিন approve না করা পর্যন্ত রাইডার অফার সিস্টেমে ঢুকতে পারবে না।
 // ============================================================
 
-import { getAuthedUser } from '../../../lib/deliverySupabase.js';
+import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
+const ROUTE = '/api/delivery/rider-register';
 const VALID_VEHICLE_TYPES = ['bike', 'cycle', 'cng'];
 const VALID_UPAZILAS = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
+  let reportClient = null;
+
   try {
     const { client, user, error: authError } = await getAuthedUser(request);
     if (authError) {
@@ -24,6 +35,7 @@ export async function POST({ request }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    reportClient = client;
 
     const { vehicleType, offersDelivery, offersRide, upazila, photoUrl, idCardPhotoUrl } = await request.json();
 
@@ -66,11 +78,23 @@ export async function POST({ request }) {
     }
 
     // আগে থেকে আবেদন করে থাকলে (pending বা approved) আবার আবেদন করতে দিব না
-    const { data: existing } = await client
+    const { data: existing, error: existingError } = await client
       .from('delivery_riders')
       .select('id, verification_status')
       .eq('profile_id', user.id)
       .maybeSingle();
+
+    if (existingError) {
+      // শুধু রিপোর্ট — আচরণ অপরিবর্তিত (ফেইল হলে "আগে আবেদন নেই" ধরে insert-এ যাওয়া হয়)
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_rider_register_lookup',
+        title: 'হিরো আবেদন: আগের আবেদন চেক করা ব্যর্থ',
+        message: existingError.message,
+        code: existingError.code,
+        status: 200,
+      });
+    }
 
     if (existing) {
       const message =
@@ -102,6 +126,14 @@ export async function POST({ request }) {
       .single();
 
     if (insertError) {
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_rider_register_insert',
+        title: 'হিরো আবেদন সেভ ব্যর্থ',
+        message: insertError.message,
+        code: insertError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'আবেদন ব্যর্থ: ' + insertError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -113,6 +145,22 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    // লগইনের আগেই ক্র্যাশ করলে reportClient নেই — তখন service role client
+    let fallbackClient = reportClient;
+    if (!fallbackClient) {
+      try {
+        fallbackClient = getAdminClient().client || null;
+      } catch (_) {
+        fallbackClient = null;
+      }
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_rider_register_unexpected',
+      title: 'হিরো আবেদন: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

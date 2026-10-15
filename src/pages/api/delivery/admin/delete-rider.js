@@ -1,3 +1,11 @@
+// path: src/pages/api/delivery/admin/delete-rider.js
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): serverErrorReporter.js দিয়ে অ্যাডমিন এরর লগে রিপোর্ট —
+// delivery_admin_delete_rider_unlink, delivery_admin_delete_rider, delivery_admin_delete_rider_unexpected।
+// ৪০৩ (অ্যাডমিন না), ৪০০ (riderId নেই) এবং has_history (FK ২৩৫০৩, স্বাভাবিক পরিস্থিতি) রিপোর্ট হয় না।
+// service role কী না থাকলে রিপোর্ট করার মতো client-ই থাকে না — সেটা আগের মতোই ৫০০ রেসপন্স।
+// রেসপন্স ও লজিক অপরিবর্তিত।
+//
 // ============================================================
 // API এন্ডপয়েন্ট: এডমিন রাইডার সম্পূর্ণ ডিলিট করবে
 // (/api/delivery/admin/delete-rider)
@@ -14,10 +22,16 @@
 // ============================================================
 
 import { requireAdmin, getAdminClient } from '../../../../lib/deliverySupabase.js';
+import { reportServerError } from '../../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
+const ROUTE = '/api/delivery/admin/delete-rider';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট: service role client পাওয়ার পর সেট হয়
+  let reportClient = null;
+
   try {
     const { isAdmin, error: adminCheckError } = await requireAdmin(request);
     if (!isAdmin) {
@@ -43,6 +57,7 @@ export async function POST({ request }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    reportClient = adminClient;
 
     if (force) {
       // জোরপূর্বক ডিলিট: এই রাইডার accepted_rider_id হিসেবে যেসব
@@ -55,6 +70,14 @@ export async function POST({ request }) {
         .eq('accepted_rider_id', riderId);
 
       if (unlinkError) {
+        await reportServerError(reportClient, {
+          route: ROUTE,
+          action: 'delivery_admin_delete_rider_unlink',
+          title: 'রাইডার জোরপূর্বক ডিলিট: রেফারেন্স সরাতে ব্যর্থ',
+          message: unlinkError.message,
+          code: unlinkError.code,
+          status: 500,
+        });
         return new Response(
           JSON.stringify({ error: 'জোরপূর্বক ডিলিটের আগে রেফারেন্স সরাতে ব্যর্থ: ' + unlinkError.message }),
           { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -78,6 +101,14 @@ export async function POST({ request }) {
           { status: 400, headers: { 'Content-Type': 'application/json' } }
         );
       }
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_admin_delete_rider',
+        title: 'রাইডার ডিলিট ব্যর্থ',
+        message: deleteError.message,
+        code: deleteError.code,
+        status: 400,
+      });
       return new Response(JSON.stringify({ error: 'ডিলিট ব্যর্থ: ' + deleteError.message }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -89,6 +120,22 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    // admin client পাওয়ার আগেই ক্র্যাশ করলে reportClient নেই — তখন নতুন করে চেষ্টা
+    let fallbackClient = reportClient;
+    if (!fallbackClient) {
+      try {
+        fallbackClient = getAdminClient().client || null;
+      } catch (_) {
+        fallbackClient = null;
+      }
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_admin_delete_rider_unexpected',
+      title: 'রাইডার ডিলিট: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

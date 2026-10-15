@@ -1,3 +1,11 @@
+// path: src/pages/api/delivery/mark-pickup-done.js
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): serverErrorReporter.js দিয়ে অ্যাডমিন এরর লগে রিপোর্ট —
+// delivery_pickup_rider_lookup, delivery_pickup_request_lookup, delivery_pickup_admin_config,
+// delivery_pickup_update, delivery_pickup_unexpected।
+// ৪০০/৪০১/৪০৩/৪০৪ এবং রেস কন্ডিশন (PGRST116, দুইবার ক্লিক) রিপোর্ট হয় না।
+// রেসপন্স ও লজিক অপরিবর্তিত।
+//
 // ============================================================
 // API এন্ডপয়েন্ট: রাইড হিরো পিকআপ সম্পন্ন মার্ক করবে
 // (/api/delivery/mark-pickup-done)
@@ -10,10 +18,16 @@
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendNotification } from '../../../lib/notify.js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
+const ROUTE = '/api/delivery/mark-pickup-done';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
+  let reportClient = null;
+
   try {
     const { client, user, error: authError } = await getAuthedUser(request);
     if (authError) {
@@ -22,6 +36,7 @@ export async function POST({ request }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    reportClient = client;
 
     const { requestId } = await request.json();
 
@@ -38,6 +53,18 @@ export async function POST({ request }) {
       .eq('profile_id', user.id)
       .maybeSingle();
 
+    if (riderError) {
+      // শুধু DB এরর রিপোর্ট; "প্রোফাইল নেই" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_pickup_rider_lookup',
+        title: 'পিকআপ মার্ক: হিরো প্রোফাইল পড়া ব্যর্থ',
+        message: riderError.message,
+        code: riderError.code,
+        status: 403,
+      });
+    }
+
     if (riderError || !rider) {
       return new Response(
         JSON.stringify({ error: 'তোমার হিরো প্রোফাইল পাওয়া যায়নি' }),
@@ -50,6 +77,18 @@ export async function POST({ request }) {
       .select('id, status, accepted_rider_id, pickup_done_at')
       .eq('id', requestId)
       .maybeSingle();
+
+    if (reqError) {
+      // শুধু DB এরর রিপোর্ট; "পাওয়া যায়নি" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_pickup_request_lookup',
+        title: 'পিকআপ মার্ক: রিকোয়েস্ট পড়া ব্যর্থ',
+        message: reqError.message,
+        code: reqError.code,
+        status: 404,
+      });
+    }
 
     if (reqError || !reqRow) {
       return new Response(
@@ -81,6 +120,14 @@ export async function POST({ request }) {
 
     const { client: adminClient, error: adminError } = getAdminClient();
     if (adminError) {
+      // সার্ভিস-কী কনফিগ সমস্যা — ইউজারের client দিয়ে রিপোর্ট
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_pickup_admin_config',
+        title: 'পিকআপ মার্ক: সার্ভার কনফিগ সমস্যা (service role)',
+        message: adminError,
+        status: 500,
+      });
       return new Response(JSON.stringify({ error: adminError }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -97,6 +144,17 @@ export async function POST({ request }) {
       .single();
 
     if (updateError || !updated) {
+      // PGRST116 = কোনো রো মেলেনি (দুইবার ক্লিক/রেস) — রিপোর্ট নয়
+      if (updateError && updateError.code !== 'PGRST116') {
+        await reportServerError(reportClient, {
+          route: ROUTE,
+          action: 'delivery_pickup_update',
+          title: 'পিকআপ মার্ক করা ব্যর্থ',
+          message: updateError.message,
+          code: updateError.code,
+          status: 500,
+        });
+      }
       return new Response(
         JSON.stringify({ error: 'পিকআপ মার্ক করা ব্যর্থ: ' + (updateError?.message || 'অজানা কারণ') }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -123,6 +181,22 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    // লগইনের আগেই ক্র্যাশ করলে reportClient নেই — তখন service role client
+    let fallbackClient = reportClient;
+    if (!fallbackClient) {
+      try {
+        fallbackClient = getAdminClient().client || null;
+      } catch (_) {
+        fallbackClient = null;
+      }
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_pickup_unexpected',
+      title: 'পিকআপ মার্ক: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
