@@ -4,7 +4,8 @@
 //
 // DeliveryHeroCard ও RideHeroCard দুটোই এটা ব্যবহার করে।
 // অনলাইন মানে: delivery_riders-এ verification_status = 'approved'
-// এবং is_active = true (রাইডার ড্যাশবোর্ডের অনলাইন টগল)।
+// এবং ডেলিভারি/রাইডের নিজ নিজ অনলাইন টগল চালু (delivery_online / ride_online)।
+// অ্যাডমিন এই সেবার অর্ডার গ্রহণ বন্ধ রাখলে স্টেট 'paused' — ফর্ম লুকিয়ে নোটিশ।
 //
 // স্টেট:
 //   'unknown'       — চেক করা যায়নি (নেটওয়ার্ক সমস্যা) → ব্লক করে না,
@@ -29,11 +30,19 @@ export async function fetchOnlineRiders(category) {
     .from('delivery_riders')
     .select('id, upazila, vehicle_type')
     .eq('verification_status', 'approved')
-    .eq('is_active', true)
+    .eq(category === 'ride' ? 'ride_online' : 'delivery_online', true)
     .eq(offersColumn, true);
 
   if (error) return null;
   return data || [];
+}
+
+// অ্যাডমিন সুইচ (site_settings): false মানে এই সেবার অর্ডার গ্রহণ বন্ধ।
+// চেক ব্যর্থ হলে true ধরা হয় — সার্ভার (create-request + DB trigger) শেষ সিদ্ধান্ত নেয়
+export async function fetchServiceAccepting(category) {
+  const { data, error } = await supabase.rpc('get_service_accepting');
+  if (error || !data) return true;
+  return data[category === 'ride' ? 'ride' : 'delivery'] !== false;
 }
 
 export function evaluateAvailability(riders, upazila, vehicleType) {
@@ -55,6 +64,13 @@ export function evaluateAvailability(riders, upazila, vehicleType) {
 const SUPPORT_LINE = 'জরুরি প্রয়োজনে যোগাযোগ করুন।';
 
 function getNoticeCopy(state, upazila) {
+  if (state === 'paused') {
+    return {
+      title: 'দুঃখিত, এই সেবা এই মুহূর্তে বন্ধ আছে',
+      text: `অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন। ${SUPPORT_LINE}`,
+    };
+  }
+
   if (state === 'none-vehicle') {
     return {
       title: `${upazila}-এ এই বাহনের কোনো রাইডার সক্রিয় নেই`,
@@ -98,6 +114,7 @@ export function initRiderAvailability({
   submitBtn,
 }) {
   let riders = null;
+  let accepting = true;
 
   const titleEl = root?.querySelector('[data-notice-title]');
   const textEl = root?.querySelector('[data-notice-text]');
@@ -115,11 +132,13 @@ export function initRiderAvailability({
     }
 
     const upazila = upazilaSelect?.value || '';
-    const state = evaluateAvailability(riders, upazila, vehicleInput?.value || 'any');
-    const blocked = state.startsWith('none');
+    const state = accepting
+      ? evaluateAvailability(riders, upazila, vehicleInput?.value || 'any')
+      : 'paused';
+    const blocked = state.startsWith('none') || state === 'paused';
 
     root.hidden = !blocked;
-    form.style.display = state === 'none-district' ? 'none' : '';
+    form.style.display = state === 'none-district' || state === 'paused' ? 'none' : '';
 
     if (blocked) {
       const copy = getNoticeCopy(state, upazila);
@@ -140,7 +159,12 @@ export function initRiderAvailability({
   }
 
   async function refresh() {
-    riders = await fetchOnlineRiders(category);
+    const [onlineRiders, isAccepting] = await Promise.all([
+      fetchOnlineRiders(category),
+      fetchServiceAccepting(category),
+    ]);
+    riders = onlineRiders;
+    accepting = isAccepting;
     apply();
   }
 
