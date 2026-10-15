@@ -66,7 +66,7 @@ export async function POST({ request }) {
     const { error } = await supabaseAdmin
       .from('guest_push_devices')
       .upsert(
-        { fcm_token: token, last_seen_at: new Date().toISOString() },
+        { fcm_token: token, last_seen_at: new Date().toISOString(), uninstalled_at: null },
         { onConflict: 'fcm_token' }
       );
 

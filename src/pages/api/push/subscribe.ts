@@ -134,6 +134,7 @@ export async function POST({ request }) {
             fcm_token,
             device_label: device_label || 'Android App',
             last_used_at: new Date().toISOString(),
+            uninstalled_at: null,
           },
           { onConflict: 'fcm_token' }
         ));
