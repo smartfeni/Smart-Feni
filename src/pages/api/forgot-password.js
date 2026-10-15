@@ -14,6 +14,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -23,9 +25,10 @@ const SITE_URL = 'https://smartfeni.com';
 const GENERIC_MESSAGE =
   'যদি এই ফোন নাম্বারে অ্যাকাউন্ট থাকে এবং রিকভারি ইমেইল সেট করা থাকে, একটা পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে।';
 
-async function sendResetEmail(toEmail, actionLink) {
+async function sendResetEmail(toEmail, actionLink, onFail) {
   if (!RESEND_API_KEY) {
     console.error('Resend env var মিসিং — RESEND_API_KEY সেট করা নাই');
+    if (onFail) await onFail('resend_no_key', 'RESEND_API_KEY সেট করা নেই');
     return;
   }
 
@@ -53,15 +56,19 @@ async function sendResetEmail(toEmail, actionLink) {
 
     if (!res.ok) {
       console.error(`Resend API এরর (status ${res.status}):`, resBody);
+      if (onFail) await onFail('resend_api', `Resend API এরর (status ${res.status}): ` + String(resBody).slice(0, 200));
     } else {
       console.log('পাসওয়ার্ড রিসেট ইমেইল পাঠানো সফল:', resBody);
     }
   } catch (err) {
     console.error('Resend fetch ব্যর্থ (নেটওয়ার্ক সমস্যা):', err);
+    if (onFail) await onFail('resend_network', 'Resend নেটওয়ার্ক সমস্যা: ' + (err && err.message));
   }
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const { phone } = await request.json();
 
@@ -93,6 +100,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     const dummyEmail = `${digitsOnly}@smartfeni.local`;
 
@@ -116,6 +124,16 @@ export async function POST({ request }) {
 
     if (linkError || !linkData?.user || !linkData?.properties?.hashed_token) {
       console.error('generateLink ব্যর্থ (সম্ভবত এই নাম্বারে অ্যাকাউন্ট নাই):', linkError?.message);
+      if (linkError && linkError.code !== 'user_not_found' && !/not found/i.test(String(linkError.message || ''))) {
+        await reportServerError(reportDb, {
+          route: '/api/forgot-password',
+          action: 'forgot_password_generate_link',
+          title: 'পাসওয়ার্ড রিসেট: লিংক জেনারেট ব্যর্থ',
+          message: linkError.message,
+          code: linkError.code,
+          status: 500,
+        });
+      }
       // নিরাপত্তার জন্য এখানেও একই জেনেরিক মেসেজ — ফাঁস করা হয় না যে নাম্বারটা ভুল
       return new Response(JSON.stringify({ success: true, message: GENERIC_MESSAGE }), {
         status: 200,
@@ -134,7 +152,15 @@ export async function POST({ request }) {
     const resetLink = `${SITE_URL}/reset-password?token_hash=${linkData.properties.hashed_token}&type=recovery`;
 
     if (recoveryEmail) {
-      await sendResetEmail(recoveryEmail, resetLink);
+      await sendResetEmail(recoveryEmail, resetLink, (action, message) =>
+        reportServerError(supabaseAdmin, {
+          route: '/api/forgot-password',
+          action: 'forgot_password_' + action,
+          title: 'পাসওয়ার্ড রিসেট ইমেইল পাঠানো ব্যর্থ',
+          message,
+          status: 500,
+        })
+      );
     } else {
       console.error('রিকভারি ইমেইল সেট করা নাই এই ইউজারের জন্য:', linkData.user.id);
     }
@@ -145,6 +171,13 @@ export async function POST({ request }) {
     });
   } catch (err) {
     console.error('forgot-password API এরর:', err);
+    await reportServerError(reportDb, {
+      route: '/api/forgot-password',
+      action: 'forgot_password_unexpected',
+      title: 'পাসওয়ার্ড রিসেট: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(JSON.stringify({ error: 'অপ্রত্যাশিত সমস্যা হয়েছে' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

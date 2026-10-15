@@ -19,10 +19,14 @@
 // (security ক্যাটাগরি) পাঠানো হয়, supabaseAdmin দিয়ে সরাসরি create_notification।
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const { accessToken, currentPassword, newPhone } = await request.json();
 
@@ -69,6 +73,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     const currentEmail = callerUser.email;
     const newEmail = `${digitsOnly}@smartfeni.local`;
@@ -106,6 +111,16 @@ export async function POST({ request }) {
       const message = updateError.message.includes('already been registered')
         ? 'এই ফোন নম্বরে আগে থেকেই অ্যাকাউন্ট আছে'
         : 'নম্বর বদলাতে সমস্যা হয়েছে: ' + updateError.message;
+      if (!updateError.message.includes('already been registered')) {
+        await reportServerError(reportDb, {
+          route: '/api/change-phone',
+          action: 'change_phone_auth_update',
+          title: 'ফোন বদল: auth ইমেইল আপডেট ব্যর্থ',
+          message: updateError.message,
+          code: updateError.code,
+          status: 400,
+        });
+      }
       return new Response(JSON.stringify({ error: message }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -118,6 +133,14 @@ export async function POST({ request }) {
       .eq('id', callerUser.id);
 
     if (profileError) {
+      await reportServerError(reportDb, {
+        route: '/api/change-phone',
+        action: 'change_phone_profile',
+        title: 'ফোন বদল: auth বদলেছে কিন্তু প্রোফাইল আপডেট ব্যর্থ (অসঙ্গতি)',
+        message: profileError.message,
+        code: profileError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'auth নম্বর বদলেছে কিন্তু প্রোফাইল আপডেট ব্যর্থ: ' + profileError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -144,6 +167,13 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/change-phone',
+      action: 'change_phone_unexpected',
+      title: 'ফোন বদল: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

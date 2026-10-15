@@ -26,10 +26,14 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const { clubId, accessToken } = await request.json();
 
@@ -68,6 +72,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     const { data: callerProfile, error: callerProfileError } = await supabaseAdmin
       .from('profiles')
@@ -88,6 +93,16 @@ export async function POST({ request }) {
       .eq('id', clubId)
       .single();
 
+    if (clubFetchError && clubFetchError.code !== 'PGRST116') {
+      await reportServerError(reportDb, {
+        route: '/api/delete-club',
+        action: 'delete_club_fetch',
+        title: 'ক্লাব ডিলিট: ক্লাব পড়া ব্যর্থ',
+        message: clubFetchError.message,
+        code: clubFetchError.code,
+        status: 404,
+      });
+    }
     if (clubFetchError || !club) {
       return new Response(
         JSON.stringify({ error: 'ক্লাব খুঁজে পাওয়া যায়নি' }),
@@ -96,20 +111,40 @@ export async function POST({ request }) {
     }
 
     // ১. এই ক্লাবের সব মডারেটর রো ডিলিট
-    await supabaseAdmin
+    const { error: modDeleteError } = await supabaseAdmin
       .from('moderators')
       .delete()
       .eq('entity_type', 'club')
       .eq('entity_id', clubId);
+    if (modDeleteError) {
+      await reportServerError(reportDb, {
+        route: '/api/delete-club',
+        action: 'delete_club_moderators',
+        title: 'ক্লাব ডিলিট: মডারেটর রো ডিলিট ব্যর্থ',
+        message: modDeleteError.message,
+        code: modDeleteError.code,
+        status: 200,
+      });
+    }
 
     // ২. ওউনারের প্রোফাইল রিসেট — clubs রো ডিলিটের আগেই করতে হবে,
     // কারণ profiles.club_id ফরেন-কি clubs.id কে রেফারেন্স করে
     // (অ্যাকাউন্ট ডিলিট হয় না, শুধু ফ্ল্যাগ রিসেট)
     if (club.owner_id) {
-      await supabaseAdmin
+      const { error: ownerResetError } = await supabaseAdmin
         .from('profiles')
         .update({ is_club_owner: false, club_id: null })
         .eq('id', club.owner_id);
+      if (ownerResetError) {
+        await reportServerError(reportDb, {
+          route: '/api/delete-club',
+          action: 'delete_club_owner_reset',
+          title: 'ক্লাব ডিলিট: ওউনারের প্রোফাইল রিসেট ব্যর্থ',
+          message: ownerResetError.message,
+          code: ownerResetError.code,
+          status: 200,
+        });
+      }
     }
 
     // ৩. clubs row ডিলিট — cascade-এ club_members/club_posts/
@@ -121,6 +156,14 @@ export async function POST({ request }) {
       .eq('id', clubId);
 
     if (deleteClubError) {
+      await reportServerError(reportDb, {
+        route: '/api/delete-club',
+        action: 'delete_club_delete',
+        title: 'ক্লাব ডিলিট (clubs delete) ব্যর্থ',
+        message: deleteClubError.message,
+        code: deleteClubError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'ক্লাব ডিলিট ব্যর্থ: ' + deleteClubError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -132,6 +175,13 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/delete-club',
+      action: 'delete_club_unexpected',
+      title: 'ক্লাব ডিলিট: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

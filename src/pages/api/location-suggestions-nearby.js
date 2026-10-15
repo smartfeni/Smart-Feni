@@ -16,6 +16,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -39,6 +41,8 @@ function num(url, key) {
 }
 
 export async function GET({ url }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     let south = num(url, 'south');
     let west = num(url, 'west');
@@ -79,6 +83,7 @@ export async function GET({ url }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     const { data, error } = await supabaseAdmin
       .from('location_suggestions')
@@ -91,6 +96,14 @@ export async function GET({ url }) {
       .limit(limit);
 
     if (error) {
+      await reportServerError(reportDb, {
+        route: '/api/location-suggestions-nearby',
+        action: 'location_nearby_query',
+        title: 'ম্যাপ লোকেশন (nearby) ডাটা আনা ব্যর্থ',
+        message: error.message,
+        code: error.code,
+        status: 500,
+      });
       return json({ error: 'ডাটা আনতে সমস্যা হয়েছে' }, 500);
     }
 
@@ -102,6 +115,13 @@ export async function GET({ url }) {
       { 'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600' }
     );
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/location-suggestions-nearby',
+      action: 'location_nearby_unexpected',
+      title: 'ম্যাপ লোকেশন (nearby): অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return json({ error: 'অপ্রত্যাশিত ত্রুটি' }, 500);
   }
 }

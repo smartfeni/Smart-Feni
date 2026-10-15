@@ -24,10 +24,14 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const authHeader = request.headers.get('Authorization') || '';
     const token = authHeader.replace('Bearer ', '');
@@ -59,6 +63,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     // caller admin/moderator কিনা যাচাই
     const { data: callerData, error: callerError } = await supabaseAdmin.auth.getUser(token);
@@ -86,6 +91,16 @@ export async function POST({ request }) {
       .eq('id', shopId)
       .single();
 
+    if (shopFetchError && shopFetchError.code !== 'PGRST116') {
+      await reportServerError(reportDb, {
+        route: '/api/delete-shop',
+        action: 'delete_shop_fetch',
+        title: 'শপ ডিলিট: শপ পড়া ব্যর্থ',
+        message: shopFetchError.message,
+        code: shopFetchError.code,
+        status: 404,
+      });
+    }
     if (shopFetchError || !shop) {
       return new Response(JSON.stringify({ error: 'শপ খুঁজে পাওয়া যায়নি' }), {
         status: 404, headers: { 'Content-Type': 'application/json' },
@@ -93,29 +108,69 @@ export async function POST({ request }) {
     }
 
     // ১. শুধু এই শপের প্রোডাক্ট লিস্টিং ডিলিট (ওউনারের অন্য শপ অক্ষত থাকে)
-    await supabaseAdmin
+    const { error: listingsDeleteError } = await supabaseAdmin
       .from('listings')
       .delete()
       .eq('shop_id', shopId);
+    if (listingsDeleteError) {
+      await reportServerError(reportDb, {
+        route: '/api/delete-shop',
+        action: 'delete_shop_listings',
+        title: 'শপ ডিলিট: প্রোডাক্ট লিস্টিং ডিলিট ব্যর্থ',
+        message: listingsDeleteError.message,
+        code: listingsDeleteError.code,
+        status: 200,
+      });
+    }
 
     // ২. এই শপের সব মডারেটর রো ডিলিট
-    await supabaseAdmin
+    const { error: modDeleteError } = await supabaseAdmin
       .from('moderators')
       .delete()
       .eq('entity_type', 'shop')
       .eq('entity_id', shopId);
+    if (modDeleteError) {
+      await reportServerError(reportDb, {
+        route: '/api/delete-shop',
+        action: 'delete_shop_moderators',
+        title: 'শপ ডিলিট: মডারেটর রো ডিলিট ব্যর্থ',
+        message: modDeleteError.message,
+        code: modDeleteError.code,
+        status: 200,
+      });
+    }
 
     // ৩. এই শপের সব অর্ডার ডিলিট (order_items নিজে থেকেই CASCADE-এ মুছে যায়)
-    await supabaseAdmin
+    const { error: ordersDeleteError } = await supabaseAdmin
       .from('orders')
       .delete()
       .eq('shop_id', shopId);
+    if (ordersDeleteError) {
+      await reportServerError(reportDb, {
+        route: '/api/delete-shop',
+        action: 'delete_shop_orders',
+        title: 'শপ ডিলিট: অর্ডার ডিলিট ব্যর্থ',
+        message: ordersDeleteError.message,
+        code: ordersDeleteError.code,
+        status: 200,
+      });
+    }
 
     // ৪. এই শপের সব product_events (অ্যানালিটিক্স ডেটা) ডিলিট
-    await supabaseAdmin
+    const { error: eventsDeleteError } = await supabaseAdmin
       .from('product_events')
       .delete()
       .eq('shop_id', shopId);
+    if (eventsDeleteError) {
+      await reportServerError(reportDb, {
+        route: '/api/delete-shop',
+        action: 'delete_shop_events',
+        title: 'শপ ডিলিট: product_events ডিলিট ব্যর্থ',
+        message: eventsDeleteError.message,
+        code: eventsDeleteError.code,
+        status: 200,
+      });
+    }
 
     // ৫. profiles ঠিক করা — shops রো ডিলিটের আগেই করতে হবে (FK)
     // ৫ক. যেসব প্রোফাইলের shop_id এই শপের দিকে আছে, আগে সবার null করা
@@ -156,6 +211,14 @@ export async function POST({ request }) {
       .eq('id', shopId);
 
     if (deleteShopError) {
+      await reportServerError(reportDb, {
+        route: '/api/delete-shop',
+        action: 'delete_shop_delete',
+        title: 'শপ ডিলিট (shops delete) ব্যর্থ',
+        message: deleteShopError.message,
+        code: deleteShopError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'শপ ডিলিট ব্যর্থ: ' + deleteShopError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -167,6 +230,13 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/delete-shop',
+      action: 'delete_shop_unexpected',
+      title: 'শপ ডিলিট: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

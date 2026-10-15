@@ -12,6 +12,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 import {
   slugify,
   validateSlugFormat,
@@ -29,6 +31,8 @@ function json(body, status = 200) {
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const authHeader = request.headers.get('Authorization') || '';
     const token = authHeader.replace('Bearer ', '');
@@ -53,6 +57,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     const { data: callerData, error: callerError } = await supabaseAdmin.auth.getUser(token);
     if (callerError || !callerData?.user) {
@@ -81,6 +86,13 @@ export async function POST({ request }) {
     });
 
     if (result.reason === 'error') {
+      await reportServerError(reportDb, {
+        route: '/api/check-shop-slug',
+        action: 'check_shop_slug_availability',
+        title: 'স্লাগ চেক (checkSlugAvailability) ব্যর্থ',
+        message: 'checkSlugAvailability ব্যর্থ',
+        status: 500,
+      });
       return json({ error: 'স্লাগ চেক করা যায়নি — আবার চেষ্টা করুন' }, 500);
     }
 
@@ -90,6 +102,13 @@ export async function POST({ request }) {
 
     return json({ available: true, slug: cleanSlug });
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/check-shop-slug',
+      action: 'check_shop_slug_unexpected',
+      title: 'স্লাগ চেক: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return json({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }, 500);
   }
 }

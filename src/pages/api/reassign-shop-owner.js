@@ -27,6 +27,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -50,6 +52,8 @@ function buildPhoneCandidates(input) {
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const authHeader = request.headers.get('Authorization') || '';
     const token = authHeader.replace('Bearer ', '');
@@ -81,6 +85,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     // caller যে টোকেন দিয়ে কল করেছে সেটা সত্যিই admin/moderator এর কিনা যাচাই
     const { data: callerData, error: callerError } = await supabaseAdmin.auth.getUser(token);
@@ -109,6 +114,16 @@ export async function POST({ request }) {
       .eq('id', shopId)
       .single();
 
+    if (shopFetchError && shopFetchError.code !== 'PGRST116') {
+      await reportServerError(reportDb, {
+        route: '/api/reassign-shop-owner',
+        action: 'reassign_shop_fetch',
+        title: 'শপ ওউনার বদল: শপ পড়া ব্যর্থ',
+        message: shopFetchError.message,
+        code: shopFetchError.code,
+        status: 404,
+      });
+    }
     if (shopFetchError || !shop) {
       return new Response(JSON.stringify({ error: 'শপ খুঁজে পাওয়া যায়নি' }), {
         status: 404, headers: { 'Content-Type': 'application/json' },
@@ -123,6 +138,16 @@ export async function POST({ request }) {
       .in('phone', phoneCandidates)
       .limit(2);
 
+    if (newOwnerError) {
+      await reportServerError(reportDb, {
+        route: '/api/reassign-shop-owner',
+        action: 'reassign_shop_owner_lookup',
+        title: 'শপ ওউনার বদল: নতুন ওউনার খোঁজা ব্যর্থ',
+        message: newOwnerError.message,
+        code: newOwnerError.code,
+        status: 404,
+      });
+    }
     if (newOwnerError || !phoneMatches || phoneMatches.length === 0) {
       return new Response(
         JSON.stringify({ error: 'এই ফোন নম্বরে কোনো অ্যাকাউন্ট পাওয়া যায়নি — নতুন ওউনারকে আগে সাইটে অ্যাকাউন্ট খুলতে হবে' }),
@@ -146,6 +171,14 @@ export async function POST({ request }) {
       .eq('id', shopId);
 
     if (updateShopError) {
+      await reportServerError(reportDb, {
+        route: '/api/reassign-shop-owner',
+        action: 'reassign_shop_update',
+        title: 'শপ ওউনার বদল (shops update) ব্যর্থ',
+        message: updateShopError.message,
+        code: updateShopError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'শপ আপডেট ব্যর্থ: ' + updateShopError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -169,13 +202,33 @@ export async function POST({ request }) {
         if (oldOwnerProfile?.shop_id === shopId || !oldOwnerProfile?.shop_id) {
           oldUpdate.shop_id = remainingShops[0].id;
         }
-        await supabaseAdmin.from('profiles').update(oldUpdate).eq('id', shop.owner_id);
+        const { error: oldOwnerUpdateError } = await supabaseAdmin.from('profiles').update(oldUpdate).eq('id', shop.owner_id);
+        if (oldOwnerUpdateError) {
+          await reportServerError(reportDb, {
+            route: '/api/reassign-shop-owner',
+            action: 'reassign_shop_old_owner_update',
+            title: 'শপ ওউনার বদল: পুরনো ওউনারের প্রোফাইল আপডেট ব্যর্থ',
+            message: oldOwnerUpdateError.message,
+            code: oldOwnerUpdateError.code,
+            status: 200,
+          });
+        }
       } else {
         // এটাই শেষ শপ ছিল → আগের মতো রিসেট
-        await supabaseAdmin
+        const { error: oldOwnerResetError } = await supabaseAdmin
           .from('profiles')
           .update({ is_shop_owner: false, shop_id: null })
           .eq('id', shop.owner_id);
+        if (oldOwnerResetError) {
+          await reportServerError(reportDb, {
+            route: '/api/reassign-shop-owner',
+            action: 'reassign_shop_old_owner_reset',
+            title: 'শপ ওউনার বদল: পুরনো ওউনার রিসেট ব্যর্থ',
+            message: oldOwnerResetError.message,
+            code: oldOwnerResetError.code,
+            status: 200,
+          });
+        }
       }
     }
 
@@ -191,6 +244,14 @@ export async function POST({ request }) {
       .eq('id', newOwnerProfile.id);
 
     if (newOwnerUpdateError) {
+      await reportServerError(reportDb, {
+        route: '/api/reassign-shop-owner',
+        action: 'reassign_shop_new_owner',
+        title: 'শপ ওউনার বদল: শপ হয়েছে কিন্তু নতুন ওউনারের প্রোফাইল আপডেট ব্যর্থ',
+        message: newOwnerUpdateError.message,
+        code: newOwnerUpdateError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'শপ আপডেট হয়েছে কিন্তু নতুন ওউনারের প্রোফাইল আপডেট ব্যর্থ: ' + newOwnerUpdateError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -202,6 +263,13 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/reassign-shop-owner',
+      action: 'reassign_shop_unexpected',
+      title: 'শপ ওউনার বদল: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

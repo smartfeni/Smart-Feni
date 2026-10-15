@@ -25,6 +25,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -48,6 +50,8 @@ function slugify(input) {
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const authHeader = request.headers.get('Authorization') || '';
     const token = authHeader.replace('Bearer ', '');
@@ -104,6 +108,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     // caller যে টোকেন দিয়ে কল করেছে সেটা সত্যিই admin/moderator এর কিনা যাচাই
     const { data: callerData, error: callerError } = await supabaseAdmin.auth.getUser(token);
@@ -167,6 +172,16 @@ export async function POST({ request }) {
       const message = createError.message.includes('already been registered')
         ? 'এই ফোন নম্বরে আগে থেকেই অ্যাকাউন্ট আছে'
         : 'অ্যাকাউন্ট তৈরি ব্যর্থ: ' + createError.message;
+      if (!createError.message.includes('already been registered')) {
+        await reportServerError(reportDb, {
+          route: '/api/create-shop',
+          action: 'create_shop_auth',
+          title: 'শপ তৈরি: ওউনার অ্যাকাউন্ট তৈরি ব্যর্থ',
+          message: createError.message,
+          code: createError.code,
+          status: 400,
+        });
+      }
       return new Response(JSON.stringify({ error: message }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -189,6 +204,14 @@ export async function POST({ request }) {
       .single();
 
     if (shopError) {
+      await reportServerError(reportDb, {
+        route: '/api/create-shop',
+        action: 'create_shop_insert',
+        title: 'শপ তৈরি (shops insert) ব্যর্থ',
+        message: shopError.message,
+        code: shopError.code,
+        status: 500,
+      });
       // shops row তৈরি ব্যর্থ হলে তৈরি হওয়া auth ইউজার ক্লিনআপ করে দেওয়া ভালো
       await supabaseAdmin.auth.admin.deleteUser(userData.user.id);
       return new Response(
@@ -207,6 +230,14 @@ export async function POST({ request }) {
       .eq('id', userData.user.id);
 
     if (profileError) {
+      await reportServerError(reportDb, {
+        route: '/api/create-shop',
+        action: 'create_shop_profile',
+        title: 'শপ তৈরি: শপ হয়েছে কিন্তু প্রোফাইল আপডেট ব্যর্থ',
+        message: profileError.message,
+        code: profileError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'শপ তৈরি হয়েছে কিন্তু প্রোফাইল আপডেট ব্যর্থ: ' + profileError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -225,6 +256,13 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/create-shop',
+      action: 'create_shop_unexpected',
+      title: 'শপ তৈরি: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

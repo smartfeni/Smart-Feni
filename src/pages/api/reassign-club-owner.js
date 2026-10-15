@@ -31,6 +31,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -54,6 +56,8 @@ function buildPhoneCandidates(input) {
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const authHeader = request.headers.get('Authorization') || '';
     const token = authHeader.replace('Bearer ', '');
@@ -85,6 +89,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     // caller যে টোকেন দিয়ে কল করেছে সেটা সত্যিই admin/moderator এর কিনা যাচাই
     const { data: callerData, error: callerError } = await supabaseAdmin.auth.getUser(token);
@@ -113,6 +118,16 @@ export async function POST({ request }) {
       .eq('id', clubId)
       .single();
 
+    if (clubFetchError && clubFetchError.code !== 'PGRST116') {
+      await reportServerError(reportDb, {
+        route: '/api/reassign-club-owner',
+        action: 'reassign_club_fetch',
+        title: 'ক্লাব ওউনার বদল: ক্লাব পড়া ব্যর্থ',
+        message: clubFetchError.message,
+        code: clubFetchError.code,
+        status: 404,
+      });
+    }
     if (clubFetchError || !club) {
       return new Response(JSON.stringify({ error: 'ক্লাব খুঁজে পাওয়া যায়নি' }), {
         status: 404, headers: { 'Content-Type': 'application/json' },
@@ -127,6 +142,16 @@ export async function POST({ request }) {
       .in('phone', phoneCandidates)
       .limit(2);
 
+    if (newOwnerError) {
+      await reportServerError(reportDb, {
+        route: '/api/reassign-club-owner',
+        action: 'reassign_club_owner_lookup',
+        title: 'ক্লাব ওউনার বদল: নতুন ওউনার খোঁজা ব্যর্থ',
+        message: newOwnerError.message,
+        code: newOwnerError.code,
+        status: 404,
+      });
+    }
     if (newOwnerError || !phoneMatches || phoneMatches.length === 0) {
       return new Response(
         JSON.stringify({ error: 'এই ফোন নম্বরে কোনো অ্যাকাউন্ট পাওয়া যায়নি — নতুন ওউনারকে আগে সাইটে অ্যাকাউন্ট খুলতে হবে' }),
@@ -160,6 +185,14 @@ export async function POST({ request }) {
       .eq('id', clubId);
 
     if (updateClubError) {
+      await reportServerError(reportDb, {
+        route: '/api/reassign-club-owner',
+        action: 'reassign_club_update',
+        title: 'ক্লাব ওউনার বদল (clubs update) ব্যর্থ',
+        message: updateClubError.message,
+        code: updateClubError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'ক্লাব আপডেট ব্যর্থ: ' + updateClubError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -168,10 +201,20 @@ export async function POST({ request }) {
 
     // পুরনো ওউনার রিসেট (থাকলে, আর যদি নতুন-পুরনো একই না হয়)
     if (club.owner_id && club.owner_id !== newOwnerProfile.id) {
-      await supabaseAdmin
+      const { error: oldOwnerResetError } = await supabaseAdmin
         .from('profiles')
         .update({ is_club_owner: false, club_id: null })
         .eq('id', club.owner_id);
+      if (oldOwnerResetError) {
+        await reportServerError(reportDb, {
+          route: '/api/reassign-club-owner',
+          action: 'reassign_club_old_owner',
+          title: 'ক্লাব ওউনার বদল: পুরনো ওউনার রিসেট ব্যর্থ',
+          message: oldOwnerResetError.message,
+          code: oldOwnerResetError.code,
+          status: 200,
+        });
+      }
     }
 
     // নতুন ওউনার সেট
@@ -181,6 +224,14 @@ export async function POST({ request }) {
       .eq('id', newOwnerProfile.id);
 
     if (newOwnerUpdateError) {
+      await reportServerError(reportDb, {
+        route: '/api/reassign-club-owner',
+        action: 'reassign_club_new_owner',
+        title: 'ক্লাব ওউনার বদল: ক্লাব হয়েছে কিন্তু নতুন ওউনারের প্রোফাইল আপডেট ব্যর্থ',
+        message: newOwnerUpdateError.message,
+        code: newOwnerUpdateError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'ক্লাব আপডেট হয়েছে কিন্তু নতুন ওউনারের প্রোফাইল আপডেট ব্যর্থ: ' + newOwnerUpdateError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -192,6 +243,13 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/reassign-club-owner',
+      action: 'reassign_club_unexpected',
+      title: 'ক্লাব ওউনার বদল: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

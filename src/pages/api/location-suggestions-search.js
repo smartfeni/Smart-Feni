@@ -16,6 +16,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -38,7 +40,17 @@ async function searchLocalSuggestions(supabaseAdmin, q, limit = 8) {
     .ilike('name_normalized', `%${q.toLowerCase()}%`)
     .limit(limit);
 
-  if (error) return [];
+  if (error) {
+    await reportServerError(supabaseAdmin, {
+      route: '/api/location-suggestions-search',
+      action: 'location_search_local',
+      title: 'লোকেশন সার্চ: নিজেদের DB সার্চ ব্যর্থ',
+      message: error.message,
+      code: error.code,
+      status: 200,
+    });
+    return [];
+  }
   return data || [];
 }
 
@@ -83,7 +95,19 @@ async function fallbackGooglePlaces(supabaseAdmin, q, apiKey) {
     const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`);
     const data = await res.json();
 
-    if (data.status !== 'OK' || !Array.isArray(data.results)) return [];
+    if (data.status !== 'OK' || !Array.isArray(data.results)) {
+      // ZERO_RESULTS স্বাভাবিক; বাকি স্ট্যাটাস (REQUEST_DENIED, OVER_QUERY_LIMIT ইত্যাদি) আসল সমস্যা
+      if (data.status && data.status !== 'ZERO_RESULTS') {
+        await reportServerError(supabaseAdmin, {
+          route: '/api/location-suggestions-search',
+          action: 'location_search_google',
+          title: 'লোকেশন সার্চ: Google Places ব্যর্থ',
+          message: 'Google Places status: ' + data.status,
+          status: 200,
+        });
+      }
+      return [];
+    }
 
     const candidates = data.results.slice(0, 5);
     const saved = [];
@@ -115,6 +139,16 @@ async function fallbackGooglePlaces(supabaseAdmin, q, apiKey) {
         .select('id, name, lat, lng, upazila, image_url, source')
         .single();
 
+      if (upsertError) {
+        await reportServerError(supabaseAdmin, {
+          route: '/api/location-suggestions-search',
+          action: 'location_search_cache_upsert',
+          title: 'লোকেশন সার্চ: Google রেজাল্ট DB-তে ক্যাশ করা ব্যর্থ',
+          message: upsertError.message,
+          code: upsertError.code,
+          status: 200,
+        });
+      }
       if (!upsertError && upserted) saved.push(upserted);
     }
 
@@ -125,6 +159,8 @@ async function fallbackGooglePlaces(supabaseAdmin, q, apiKey) {
 }
 
 export async function GET({ url }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const q = (url.searchParams.get('q') || '').trim();
     if (q.length < 2) {
@@ -135,6 +171,7 @@ export async function GET({ url }) {
     }
 
     const supabaseAdmin = getAdminClient();
+    reportDb = supabaseAdmin;
     if (!supabaseAdmin) {
       return new Response(JSON.stringify({ error: 'সার্ভার কনফিগারেশন ঠিক নেই' }), {
         status: 500,
@@ -159,6 +196,13 @@ export async function GET({ url }) {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/location-suggestions-search',
+      action: 'location_search_unexpected',
+      title: 'লোকেশন সার্চ: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

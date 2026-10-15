@@ -18,6 +18,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 import {
   slugify,
   validateSlugFormat,
@@ -35,6 +37,8 @@ function json(body, status = 200) {
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const authHeader = request.headers.get('Authorization') || '';
     const token = authHeader.replace('Bearer ', '');
@@ -59,6 +63,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     // caller যে টোকেন দিয়ে কল করেছে সেটা সত্যিই admin/moderator এর কিনা যাচাই
     const { data: callerData, error: callerError } = await supabaseAdmin.auth.getUser(token);
@@ -83,6 +88,16 @@ export async function POST({ request }) {
       .eq('id', shopId)
       .single();
 
+    if (shopFetchError && shopFetchError.code !== 'PGRST116') {
+      await reportServerError(reportDb, {
+        route: '/api/update-shop-slug',
+        action: 'update_shop_slug_fetch',
+        title: 'স্লাগ বদল: শপ পড়া ব্যর্থ',
+        message: shopFetchError.message,
+        code: shopFetchError.code,
+        status: 404,
+      });
+    }
     if (shopFetchError || !shop) {
       return json({ error: 'শপ খুঁজে পাওয়া যায়নি' }, 404);
     }
@@ -104,6 +119,13 @@ export async function POST({ request }) {
     });
 
     if (availability.reason === 'error') {
+      await reportServerError(reportDb, {
+        route: '/api/update-shop-slug',
+        action: 'update_shop_slug_check',
+        title: 'স্লাগ বদল: স্লাগ চেক ব্যর্থ',
+        message: 'checkSlugAvailability ব্যর্থ',
+        status: 500,
+      });
       return json({ error: 'স্লাগ চেক করা যায়নি — আবার চেষ্টা করুন' }, 500);
     }
 
@@ -126,11 +148,26 @@ export async function POST({ request }) {
           409
         );
       }
+      await reportServerError(reportDb, {
+        route: '/api/update-shop-slug',
+        action: 'update_shop_slug_update',
+        title: 'স্লাগ আপডেট (shops update) ব্যর্থ',
+        message: updateError.message,
+        code: updateError.code,
+        status: 500,
+      });
       return json({ error: 'স্লাগ আপডেট ব্যর্থ: ' + updateError.message }, 500);
     }
 
     return json({ success: true, slug: cleanSlug, oldSlug: shop.slug, changed: true });
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/update-shop-slug',
+      action: 'update_shop_slug_unexpected',
+      title: 'স্লাগ বদল: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return json({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }, 500);
   }
 }

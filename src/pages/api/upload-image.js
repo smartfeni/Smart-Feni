@@ -32,6 +32,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -43,6 +45,8 @@ function json(body, status) {
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const authHeader = request.headers.get('authorization') || '';
     const token = authHeader.replace('Bearer ', '').trim();
@@ -61,6 +65,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     // টোকেন যাচাই করে আসল ইউজার আইডি বের করা হচ্ছে
     const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
@@ -114,6 +119,13 @@ export async function POST({ request }) {
 
     if (uploadError) {
       console.error('upload-image error:', uploadError.message);
+      await reportServerError(reportDb, {
+        route: '/api/upload-image',
+        action: 'upload_image_storage',
+        title: 'ছবি আপলোড (Storage) ব্যর্থ',
+        message: uploadError.message,
+        status: 500,
+      });
       return json({ error: 'আপলোড ব্যর্থ: ' + uploadError.message }, 500);
     }
 
@@ -122,6 +134,13 @@ export async function POST({ request }) {
     return json({ url: publicData?.publicUrl || null, path }, 200);
   } catch (err) {
     console.error('upload-image API এরর:', err);
+    await reportServerError(reportDb, {
+      route: '/api/upload-image',
+      action: 'upload_image_unexpected',
+      title: 'ছবি আপলোড: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return json({ error: 'অপ্রত্যাশিত সমস্যা হয়েছে' }, 500);
   }
 }

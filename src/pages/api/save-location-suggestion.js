@@ -15,6 +15,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -33,6 +35,8 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const body = await request.json();
     const name = (body?.name || '').trim();
@@ -72,18 +76,29 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     // কাছাকাছি (~500 মিটার বক্স) আগে থেকে কোনো সাজেশন আছে কিনা চেক —
     // ছোট রেঞ্জে DB থেকে টেনে এনে নিখুঁত দূরত্ব হিসাব করা হচ্ছে
     const latDelta = 0.005;
     const lngDelta = 0.005;
-    const { data: nearby } = await supabaseAdmin
+    const { data: nearby, error: nearbyError } = await supabaseAdmin
       .from('location_suggestions')
       .select('id, lat, lng')
       .gte('lat', lat - latDelta)
       .lte('lat', lat + latDelta)
       .gte('lng', lng - lngDelta)
       .lte('lng', lng + lngDelta);
+    if (nearbyError) {
+      await reportServerError(reportDb, {
+        route: '/api/save-location-suggestion',
+        action: 'save_location_nearby',
+        title: 'লোকেশন সেভ: কাছাকাছি সাজেশন চেক ব্যর্থ (ডুপ্লিকেট চেক হয়নি)',
+        message: nearbyError.message,
+        code: nearbyError.code,
+        status: 200,
+      });
+    }
 
     const isDuplicate = (nearby || []).some(
       (row) => haversineMeters(lat, lng, row.lat, row.lng) < DUPLICATE_RADIUS_METERS
@@ -104,6 +119,14 @@ export async function POST({ request }) {
     });
 
     if (insertError) {
+      await reportServerError(reportDb, {
+        route: '/api/save-location-suggestion',
+        action: 'save_location_insert',
+        title: 'লোকেশন সাজেশন সেভ (insert) ব্যর্থ',
+        message: insertError.message,
+        code: insertError.code,
+        status: 500,
+      });
       return new Response(JSON.stringify({ error: 'সেভ ব্যর্থ: ' + insertError.message }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -115,6 +138,13 @@ export async function POST({ request }) {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/save-location-suggestion',
+      action: 'save_location_unexpected',
+      title: 'লোকেশন সাজেশন সেভ: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

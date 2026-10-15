@@ -32,6 +32,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
+import { reportServerError } from '../../lib/serverErrorReporter.js';
 import {
   slugify,
   validateSlugFormat,
@@ -43,6 +45,8 @@ import {
 export const prerender = false;
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
+  let reportDb = null;
   try {
     const authHeader = request.headers.get('Authorization') || '';
     const token = authHeader.replace('Bearer ', '');
@@ -74,6 +78,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
 
     // যে টোকেন দিয়ে কল হয়েছে, সেটা সত্যিই admin/moderator এর কিনা যাচাই
     const { data: callerData, error: callerError } = await supabaseAdmin.auth.getUser(token);
@@ -102,6 +107,16 @@ export async function POST({ request }) {
       .eq('id', requestId)
       .single();
 
+    if (reqError && reqError.code !== 'PGRST116') {
+      await reportServerError(reportDb, {
+        route: '/api/approve-shop-request',
+        action: 'approve_shop_fetch',
+        title: 'শপ আবেদন Approve: আবেদন পড়া ব্যর্থ',
+        message: reqError.message,
+        code: reqError.code,
+        status: 404,
+      });
+    }
     if (reqError || !req) {
       return new Response(JSON.stringify({ error: 'আবেদন পাওয়া যায়নি' }), {
         status: 404, headers: { 'Content-Type': 'application/json' },
@@ -134,6 +149,13 @@ export async function POST({ request }) {
       const availability = await checkSlugAvailability(supabaseAdmin, finalSlug);
 
       if (availability.reason === 'error') {
+        await reportServerError(reportDb, {
+          route: '/api/approve-shop-request',
+          action: 'approve_shop_slug_check',
+          title: 'শপ আবেদন Approve: স্লাগ চেক ব্যর্থ',
+          message: 'checkSlugAvailability ব্যর্থ',
+          status: 500,
+        });
         return new Response(JSON.stringify({ error: 'স্লাগ চেক করা যায়নি — আবার চেষ্টা করুন' }), {
           status: 500, headers: { 'Content-Type': 'application/json' },
         });
@@ -185,6 +207,14 @@ export async function POST({ request }) {
           { status: 409, headers: { 'Content-Type': 'application/json' } }
         );
       }
+      await reportServerError(reportDb, {
+        route: '/api/approve-shop-request',
+        action: 'approve_shop_insert',
+        title: 'শপ আবেদন Approve: শপ তৈরি (insert) ব্যর্থ',
+        message: shopError.message,
+        code: shopError.code,
+        status: 500,
+      });
       return new Response(JSON.stringify({ error: 'শপ তৈরি ব্যর্থ: ' + shopError.message }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
       });
@@ -208,19 +238,44 @@ export async function POST({ request }) {
       .eq('id', req.user_id);
 
     if (profileError) {
+      await reportServerError(reportDb, {
+        route: '/api/approve-shop-request',
+        action: 'approve_shop_profile',
+        title: 'শপ আবেদন Approve: শপ হয়েছে কিন্তু প্রোফাইল আপডেট ব্যর্থ',
+        message: profileError.message,
+        code: profileError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'শপ তৈরি হয়েছে কিন্তু প্রোফাইল আপডেট ব্যর্থ: ' + profileError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    await supabaseAdmin.from('shop_requests').update({ status: 'accepted' }).eq('id', requestId);
+    const { error: reqStatusError } = await supabaseAdmin.from('shop_requests').update({ status: 'accepted' }).eq('id', requestId);
+    if (reqStatusError) {
+      await reportServerError(reportDb, {
+        route: '/api/approve-shop-request',
+        action: 'approve_shop_request_status',
+        title: 'শপ আবেদন Approve: আবেদনের স্ট্যাটাস accepted করা ব্যর্থ',
+        message: reqStatusError.message,
+        code: reqStatusError.code,
+        status: 200,
+      });
+    }
 
     return new Response(
       JSON.stringify({ success: true, shopId: shopData.id, slug: finalSlug }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: '/api/approve-shop-request',
+      action: 'approve_shop_unexpected',
+      title: 'শপ আবেদন Approve: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
