@@ -7,7 +7,7 @@
 //
 // আপডেট (রাইডার অ্যাভেইলেবিলিটি): রিকোয়েস্ট তৈরির আগে সার্ভারে চেক —
 // সিলেক্ট করা উপজেলায় (এবং নির্দিষ্ট বাহন চাইলে সেই বাহনের) কোনো
-// approved + অনলাইন (is_active) রাইডার না থাকলে 409 + code: 'NO_RIDER_ONLINE'
+// approved + অনলাইন (ডেলিভারি/রাইডের আলাদা টগল: delivery_online / ride_online) রাইডার না থাকলে 409 + code: 'NO_RIDER_ONLINE'
 // দিয়ে reject। ফ্রন্টএন্ডের নোটিশ বাইপাস করে সরাসরি API কল করলেও
 // অর্ডার তৈরি হবে না।
 //
@@ -37,6 +37,19 @@ const VALID_VEHICLE_TYPES = ['bike', 'cycle', 'cng', 'any'];
 const VALID_CATEGORIES = ['delivery', 'ride'];
 const EXPIRY_HOURS = 1;
 const ROUTE = '/api/delivery/create-request';
+const WHATSAPP_NOTE = 'জরুরি প্রয়োজনে WhatsApp করুন: +8801816355833';
+
+// অ্যাডমিন এই সেবার অর্ডার গ্রহণ বন্ধ রাখলে (site_settings accept_*_orders)
+function pausedResponse(category) {
+  const label = category === 'ride' ? 'রাইড' : 'ডেলিভারি';
+  return new Response(
+    JSON.stringify({
+      error: `${label} সেবা এই মুহূর্তে বন্ধ আছে। কিছুক্ষণ পর চেষ্টা করুন। ${WHATSAPP_NOTE}`,
+      code: 'SERVICE_PAUSED',
+    }),
+    { status: 409, headers: { 'Content-Type': 'application/json' } }
+  );
+}
 
 export async function POST({ request }) {
   // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
@@ -99,6 +112,12 @@ export async function POST({ request }) {
       );
     }
 
+    // ===== অ্যাডমিন সুইচ: এই সেবার অর্ডার গ্রহণ বন্ধ কিনা =====
+    const { data: acceptingData } = await client.rpc('get_service_accepting');
+    if (acceptingData && acceptingData[finalCategory] === false) {
+      return pausedResponse(finalCategory);
+    }
+
     // ===== অনলাইন রাইডার চেক (উপজেলা অনুযায়ী) =====
     // service role client দিয়ে গুনছি, যেন RLS-এর কারণে ভুল শূন্য না আসে
     const { client: availabilityAdmin } = getAdminClient();
@@ -108,7 +127,7 @@ export async function POST({ request }) {
       .from('delivery_riders')
       .select('id', { count: 'exact', head: true })
       .eq('verification_status', 'approved')
-      .eq('is_active', true)
+      .eq(finalCategory === 'ride' ? 'ride_online' : 'delivery_online', true)
       .eq(finalCategory === 'ride' ? 'offers_ride' : 'offers_delivery', true)
       .eq('upazila', upazila);
 
@@ -177,6 +196,10 @@ export async function POST({ request }) {
       .single();
 
     if (insertError) {
+      // DB trigger (trg_block_paused_service): চেক ও insert-এর মাঝে সুইচ অফ হলে
+      if (String(insertError.message || '').includes('SERVICE_PAUSED')) {
+        return pausedResponse(finalCategory);
+      }
       await reportServerError(reportClient, {
         route: ROUTE,
         action: 'delivery_create_insert',
