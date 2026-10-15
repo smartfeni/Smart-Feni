@@ -1,0 +1,243 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — ডিভাইস ও আনইনস্টল (/admin/devices)
+// শুধু admin (মডারেটর /admin-এ ফেরত যায়)।
+//   • সক্রিয় ডিভাইস (লগইন করা Android + গেস্ট), মোট আনইনস্টল, গড় থাকার দিন
+//   • গত ৮ সপ্তাহে নতুন ডিভাইস বনাম আনইনস্টল
+//   • সাম্প্রতিক আনইনস্টল হওয়া লগইন-করা ইউজার (নাম, কত দিন ছিল)
+// ডাটা: RPC admin_device_stats() (SECURITY DEFINER, ভেতরে is_admin() চেক)
+// আনইনস্টল ধরা পড়ে সাপ্তাহিক cron ping (/api/push/ping) ও প্রমো/পুশ পাঠানোর সময়
+// ============================================================
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="ডিভাইস ও আনইনস্টল | অ্যাডমিন">
+  <div class="dv-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="dv-loading">
+        <div class="dv-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="dv-content" style="display:none;">
+
+        <a href="/admin" class="dv-back"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="dv-header">
+          <div>
+            <h1>ডিভাইস ও আনইনস্টল</h1>
+            <p class="dv-subtitle" id="dvSummary"></p>
+          </div>
+          <button type="button" class="dv-refresh" id="dvRefresh" aria-label="রিফ্রেশ"><i class="fas fa-rotate"></i></button>
+        </div>
+
+        <div class="dv-stats" id="dvStats"></div>
+
+        <h2 class="dv-h2">গত ৮ সপ্তাহ</h2>
+        <div class="dv-card" id="dvWeeks"></div>
+        <div class="dv-legend">
+          <span><i class="dv-dot dv-dot-green"></i> নতুন ডিভাইস</span>
+          <span><i class="dv-dot dv-dot-red"></i> আনইনস্টল</span>
+        </div>
+
+        <h2 class="dv-h2">সাম্প্রতিক আনইনস্টল (লগইন করা ইউজার)</h2>
+        <div class="dv-card" id="dvRecent"></div>
+
+        <p class="dv-note">
+          আনইনস্টলের তারিখ হলো যেদিন সিস্টেম ধরেছে, আসল আনইনস্টলের দিন নয় (সর্বোচ্চ ১ সপ্তাহ পার্থক্য)।
+          ১৫ অক্টোবরের প্রথম রানে ধরা পড়া ৩০টা আগের আনইনস্টল, তাই তাদের দিন "আনুমানিক"।
+          "নতুন ডিভাইস" মানে প্রথম লগইন বা প্রথম অ্যাপ খোলা, তাই Play Console-এর সংখ্যার সাথে হুবহু মিলবে না।
+        </p>
+
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .dv-page { min-height: 60vh; padding: 32px 0 80px; }
+    .dv-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .dv-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: dv-spin 0.8s linear infinite; }
+    @keyframes dv-spin { to { transform: rotate(360deg); } }
+    .dv-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: 0.88rem; margin-bottom: 20px; }
+    .dv-back:hover { color: #FF6B35; }
+    .dv-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+    .dv-header h1 { font-size: 1.6rem; font-weight: 700; color: #1B2A4A; }
+    .dv-subtitle { font-size: 0.85rem; color: #8FA0BC; margin-top: 4px; font-weight: 600; }
+    .dv-refresh { flex-shrink: 0; width: 42px; height: 42px; border-radius: 50%; border: none; background: #fff; color: #5A6E85; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); cursor: pointer; font-size: 0.95rem; }
+    .dv-refresh:hover { color: #FF6B35; }
+    .dv-refresh.spinning i { animation: dv-spin 0.7s linear infinite; }
+
+    .dv-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+    .dv-stat { background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); }
+    .dv-stat-num { font-size: 1.7rem; font-weight: 800; color: #1B2A4A; line-height: 1.1; }
+    .dv-stat-num.red { color: #D14343; }
+    .dv-stat-num.green { color: #1B7A3C; }
+    .dv-stat-label { font-size: 0.8rem; font-weight: 700; color: #5A6E85; margin-top: 6px; }
+    .dv-stat-sub { font-size: 0.72rem; color: #8FA0BC; margin-top: 2px; }
+
+    .dv-h2 { font-size: 1.05rem; font-weight: 700; color: #1B2A4A; margin: 8px 0 10px; }
+    .dv-card { background: #fff; border-radius: 16px; padding: 14px 16px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); margin-bottom: 14px; }
+
+    .dv-week { display: grid; grid-template-columns: 64px 1fr; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid #F1F4F9; }
+    .dv-week:last-child { border-bottom: none; }
+    .dv-week-label { font-size: 0.76rem; font-weight: 700; color: #5A6E85; }
+    .dv-bars { display: flex; flex-direction: column; gap: 4px; }
+    .dv-bar-row { display: flex; align-items: center; gap: 8px; }
+    .dv-bar { height: 10px; border-radius: 6px; min-width: 2px; }
+    .dv-bar.green { background: #2ECC71; }
+    .dv-bar.red { background: #D14343; }
+    .dv-bar-num { font-size: 0.74rem; font-weight: 700; color: #1B2A4A; }
+    .dv-legend { display: flex; gap: 16px; font-size: 0.76rem; color: #5A6E85; font-weight: 600; margin-bottom: 20px; }
+    .dv-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+    .dv-dot-green { background: #2ECC71; }
+    .dv-dot-red { background: #D14343; }
+
+    .dv-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #F1F4F9; }
+    .dv-row:last-child { border-bottom: none; }
+    .dv-row-name { font-size: 0.88rem; font-weight: 700; color: #1B2A4A; word-break: break-word; }
+    .dv-row-meta { font-size: 0.74rem; color: #8FA0BC; margin-top: 2px; }
+    .dv-pill { flex-shrink: 0; padding: 4px 10px; border-radius: 20px; font-size: 0.74rem; font-weight: 700; background: #FFF0EA; color: #D14343; white-space: nowrap; }
+    .dv-empty { text-align: center; color: #B0BCCB; padding: 24px 0; font-weight: 600; font-size: 0.88rem; }
+    .dv-note { font-size: 0.74rem; color: #8FA0BC; line-height: 1.7; margin-top: 6px; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    // ===== হেল্পার =====
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const BN_DIGITS = '০১২৩৪৫৬৭৮৯';
+    const toBn = (n) => String(n).replace(/\d/g, (d) => BN_DIGITS[d]);
+    const toast = (t, type = 'success') => window.showToast(t, type);
+
+    function fmtDate(iso) {
+      if (!iso) return '';
+      try {
+        return new Date(iso).toLocaleDateString('bn-BD', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short' });
+      } catch (_) {
+        return String(iso);
+      }
+    }
+
+    // সপ্তাহের শুরুর তারিখ (YYYY-MM-DD) → "১২ অক্টো"
+    function fmtWeek(ymd) {
+      try {
+        return new Date(ymd + 'T00:00:00+06:00').toLocaleDateString('bn-BD', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short' });
+      } catch (_) {
+        return ymd;
+      }
+    }
+
+    // ===== রেন্ডার =====
+    function statCard(num, label, sub, cls = '') {
+      return `<div class="dv-stat">
+        <div class="dv-stat-num ${cls}">${esc(num)}</div>
+        <div class="dv-stat-label">${esc(label)}</div>
+        ${sub ? `<div class="dv-stat-sub">${esc(sub)}</div>` : ''}
+      </div>`;
+    }
+
+    function renderStats(s) {
+      const uninstalled = (s.android_uninstalled || 0) + (s.guest_uninstalled || 0);
+      const active = (s.android_active || 0) + (s.guest_active || 0);
+      const total = active + uninstalled;
+      const pct = total > 0 ? Math.round((uninstalled / total) * 100) : 0;
+
+      $('dvSummary').textContent = `মোট ${toBn(total)}টা ডিভাইস ট্র্যাক হচ্ছে`;
+
+      const avgText = s.avg_days_count > 0 && s.avg_days_lived != null
+        ? `${toBn(s.avg_days_lived)} দিন`
+        : 'ডেটা জমছে';
+      const avgSub = s.avg_days_count > 0
+        ? `${toBn(s.avg_days_count)}টা নতুন আনইনস্টল থেকে`
+        : 'পরের সাপ্তাহিক ping-এর পর';
+
+      $('dvStats').innerHTML = [
+        statCard(toBn(s.android_active || 0), 'লগইন করা (সক্রিয়)', 'Android অ্যাপ', 'green'),
+        statCard(toBn(s.guest_active || 0), 'গেস্ট (সক্রিয়)', 'লগইন ছাড়া ডিভাইস', 'green'),
+        statCard(toBn(uninstalled), 'মোট আনইনস্টল', `${toBn(pct)}% ডিভাইস`, 'red'),
+        statCard(avgText, 'গড় থাকার সময়', avgSub),
+      ].join('');
+    }
+
+    function renderWeeks(weeks) {
+      const el = $('dvWeeks');
+      if (!weeks || weeks.length === 0) {
+        el.innerHTML = '<div class="dv-empty">এখনো ডেটা নেই</div>';
+        return;
+      }
+      const max = Math.max(1, ...weeks.map((w) => Math.max(w.installs || 0, w.uninstalls || 0)));
+      el.innerHTML = weeks.map((w) => {
+        const iw = Math.round(((w.installs || 0) / max) * 100);
+        const uw = Math.round(((w.uninstalls || 0) / max) * 100);
+        return `<div class="dv-week">
+          <div class="dv-week-label">${esc(fmtWeek(w.week))}</div>
+          <div class="dv-bars">
+            <div class="dv-bar-row"><div class="dv-bar green" style="width:${iw}%"></div><span class="dv-bar-num">${toBn(w.installs || 0)}</span></div>
+            <div class="dv-bar-row"><div class="dv-bar red" style="width:${uw}%"></div><span class="dv-bar-num">${toBn(w.uninstalls || 0)}</span></div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function renderRecent(rows) {
+      const el = $('dvRecent');
+      if (!rows || rows.length === 0) {
+        el.innerHTML = '<div class="dv-empty">কোনো আনইনস্টল ধরা পড়েনি</div>';
+        return;
+      }
+      el.innerHTML = rows.map((r) => {
+        const days = r.days_lived != null ? `${r.exact ? '' : '~'}${toBn(r.days_lived)} দিন` : '';
+        const meta = `${esc(fmtDate(r.created_at))} থেকে · ধরা পড়েছে ${esc(fmtDate(r.uninstalled_at))}${r.exact ? '' : ' (আনুমানিক)'}`;
+        return `<div class="dv-row">
+          <div>
+            <div class="dv-row-name">${esc(r.name || 'নামহীন ইউজার')}</div>
+            <div class="dv-row-meta">${meta}</div>
+          </div>
+          <span class="dv-pill">${esc(days)}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // ===== ডাটা লোড =====
+    let loading = false;
+    async function load() {
+      if (loading) return;
+      loading = true;
+      const btn = $('dvRefresh');
+      btn.classList.add('spinning');
+      try {
+        const { data, error } = await supabase.rpc('admin_device_stats');
+        if (error || !data) {
+          toast('ডেটা লোড করতে সমস্যা হয়েছে', 'error');
+          return;
+        }
+        renderStats(data);
+        renderWeeks(data.weeks);
+        renderRecent(data.recent);
+      } catch (_) {
+        toast('ডেটা লোড করতে সমস্যা হয়েছে', 'error');
+      } finally {
+        loading = false;
+        btn.classList.remove('spinning');
+      }
+    }
+
+    // ===== শুরু =====
+    (async () => {
+      const detail = await initAdminGuard();
+      if (!detail) return;
+      if (detail.role !== 'admin') {
+        window.location.href = '/admin';
+        return;
+      }
+      $('dvRefresh').addEventListener('click', load);
+      load();
+    })();
+  </script>
+</BaseLayout>
