@@ -126,6 +126,8 @@
   .dt-spec { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 20px; border: 1.5px solid #E5EAF0; background: #fff; font-size: 0.8rem; font-weight: 700; color: #5A6E85; cursor: pointer; }
   .dt-spec input { display: none; }
   .dt-spec.on { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+  .dt-spec-add { border-style: dashed; border-color: #FFB394; background: #FFF8F4; color: #FF6B35; font-family: inherit; }
+  .dt-addspec { margin-top: 10px; background: #F8FAFC; border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 
   .dt-photo-pick { display: flex; align-items: center; gap: 12px; }
   .dt-photo-pick .dt-photo { width: 72px; height: 72px; }
@@ -511,7 +513,16 @@
 
       <div class="dt-field">
         <span class="dt-label">স্পেশালিটি * <span class="dt-opt">(একাধিক বাছা যায়)</span></span>
-        <div class="dt-specs" id="dtSpecs">${specHtml}</div>
+        <div class="dt-specs" id="dtSpecs">${specHtml}<button type="button" class="dt-spec dt-spec-add" data-act="add-spec"><i class="fas fa-plus"></i> নতুন স্পেশালিটি</button></div>
+        <div class="dt-addspec" id="dtAddSpec" style="display:none;">
+          <input type="text" id="dtNewSpecBn" class="dt-input" maxlength="40" placeholder="স্পেশালিটির নাম (বাংলা) *" autocomplete="off" />
+          <input type="text" id="dtNewSpecEn" class="dt-input" maxlength="60" placeholder="ইংরেজি নাম (ঐচ্ছিক)" autocomplete="off" />
+          <div class="dt-help" style="margin:0;">আগে থেকে একই নাম থাকলে সেটাই টিক হবে।</div>
+          <div class="dt-savebar" style="margin-top:4px;">
+            <button type="button" class="dt-btn soft small" data-act="cancel-spec">বাতিল</button>
+            <button type="button" class="dt-btn primary small" data-act="save-spec" id="dtSpecSaveBtn">যোগ করুন</button>
+          </div>
+        </div>
       </div>
 
       <div class="dt-field">
@@ -618,6 +629,43 @@
     } catch (e) {
       help.textContent = e?.message || 'ছবি আপলোড হয়নি।';
     }
+  }
+
+  // ---------- নতুন স্পেশালিটি (ম্যানুয়াল) ----------
+  async function addSpecialty() {
+    const bn = $('dtNewSpecBn').value.trim();
+    const en = $('dtNewSpecEn').value.trim();
+    if (bn.length < 2) { setMsg('স্পেশালিটির নাম দিন।'); return; }
+    const btn = $('dtSpecSaveBtn');
+    btn.disabled = true;
+    const { data, error } = await supabase.rpc('add_specialty', { p_name_bn: bn, p_name_en: en || null });
+    btn.disabled = false;
+    if (error) {
+      const m = String(error.message || '');
+      if (m.includes('daily_limit')) setMsg('আজকের জন্য নতুন স্পেশালিটি যোগের সীমা (১০টা) শেষ।');
+      else if (m.includes('invalid_name')) setMsg('নাম ২ থেকে ৪০ অক্ষরের মধ্যে হতে হবে।');
+      else setMsg(errMsg(error));
+      return;
+    }
+    if (!specMap[data.slug]) {
+      specialties.push({ slug: data.slug, name_bn: data.name_bn });
+      specMap[data.slug] = data.name_bn;
+    }
+    let input = document.querySelector('#dtSpecs .dt-spec-in[value="' + CSS.escape(data.slug) + '"]');
+    if (!input) {
+      const label = document.createElement('label');
+      label.className = 'dt-spec';
+      label.innerHTML = '<input type="checkbox" class="dt-spec-in" value="' + esc(data.slug) + '" />' + esc(data.name_bn);
+      document.querySelector('#dtSpecs .dt-spec-add').before(label);
+      input = label.querySelector('input');
+    }
+    input.checked = true;
+    input.closest('.dt-spec').classList.add('on');
+    $('dtNewSpecBn').value = '';
+    $('dtNewSpecEn').value = '';
+    $('dtAddSpec').style.display = 'none';
+    setMsg('');
+    toast(data.existing ? 'এই স্পেশালিটি আগে থেকেই আছে, টিক দেওয়া হয়েছে' : 'নতুন স্পেশালিটি যোগ হয়েছে');
   }
 
   // ---------- সেভ অ্যাকশন ----------
@@ -751,6 +799,9 @@
     else if (act === 'save-chamber') saveChamber();
     else if (act === 'save-new') saveNewDoctor();
     else if (act === 'save-doctor') saveDoctor();
+    else if (act === 'add-spec') { $('dtAddSpec').style.display = 'flex'; $('dtNewSpecBn').focus(); }
+    else if (act === 'cancel-spec') $('dtAddSpec').style.display = 'none';
+    else if (act === 'save-spec') addSpecialty();
   });
 
   $('dtModalBody').addEventListener('input', (e) => {

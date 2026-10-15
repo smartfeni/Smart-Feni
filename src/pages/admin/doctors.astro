@@ -130,6 +130,14 @@ import SerialsTab from '../../components/clinic-dashboard/SerialsTab.astro';
 
         <label class="form-label">স্পেশালিটি (এক বা একাধিক)</label>
         <div id="dSpecs" class="spec-wrap"></div>
+        <div id="dAddSpecBox" class="dup-box" style="display:none;">
+          <input type="text" class="form-input" id="dNewSpecBn" maxlength="40" placeholder="নতুন স্পেশালিটির নাম (বাংলা) *" autocomplete="off" />
+          <input type="text" class="form-input" id="dNewSpecEn" maxlength="60" placeholder="ইংরেজি নাম (ঐচ্ছিক)" autocomplete="off" style="margin-top:8px;" />
+          <div class="btn-row" style="margin-top:10px;">
+            <button class="cancel-btn" id="dSpecCancel" type="button">বাতিল</button>
+            <button class="create-btn" id="dSpecSave" type="button" style="margin-top:0;">যোগ করুন</button>
+          </div>
+        </div>
 
         <label class="form-label">ডিগ্রি</label>
         <input type="text" class="form-input" id="dDegrees" placeholder="MBBS, FCPS (Medicine)" />
@@ -660,6 +668,12 @@ import SerialsTab from '../../components/clinic-dashboard/SerialsTab.astro';
         });
         wrap.appendChild(label);
       });
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.innerHTML = '<i class="fas fa-plus"></i> নতুন স্পেশালিটি';
+      addBtn.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:20px;font-size:0.8rem;font-weight:700;cursor:pointer;border:1.5px dashed #FFB394;background:#FFF8F4;color:#FF6B35;font-family:inherit;';
+      addBtn.addEventListener('click', () => { $('dAddSpecBox').style.display = 'block'; $('dNewSpecBn').focus(); });
+      wrap.appendChild(addBtn);
     }
 
     function setPhotoPreview(url) {
@@ -694,6 +708,30 @@ import SerialsTab from '../../components/clinic-dashboard/SerialsTab.astro';
       document.querySelectorAll('#doctorFormBox .field-error-msg').forEach((el) => el.classList.remove('show'));
       document.querySelectorAll('#doctorFormBox .field-invalid').forEach((el) => el.classList.remove('field-invalid'));
       openOverlay($('doctorOverlay'));
+    }
+
+    // নতুন স্পেশালিটি (ম্যানুয়াল) — add_specialty RPC
+    async function addSpecialty() {
+      const bn = $('dNewSpecBn').value.trim();
+      const en = $('dNewSpecEn').value.trim();
+      if (bn.length < 2) { toast('স্পেশালিটির নাম দিন', 'error'); return; }
+      const btn = $('dSpecSave');
+      btn.disabled = true;
+      const { data, error } = await supabase.rpc('add_specialty', { p_name_bn: bn, p_name_en: en || null });
+      btn.disabled = false;
+      if (error) {
+        toast(String(error.message || '').includes('invalid_name') ? 'নাম ২ থেকে ৪০ অক্ষরের মধ্যে হতে হবে' : 'যোগ করা যায়নি: ' + error.message, 'error');
+        return;
+      }
+      const selected = [...document.querySelectorAll('#dSpecs input:checked')].map((i) => i.value);
+      if (!selected.includes(data.slug)) selected.push(data.slug);
+      await loadSpecialties();
+      renderSpecCheckboxes(selected);
+      rebuildSpecFilter();
+      $('dNewSpecBn').value = '';
+      $('dNewSpecEn').value = '';
+      $('dAddSpecBox').style.display = 'none';
+      toast(data.existing ? 'এই স্পেশালিটি আগে থেকেই আছে, টিক দেওয়া হয়েছে' : 'নতুন স্পেশালিটি যোগ হয়েছে ✓');
     }
 
     // নাম লেখার সময় ডুপ্লিকেট সাজেশন
@@ -1274,6 +1312,8 @@ import SerialsTab from '../../components/clinic-dashboard/SerialsTab.astro';
     $('dName').addEventListener('input', scheduleDupCheck);
     $('dNameEn').addEventListener('input', scheduleDupCheck);
     $('dSaveBtn').addEventListener('click', saveDoctor);
+    $('dSpecSave').addEventListener('click', addSpecialty);
+    $('dSpecCancel').addEventListener('click', () => { $('dAddSpecBox').style.display = 'none'; });
     $('dPhotoInput').addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0];
       if (!f) return;
