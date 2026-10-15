@@ -8,8 +8,11 @@
 //      (লগইন ছাড়াই) এই পাবলিক তালিকা দেখতে পায়
 //   ৩) guest_push_devices-এর সব টোকেনে FCM পুশ (৫০০ করে ব্যাচে),
 //      "অফার" চ্যানেলে (sf_promo_v1)। লগইন করা ইউজারের টোকেন (push_subscriptions)
-//      বাদ — তারা নিজেদের ইনবক্সের পথেই পায়, দুইবার যাবে না
-//   ৪) মৃত টোকেন (অ্যাপ আনইনস্টল ইত্যাদি) অটো মুছে যায়
+//      বাদ — তারা নিজেদের ইনবক্সের পথেই পায়, দুইবার যাবে না।
+//      uninstalled_at বসা (আনইনস্টল হয়ে যাওয়া) টোকেন বাদ।
+//   ৪) আনইনস্টল হওয়া টোকেন (not-registered / invalid-registration-token)
+//      ডিলিট না করে uninstalled_at = now() বসানো হয় (আনইনস্টল ট্র্যাকিংয়ের জন্য)।
+//      শুধু অবৈধ ফরম্যাটের টোকেন (invalid-argument) ডিলিট হয়।
 //
 // শুধু প্রমো: এখানে শুধু অফার/ঘোষণা যায়। ব্যক্তিগত বা সিকিউরিটি মেসেজ কখনো
 // গেস্ট ডিভাইসে যায় না।
@@ -43,12 +46,13 @@ function getFirebaseAdmin() {
 }
 
 // পাতা করে সব সারি আনা (Supabase একবারে সর্বোচ্চ ১০০০)
-async function fetchAll(supabaseAdmin, table: string, column: string) {
+// onlyActive = true হলে uninstalled_at বসা সারি বাদ
+async function fetchAll(supabaseAdmin, table: string, column: string, onlyActive = false) {
   const out: string[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabaseAdmin
-      .from(table)
-      .select(column)
+    let query = supabaseAdmin.from(table).select(column);
+    if (onlyActive) query = query.is('uninstalled_at', null);
+    const { data, error } = await query
       .order(column, { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw error;
@@ -120,9 +124,9 @@ export async function POST({ request }) {
 
     if (promoError || !promoRow) return json({ error: 'প্রমো সেভ ব্যর্থ' }, 500);
 
-    // ---------- ২) টার্গেট টোকেন (লগইন করা ডিভাইস বাদ) ----------
+    // ---------- ২) টার্গেট টোকেন (লগইন করা ডিভাইস ও আনইনস্টল হওয়া বাদ) ----------
     const [guestTokens, loggedInTokens] = await Promise.all([
-      fetchAll(supabaseAdmin, 'guest_push_devices', 'fcm_token'),
+      fetchAll(supabaseAdmin, 'guest_push_devices', 'fcm_token', true),
       fetchAll(supabaseAdmin, 'push_subscriptions', 'fcm_token'),
     ]);
     const loggedInSet = new Set(loggedInTokens);
@@ -139,7 +143,8 @@ export async function POST({ request }) {
 
     let sent = 0;
     let failed = 0;
-    const staleTokens: string[] = [];
+    const uninstalledTokens: string[] = []; // আনইনস্টল: uninstalled_at বসবে
+    const invalidTokens: string[] = [];     // অবৈধ ফরম্যাট: ডিলিট হবে
 
     for (let i = 0; i < targets.length; i += FCM_BATCH) {
       const chunk = targets.slice(i, i + FCM_BATCH);
@@ -173,18 +178,27 @@ export async function POST({ request }) {
           const code = r.error?.code || '';
           if (
             code === 'messaging/registration-token-not-registered' ||
-            code === 'messaging/invalid-registration-token' ||
-            code === 'messaging/invalid-argument'
+            code === 'messaging/invalid-registration-token'
           ) {
-            staleTokens.push(chunk[idx]);
+            uninstalledTokens.push(chunk[idx]);
+          } else if (code === 'messaging/invalid-argument') {
+            invalidTokens.push(chunk[idx]);
           }
         }
       });
     }
 
-    // ---------- ৪) মৃত টোকেন পরিষ্কার ----------
-    for (let i = 0; i < staleTokens.length; i += 200) {
-      await supabaseAdmin.from('guest_push_devices').delete().in('fcm_token', staleTokens.slice(i, i + 200));
+    // ---------- ৪) আনইনস্টল হওয়া টোকেনে সময় বসানো, অবৈধ টোকেন ডিলিট ----------
+    const nowIso = new Date().toISOString();
+    for (let i = 0; i < uninstalledTokens.length; i += 200) {
+      await supabaseAdmin
+        .from('guest_push_devices')
+        .update({ uninstalled_at: nowIso })
+        .in('fcm_token', uninstalledTokens.slice(i, i + 200))
+        .is('uninstalled_at', null);
+    }
+    for (let i = 0; i < invalidTokens.length; i += 200) {
+      await supabaseAdmin.from('guest_push_devices').delete().in('fcm_token', invalidTokens.slice(i, i + 200));
     }
 
     return json({
@@ -193,7 +207,8 @@ export async function POST({ request }) {
       devices: targets.length,
       sent,
       failed,
-      cleaned: staleTokens.length,
+      uninstalled: uninstalledTokens.length,
+      cleaned: invalidTokens.length,
     });
   } catch (err) {
     console.error('guest-broadcast এরর:', String(err));
