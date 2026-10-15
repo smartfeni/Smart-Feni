@@ -1,3 +1,9 @@
+// path: src/pages/api/delivery/submit-offer.js
+//
+// আপডেট (এরর মনিটরিং, ধাপ ৯ — ডেলিভারি গ্রুপ): serverErrorReporter.js দিয়ে অ্যাডমিন এরর লগে রিপোর্ট —
+// delivery_offer_hero_lookup, delivery_offer_request_lookup, delivery_offer_active_query,
+// delivery_offer_upsert, delivery_offer_unexpected। ৪০০/৪০১/৪০৩/৪০৪ (ভুল দাম, আন্ডারকাট নিয়ম,
+// ভেরিফাইড না, রিকোয়েস্ট নেই) রিপোর্ট হয় না। রেসপন্স ও লজিক অপরিবর্তিত।
 //
 // আপডেট (N19): sendNotification এ priority: 'high' যোগ — নতুন সেরা মূল্য কাস্টমারের কাছে সাথে সাথে যাওয়া দরকার।
 // ============================================================
@@ -13,10 +19,16 @@
 
 import { getAuthedUser, getAdminClient } from '../../../lib/deliverySupabase.js';
 import { sendNotification } from '../../../lib/notify.js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
+const ROUTE = '/api/delivery/submit-offer';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
+  let reportClient = null;
+
   try {
     const { client, user, error: authError } = await getAuthedUser(request);
     if (authError) {
@@ -25,6 +37,7 @@ export async function POST({ request }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    reportClient = client;
 
     const { requestId, offerPrice } = await request.json();
 
@@ -50,6 +63,18 @@ export async function POST({ request }) {
       .eq('profile_id', user.id)
       .maybeSingle();
 
+    if (heroError) {
+      // শুধু DB এরর রিপোর্ট; "ভেরিফাইড না" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_offer_hero_lookup',
+        title: 'হিরো অফার: হিরো প্রোফাইল পড়া ব্যর্থ',
+        message: heroError.message,
+        code: heroError.code,
+        status: 403,
+      });
+    }
+
     if (heroError || !heroRow || heroRow.verification_status !== 'approved') {
       return new Response(
         JSON.stringify({ error: 'তুমি এখনো ভেরিফাইড হিরো না' }),
@@ -63,6 +88,18 @@ export async function POST({ request }) {
       .select('id, status, category, customer_asking_price, vehicle_type, customer_profile_id')
       .eq('id', requestId)
       .maybeSingle();
+
+    if (reqError) {
+      // শুধু DB এরর রিপোর্ট; "পাওয়া যায়নি" স্বাভাবিক পরিস্থিতি
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_offer_request_lookup',
+        title: 'হিরো অফার: রিকোয়েস্ট পড়া ব্যর্থ',
+        message: reqError.message,
+        code: reqError.code,
+        status: 404,
+      });
+    }
 
     if (reqError || !reqRow) {
       return new Response(
@@ -94,11 +131,23 @@ export async function POST({ request }) {
     }
 
     // বর্তমান সর্বনিম্ন রাইডার অফার বের করা
-    const { data: activeOffers } = await client
+    const { data: activeOffers, error: activeOffersError } = await client
       .from('delivery_offers')
       .select('offer_price')
       .eq('request_id', requestId)
       .eq('status', 'active');
+
+    if (activeOffersError) {
+      // শুধু রিপোর্ট — আচরণ অপরিবর্তিত (ফেইল হলে লিস্ট ফাঁকা ধরা হয়, মানে আন্ডারকাট চেক এড়িয়ে যায়)
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_offer_active_query',
+        title: 'হিরো অফার: বর্তমান অফার তালিকা পড়া ব্যর্থ',
+        message: activeOffersError.message,
+        code: activeOffersError.code,
+        status: 200,
+      });
+    }
 
     const lowestOffer = (activeOffers || []).reduce(
       (min, o) => (o.offer_price < min ? o.offer_price : min),
@@ -144,6 +193,14 @@ export async function POST({ request }) {
       .single();
 
     if (upsertError || !upserted) {
+      await reportServerError(reportClient, {
+        route: ROUTE,
+        action: 'delivery_offer_upsert',
+        title: 'হিরো অফার সেভ ব্যর্থ',
+        message: upsertError?.message || 'upsert থেকে কোনো রো ফেরত আসেনি',
+        code: upsertError?.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'অফার দেওয়া ব্যর্থ: ' + (upsertError?.message || 'অজানা কারণ') }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -172,6 +229,22 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    // লগইনের আগেই ক্র্যাশ করলে reportClient নেই — তখন service role client
+    let fallbackClient = reportClient;
+    if (!fallbackClient) {
+      try {
+        fallbackClient = getAdminClient().client || null;
+      } catch (_) {
+        fallbackClient = null;
+      }
+    }
+    await reportServerError(fallbackClient, {
+      route: ROUTE,
+      action: 'delivery_offer_unexpected',
+      title: 'হিরো অফার: অপ্রত্যাশিত ক্র্যাশ',
+      message: err && err.message,
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'অপ্রত্যাশিত ত্রুটি: ' + err.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
