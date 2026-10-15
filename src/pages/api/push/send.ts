@@ -19,7 +19,9 @@
 // Stale subscription cleanup:
 //   - web: 404/410 রেসপন্স এলে রেকর্ড ডিলিট
 //   - android: FCM 'messaging/registration-token-not-registered' বা
-//     'messaging/invalid-registration-token' এলে রেকর্ড ডিলিট
+//     'messaging/invalid-registration-token' এলে রেকর্ড ডিলিট করা হয় না —
+//     uninstalled_at = now() বসানো হয় (আনইনস্টল ট্র্যাকিংয়ের জন্য)।
+//     uninstalled_at বসা টোকেনে আর পুশ পাঠানো হয় না।
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -154,10 +156,12 @@ export async function POST({ request }) {
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
+    // uninstalled_at বসা (আনইনস্টল হয়ে যাওয়া) ডিভাইস স্কিপ
     const { data: subscriptions, error: fetchError } = await supabaseAdmin
       .from('push_subscriptions')
       .select('id, platform, endpoint, p256dh_key, auth_key, fcm_token')
-      .eq('user_id', user_id);
+      .eq('user_id', user_id)
+      .is('uninstalled_at', null);
 
     if (fetchError) {
       return new Response(
@@ -177,7 +181,8 @@ export async function POST({ request }) {
     const androidSubs = subscriptions.filter((s) => s.platform === 'android');
 
     let sentCount = 0;
-    const staleSubscriptionIds = [];
+    const staleWebIds = [];        // web: ডিলিট হবে
+    const uninstalledAndroidIds = []; // android: uninstalled_at বসবে
 
     // ---------- Web (VAPID) ----------
     const webPayload = JSON.stringify({
@@ -203,7 +208,7 @@ export async function POST({ request }) {
         } catch (err) {
           // 404/410 মানে এই সাবস্ক্রিপশন আর ভ্যালিড না (ব্রাউজার/ডিভাইসে ডেটা ক্লিয়ার ইত্যাদি)
           if (err.statusCode === 404 || err.statusCode === 410) {
-            staleSubscriptionIds.push(sub.id);
+            staleWebIds.push(sub.id);
           }
           // অন্য এরর (যেমন সাময়িক নেটওয়ার্ক সমস্যা) সাইলেন্টলি স্কিপ, পরের নোটিফিকেশনে আবার ট্রাই হবে
         }
@@ -240,7 +245,7 @@ export async function POST({ request }) {
               code === 'messaging/registration-token-not-registered' ||
               code === 'messaging/invalid-registration-token'
             ) {
-              staleSubscriptionIds.push(sub.id);
+              uninstalledAndroidIds.push(sub.id);
             } else {
               // শুধু এরর কোড লগ (টোকেন/মেসেজ না) — Vercel logs এ কারণ দেখার জন্য
               console.error('FCM পাঠানো ব্যর্থ:', code || 'unknown');
@@ -251,12 +256,27 @@ export async function POST({ request }) {
       );
     }
 
-    if (staleSubscriptionIds.length > 0) {
-      await supabaseAdmin.from('push_subscriptions').delete().in('id', staleSubscriptionIds);
+    // web: মৃত সাবস্ক্রিপশন ডিলিট
+    if (staleWebIds.length > 0) {
+      await supabaseAdmin.from('push_subscriptions').delete().in('id', staleWebIds);
+    }
+
+    // android: ডিলিট না করে আনইনস্টলের সময় রেকর্ড (created_at থেকে ইনস্টল-থেকে-আনইনস্টল দিন বের হবে)
+    if (uninstalledAndroidIds.length > 0) {
+      await supabaseAdmin
+        .from('push_subscriptions')
+        .update({ uninstalled_at: new Date().toISOString() })
+        .in('id', uninstalledAndroidIds)
+        .is('uninstalled_at', null);
     }
 
     return new Response(
-      JSON.stringify({ success: true, sent: sentCount, cleaned: staleSubscriptionIds.length }),
+      JSON.stringify({
+        success: true,
+        sent: sentCount,
+        cleaned: staleWebIds.length,
+        uninstalled: uninstalledAndroidIds.length,
+      }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
