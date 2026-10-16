@@ -13,6 +13,11 @@
 //
 // ওয়েবসাইটে (ব্রাউজারে) এটা কিছুই করে না — রেফার শুধু অ্যাপ ইনস্টলে গোনা হয়।
 // কোনো কারণে ফেইল করলে সাইন আপ আটকায় না, চুপচাপ বাদ।
+//
+// ফোনের আইডি জমা (registerDeviceForUser): লগইন করা প্রতিটা ইউজারের ফোনের আইডি
+// register_user_device() RPC দিয়ে user_devices-এ রাখা হয় (প্রতি অ্যাপ সেশনে একবার)।
+// এতে apply_referral() জানতে পারে নতুন সাইন আপ রেফারারের নিজের বা অন্য কারও ফোন থেকে
+// এসেছে কিনা। native-bridge.js অ্যাপ চালুর সময় startDeviceRegistration() ডাকে।
 // ============================================================
 
 import { supabase } from './supabase.js';
@@ -66,4 +71,67 @@ export async function applyPendingReferral() {
   } catch (err) {
     // রেফার ফেইল করলেও অ্যাকাউন্ট তৈরি স্বাভাবিক চলবে
   }
+}
+
+// ---------------- ফোনের আইডি জমা (ফ্রড চেকের জন্য) ----------------
+const DEVICE_REG_KEY_PREFIX = 'sf_dev_reg_';
+let deviceRegInFlight = null;
+let deviceListenerStarted = false;
+
+// লগইন করা ইউজারের ফোনের আইডি সার্ভারে জমা করে। অ্যাপ সেশনে ইউজার প্রতি একবার।
+// কখনো error ছোঁড়ে না; ওয়েবসাইটে কিছু করে না।
+export async function registerDeviceForUser() {
+  try {
+    if (!isNativeApp()) return;
+    if (deviceRegInFlight) return deviceRegInFlight;
+
+    deviceRegInFlight = (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const flagKey = DEVICE_REG_KEY_PREFIX + session.user.id;
+      try {
+        if (sessionStorage.getItem(flagKey) === '1') return;
+      } catch (err) {
+        // sessionStorage না পেলে প্রতিবারই চেষ্টা হবে — সমস্যা নেই
+      }
+
+      const deviceId = await getNativeDeviceId();
+      if (!deviceId) return;
+
+      const { error } = await supabase.rpc('register_user_device', { p_device_id: deviceId });
+      if (!error) {
+        try {
+          sessionStorage.setItem(flagKey, '1');
+        } catch (err) {
+          // উপেক্ষা
+        }
+      }
+    })()
+      .catch(() => {})
+      .finally(() => {
+        deviceRegInFlight = null;
+      });
+
+    return deviceRegInFlight;
+  } catch (err) {
+    // চুপচাপ বাদ
+  }
+}
+
+// অ্যাপ চালুর সময় একবার: এখনই চেষ্টা + পরে লগইন/সাইন আপ হলেও চেষ্টা
+export function startDeviceRegistration() {
+  if (deviceListenerStarted) return;
+  deviceListenerStarted = true;
+
+  registerDeviceForUser();
+
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (session && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+      // onAuthStateChange এর ভেতরে সরাসরি Supabase কল না করে পরের টিকে
+      setTimeout(() => {
+        registerDeviceForUser();
+      }, 0);
+    }
+  });
 }

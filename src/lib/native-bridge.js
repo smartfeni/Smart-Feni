@@ -42,6 +42,8 @@
 //      রেফার কোড (ref_XXXXXXXX) পড়ে নেটিভ Preferences-এ রাখে (sf_pending_ref),
 //      আর ডিভাইস আইডি (Android ID) দেয়। সাইন আপের সময় AuthModal এগুলো
 //      apply_referral() এ পাঠাবে। নেটিভ অংশ: InstallReferrerPlugin.java।
+//  ১০) ফোনের আইডি জমা — অ্যাপ চালুর সময় referral.js এর startDeviceRegistration()
+//      ডাকে, লগইন করা ইউজারের ফোনের আইডি user_devices-এ রাখে (রেফার ফ্রড চেক)।
 // ============================================================
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
@@ -289,6 +291,11 @@ export async function initBackButtonHandler() {
 
   // রেফার: প্রথমবার খুললে Play Install Referrer থেকে কোড ধরে রাখে (পরে আর কিছু করে না)
   captureInstallReferrer();
+
+  // রেফার ফ্রড চেক: লগইন করা ইউজারের ফোনের আইডি জমা (প্রতি অ্যাপ সেশনে একবার, ব্যাকগ্রাউন্ডে)
+  import('./referral.js')
+    .then((mod) => mod.startDeviceRegistration())
+    .catch(() => {});
 
   const { App } = await import('@capacitor/app');
 
