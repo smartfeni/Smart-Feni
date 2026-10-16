@@ -18,11 +18,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
 const json = (obj: unknown, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
+
+const ROUTE = '/api/push/ping';
 
 const HOUR = 60 * 60 * 1000;
 const FCM_BATCH = 500;
@@ -65,6 +68,8 @@ async function pingTable(supabaseAdmin, messaging, table: string, tokens: string
   let sent = 0;
   let failed = 0;
   const uninstalled: string[] = [];
+  const otherCodes = new Set<string>(); // আনইনস্টল ছাড়া বাকি FCM এরর কোড (শুধু কোড)
+  let updateError: string | null = null;
 
   for (let i = 0; i < tokens.length; i += FCM_BATCH) {
     const chunk = tokens.slice(i, i + FCM_BATCH);
@@ -89,6 +94,8 @@ async function pingTable(supabaseAdmin, messaging, table: string, tokens: string
           code === 'messaging/invalid-registration-token'
         ) {
           uninstalled.push(chunk[idx]);
+        } else {
+          otherCodes.add(code || 'unknown');
         }
       }
     });
@@ -96,17 +103,28 @@ async function pingTable(supabaseAdmin, messaging, table: string, tokens: string
 
   const nowIso = new Date().toISOString();
   for (let i = 0; i < uninstalled.length; i += 200) {
-    await supabaseAdmin
+    const { error: markError } = await supabaseAdmin
       .from(table)
       .update({ uninstalled_at: nowIso })
       .in('fcm_token', uninstalled.slice(i, i + 200))
       .is('uninstalled_at', null);
+    if (markError && !updateError) updateError = markError.message;
   }
 
-  return { devices: tokens.length, sent, failed, uninstalled: uninstalled.length };
+  return {
+    devices: tokens.length,
+    sent,
+    failed,
+    uninstalled: uninstalled.length,
+    otherFailCodes: Array.from(otherCodes),
+    updateError,
+  };
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট (service role) — তৈরি হওয়ার পর বসে
+  let reportDb: any = null;
+
   try {
     const internalSecret = request.headers.get('X-Internal-Secret');
     const expectedSecret = import.meta.env.PUSH_INTERNAL_SECRET;
@@ -125,6 +143,7 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    reportDb = supabaseAdmin;
     const messaging = getMessaging(firebaseApp);
 
     const [subTokens, guestTokens] = await Promise.all([
@@ -135,9 +154,43 @@ export async function POST({ request }) {
     const subscriptions = await pingTable(supabaseAdmin, messaging, 'push_subscriptions', subTokens);
     const guests = await pingTable(supabaseAdmin, messaging, 'guest_push_devices', guestTokens);
 
+    // আনইনস্টল (not-registered) স্বাভাবিক — রিপোর্ট নয়। বাকি FCM এরর ও DB আপডেট এরর রিপোর্ট
+    const pingResults: Array<[string, any]> = [
+      ['push_subscriptions', subscriptions],
+      ['guest_push_devices', guests],
+    ];
+    for (const [label, r] of pingResults) {
+      if (r.otherFailCodes.length > 0) {
+        await reportServerError(reportDb, {
+          route: ROUTE,
+          action: 'push_ping_fcm_failed',
+          title: 'সাপ্তাহিক ping: FCM ব্যর্থতা',
+          message: label + ': ' + r.otherFailCodes.join(', '),
+          code: r.otherFailCodes[0],
+          status: 200,
+        });
+      }
+      if (r.updateError) {
+        await reportServerError(reportDb, {
+          route: ROUTE,
+          action: 'push_ping_mark_uninstalled',
+          title: 'সাপ্তাহিক ping: আনইনস্টল চিহ্নিত করা ব্যর্থ',
+          message: label + ': ' + r.updateError,
+          status: 200,
+        });
+      }
+    }
+
     return json({ success: true, subscriptions, guests });
   } catch (err) {
     console.error('push/ping এরর:', String(err));
+    await reportServerError(reportDb, {
+      route: ROUTE,
+      action: 'push_ping_unexpected',
+      title: 'সাপ্তাহিক ping: অপ্রত্যাশিত ক্র্যাশ',
+      message: String(err),
+      status: 500,
+    });
     return json({ error: 'সার্ভার এরর' }, 500);
   }
 }

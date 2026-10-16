@@ -17,13 +17,19 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
 const json = (obj: unknown, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
 
+const ROUTE = '/api/push/guest-register';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট (service role) — তৈরি হওয়ার পর বসে
+  let reportDb: any = null;
+
   try {
     const raw = await request.text();
     if (!raw || raw.length > 8192) return json({ error: 'অবৈধ রিকোয়েস্ট' }, 400);
@@ -53,14 +59,27 @@ export async function POST({ request }) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    reportDb = supabaseAdmin;
+
     // লগইন করা ইউজারের টোকেন হলে গেস্ট হিসেবে রাখব না
-    const { data: existingSub } = await supabaseAdmin
+    const { data: existingSub, error: existingSubError } = await supabaseAdmin
       .from('push_subscriptions')
       .select('id')
       .eq('fcm_token', token)
       .limit(1)
       .maybeSingle();
 
+    if (existingSubError) {
+      // শুধু রিপোর্ট — আচরণ অপরিবর্তিত (গেস্ট হিসেবে সেভ চলতে থাকে)
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_guest_register_sub_lookup',
+        title: 'গেস্ট পুশ: লগইন-ডিভাইস যাচাই ব্যর্থ',
+        message: existingSubError.message,
+        code: existingSubError.code,
+        status: 200,
+      });
+    }
     if (existingSub) return json({ success: true, skipped: 'logged_in_device' });
 
     const { error } = await supabaseAdmin
@@ -70,10 +89,27 @@ export async function POST({ request }) {
         { onConflict: 'fcm_token' }
       );
 
-    if (error) return json({ error: 'সেভ ব্যর্থ' }, 500);
+    if (error) {
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_guest_register_upsert',
+        title: 'গেস্ট ডিভাইস টোকেন সেভ ব্যর্থ',
+        message: error.message,
+        code: error.code,
+        status: 500,
+      });
+      return json({ error: 'সেভ ব্যর্থ' }, 500);
+    }
 
     return json({ success: true });
-  } catch {
+  } catch (err) {
+    await reportServerError(reportDb, {
+      route: ROUTE,
+      action: 'push_guest_register_unexpected',
+      title: 'গেস্ট পুশ রেজিস্টার: অপ্রত্যাশিত ক্র্যাশ',
+      message: String(err),
+      status: 500,
+    });
     return json({ error: 'সার্ভার এরর' }, 500);
   }
 }

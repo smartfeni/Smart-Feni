@@ -28,6 +28,7 @@ import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -108,7 +109,12 @@ function getFirebaseAdmin() {
   });
 }
 
+const ROUTE = '/api/push/send';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট (service role) — তৈরি হওয়ার পর বসে
+  let reportDb: any = null;
+
   try {
     const internalSecret = request.headers.get('X-Internal-Secret');
     const expectedSecret = import.meta.env.PUSH_INTERNAL_SECRET;
@@ -155,6 +161,7 @@ export async function POST({ request }) {
     const firebaseApp = getFirebaseAdmin();
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+    reportDb = supabaseAdmin;
 
     // uninstalled_at বসা (আনইনস্টল হয়ে যাওয়া) ডিভাইস স্কিপ
     const { data: subscriptions, error: fetchError } = await supabaseAdmin
@@ -164,6 +171,14 @@ export async function POST({ request }) {
       .is('uninstalled_at', null);
 
     if (fetchError) {
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_send_subscriptions_fetch',
+        title: 'পুশ পাঠানো: সাবস্ক্রিপশন তালিকা পড়া ব্যর্থ',
+        message: fetchError.message,
+        code: fetchError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'সাবস্ক্রিপশন খুঁজতে ব্যর্থ', details: fetchError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -183,6 +198,8 @@ export async function POST({ request }) {
     let sentCount = 0;
     const staleWebIds = [];        // web: ডিলিট হবে
     const uninstalledAndroidIds = []; // android: uninstalled_at বসবে
+    const webFailCodes = new Set<string>();
+    const fcmFailCodes = new Set<string>();
 
     // ---------- Web (VAPID) ----------
     const webPayload = JSON.stringify({
@@ -209,6 +226,8 @@ export async function POST({ request }) {
           // 404/410 মানে এই সাবস্ক্রিপশন আর ভ্যালিড না (ব্রাউজার/ডিভাইসে ডেটা ক্লিয়ার ইত্যাদি)
           if (err.statusCode === 404 || err.statusCode === 410) {
             staleWebIds.push(sub.id);
+          } else {
+            webFailCodes.add(String(err.statusCode || err.code || 'unknown'));
           }
           // অন্য এরর (যেমন সাময়িক নেটওয়ার্ক সমস্যা) সাইলেন্টলি স্কিপ, পরের নোটিফিকেশনে আবার ট্রাই হবে
         }
@@ -216,6 +235,15 @@ export async function POST({ request }) {
     );
 
     // ---------- Android (FCM) ----------
+    if (androidSubs.length > 0 && !firebaseApp) {
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_send_firebase_missing',
+        title: 'পুশ পাঠানো: Firebase কনফিগ নেই (Android পুশ যায়নি)',
+        message: 'FIREBASE_* env ভেরিয়েবল পাওয়া যায়নি',
+        status: 500,
+      });
+    }
     if (androidSubs.length > 0 && firebaseApp) {
       const messaging = getMessaging(firebaseApp);
 
@@ -249,6 +277,7 @@ export async function POST({ request }) {
             } else {
               // শুধু এরর কোড লগ (টোকেন/মেসেজ না) — Vercel logs এ কারণ দেখার জন্য
               console.error('FCM পাঠানো ব্যর্থ:', code || 'unknown');
+              fcmFailCodes.add(code || 'unknown');
             }
             // এরর সাইলেন্টলি স্কিপ, পরের নোটিফিকেশনে আবার ট্রাই হবে
           }
@@ -256,18 +285,58 @@ export async function POST({ request }) {
       );
     }
 
+    // মৃত টোকেন (404/410, not-registered) স্বাভাবিক — রিপোর্ট নয়।
+    // বাকি ডেলিভারি ব্যর্থতা (শুধু কোড, টোকেন/মেসেজ নয়) একবারে রিপোর্ট
+    if (webFailCodes.size > 0 || fcmFailCodes.size > 0) {
+      const failCodes = [
+        ...Array.from(webFailCodes).sort().map((c) => 'web:' + c),
+        ...Array.from(fcmFailCodes).sort().map((c) => 'fcm:' + c),
+      ];
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_send_delivery_failed',
+        title: 'পুশ পাঠানো ব্যর্থ (ডেলিভারি এরর)',
+        message: 'পুশ পাঠানো ব্যর্থ — ' + failCodes.join(', '),
+        code: failCodes[0],
+        status: 200,
+      });
+    }
+
     // web: মৃত সাবস্ক্রিপশন ডিলিট
     if (staleWebIds.length > 0) {
-      await supabaseAdmin.from('push_subscriptions').delete().in('id', staleWebIds);
+      const { error: staleDeleteError } = await supabaseAdmin
+        .from('push_subscriptions')
+        .delete()
+        .in('id', staleWebIds);
+      if (staleDeleteError) {
+        await reportServerError(reportDb, {
+          route: ROUTE,
+          action: 'push_send_stale_delete',
+          title: 'পুশ: মৃত ওয়েব সাবস্ক্রিপশন ডিলিট ব্যর্থ',
+          message: staleDeleteError.message,
+          code: staleDeleteError.code,
+          status: 200,
+        });
+      }
     }
 
     // android: ডিলিট না করে আনইনস্টলের সময় রেকর্ড (created_at থেকে ইনস্টল-থেকে-আনইনস্টল দিন বের হবে)
     if (uninstalledAndroidIds.length > 0) {
-      await supabaseAdmin
+      const { error: uninstallMarkError } = await supabaseAdmin
         .from('push_subscriptions')
         .update({ uninstalled_at: new Date().toISOString() })
         .in('id', uninstalledAndroidIds)
         .is('uninstalled_at', null);
+      if (uninstallMarkError) {
+        await reportServerError(reportDb, {
+          route: ROUTE,
+          action: 'push_send_uninstall_mark',
+          title: 'পুশ: আনইনস্টল চিহ্নিত করা ব্যর্থ',
+          message: uninstallMarkError.message,
+          code: uninstallMarkError.code,
+          status: 200,
+        });
+      }
     }
 
     return new Response(
@@ -280,6 +349,13 @@ export async function POST({ request }) {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: ROUTE,
+      action: 'push_send_unexpected',
+      title: 'পুশ পাঠানো: অপ্রত্যাশিত ক্র্যাশ',
+      message: String(err),
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'সার্ভার এরর', details: String(err) }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

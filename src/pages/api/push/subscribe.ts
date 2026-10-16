@@ -21,10 +21,16 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
+const ROUTE = '/api/push/subscribe';
+
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট (service role) — তৈরি হওয়ার পর বসে
+  let reportDb: any = null;
+
   try {
     const body = await request.json();
     const { accessToken, platform = 'web', device_label } = body;
@@ -99,6 +105,8 @@ export async function POST({ request }) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    reportDb = supabaseAdmin;
+
     let upsertError;
 
     if (platform === 'web') {
@@ -145,13 +153,34 @@ export async function POST({ request }) {
     // ব্যর্থ হলেও লগইন/সাবস্ক্রিপশন সেভ আটকাবে না।
     if (!upsertError && platform === 'android' && body.fcm_token) {
       try {
-        await supabaseAdmin.from('guest_push_devices').delete().eq('fcm_token', body.fcm_token);
+        const { error: guestDeleteError } = await supabaseAdmin
+          .from('guest_push_devices')
+          .delete()
+          .eq('fcm_token', body.fcm_token);
+        if (guestDeleteError) {
+          await reportServerError(reportDb, {
+            route: ROUTE,
+            action: 'push_subscribe_guest_cleanup',
+            title: 'পুশ সাবস্ক্রাইব: গেস্ট ডিভাইস মোছা ব্যর্থ',
+            message: guestDeleteError.message,
+            code: guestDeleteError.code,
+            status: 200,
+          });
+        }
       } catch (e) {
         // উপেক্ষা
       }
     }
 
     if (upsertError) {
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_subscribe_upsert',
+        title: 'পুশ সাবস্ক্রিপশন সেভ ব্যর্থ',
+        message: upsertError.message,
+        code: upsertError.code,
+        status: 500,
+      });
       return new Response(
         JSON.stringify({ error: 'সাবস্ক্রিপশন সেভ করতে ব্যর্থ', details: upsertError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -163,6 +192,13 @@ export async function POST({ request }) {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {
+    await reportServerError(reportDb, {
+      route: ROUTE,
+      action: 'push_subscribe_unexpected',
+      title: 'পুশ সাবস্ক্রাইব: অপ্রত্যাশিত ক্র্যাশ',
+      message: String(err),
+      status: 500,
+    });
     return new Response(
       JSON.stringify({ error: 'সার্ভার এরর', details: String(err) }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

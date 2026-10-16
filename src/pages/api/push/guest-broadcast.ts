@@ -21,6 +21,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
+import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
@@ -33,6 +34,8 @@ const BRAND_COLOR = '#FF6B35';
 const GUEST_PROMO_TITLE = 'স্মার্ট ফেনী';
 const FCM_BATCH = 500;
 const PAGE = 1000;
+
+const ROUTE = '/api/push/guest-broadcast';
 
 function getFirebaseAdmin() {
   if (getApps().length > 0) return getApp();
@@ -64,6 +67,9 @@ async function fetchAll(supabaseAdmin, table: string, column: string, onlyActive
 }
 
 export async function POST({ request }) {
+  // এরর রিপোর্টের ক্লায়েন্ট (service role) — তৈরি হওয়ার পর বসে
+  let reportDb: any = null;
+
   try {
     const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
     const serviceRoleKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -72,6 +78,8 @@ export async function POST({ request }) {
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+
+    reportDb = supabaseAdmin;
 
     // ---------- অ্যাডমিন যাচাই ----------
     const authHeader = request.headers.get('Authorization') || '';
@@ -122,7 +130,17 @@ export async function POST({ request }) {
       .select('id')
       .single();
 
-    if (promoError || !promoRow) return json({ error: 'প্রমো সেভ ব্যর্থ' }, 500);
+    if (promoError || !promoRow) {
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_guest_broadcast_promo_insert',
+        title: 'গেস্ট প্রমো সেভ ব্যর্থ',
+        message: promoError?.message || 'insert থেকে কোনো রো ফেরত আসেনি',
+        code: promoError?.code,
+        status: 500,
+      });
+      return json({ error: 'প্রমো সেভ ব্যর্থ' }, 500);
+    }
 
     // ---------- ২) টার্গেট টোকেন (লগইন করা ডিভাইস ও আনইনস্টল হওয়া বাদ) ----------
     const [guestTokens, loggedInTokens] = await Promise.all([
@@ -134,6 +152,13 @@ export async function POST({ request }) {
 
     const firebaseApp = getFirebaseAdmin();
     if (!firebaseApp) {
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_guest_broadcast_firebase_missing',
+        title: 'গেস্ট প্রমো: Firebase কনফিগ নেই (পুশ যায়নি)',
+        message: 'FIREBASE_* env ভেরিয়েবল পাওয়া যায়নি',
+        status: 200,
+      });
       return json({ success: true, promo_id: promoRow.id, devices: targets.length, sent: 0, note: 'Firebase কনফিগার করা নেই — শুধু তালিকায় সেভ হয়েছে' });
     }
 
@@ -144,6 +169,7 @@ export async function POST({ request }) {
     let sent = 0;
     let failed = 0;
     const uninstalledTokens: string[] = []; // আনইনস্টল: uninstalled_at বসবে
+    const otherFailCodes = new Set<string>(); // আনইনস্টল/অবৈধ ছাড়া বাকি FCM এরর কোড (শুধু কোড)
     const invalidTokens: string[] = [];     // অবৈধ ফরম্যাট: ডিলিট হবে
 
     for (let i = 0; i < targets.length; i += FCM_BATCH) {
@@ -183,6 +209,8 @@ export async function POST({ request }) {
             uninstalledTokens.push(chunk[idx]);
           } else if (code === 'messaging/invalid-argument') {
             invalidTokens.push(chunk[idx]);
+          } else {
+            otherFailCodes.add(code || 'unknown');
           }
         }
       });
@@ -190,15 +218,43 @@ export async function POST({ request }) {
 
     // ---------- ৪) আনইনস্টল হওয়া টোকেনে সময় বসানো, অবৈধ টোকেন ডিলিট ----------
     const nowIso = new Date().toISOString();
+    let cleanupError: string | null = null;
     for (let i = 0; i < uninstalledTokens.length; i += 200) {
-      await supabaseAdmin
+      const { error: markError } = await supabaseAdmin
         .from('guest_push_devices')
         .update({ uninstalled_at: nowIso })
         .in('fcm_token', uninstalledTokens.slice(i, i + 200))
         .is('uninstalled_at', null);
+      if (markError && !cleanupError) cleanupError = markError.message;
     }
     for (let i = 0; i < invalidTokens.length; i += 200) {
-      await supabaseAdmin.from('guest_push_devices').delete().in('fcm_token', invalidTokens.slice(i, i + 200));
+      const { error: deleteError } = await supabaseAdmin
+        .from('guest_push_devices')
+        .delete()
+        .in('fcm_token', invalidTokens.slice(i, i + 200));
+      if (deleteError && !cleanupError) cleanupError = deleteError.message;
+    }
+
+    // আনইনস্টল (not-registered) স্বাভাবিক — রিপোর্ট নয়। বাকি FCM এরর ও ক্লিনআপ এরর রিপোর্ট
+    if (otherFailCodes.size > 0) {
+      const failCodes = Array.from(otherFailCodes).sort();
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_guest_broadcast_fcm_failed',
+        title: 'গেস্ট প্রমো: FCM ব্যর্থতা',
+        message: 'FCM ব্যর্থ — ' + failCodes.join(', '),
+        code: failCodes[0],
+        status: 200,
+      });
+    }
+    if (cleanupError) {
+      await reportServerError(reportDb, {
+        route: ROUTE,
+        action: 'push_guest_broadcast_cleanup',
+        title: 'গেস্ট প্রমো: টোকেন ক্লিনআপ ব্যর্থ',
+        message: cleanupError,
+        status: 200,
+      });
     }
 
     return json({
@@ -212,6 +268,13 @@ export async function POST({ request }) {
     });
   } catch (err) {
     console.error('guest-broadcast এরর:', String(err));
+    await reportServerError(reportDb, {
+      route: ROUTE,
+      action: 'push_guest_broadcast_unexpected',
+      title: 'গেস্ট প্রমো: অপ্রত্যাশিত ক্র্যাশ',
+      message: String(err),
+      status: 500,
+    });
     return json({ error: 'সার্ভার এরর' }, 500);
   }
 }
