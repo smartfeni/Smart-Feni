@@ -9,6 +9,10 @@
 // তাই এই ফাইলের ফিল্টার/ডেডুপ/সীমা পেরোনো এরর-ই শুধু Sentry-তে যায়।
 // মেসেজ থেকে টোকেন, ইমেইল, ফোন নম্বর ও URL query মুছে ফেলা হয় (ব্যক্তিগত তথ্য লগে জমে না)।
 // এই ফাইল কখনো throw করে না।
+// ডেপ্লয়-স্কিউ রিকভারি: নতুন ডেপ্লয়ে পুরনো _astro/*.js সরে গেলে লেজি-লোড ফেইল করে।
+// তখন (vite:preloadError বা "Failed to fetch dynamically imported module") পেজ একবার
+// রিলোড হয়; ৬০ সেকেন্ডের মধ্যে আবার ফেইল করলে, অফলাইনে বা sessionStorage না থাকলে
+// রিলোড নয়, স্বাভাবিক রিপোর্ট। সফল রিলোডে এরর রিপোর্ট হয় না।
 
 const MAX_MSG = 300;
 const MAX_PER_PAGE_LOAD = 10;
@@ -124,6 +128,45 @@ export async function reportError(opts) {
   }
 }
 
+// ---------- ডেপ্লয়-স্কিউ রিকভারি ----------
+const CHUNK_RELOAD_KEY = 'sf_chunk_reload_at';
+const CHUNK_RELOAD_COOLDOWN_MS = 60 * 1000;
+
+function isChunkLoadError(message) {
+  return /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed|Unable to preload CSS|ChunkLoadError|Loading chunk .* failed/i.test(
+    String(message || '')
+  );
+}
+
+// রিলোড শুরু করলে true; গার্ডে আটকালে false (তখন এরর স্বাভাবিকভাবে রিপোর্ট হবে)
+function tryChunkReload() {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+
+    let last = 0;
+    try {
+      last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || 0);
+    } catch (_) {
+      return false; // sessionStorage না পেলে লুপের ঝুঁকি, তাই রিলোড নয়
+    }
+
+    const now = Date.now();
+    if (last && now - last < CHUNK_RELOAD_COOLDOWN_MS) return false;
+
+    try {
+      sessionStorage.setItem(CHUNK_RELOAD_KEY, String(now));
+    } catch (_) {
+      return false;
+    }
+
+    window.location.reload();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 // ---------- গ্লোবাল হ্যান্ডলার ----------
 export function initErrorReporter() {
   try {
@@ -131,6 +174,13 @@ export function initErrorReporter() {
     initialized = true;
 
     window.SFReportError = reportError;
+
+    // Vite লেজি-লোডের প্রিলোড ফেইল করলে এই ইভেন্ট দেয়; রিলোড শুরু হলে এররটা আর ছোঁড়া হবে না
+    window.addEventListener('vite:preloadError', (e) => {
+      try {
+        if (tryChunkReload() && e && typeof e.preventDefault === 'function') e.preventDefault();
+      } catch (_) {}
+    });
 
     window.addEventListener('error', (e) => {
       try {
@@ -151,6 +201,7 @@ export function initErrorReporter() {
       try {
         const r = e && e.reason;
         const message = r && typeof r === 'object' ? r.message || '' : String(r || '');
+        if (isChunkLoadError(message) && tryChunkReload()) return;
         reportError({
           kind: 'js_crash',
           action: 'unhandledrejection',
