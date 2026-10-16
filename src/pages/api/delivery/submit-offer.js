@@ -59,7 +59,7 @@ export async function POST({ request }) {
     // নিজের হিরো প্রোফাইল যাচাই
     const { data: heroRow, error: heroError } = await client
       .from('delivery_riders')
-      .select('id, vehicle_type, offers_delivery, offers_ride, verification_status')
+      .select('id, vehicle_type, offers_delivery, offers_ride, verification_status, delivery_online, ride_online')
       .eq('profile_id', user.id)
       .maybeSingle();
 
@@ -119,6 +119,19 @@ export async function POST({ request }) {
     if (!categoryAllowed) {
       return new Response(
         JSON.stringify({ error: 'এই ক্যাটাগরিতে তুমি নিবন্ধিত না' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // অনলাইন চেক: এই ক্যাটাগরির (ডেলিভারি/রাইড) টগল অন না থাকলে অর্ডার নেওয়া যাবে না
+    const isOnlineForCategory = reqRow.category === 'ride' ? heroRow.ride_online : heroRow.delivery_online;
+    if (!isOnlineForCategory) {
+      const serviceLabel = reqRow.category === 'ride' ? 'রাইড' : 'ডেলিভারি';
+      return new Response(
+        JSON.stringify({
+          error: `তুমি এখন ${serviceLabel}-এর জন্য অফলাইন আছো। অর্ডার নিতে আগে পেজের অনলাইন টগল চালু করো, তারপর আবার চেষ্টা করো।`,
+          code: 'RIDER_OFFLINE',
+        }),
         { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
     }
