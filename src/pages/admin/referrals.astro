@@ -207,6 +207,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       duplicate_device: 'একই ফোন আগেও কাউন্ট হয়েছে',
       duplicate_phone: 'একই ফোন নম্বর আগেও কাউন্ট হয়েছে',
       cap_reached: '১০০ লিমিট অতিক্রম',
+      device_has_other_account: 'এই ফোনে আগে থেকেই অন্য অ্যাকাউন্ট আছে (রেফারারের নিজের ফোন হতে পারে)',
+      uninstalled_24h: '২৪ ঘণ্টার মধ্যে অ্যাপ আনইনস্টল করেছে',
+      not_returned: 'পুশ টোকেন নেই এবং ২৪ ঘণ্টা পর অ্যাপ আবার খোলেনি',
+      referrer_blocked: 'রেফারার ব্লকড',
     };
 
     const $ = (id) => document.getElementById(id);
@@ -298,6 +302,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const holdingTaka = Math.floor(Number(data.points_available_total || 0) / 10);
 
       wrap.appendChild(stat(bn(data.referrals_counted), 'কাউন্ট হওয়া রেফার'));
+      wrap.appendChild(stat(bn(data.referrals_pending), 'অপেক্ষমাণ রেফার (২৪ ঘণ্টা যাচাই চলছে)', data.referrals_pending > 0 ? 'accent' : ''));
       wrap.appendChild(stat(bn(data.referrals_not_counted), 'কাউন্ট না হওয়া রেফার'));
       wrap.appendChild(stat(bn(data.points_issued), `মোট দেওয়া পয়েন্ট (রেফার ${bn(data.points_from_referrals)} • লিস্টিং ${bn(data.points_from_listings)})`));
       wrap.appendChild(stat(`৳${bn(holdingTaka)}`, 'ইউজারদের জমা পয়েন্টের মূল্য (ভবিষ্যৎ দেনা)'));
@@ -708,6 +713,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
         const stats = el('div', 'rfa-user-stats');
         stats.appendChild(el('span', 'rfa-pill', `কাউন্টেড রেফার: ${bn(u.counted)}`));
+        if (u.pending > 0) stats.appendChild(el('span', 'rfa-pill', `অপেক্ষমাণ: ${bn(u.pending)}`));
         if (u.not_counted > 0) stats.appendChild(el('span', 'rfa-pill', `কাউন্ট হয়নি: ${bn(u.not_counted)}`));
         stats.appendChild(el('span', 'rfa-pill', `ব্যালেন্স: ${bn(u.balance)} পয়েন্ট`));
         stats.appendChild(el('span', 'rfa-pill', `মোট আয়: ${bn(u.total_earned)}`));
@@ -726,7 +732,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       list.appendChild(el('div', 'rfa-empty', 'লোড হচ্ছে...'));
       const { data, error } = await supabase
         .from('referrals')
-        .select('id, status, reason, device_id, created_at, referrer:profiles!referrer_id(full_name, phone), referred:profiles!referred_user_id(full_name, phone)')
+        .select('id, status, reason, device_id, created_at, confirm_after, referrer:profiles!referrer_id(full_name, phone), referred:profiles!referred_user_id(full_name, phone)')
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -746,12 +752,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const top = el('div', 'rfa-card-top');
         const left = el('div');
         const line = el('div', 'rfa-name', `${who(r.referrer)} → ${who(r.referred)}`);
-        line.appendChild(el('span', `rfa-badge ${r.status === 'counted' ? 'rfa-badge-ok' : 'rfa-badge-no'}`, r.status === 'counted' ? 'কাউন্ট হয়েছে' : 'কাউন্ট হয়নি'));
+        const isPending = r.status === 'pending';
+        line.appendChild(el('span', `rfa-badge ${r.status === 'counted' ? 'rfa-badge-ok' : isPending ? '' : 'rfa-badge-no'}`, r.status === 'counted' ? 'কাউন্ট হয়েছে' : isPending ? 'অপেক্ষমাণ' : 'কাউন্ট হয়নি'));
         left.appendChild(line);
         const details = [
           r.reason ? (REASON_LABEL[r.reason] || r.reason) : null,
           r.referred?.phone ? `নতুন ইউজার: ${r.referred.phone}` : null,
           r.device_id ? `ডিভাইস: …${String(r.device_id).slice(-6)}` : null,
+          isPending && r.confirm_after ? `যাচাই: ${fmtDate(r.confirm_after)} এর পর` : null,
           fmtDate(r.created_at),
         ].filter(Boolean).join(' • ');
         left.appendChild(el('div', 'rfa-sub', details));
