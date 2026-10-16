@@ -4,6 +4,9 @@
 //   import { reportError, initErrorReporter } from '../lib/errorReporter.js';
 //   reportError({ kind: 'db_block', action: 'profile_save', message: error.message, code: error.code, title: 'প্রোফাইল সেভ ফেইল' });
 //   initErrorReporter(); // BaseLayout থেকে একবার (ধাপ ৩)
+// আপডেট (ধাপ ৮ Sentry): js_crash ব্রাউজারে Sentry-তেও যায় (sentry.client.config.js);
+// ইভেন্ট আইডি app_error_logs.sentry_event_id-এ বসে। Sentry-র নিজস্ব অটো-ক্যাপচার বন্ধ,
+// তাই এই ফাইলের ফিল্টার/ডেডুপ/সীমা পেরোনো এরর-ই শুধু Sentry-তে যায়।
 // মেসেজ থেকে টোকেন, ইমেইল, ফোন নম্বর ও URL query মুছে ফেলা হয় (ব্যক্তিগত তথ্য লগে জমে না)।
 // এই ফাইল কখনো throw করে না।
 
@@ -59,6 +62,24 @@ async function getClient() {
   }
 }
 
+// ---------- Sentry (ধাপ ৮): শুধু js_crash; ইভেন্ট আইডি ফেরত দেয় ----------
+// window.__sfSentryCapture বসায় sentry.client.config.js (DSN না থাকলে এটা নেই, তখন null)।
+// Sentry লাইব্রেরি শুধু প্রথম এররের সময় লোড হয় (পেজ-লোডে কোনো বাড়তি ওজন নেই);
+// ৩ সেকেন্ডে না পেলে ছেড়ে দিই, যাতে app_error_logs-এর রিপোর্ট আটকে না যায়।
+async function captureToSentry(o, message) {
+  try {
+    if (typeof window.__sfSentryCapture !== 'function') return null;
+    const err = o.error instanceof Error ? o.error : new Error(message);
+    const id = await Promise.race([
+      window.__sfSentryCapture(err, String(o.action || '').slice(0, 100)),
+      new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+    ]);
+    return id ? String(id) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ---------- মূল ফাংশন ----------
 export async function reportError(opts) {
   try {
@@ -81,6 +102,8 @@ export async function reportError(opts) {
     reporting = true;
     sentCount += 1;
 
+    const sentryId = kind === 'js_crash' ? await captureToSentry(o, message) : null;
+
     const client = await getClient();
     if (!client || typeof client.rpc !== 'function') return;
 
@@ -92,7 +115,7 @@ export async function reportError(opts) {
       p_code: o.code ? String(o.code).slice(0, 50) : null,
       p_title: o.title ? String(o.title).slice(0, 200) : null,
       p_user_agent: (typeof navigator !== 'undefined' && navigator.userAgent ? navigator.userAgent : '').slice(0, 300),
-      p_sentry_event_id: null, // Sentry যোগ হলে (ধাপ ৮) এখানে বসবে
+      p_sentry_event_id: sentryId,
     });
   } catch (_) {
     // রিপোর্টারের নিজের এরর কখনো বাইরে যাবে না
@@ -119,6 +142,7 @@ export function initErrorReporter() {
           message: (e && e.message) || (e && e.error && e.error.message) || '',
           stack: e && e.error && e.error.stack,
           filename: e && e.filename,
+          error: e && e.error,
         });
       } catch (_) {}
     });
@@ -132,6 +156,7 @@ export function initErrorReporter() {
           action: 'unhandledrejection',
           message,
           stack: r && r.stack,
+          error: r instanceof Error ? r : null,
         });
       } catch (_) {}
     });
