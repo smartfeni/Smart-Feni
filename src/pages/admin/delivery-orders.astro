@@ -61,6 +61,100 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
           <button type="button" id="doSoundBtn" class="do-sound" title="নতুন অর্ডারের শব্দ"><i class="fas fa-bell"></i></button>
         </div>
 
+        <!-- ===== অর্ডার গ্রহণ সুইচ (শুধু অ্যাডমিন বদলাতে পারবে; RPC admin_set_service_accepting) ===== -->
+        <style is:global>
+          .do-svc { background: #fff; border-radius: 16px; padding: 14px 16px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); margin-bottom: 16px; }
+          .do-svc-title { font-weight: 700; color: #1B2A4A; font-size: 0.95rem; margin-bottom: 4px; }
+          .do-svc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #F1F4F9; font-size: 0.9rem; font-weight: 600; color: #1B2A4A; cursor: pointer; }
+          .do-svc-row small { display: block; font-size: 0.72rem; font-weight: 700; margin-top: 2px; color: #8FA0BC; }
+          .do-svc-row small.on { color: #1B7A3C; }
+          .do-svc-row small.off { color: #D14343; }
+          .do-svc-switch { -webkit-appearance: none; appearance: none; flex-shrink: 0; width: 46px; height: 26px; border-radius: 13px; background: #CBD5E1; position: relative; cursor: pointer; transition: background 0.2s; border: none; outline: none; }
+          .do-svc-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+          .do-svc-switch:checked { background: #2ECC71; }
+          .do-svc-switch:checked::after { transform: translateX(20px); }
+          .do-svc-switch:disabled { opacity: 0.5; }
+          .do-svc-note { font-size: 0.72rem; color: #8FA0BC; line-height: 1.6; margin-top: 8px; }
+        </style>
+        <div class="do-svc" id="doSvc">
+          <div class="do-svc-title"><i class="fas fa-power-off"></i> অর্ডার গ্রহণ</div>
+          <label class="do-svc-row">
+            <span>📦 ডেলিভারি অর্ডার গ্রহণ <small id="svcDeliveryState">লোড হচ্ছে...</small></span>
+            <input type="checkbox" id="svcDelivery" class="do-svc-switch" disabled />
+          </label>
+          <label class="do-svc-row">
+            <span>🏍️ রাইড অর্ডার গ্রহণ <small id="svcRideState">লোড হচ্ছে...</small></span>
+            <input type="checkbox" id="svcRide" class="do-svc-switch" disabled />
+          </label>
+          <p class="do-svc-note">বন্ধ করলে কাস্টমার নতুন অর্ডার দিতে পারবে না, "সেবা বন্ধ আছে" নোটিশ দেখবে। চলমান অর্ডারে কোনো প্রভাব পড়ে না। রাইডার না থাকলে বন্ধ রাখুন।</p>
+        </div>
+        <script>
+          import { supabase } from '../../lib/supabase.js';
+
+          const SVC = {
+            delivery: { input: 'svcDelivery', state: 'svcDeliveryState', label: 'ডেলিভারি' },
+            ride: { input: 'svcRide', state: 'svcRideState', label: 'রাইড' },
+          };
+          const svcToast = (t, type = 'success') => { if (window.showToast) window.showToast(t, type); };
+
+          function svcPaint(service, on) {
+            const cfg = SVC[service];
+            const input = document.getElementById(cfg.input);
+            const state = document.getElementById(cfg.state);
+            if (!input || !state) return;
+            input.checked = on;
+            state.textContent = on ? 'চালু আছে' : 'বন্ধ আছে';
+            state.className = on ? 'on' : 'off';
+          }
+
+          async function svcLoad() {
+            const { data, error } = await supabase.rpc('get_service_accepting');
+            if (error || !data) {
+              Object.values(SVC).forEach((c) => {
+                const s = document.getElementById(c.state);
+                if (s) s.textContent = 'লোড করা যায়নি';
+              });
+              return;
+            }
+            svcPaint('delivery', data.delivery !== false);
+            svcPaint('ride', data.ride !== false);
+            Object.values(SVC).forEach((c) => {
+              const i = document.getElementById(c.input);
+              if (i) i.disabled = false;
+            });
+          }
+
+          async function svcToggle(service) {
+            const cfg = SVC[service];
+            const input = document.getElementById(cfg.input);
+            if (!input) return;
+            const on = input.checked;
+
+            if (!on && !window.confirm(cfg.label + ' অর্ডার গ্রহণ বন্ধ করবেন? কাস্টমার নতুন অর্ডার দিতে পারবে না।')) {
+              input.checked = true;
+              return;
+            }
+
+            input.disabled = true;
+            const { error } = await supabase.rpc('admin_set_service_accepting', { p_service: service, p_on: on });
+            input.disabled = false;
+
+            if (error) {
+              input.checked = !on;
+              const forbidden = error.code === '42501' || /forbidden/i.test(error.message || '');
+              svcToast(forbidden ? 'শুধু অ্যাডমিন বদলাতে পারবেন' : 'বদলানো যায়নি, আবার চেষ্টা করুন', 'error');
+              return;
+            }
+
+            svcPaint(service, on);
+            svcToast(cfg.label + (on ? ' অর্ডার গ্রহণ চালু হয়েছে' : ' অর্ডার গ্রহণ বন্ধ হয়েছে'));
+          }
+
+          document.getElementById('svcDelivery')?.addEventListener('change', () => svcToggle('delivery'));
+          document.getElementById('svcRide')?.addEventListener('change', () => svcToggle('ride'));
+          svcLoad();
+        </script>
+
         <!-- ===== সামারি ===== -->
         <div class="do-stats" id="doStats">
           <div class="do-stat"><b id="stToday">—</b><span>আজকের অর্ডার</span></div>
