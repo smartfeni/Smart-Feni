@@ -21,6 +21,13 @@
 // - ট্যাবে pending সংখ্যার ব্যাজ
 // ============================================================
 
+// আপডেট (পোস্টার + প্রিভিউ + সাজানো):
+// - প্রতি লিস্টিং কার্ডে পোস্টারের নাম ও নম্বর (profiles থেকে); মালিক না থাকলে "আনক্লেইমড"
+// - প্রতি কার্ডে "প্রিভিউ" বাটন: পেজের ভেতরেই শিট (সব ছবি/তথ্য/পোস্টার + Approve/Reject)।
+//   পাবলিক /listing/[id] শুধু active দেখায়, তাই pending/rejected-এর জন্য ইন-পেজ প্রিভিউ
+// - সাজানো: রিভিউ বাকি → বাতিল → সক্রিয়; প্রতি গ্রুপে আনরিভিউড আগে, তারপর নতুন তারিখ আগে
+// - কার্ডের টেক্সট এস্কেপ; এডিট ফর্মে required + * + SFValidateForm + showToast
+
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
@@ -458,7 +465,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
     function escapeHtml(str) {
       const div = document.createElement('div');
       div.textContent = str ?? '';
-      return div.innerHTML;
+      return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     function formatDate(iso) {
@@ -549,8 +556,8 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         .join('');
 
       form.innerHTML = `
-        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">নাম
-          <input type="text" data-field="title" value="${escapeHtml(listing.title || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">নাম <span class="required-mark" style="color:#D14343;">*</span>
+          <input type="text" data-field="title" required value="${escapeHtml(listing.title || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
         </label>
         <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">বিবরণ / এলাকা
           <textarea data-field="description" rows="2" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;resize:vertical;">${escapeHtml(listing.description || '')}</textarea>
@@ -564,8 +571,8 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
             ${upazilaOpts}
           </select>
         </label>
-        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">ফোন নম্বর
-          <input type="text" data-field="contact_phone" value="${escapeHtml(listing.contact_phone || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">ফোন নম্বর <span class="required-mark" style="color:#D14343;">*</span>
+          <input type="text" data-field="contact_phone" required value="${escapeHtml(listing.contact_phone || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
         </label>
         <div style="display:flex;gap:8px;margin-top:4px;">
           <button data-action="save" style="flex:1;background:#1B2A4A;color:#fff;border:none;padding:10px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;">সেভ করুন</button>
@@ -579,6 +586,12 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         const saveBtn = form.querySelector('[data-action="save"]');
         saveBtn.textContent = 'সেভ হচ্ছে...';
         saveBtn.disabled = true;
+
+        if (window.SFValidateForm && !window.SFValidateForm(form)) {
+          saveBtn.textContent = 'সেভ করুন';
+          saveBtn.disabled = false;
+          return;
+        }
 
         // এডিট করে সেভ করলে ফোন নম্বর ব্লকলিস্টে যোগ — স্ক্র্যাপার যেন এই
         // এডিটেড ডেটা আর ওভাররাইট না করে (পুরনো ফোন নম্বর দিয়ে ব্লক করা
@@ -594,6 +607,14 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         };
 
         const { error } = await supabase.from('listings').update(updates).eq('id', listing.id);
+
+        if (error && window.showToast) {
+          window.showToast('সেভ ব্যর্থ: ' + error.message, 'error');
+          saveBtn.textContent = 'সেভ করুন';
+          saveBtn.disabled = false;
+          return;
+        }
+        if (!error && window.showToast) window.showToast('লিস্টিং সেভ হয়েছে', 'success');
 
         if (error) {
           alert('সেভ ব্যর্থ: ' + error.message);
@@ -622,12 +643,12 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
 
       card.innerHTML = `
         ${thumb
-          ? `<img src="${thumb}" style="width:76px;height:76px;border-radius:14px;object-fit:cover;flex-shrink:0;" />`
+          ? `<img src="${escapeHtml(thumb)}" style="width:76px;height:76px;border-radius:14px;object-fit:cover;flex-shrink:0;" />`
           : `<div style="width:76px;height:76px;border-radius:14px;background:#F4F7FC;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#B0BCCB;font-size:1.4rem;"><i class="fas fa-image"></i></div>`
         }
         <div style="flex:1;min-width:0;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-            <h3 style="font-size:0.98rem;font-weight:700;color:#1B2A4A;">${listing.title || '(শিরোনামহীন)'}</h3>
+            <h3 style="font-size:0.98rem;font-weight:700;color:#1B2A4A;">${escapeHtml(listing.title || '(শিরোনামহীন)')}</h3>
             <span style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
               ${!listing.is_reviewed ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#FF6B35;color:#fff;">নতুন</span>` : ''}
               <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${status.bg};color:${status.color};">${status.text}</span>
@@ -636,18 +657,19 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
             </span>
           </div>
           <p style="font-size:0.82rem;color:#8FA0BC;margin-top:4px;">
-            ${categoryName} ${listing.type ? '· ' + listing.type : ''}
+            ${categoryName} ${listing.type ? '· ' + escapeHtml(listing.type) : ''}
             ${sourceLabel ? ` · <span style="color:#B36B00;font-weight:700;">${sourceLabel}</span>` : ''}
             ${isUnclaimed && listing.source ? ` · <span style="color:#8FA0BC;">আনক্লেইমড</span>` : ''}
             ${!listing.upazila ? ` · <span style="color:#D14343;">উপজেলা নাই</span>` : ''}
           </p>
-          ${listing.description ? `<p style="font-size:0.85rem;color:#5A6E85;margin-top:6px;">${listing.description}</p>` : ''}
+          ${listing.description ? `<p style="font-size:0.85rem;color:#5A6E85;margin-top:6px;">${escapeHtml(listing.description)}</p>` : ''}
           <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:0.8rem;color:#5A6E85;">
-            ${listing.price ? `<span><i class="fas fa-tag" style="color:#FF6B35;"></i> ${listing.price}</span>` : ''}
-            ${listing.upazila ? `<span><i class="fas fa-location-dot" style="color:#FF6B35;"></i> ${listing.upazila}</span>` : ''}
-            ${listing.contact_phone ? `<span><i class="fas fa-phone" style="color:#FF6B35;"></i> ${listing.contact_phone}</span>` : ''}
+            ${listing.price ? `<span><i class="fas fa-tag" style="color:#FF6B35;"></i> ${escapeHtml(listing.price)}</span>` : ''}
+            ${listing.upazila ? `<span><i class="fas fa-location-dot" style="color:#FF6B35;"></i> ${escapeHtml(listing.upazila)}</span>` : ''}
+            ${listing.contact_phone ? `<span><i class="fas fa-phone" style="color:#FF6B35;"></i> ${escapeHtml(listing.contact_phone)}</span>` : ''}
             ${listing.rating_count > 0 ? `<span><i class="fas fa-star" style="color:#F5A623;"></i> ${Number(listing.rating).toFixed(1)} (${listing.rating_count})</span>` : ''}
             <span><i class="fas fa-clock" style="color:#FF6B35;"></i> ${formatDate(listing.created_at)}</span>
+            <span style="flex-basis:100%;">${posterHtml(listing)}</span>
           </div>
           <div class="card-actions" style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"></div>
           <div class="edit-form-slot"></div>
@@ -656,6 +678,12 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
 
       const actionsWrap = card.querySelector('.card-actions');
       const editSlot = card.querySelector('.edit-form-slot');
+
+      const previewBtn = document.createElement('button');
+      previewBtn.innerHTML = '<i class="fas fa-eye"></i> প্রিভিউ';
+      previewBtn.style.cssText = 'background:#1B2A4A;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+      previewBtn.addEventListener('click', () => openPreview(listing));
+      actionsWrap.appendChild(previewBtn);
 
       if (listing.status !== 'active') {
         const approveBtn = document.createElement('button');
@@ -810,6 +838,171 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       loadListings();
     }
 
+    // ============================================================
+    // রিভিউ সাজানো + পোস্টার তথ্য + প্রিভিউ শিট
+    // ============================================================
+
+    // অননুমোদিত (pending → rejected) সবার উপরে, active সবার নিচে।
+    // প্রতি গ্রুপের ভেতরে: আনরিভিউড আগে, তারপর নতুন তারিখ আগে
+    const STATUS_RANK = { pending: 0, rejected: 1, active: 2 };
+
+    function sortListingsForReview(list) {
+      return [...list].sort((a, b) => {
+        const ra = STATUS_RANK[a.status] ?? 0;
+        const rb = STATUS_RANK[b.status] ?? 0;
+        if (ra !== rb) return ra - rb;
+        const ua = a.is_reviewed ? 1 : 0;
+        const ub = b.is_reviewed ? 1 : 0;
+        if (ua !== ub) return ua - ub;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+    }
+
+    let posterMap = {};
+
+    async function loadPosters(list) {
+      posterMap = {};
+      const ids = [...new Set(list.map((l) => l.user_id).filter(Boolean))];
+      if (ids.length === 0) return;
+      const { data, error } = await supabase.from('profiles').select('id, full_name, phone').in('id', ids);
+      if (error) {
+        console.error('পোস্টারের তথ্য আনা যায়নি:', error.message);
+        return;
+      }
+      posterMap = Object.fromEntries((data || []).map((p) => [p.id, p]));
+    }
+
+    function telLink(phone) {
+      const raw = String(phone || '').trim();
+      if (!raw) return '';
+      const dialable = raw.replace(/[\s-]/g, '');
+      if (/^\+?\d{6,15}$/.test(dialable)) {
+        return `<a href="tel:${dialable}" style="color:#1D6FE0;font-weight:700;text-decoration:none;">${escapeHtml(raw)}</a>`;
+      }
+      return escapeHtml(raw);
+    }
+
+    function posterHtml(listing) {
+      if (!listing.user_id) {
+        return '<span style="color:#8FA0BC;"><i class="fas fa-user-slash"></i> পোস্টার নেই (আনক্লেইমড / অ্যাডমিন বা স্ক্র্যাপ এন্ট্রি)</span>';
+      }
+      const p = posterMap[listing.user_id];
+      if (!p) {
+        return '<span style="color:#8FA0BC;"><i class="fas fa-user"></i> পোস্টারের তথ্য পাওয়া যায়নি</span>';
+      }
+      const name = escapeHtml(p.full_name || '(নাম নাই)');
+      const phone = telLink(p.phone);
+      return `<i class="fas fa-user" style="color:#FF6B35;"></i> পোস্টার: <b style="color:#1B2A4A;">${name}</b>${phone ? ' · ' + phone : ''}`;
+    }
+
+    function closePreview() {
+      const el = document.getElementById('listingPreviewOverlay');
+      if (el) el.remove();
+      document.body.style.overflow = '';
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closePreview();
+    });
+
+    function openPreview(listing) {
+      closePreview();
+
+      const status = statusLabels[listing.status] || statusLabels.pending;
+      const categoryName = categoryNameMap[listing.category] || listing.category;
+      const sourceLabel = listing.source ? (sourceLabels[listing.source] || listing.source) : null;
+      const images = (Array.isArray(listing.images) ? listing.images : [])
+        .filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u));
+
+      const imagesHtml = images.length
+        ? `<div style="display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;margin-bottom:14px;">${images
+            .map((u) => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener" style="flex-shrink:0;scroll-snap-align:start;max-width:85%;"><img src="${escapeHtml(u)}" style="height:220px;max-width:100%;border-radius:14px;object-fit:contain;background:#F4F7FC;display:block;" /></a>`)
+            .join('')}</div>`
+        : `<div style="height:90px;border-radius:14px;background:#F4F7FC;display:flex;align-items:center;justify-content:center;gap:8px;color:#B0BCCB;font-size:0.85rem;font-weight:600;margin-bottom:14px;"><i class="fas fa-image"></i> কোনো ছবি নেই</div>`;
+
+      const row = (label, valueHtml) => valueHtml
+        ? `<div style="padding:9px 0;border-top:1px solid #EEF3F9;font-size:0.85rem;"><div style="font-size:0.72rem;font-weight:700;color:#8FA0BC;margin-bottom:2px;">${label}</div><div style="color:#1B2A4A;word-break:break-word;">${valueHtml}</div></div>`
+        : '';
+
+      const pill = (text, bg, color) => `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${bg};color:${color};">${text}</span>`;
+
+      const overlay = document.createElement('div');
+      overlay.id = 'listingPreviewOverlay';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,0.55);display:flex;align-items:flex-end;justify-content:center;';
+
+      const sheet = document.createElement('div');
+      sheet.style.cssText = 'background:#fff;width:100%;max-width:560px;max-height:92vh;overflow-y:auto;border-radius:22px 22px 0 0;padding:18px 16px 28px;box-shadow:0 -8px 30px rgba(15,23,42,0.18);';
+
+      sheet.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;">
+          <div style="min-width:0;">
+            <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:#F4F7FC;color:#5A6E85;">${escapeHtml(categoryName)}${listing.type ? ' · ' + escapeHtml(listing.type) : ''}</span>
+            <h3 style="font-size:1.05rem;font-weight:700;color:#1B2A4A;margin-top:8px;word-break:break-word;">${escapeHtml(listing.title || '(শিরোনামহীন)')}</h3>
+          </div>
+          <button type="button" data-action="close" aria-label="বন্ধ করুন" style="flex-shrink:0;width:34px;height:34px;border-radius:50%;border:none;background:#F4F7FC;color:#5A6E85;font-size:1rem;cursor:pointer;"><i class="fas fa-xmark"></i></button>
+        </div>
+        ${imagesHtml}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+          ${pill(status.text, status.bg, status.color)}
+          ${!listing.is_reviewed ? pill('নতুন', '#FF6B35', '#fff') : ''}
+          ${listing.is_verified ? pill('ভ্যারিফাইড', '#E8F2FF', '#1D6FE0') : ''}
+          ${listing.is_disabled ? pill('রিপোর্টেড', '#FFF0EA', '#D14343') : ''}
+          ${sourceLabel ? pill(escapeHtml(sourceLabel), '#FFF3E0', '#B36B00') : ''}
+        </div>
+        ${row('দাম / মূল্য', listing.price ? escapeHtml(listing.price) : '')}
+        ${row('উপজেলা', listing.upazila ? escapeHtml(listing.upazila) : '')}
+        ${row('বিবরণ', listing.description ? `<span style="white-space:pre-wrap;">${escapeHtml(listing.description)}</span>` : '')}
+        ${row('যোগাযোগ নম্বর', telLink(listing.contact_phone))}
+        ${row('পোস্টার', posterHtml(listing))}
+        ${row('পোস্টের তারিখ', escapeHtml(formatDate(listing.created_at)))}
+        <div data-slot="actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;"></div>
+      `;
+
+      const actions = sheet.querySelector('[data-slot="actions"]');
+
+      if (listing.status !== 'active') {
+        const approveBtn = document.createElement('button');
+        approveBtn.type = 'button';
+        approveBtn.textContent = 'Approve করুন';
+        approveBtn.style.cssText = 'background:#1B7A3C;color:#fff;border:none;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;';
+        approveBtn.addEventListener('click', async () => {
+          approveBtn.disabled = true;
+          await updateStatusAndLock(listing, 'active');
+          closePreview();
+        });
+        actions.appendChild(approveBtn);
+      }
+
+      if (listing.status !== 'rejected') {
+        const rejectBtn = document.createElement('button');
+        rejectBtn.type = 'button';
+        rejectBtn.textContent = 'Reject করুন';
+        rejectBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;';
+        rejectBtn.addEventListener('click', async () => {
+          rejectBtn.disabled = true;
+          await updateStatusAndLock(listing, 'rejected');
+          closePreview();
+        });
+        actions.appendChild(rejectBtn);
+      }
+
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.textContent = 'বন্ধ করুন';
+      closeBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;';
+      closeBtn.addEventListener('click', closePreview);
+      actions.appendChild(closeBtn);
+
+      sheet.querySelector('[data-action="close"]').addEventListener('click', closePreview);
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closePreview();
+      });
+
+      overlay.appendChild(sheet);
+      document.body.appendChild(overlay);
+      document.body.style.overflow = 'hidden';
+    }
+
     async function loadListings() {
       container.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
 
@@ -847,7 +1040,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
         return;
       }
 
-      const listings = data || [];
+      const listings = sortListingsForReview(data || []);
       resultCount.textContent = `মোট ${listings.length} টি লিস্টিং`;
       container.innerHTML = '';
 
@@ -857,6 +1050,7 @@ const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়�
       }
 
       emptyState.style.display = 'none';
+      await loadPosters(listings);
       listings.forEach((listing) => container.appendChild(renderCard(listing)));
     }
 
