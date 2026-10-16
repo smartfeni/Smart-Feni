@@ -77,8 +77,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           <div class="field-error-msg" data-error-for="customerNameInput"><i class="fas fa-circle-exclamation"></i><span>আপনার নাম লিখুন</span></div>
 
           <label class="form-label">ফোন নম্বর<span class="required-mark">*</span></label>
-          <input type="text" class="form-input" id="customerPhoneInput" placeholder="01xxxxxxxxx" required />
-          <div class="field-error-msg" data-error-for="customerPhoneInput"><i class="fas fa-circle-exclamation"></i><span>ফোন নম্বর লিখুন</span></div>
+          <input type="text" class="form-input" id="customerPhoneInput" placeholder="01xxxxxxxxx" inputmode="tel" autocomplete="tel" required />
+          <div class="field-error-msg" data-error-for="customerPhoneInput"><i class="fas fa-circle-exclamation"></i><span>সঠিক মোবাইল নম্বর লিখুন (01xxxxxxxxx)</span></div>
 
           <label class="form-label">ঠিকানা<span class="required-mark">*</span></label>
           <textarea class="form-input" id="customerAddressInput" rows="3" placeholder="ডেলিভারির সম্পূর্ণ ঠিকানা" required></textarea>
@@ -612,6 +612,15 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       return isNaN(n) ? 0 : n;
     }
 
+    // বাংলাদেশি মোবাইল নম্বর নরমালাইজ: বাংলা অঙ্ক -> ইংরেজি, +88/88 বাদ; বৈধ না হলে null
+    function normalizeBdPhone(raw) {
+      if (!raw) return null;
+      let s = convertBanglaDigits(String(raw)).replace(/[\s\-().]/g, '');
+      if (s.startsWith('+88')) s = s.slice(3);
+      else if (s.startsWith('88') && s.length === 13) s = s.slice(2);
+      return /^01[3-9][0-9]{8}$/.test(s) ? s : null;
+    }
+
     function showMsg(text) {
       checkoutMsg.textContent = text;
       checkoutMsg.className = 'form-msg show-error';
@@ -771,8 +780,15 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       checkoutMsg.className = 'form-msg';
 
       const customerName = nameInput.value.trim();
-      const customerPhone = phoneInput.value.trim();
+      const customerPhone = normalizeBdPhone(phoneInput.value) || '';
       const customerAddress = addressInput.value.trim();
+
+      if (phoneInput.value.trim() && !customerPhone) {
+        showMsg('সঠিক মোবাইল নম্বর দিন (যেমন 01712345678)');
+        phoneInput.classList.add('field-invalid');
+        phoneInput.focus();
+        return;
+      }
 
       if (!window.SFValidateForm(document.querySelector('.checkout-form-card')) || !customerName || !customerPhone || !customerAddress) {
         showMsg('নাম, ফোন নম্বর ও ঠিকানা দিন');
@@ -865,7 +881,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         .single();
 
       if (profile?.full_name) nameInput.value = profile.full_name;
-      if (profile?.phone) phoneInput.value = profile.phone;
+      const prefillPhone = normalizeBdPhone(profile?.phone);
+      if (prefillPhone) phoneInput.value = prefillPhone;
 
       const params = new URLSearchParams(window.location.search);
       const buyNowProductId = params.get('buyNow');
