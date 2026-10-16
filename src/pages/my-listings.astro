@@ -131,6 +131,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         <option value="সোনাগাজী">সোনাগাজী</option>
       </select>
 
+      <div id="mlEditUnionWrap" style="display:none;">
+        <label class="ml-form-label">ইউনিয়ন / এলাকা<span class="required-mark">*</span></label>
+        <select class="ml-form-input" id="mlEditUnion">
+          <option value="">ইউনিয়ন নির্বাচন করুন</option>
+        </select>
+        <div class="field-error-msg" data-error-for="mlEditUnion"><i class="fas fa-circle-exclamation"></i><span>ইউনিয়ন নির্বাচন করুন</span></div>
+      </div>
+
       <label class="ml-form-label">যোগাযোগ নম্বর</label>
       <input type="tel" class="ml-form-input" id="mlEditPhone" />
 
@@ -705,6 +713,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 <script>
   import { supabase } from '../lib/supabase.js';
   import { categories } from '../data/services.js';
+  import { getUnionsOfUpazilaName } from '../data/feniAreas.js';
 
   const loadingState = document.getElementById('loadingState');
   const loginRequired = document.getElementById('loginRequired');
@@ -779,6 +788,17 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
   const editPriceLabel = document.getElementById('mlEditPriceLabel');
   const editPriceInput = document.getElementById('mlEditPrice');
   const editUpazilaInput = document.getElementById('mlEditUpazila');
+  const editUnionWrap = document.getElementById('mlEditUnionWrap');
+  const editUnionInput = document.getElementById('mlEditUnion');
+
+  // গাড়ি ভাড়ার এডিটে উপজেলা অনুযায়ী ইউনিয়ন ড্রপডাউন ভরা
+  function fillEditUnions(selected) {
+    const list = getUnionsOfUpazilaName(editUpazilaInput.value);
+    editUnionInput.innerHTML = '<option value="">ইউনিয়ন নির্বাচন করুন</option>' +
+      list.map((u) => `<option value="${u}">${u}</option>`).join('');
+    editUnionInput.value = list.includes(selected) ? selected : '';
+  }
+  editUpazilaInput?.addEventListener('change', () => fillEditUnions(''));
   const editPhoneInput = document.getElementById('mlEditPhone');
   const editSaveBtn = document.getElementById('mlEditSaveBtn');
   let editingId = null;
@@ -1014,6 +1034,16 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     editDescInput.value = src.description || '';
     editPriceInput.value = src.price || '';
     editUpazilaInput.value = src.upazila || 'ফেনী সদর';
+
+    if (isCar) {
+      editUnionWrap.style.display = 'block';
+      editUnionInput.setAttribute('required', 'required');
+      fillEditUnions(src.union_name || '');
+    } else {
+      editUnionWrap.style.display = 'none';
+      editUnionInput.removeAttribute('required');
+      editUnionInput.value = '';
+    }
     editPhoneInput.value = src.contact_phone || '';
     editMessage.className = 'ml-form-msg';
     editMessage.textContent = '';
@@ -1044,6 +1074,13 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       return;
     }
 
+    if (editingItem.category === CAR_CATEGORY && !editUnionInput.value) {
+      window.showToast?.('ইউনিয়ন নির্বাচন করুন', 'error');
+      editMessage.textContent = 'ইউনিয়ন নির্বাচন করুন';
+      editMessage.className = 'ml-form-msg show-error';
+      return;
+    }
+
     editSaveBtn.disabled = true;
 
     const updates = {
@@ -1051,6 +1088,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       description: editDescInput.value.trim(),
       price: editPriceInput.value.trim(),
       upazila: editUpazilaInput.value,
+      union_name: editingItem.category === CAR_CATEGORY ? editUnionInput.value : null,
       contact_phone: editPhoneInput.value.trim(),
     };
 
@@ -1065,6 +1103,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       p_type: editingItem.type || null,
       p_contact_phone: updates.contact_phone,
       p_images: editingItem.images || [],
+      p_union_name: updates.union_name,
     });
 
     editSaveBtn.disabled = false;

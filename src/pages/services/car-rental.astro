@@ -14,6 +14,7 @@ export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import AddListingModal from '../../components/ui/AddListingModal.astro';
+import { UPAZILAS } from '../../data/feniAreas.js';
 import { supabase } from '../../lib/supabase.js';
 
 const typeOptions = [
@@ -82,6 +83,18 @@ const totalCount = listings.length;
         <input type="text" id="searchInput" placeholder="আপনার এলাকার নাম লিখে ড্রাইভার খুঁজুন..." />
       </div>
 
+      <div class="loc-filter-row">
+        <select id="upazilaFilter" class="loc-select" aria-label="উপজেলা">
+          <option value="">সব উপজেলা</option>
+          {UPAZILAS.map((u) => (
+            <option value={u.name}>{u.name}</option>
+          ))}
+        </select>
+        <select id="unionFilter" class="loc-select" aria-label="ইউনিয়ন" disabled>
+          <option value="">সব ইউনিয়ন</option>
+        </select>
+      </div>
+
       <div class="filter-row" id="filterRow">
         <button class="filter-pill active" data-type="all" type="button">
           সব <span class="pill-count">({toBanglaDigits(totalCount)})</span>
@@ -113,7 +126,8 @@ const totalCount = listings.length;
                   data-type={item.type || 'other'}
                   data-target-id={item.id}
                   data-upazila-name={item.upazila || ''}
-                  data-search={`${item.title || ''} ${item.description || ''} ${item.upazila || ''}`.toLowerCase()}
+                  data-union-name={item.union_name || ''}
+                  data-search={`${item.title || ''} ${item.description || ''} ${item.upazila || ''} ${item.union_name || ''}`.toLowerCase()}
                 >
                   <button class="like-btn-preview" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
                     <i class="fas fa-heart"></i>
@@ -135,7 +149,7 @@ const totalCount = listings.length;
                     <h3 class="car-title">{item.title}</h3>
                     {areaName && <p class="car-area">{areaName}</p>}
                     {item.price && <p class="car-price">{item.price}</p>}
-                    <p class="location-tag"><i class="fas fa-location-dot"></i> {item.upazila}</p>
+                    <p class="location-tag"><i class="fas fa-location-dot"></i> {item.upazila}{item.union_name ? `, ${item.union_name}` : ''}</p>
                   </div>
                 </a>
               );
@@ -150,6 +164,7 @@ const totalCount = listings.length;
 
   <AddListingModal
     category="car-rental"
+    showUnion={true}
     typeOptions={typeOptions}
     titleLabel="আপনার নাম / গাড়ির নাম"
     priceLabel="গাড়ির ধরন/মডেল"
@@ -242,6 +257,36 @@ const totalCount = listings.length;
     padding: 2px 4px 10px;
     scrollbar-width: none;
     -ms-overflow-style: none;
+  }
+
+  .loc-filter-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    max-width: 480px;
+    margin: 0 auto 16px;
+  }
+
+  .loc-select {
+    width: 100%;
+    padding: 11px 14px;
+    border-radius: 14px;
+    border: 1.5px solid #EEF3F9;
+    background: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    font-family: inherit;
+    color: #1B2A4A;
+  }
+
+  .loc-select:focus {
+    outline: none;
+    border-color: #FF6B35;
+  }
+
+  .loc-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
   }
 
   .filter-row::-webkit-scrollbar {
@@ -439,6 +484,7 @@ const totalCount = listings.length;
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { reorderByUserLocation } from '../../lib/locationSort.js';
+  import { getUnionsOfUpazilaName } from '../../data/feniAreas.js';
   import { fetchLikeData, toggleLike, isLoggedIn } from '../../lib/contentEngagement.js';
 
   const grid = document.getElementById('carGrid');
@@ -446,6 +492,11 @@ const totalCount = listings.length;
   const searchInput = document.getElementById('searchInput');
   const noResults = document.getElementById('noResults');
   const filterPills = document.querySelectorAll('.filter-pill');
+  const upazilaFilter = document.getElementById('upazilaFilter');
+  const unionFilter = document.getElementById('unionFilter');
+
+  let activeUpazila = '';
+  let activeUnion = '';
 
   let activeType = 'all';
 
@@ -456,7 +507,9 @@ const totalCount = listings.length;
     cards.forEach((card) => {
       const matchesType = activeType === 'all' || card.dataset.type === activeType;
       const matchesSearch = keyword === '' || (card.dataset.search || '').includes(keyword);
-      const matches = matchesType && matchesSearch;
+      const matchesUpazila = activeUpazila === '' || card.dataset.upazilaName === activeUpazila;
+      const matchesUnion = activeUnion === '' || card.dataset.unionName === activeUnion;
+      const matches = matchesType && matchesSearch && matchesUpazila && matchesUnion;
 
       if (matches) {
         card.classList.remove('hidden');
@@ -472,6 +525,22 @@ const totalCount = listings.length;
   }
 
   searchInput?.addEventListener('input', applyFilters);
+
+  // উপজেলা বদলালে ইউনিয়ন ড্রপডাউন সেই উপজেলার ইউনিয়ন দিয়ে ভরে, ইউনিয়ন ফিল্টার রিসেট
+  upazilaFilter?.addEventListener('change', () => {
+    activeUpazila = upazilaFilter.value;
+    activeUnion = '';
+    const list = getUnionsOfUpazilaName(activeUpazila);
+    unionFilter.innerHTML = '<option value="">সব ইউনিয়ন</option>' +
+      list.map((u) => `<option value="${u}">${u}</option>`).join('');
+    unionFilter.disabled = !activeUpazila;
+    applyFilters();
+  });
+
+  unionFilter?.addEventListener('change', () => {
+    activeUnion = unionFilter.value;
+    applyFilters();
+  });
 
   filterPills.forEach((pill) => {
     pill.addEventListener('click', () => {

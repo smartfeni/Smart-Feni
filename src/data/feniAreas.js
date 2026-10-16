@@ -96,6 +96,14 @@ export function getUnionBn(unionEn) {
   return UNION_BN[unionEn] || unionEn;
 }
 
+// উপজেলার বাংলা নাম দিলে সেই উপজেলার ইউনিয়ন/পৌরসভার বাংলা নাম তালিকা
+// (গাড়ি ভাড়ার ফিল্টার ও লিস্টিং ফর্মের ইউনিয়ন ড্রপডাউনের জন্য)
+export function getUnionsOfUpazilaName(bnName) {
+  const up = getUpazilaByName(bnName);
+  if (!up) return [];
+  return (UNIONS_BY_UPAZILA[up.id] || []).map((u) => getUnionBn(u));
+}
+
 export function getUnionUpazilaId(unionEn) {
   return UNION_UPAZILA[unionEn] || null;
 }

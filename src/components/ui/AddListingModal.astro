@@ -47,6 +47,7 @@ export interface Props {
   companyLabel?: string;
   autoActive?: boolean;
   nounLabel?: string;
+  showUnion?: boolean;
 }
 
 const {
@@ -56,6 +57,7 @@ const {
   priceLabel = 'দাম / রেট',
   companyLabel,
   autoActive = false,
+  showUnion = false,
   nounLabel = 'লিস্টিং',
 } = Astro.props;
 
@@ -64,7 +66,7 @@ const isShopProduct = category === 'online-shop';
 const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
 ---
 
-<div class="listing-overlay" id="listingOverlay" data-category={category} data-company-label={companyLabel || ''} data-auto-active={autoActive ? '1' : ''} data-noun-label={nounLabel}>
+<div class="listing-overlay" id="listingOverlay" data-category={category} data-company-label={companyLabel || ''} data-auto-active={autoActive ? '1' : ''} data-noun-label={nounLabel} data-show-union={showUnion ? '1' : ''}>
   <div class="listing-modal">
     <button class="listing-close" id="listingClose" aria-label="বন্ধ করুন">
       <i class="fas fa-xmark"></i>
@@ -125,6 +127,18 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
             <option value={u}>{u}</option>
           ))}
         </select>
+
+        {showUnion && (
+          <>
+            <label class="listing-label">ইউনিয়ন / এলাকা<span class="required-mark">*</span></label>
+            <select class="listing-input" id="listingUnion" required>
+              <option value="">ইউনিয়ন নির্বাচন করুন</option>
+            </select>
+            <div class="field-error-msg" data-error-for="listingUnion">
+              <i class="fas fa-circle-exclamation"></i><span>ইউনিয়ন নির্বাচন করুন</span>
+            </div>
+          </>
+        )}
       </>
     )}
 
@@ -385,6 +399,7 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { compressImages } from '../../lib/imageCompress.js';
+  import { getUnionsOfUpazilaName } from '../../data/feniAreas.js';
 
   const overlay = document.getElementById('listingOverlay');
   const closeBtn = document.getElementById('listingClose');
@@ -394,6 +409,24 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
   const customTypeWrap = document.getElementById('listingCustomTypeWrap');
   const customTypeInput = document.getElementById('listingCustomType');
   const category = overlay?.dataset.category || '';
+
+  // ইউনিয়ন ড্রপডাউন (শুধু showUnion চালু থাকলে, যেমন গাড়ি ভাড়া) — উপজেলা বদলালে
+  // সেই উপজেলার ইউনিয়ন দিয়ে ভরে যায়
+  const showUnion = overlay?.dataset.showUnion === '1';
+  const upazilaSelect = document.getElementById('listingUpazila');
+  const unionSelect = document.getElementById('listingUnion');
+
+  function fillUnions() {
+    if (!unionSelect) return;
+    const list = getUnionsOfUpazilaName(upazilaSelect?.value);
+    unionSelect.innerHTML = '<option value="">ইউনিয়ন নির্বাচন করুন</option>' +
+      list.map((u) => `<option value="${u}">${u}</option>`).join('');
+  }
+
+  if (showUnion) {
+    fillUnions();
+    upazilaSelect?.addEventListener('change', fillUnions);
+  }
   const companyLabel = overlay?.dataset.companyLabel || '';
   const autoActive = overlay?.dataset.autoActive === '1';
   const isShopProduct = category === 'online-shop';
@@ -563,6 +596,11 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
       return;
     }
 
+    if (showUnion && !unionSelect?.value) {
+      showMessage('ইউনিয়ন নির্বাচন করুন');
+      return;
+    }
+
     if (type === 'other') {
       type = customTypeInput?.value?.trim();
     }
@@ -612,6 +650,7 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
       upazila,
       images: imageUrls,
       contact_phone: phone || null,
+      union_name: showUnion ? (unionSelect?.value || null) : null,
     };
 
     if (isShopProduct && targetShopId) {
