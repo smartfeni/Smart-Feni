@@ -13,7 +13,7 @@
 // service role client দিয়ে delivery_riders আপডেট হয়।
 // ============================================================
 
-import { requireAdmin, getAdminClient } from '../../../../lib/deliverySupabase.js';
+import { requireAdminOrMod, getAdminClient } from '../../../../lib/deliverySupabase.js';
 import { reportServerError } from '../../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
@@ -25,7 +25,7 @@ export async function POST({ request }) {
   let reportClient = null;
 
   try {
-    const { isAdmin, adminUserId, error: adminCheckError } = await requireAdmin(request);
+    const { isAdmin, adminUserId, error: adminCheckError } = await requireAdminOrMod(request);
     if (!isAdmin) {
       return new Response(JSON.stringify({ error: adminCheckError || 'এডমিন পারমিশন নেই' }), {
         status: 403,

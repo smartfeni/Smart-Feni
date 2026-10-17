@@ -88,3 +88,27 @@ export async function requireAdmin(request) {
 
   return { isAdmin: true, adminUserId: user.id, error: null };
 }
+
+// অ্যাডমিন বা মডারেটর (ব্লক না হলে) — রাইডার approve/reject এর জন্য।
+// রিটার্নে isAdmin = true মানে "অনুমোদিত" (admin বা moderator), role আলাদা দেওয়া আছে।
+export async function requireAdminOrMod(request) {
+  const { client: userClient, user, error } = await getAuthedUser(request);
+  if (error) return { isAdmin: false, adminUserId: null, role: null, error };
+
+  const { data: profile, error: profileError } = await userClient
+    .from('profiles')
+    .select('role, is_blocked')
+    .eq('id', user.id)
+    .single();
+
+  if (
+    profileError ||
+    !profile ||
+    profile.is_blocked ||
+    (profile.role !== 'admin' && profile.role !== 'moderator')
+  ) {
+    return { isAdmin: false, adminUserId: null, role: null, error: 'এডমিন/মডারেটর পারমিশন নেই' };
+  }
+
+  return { isAdmin: true, adminUserId: user.id, role: profile.role, error: null };
+}

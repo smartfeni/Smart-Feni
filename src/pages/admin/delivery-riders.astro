@@ -490,6 +490,39 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       color: #fff;
     }
 
+    .dr-toggles {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      background: #F8FAFC;
+      border-radius: 12px;
+    }
+
+    .dr-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      cursor: pointer;
+    }
+
+    .dr-toggle-row i {
+      color: #FF6B35;
+      margin-right: 4px;
+    }
+
+    .dr-toggle-row input {
+      width: 20px;
+      height: 20px;
+      accent-color: #FF6B35;
+      cursor: pointer;
+    }
+
     .dr-rejected-reason {
       font-size: 0.8rem;
       color: #5A6E85;
@@ -563,6 +596,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     let allRiders = { pending: [], approved: [], rejected: [] };
     let currentTab = 'pending';
 
+    function esc(s) {
+      return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     const VEHICLE_LABELS = { bike: 'বাইক', cycle: 'সাইকেল', cng: 'সিএনজি' };
 
     // ===== প্রাইভেট bucket এর path থেকে সাইনড URL জেনারেট =====
@@ -571,7 +613,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     // (যদিও প্রাইভেট bucket এর পুরনো public URL কাজ নাও করতে পারে)
     async function getSignedIdCardUrl(pathOrUrl) {
       if (!pathOrUrl) return null;
-      if (pathOrUrl.startsWith('http')) return pathOrUrl;
+      if (pathOrUrl.startsWith('http')) return pathOrUrl.replace(/["'<>\s]/g, '');
 
       const { data, error } = await supabase.storage
         .from('rider-verification')
@@ -591,7 +633,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
       const { data, error } = await supabase
         .from('delivery_riders')
-        .select('id, vehicle_type, offers_delivery, offers_ride, photo_url, id_card_photo_url, verification_status, rejection_reason, created_at, profile_id, profiles!delivery_riders_profile_id_fkey(full_name, phone)')
+        .select('id, vehicle_type, offers_delivery, offers_ride, delivery_online, ride_online, photo_url, id_card_photo_url, verification_status, rejection_reason, created_at, profile_id, profiles!delivery_riders_profile_id_fkey(full_name, phone)')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -606,6 +648,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const withSignedUrls = await Promise.all(
         (data || []).map(async (r) => ({
           ...r,
+          photo_url: /^https:\/\//.test(r.photo_url || '') ? r.photo_url.replace(/["'<>\s]/g, '') : null,
           id_card_signed_url: await getSignedIdCardUrl(r.id_card_photo_url),
         }))
       );
@@ -637,8 +680,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const card = document.createElement('div');
         card.className = 'dr-card';
 
-        const name = rider.profiles?.full_name || 'নাম নেই';
-        const phone = rider.profiles?.phone || '—';
+        const name = esc(rider.profiles?.full_name || 'নাম নেই');
+        const phone = esc(rider.profiles?.phone || '—');
         const vehicleLabel = VEHICLE_LABELS[rider.vehicle_type] || rider.vehicle_type;
 
         let actionsHtml = '';
@@ -687,7 +730,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           `;
         } else if (rider.verification_status === 'rejected') {
           actionsHtml = `
-            ${rider.rejection_reason ? `<p class="dr-rejected-reason"><i class="fas fa-circle-info"></i> কারণ: ${rider.rejection_reason}</p>` : ''}
+            ${rider.rejection_reason ? `<p class="dr-rejected-reason"><i class="fas fa-circle-info"></i> কারণ: ${esc(rider.rejection_reason)}</p>` : ''}
             <div class="dr-actions">
               <button class="dr-btn-approve" data-action="approve"><i class="fas fa-rotate-left"></i> রিঅ্যাক্টিভেট (Approve)</button>
               <button class="dr-btn-delete" data-action="show-delete"><i class="fas fa-trash"></i> ডিলিট করুন</button>
@@ -708,6 +751,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             </div>
           `;
         }
+
+        const togglesHtml = rider.verification_status === 'approved' && (rider.offers_delivery || rider.offers_ride)
+          ? `<div class="dr-toggles">
+              ${rider.offers_delivery ? `<label class="dr-toggle-row"><span><i class="fas fa-box"></i> ডেলিভারি অনলাইন</span><input type="checkbox" class="dr-online-toggle" data-category="delivery" ${rider.delivery_online ? 'checked' : ''} /></label>` : ''}
+              ${rider.offers_ride ? `<label class="dr-toggle-row"><span><i class="fas fa-motorcycle"></i> রাইড অনলাইন</span><input type="checkbox" class="dr-online-toggle" data-category="ride" ${rider.ride_online ? 'checked' : ''} /></label>` : ''}
+            </div>`
+          : '';
 
         const photoBoxHtml = rider.photo_url
           ? `<div class="dr-doc-box" data-img="${rider.photo_url}"><img src="${rider.photo_url}" alt="নিজের ছবি" /><span class="dr-doc-label">নিজের ছবি</span></div>`
@@ -740,8 +790,31 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             ${idCardBoxHtml}
           </div>
 
-          ${actionsHtml}
+          ${togglesHtml}${actionsHtml}
         `;
+
+        // অনলাইন টগল (admin + moderator) — RPC দিয়ে, সরাসরি টেবিল আপডেট নয়
+        card.querySelectorAll('.dr-online-toggle').forEach((input) => {
+          input.addEventListener('change', async () => {
+            const want = input.checked;
+            const category = input.dataset.category;
+            input.disabled = true;
+            const { error } = await supabase.rpc('mod_set_rider_online', {
+              p_rider_id: rider.id,
+              p_category: category,
+              p_online: want,
+            });
+            input.disabled = false;
+            if (error) {
+              input.checked = !want;
+              window.showToast('টগল বদলানো যায়নি: ' + error.message, 'error');
+              return;
+            }
+            if (category === 'ride') rider.ride_online = want;
+            else rider.delivery_online = want;
+            window.showToast((category === 'ride' ? 'রাইড' : 'ডেলিভারি') + (want ? ' অনলাইন করা হয়েছে ✓' : ' অফলাইন করা হয়েছে ✓'), 'success');
+          });
+        });
 
         // lightbox বাইন্ড
         card.querySelectorAll('.dr-doc-box[data-img]').forEach((box) => {
