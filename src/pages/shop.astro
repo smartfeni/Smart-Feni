@@ -1,8 +1,13 @@
 ---
 // ============================================================
-// পেজ: /shop — সব শপের লিস্টিং (Club ডিরেক্টরির কার্ড-প্যাটার্নে,
-// কিন্তু শপ-স্পেসিফিক ইনফো: প্রোডাক্ট কাউন্ট, বাজার/এলাকার নাম)
-// আগে ছিল services/online-shop.astro তে, এখন এখানে সরে এসেছে।
+// পেজ: /shop — সব শপের লিস্টিং (রিডিজাইন, ব্যাচ ২)
+// - শপ ক্যাটাগরি চিপ ("সব" ডিফল্ট; যে ক্যাটাগরিতে ০ শপ সেটা লুকানো —
+//   DB ফাংশন shop_category_counts())
+// - শুধু খোলা ও সক্রিয় শপ আসে (list_public_shops); খোলা/বন্ধ লেবেল ইউজারকে
+//   দেখানো হয় না, বন্ধ শপ নিজে থেকেই লুকায়
+// - সার্চ: শপ ও প্রোডাক্ট (নাম/বিবরণ) সাজেশন (search_shop_catalog)
+// - ৩ রকম ভিউ: লিস্ট / গ্রিড / বড় কার্ড (localStorage-এ মনে রাখে)
+// - ছবি lazy + স্কেলিটন, প্রথম কয়েকটা eager (লোড দ্রুত)
 // ============================================================
 
 export const prerender = false;
@@ -19,17 +24,33 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         <p>নিবন্ধিত শপ থেকে পণ্য দেখুন, কার্টে যোগ করুন বা সরাসরি কল করে অর্ডার করুন</p>
       </div>
 
-      <div class="shop-search-box" id="shopSearchBox">
-        <i class="fas fa-search"></i>
-        <input
-          type="text"
-          id="shopSearchInput"
-          placeholder="যে শপটি খুঁজছেন, তার নাম লিখুন..."
-          autocomplete="off"
-        />
+      <div class="shop-search-wrap" id="shopSearchBox">
+        <div class="shop-search-box">
+          <i class="fas fa-search"></i>
+          <input
+            type="text"
+            id="shopSearchInput"
+            placeholder="শপ বা প্রোডাক্টের নাম লিখুন..."
+            autocomplete="off"
+            enterkeyhint="search"
+          />
+          <button type="button" id="shopSearchClear" class="search-clear" aria-label="মুছুন" style="display:none;">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+        <div class="suggest-box" id="suggestBox" style="display:none;"></div>
       </div>
 
-      <div id="shopsGrid" class="shops-grid"></div>
+      <div class="shop-toolbar">
+        <div class="cat-chips" id="catChips"></div>
+        <div class="view-switch" id="viewSwitch" role="group" aria-label="ভিউ">
+          <button type="button" data-view="list" aria-label="লিস্ট"><i class="fas fa-list"></i></button>
+          <button type="button" data-view="grid" aria-label="গ্রিড"><i class="fas fa-table-cells-large"></i></button>
+          <button type="button" data-view="big" aria-label="বড় কার্ড"><i class="fas fa-square"></i></button>
+        </div>
+      </div>
+
+      <div id="shopsGrid" class="shops-grid view-grid"></div>
 
       <div id="loadingState" class="state-msg">
         <div class="spinner"></div>
@@ -38,23 +59,23 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
       <div id="emptyState" class="state-msg" style="display:none;">
         <i class="fas fa-store-slash"></i>
-        <p>এই নামে কোনো শপ পাওয়া যায়নি</p>
+        <p>এখানে কোনো শপ পাওয়া যায়নি</p>
       </div>
 
     </div>
   </div>
 
-  <style>
+  <style is:global>
     .shops-page {
       min-height: 70vh;
       padding: 40px 0 80px;
     }
 
-    .page-header {
-      margin-bottom: 24px;
+    .shops-page .page-header {
+      margin-bottom: 20px;
     }
 
-    .page-header h1 {
+    .shops-page .page-header h1 {
       font-size: 1.8rem;
       font-weight: 700;
       color: #1B2A4A;
@@ -63,23 +84,29 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       gap: 10px;
     }
 
-    .page-header h1 i {
+    .shops-page .page-header h1 i {
       color: #FF6B35;
     }
 
-    .page-header p {
+    .shops-page .page-header p {
       font-size: 0.95rem;
       color: #5A6E85;
       margin-top: 6px;
     }
 
-    .shop-search-box {
+    /* ---------- সার্চ + সাজেশন ---------- */
+    .shop-search-wrap {
       position: relative;
-      margin-bottom: 24px;
+      margin-bottom: 16px;
       scroll-margin-top: 96px;
+      z-index: 20;
     }
 
-    .shop-search-box i {
+    .shop-search-box {
+      position: relative;
+    }
+
+    .shop-search-box > i.fa-search {
       position: absolute;
       left: 18px;
       top: 50%;
@@ -90,13 +117,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     .shop-search-box input {
       width: 100%;
-      padding: 14px 18px 14px 46px;
+      padding: 14px 44px 14px 46px;
       border-radius: 40px;
       border: 1.5px solid #E5EAF0;
       background: #fff;
       font-size: 0.92rem;
       font-family: inherit;
       color: #1B2A4A;
+      box-sizing: border-box;
       transition: all 0.2s ease;
     }
 
@@ -106,6 +134,169 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
     }
 
+    .search-clear {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 32px;
+      height: 32px;
+      border: 0;
+      border-radius: 50%;
+      background: #F4F7FC;
+      color: #5A6E85;
+      cursor: pointer;
+    }
+
+    .suggest-box {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(100% + 8px);
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 14px 36px rgba(15, 23, 42, 0.16);
+      overflow: hidden;
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+
+    .suggest-head {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #8FA0BC;
+      padding: 12px 16px 4px;
+      letter-spacing: 0.3px;
+    }
+
+    .suggest-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      text-decoration: none;
+      color: #1B2A4A;
+    }
+
+    .suggest-item:hover,
+    .suggest-item:active {
+      background: #FFF4EC;
+    }
+
+    .suggest-ico {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: #FFF0EA;
+      color: #FF6B35;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      overflow: hidden;
+      font-size: 0.85rem;
+    }
+
+    .suggest-ico img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .suggest-txt {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .suggest-txt b {
+      display: block;
+      font-size: 0.88rem;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+
+    .suggest-txt small {
+      display: block;
+      font-size: 0.74rem;
+      color: #8FA0BC;
+      margin-top: 1px;
+      overflow-wrap: anywhere;
+    }
+
+    .suggest-empty {
+      padding: 18px 16px;
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      text-align: center;
+    }
+
+    /* ---------- ক্যাটাগরি চিপ + ভিউ সুইচ ---------- */
+    .shop-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .cat-chips {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      flex: 1;
+      min-width: 0;
+      padding: 2px 2px 6px;
+      scrollbar-width: none;
+    }
+
+    .cat-chips::-webkit-scrollbar {
+      display: none;
+    }
+
+    .cat-chip {
+      flex-shrink: 0;
+      border: 1.5px solid #E5EAF0;
+      background: #fff;
+      color: #1B2A4A;
+      padding: 7px 15px;
+      border-radius: 40px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .cat-chip.sel {
+      background: #FF6B35;
+      border-color: #FF6B35;
+      color: #fff;
+    }
+
+    .view-switch {
+      display: flex;
+      flex-shrink: 0;
+      background: #fff;
+      border: 1.5px solid #E5EAF0;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .view-switch button {
+      border: 0;
+      background: transparent;
+      color: #8FA0BC;
+      width: 34px;
+      height: 34px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .view-switch button.sel {
+      background: #FFF0EA;
+      color: #FF6B35;
+    }
+
+    /* ---------- স্টেট ---------- */
     .state-msg {
       display: flex;
       flex-direction: column;
@@ -132,13 +323,31 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
-  </style>
 
-  <style is:global>
+    /* ---------- শপ কার্ড (৩ ভিউ) ---------- */
     .shops-grid {
       display: grid;
+      gap: 14px;
+    }
+
+    .shops-grid.view-big {
       grid-template-columns: 1fr;
-      gap: 16px;
+    }
+
+    .shops-grid.view-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .shops-grid.view-list {
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    @media (min-width: 720px) {
+      .shops-grid.view-big { grid-template-columns: repeat(2, 1fr); }
+      .shops-grid.view-grid { grid-template-columns: repeat(3, 1fr); }
+      .shops-grid.view-list { grid-template-columns: repeat(2, 1fr); }
     }
 
     .shop-card {
@@ -162,6 +371,11 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       width: 100%;
       aspect-ratio: 21/9;
       background: #F4F7FC;
+      overflow: hidden;
+    }
+
+    .view-grid .shop-cover-wrap {
+      aspect-ratio: 16/9;
     }
 
     .shop-cover-img {
@@ -175,6 +389,17 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       width: 100%;
       height: 100%;
       background: linear-gradient(135deg, #FFF0EA, #F4F7FC);
+    }
+
+    /* ছবি আসার আগে স্কেলিটন শিমার */
+    .img-skel {
+      background: linear-gradient(90deg, #F1F4F9 25%, #E7ECF4 50%, #F1F4F9 75%);
+      background-size: 200% 100%;
+      animation: skel 1.2s linear infinite;
+    }
+
+    @keyframes skel {
+      to { background-position: -200% 0; }
     }
 
     .my-shop-badge {
@@ -243,6 +468,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       align-items: center;
       gap: 6px;
       line-height: 1.3;
+      overflow-wrap: anywhere;
     }
 
     .shop-name .verified-badge {
@@ -258,7 +484,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       overflow: hidden;
       text-overflow: ellipsis;
       display: -webkit-box;
-      -webkit-line-clamp: 1;
+      -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
     }
 
@@ -283,14 +509,60 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       margin-right: 3px;
     }
 
+    /* গ্রিড ভিউ: ছোট কার্ড */
+    .view-grid .shop-logo-row { margin-top: -22px; padding: 0 12px; }
+    .view-grid .shop-logo-img,
+    .view-grid .shop-logo-placeholder { width: 46px; height: 46px; border-radius: 12px; font-size: 1.1rem; }
+    .view-grid .shop-body { padding: 8px 12px 14px; }
+    .view-grid .shop-name { font-size: 0.9rem; }
+    .view-grid .shop-tagline-text { display: none; }
+    .view-grid .shop-meta-chips { margin-top: 6px; gap: 6px; }
+    .view-grid .shop-chip.loc { display: none; }
+
+    /* লিস্ট ভিউ: সারি */
+    .view-list .shop-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 16px;
+    }
+
+    .view-list .shop-cover-wrap { display: none; }
+
+    .view-list .shop-logo-row {
+      margin-top: 0;
+      padding: 0;
+      flex-shrink: 0;
+    }
+
+    .view-list .shop-logo-img,
+    .view-list .shop-logo-placeholder { width: 54px; height: 54px; }
+    .view-list .shop-body { padding: 0; min-width: 0; flex: 1; }
+    .view-list .shop-name { font-size: 0.95rem; }
+    .view-list .shop-tagline-text { -webkit-line-clamp: 1; }
+    .view-list .my-shop-inline {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      background: #1B2A4A;
+      color: #fff;
+      padding: 2px 9px;
+      border-radius: 40px;
+      margin-left: 6px;
+    }
+
+    .my-shop-inline { display: none; }
+    .view-list .my-shop-badge { display: none; }
+
     @media (max-width: 480px) {
-      .shop-logo-img,
-      .shop-logo-placeholder {
+      .view-big .shop-logo-img,
+      .view-big .shop-logo-placeholder {
         width: 54px;
         height: 54px;
       }
 
-      .shop-logo-row {
+      .view-big .shop-logo-row {
         margin-top: -26px;
       }
     }
@@ -304,80 +576,210 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     const emptyState = document.getElementById('emptyState');
     const searchInput = document.getElementById('shopSearchInput');
     const searchBox = document.getElementById('shopSearchBox');
+    const searchClear = document.getElementById('shopSearchClear');
+    const suggestBox = document.getElementById('suggestBox');
+    const catChipsEl = document.getElementById('catChips');
+    const viewSwitch = document.getElementById('viewSwitch');
 
     let allShops = [];
-    let searchQuery = '';
     let myShopId = null;
-    let productCounts = {};
+    let activeCat = 'all';
+    let viewMode = 'grid';
+    let searchSeq = 0;
 
-    function filterShops(query) {
-      const q = query.trim().toLowerCase();
-      if (!q) return allShops;
-      return allShops.filter((s) => {
-        const nameMatch = (s.name || '').toLowerCase().includes(q);
-        const slugMatch = (s.slug || '').toLowerCase().includes(q);
-        return nameMatch || slugMatch;
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function toBn(n) {
+      return String(n).replace(/[0-9]/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+    }
+
+    // ---------- ভিউ মোড (মনে রাখে) ----------
+    try {
+      const saved = localStorage.getItem('sf_shop_view');
+      if (['list', 'grid', 'big'].includes(saved)) viewMode = saved;
+    } catch (e) { /* ignore */ }
+
+    function applyView() {
+      grid.className = 'shops-grid view-' + viewMode;
+      viewSwitch.querySelectorAll('button').forEach((b) => {
+        b.classList.toggle('sel', b.dataset.view === viewMode);
       });
     }
 
-    function sortShops(list) {
-      return [...list].sort((a, b) => {
-        const aMine = a.id === myShopId ? 1 : 0;
-        const bMine = b.id === myShopId ? 1 : 0;
-        return bMine - aMine;
-      });
-    }
+    viewSwitch.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-view]');
+      if (!btn) return;
+      viewMode = btn.dataset.view;
+      try { localStorage.setItem('sf_shop_view', viewMode); } catch (err) { /* ignore */ }
+      applyView();
+    });
 
+    // ---------- শপ কার্ড ----------
     function renderShops() {
-      const filtered = filterShops(searchQuery);
-      const sorted = sortShops(filtered);
+      const list = [...allShops].sort((a, b) => {
+        const am = a.id === myShopId ? 1 : 0;
+        const bm = b.id === myShopId ? 1 : 0;
+        return bm - am;
+      });
 
       grid.innerHTML = '';
 
-      if (sorted.length === 0) {
+      if (list.length === 0) {
         emptyState.style.display = 'flex';
         return;
       }
-
       emptyState.style.display = 'none';
 
-      sorted.forEach((shop) => {
+      const frag = document.createDocumentFragment();
+
+      list.forEach((shop, idx) => {
         const card = document.createElement('a');
-        card.href = `/${shop.slug}`;
+        card.href = '/' + encodeURIComponent(shop.slug);
         card.className = 'shop-card';
 
+        const eager = idx < 4;
+        const imgAttrs = eager ? 'fetchpriority="high"' : 'loading="lazy"';
+
         const coverHtml = shop.cover_image
-          ? `<img class="shop-cover-img" src="${shop.cover_image}" alt="${shop.name}" loading="lazy" />`
+          ? `<img class="shop-cover-img" src="${esc(shop.cover_image)}" alt="${esc(shop.name)}" ${imgAttrs} decoding="async" onload="this.parentNode.classList.remove('img-skel')" />`
           : `<div class="shop-cover-placeholder"></div>`;
 
         const logoHtml = shop.logo_image
-          ? `<img class="shop-logo-img" src="${shop.logo_image}" alt="${shop.name}" loading="lazy" />`
+          ? `<img class="shop-logo-img" src="${esc(shop.logo_image)}" alt="${esc(shop.name)}" ${imgAttrs} decoding="async" />`
           : `<div class="shop-logo-placeholder"><i class="fas fa-store"></i></div>`;
 
-        const count = productCounts[shop.id] || 0;
+        const count = shop.product_count || 0;
+        const mine = shop.id === myShopId;
 
         card.innerHTML = `
-          <div class="shop-cover-wrap">
+          <div class="shop-cover-wrap ${shop.cover_image ? 'img-skel' : ''}">
             ${coverHtml}
-            ${shop.id === myShopId ? '<span class="my-shop-badge"><i class="fas fa-star"></i> আমার শপ</span>' : ''}
+            ${mine ? '<span class="my-shop-badge"><i class="fas fa-star"></i> আমার শপ</span>' : ''}
           </div>
           <div class="shop-logo-row">${logoHtml}</div>
           <div class="shop-body">
             <p class="shop-name">
-              ${shop.name}
+              <span>${esc(shop.name)}</span>
               ${shop.is_verified ? '<i class="fas fa-circle-check verified-badge"></i>' : ''}
+              ${mine ? '<span class="my-shop-inline">আমার শপ</span>' : ''}
             </p>
-            ${shop.tagline ? `<p class="shop-tagline-text">${shop.tagline}</p>` : ''}
+            ${shop.tagline ? `<p class="shop-tagline-text">${esc(shop.tagline)}</p>` : ''}
             <div class="shop-meta-chips">
-              ${shop.location_name ? `<span class="shop-chip"><i class="fas fa-location-dot"></i> ${shop.location_name}</span>` : ''}
-              <span class="shop-chip"><i class="fas fa-box"></i> ${count} প্রোডাক্ট</span>
+              ${shop.location_name ? `<span class="shop-chip loc"><i class="fas fa-location-dot"></i> ${esc(shop.location_name)}</span>` : ''}
+              <span class="shop-chip"><i class="fas fa-box"></i> ${toBn(count)} প্রোডাক্ট</span>
             </div>
           </div>
         `;
 
-        grid.appendChild(card);
+        frag.appendChild(card);
+      });
+
+      grid.appendChild(frag);
+    }
+
+    // ---------- ক্যাটাগরি চিপ ----------
+    function renderCatChips(cats) {
+      catChipsEl.innerHTML = '';
+      const items = [{ slug: 'all', name_bn: 'সব' }, ...cats];
+      items.forEach((c) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'cat-chip' + (c.slug === activeCat ? ' sel' : '');
+        b.textContent = c.name_bn;
+        b.addEventListener('click', () => {
+          activeCat = c.slug;
+          catChipsEl.querySelectorAll('.cat-chip').forEach((x) => x.classList.remove('sel'));
+          b.classList.add('sel');
+          loadShops();
+        });
+        catChipsEl.appendChild(b);
       });
     }
+
+    async function loadCategories() {
+      const { data } = await supabase.rpc('shop_category_counts');
+      // ০ শপের ক্যাটাগরি DB ফাংশনই বাদ দেয়; এখানে আবার নিশ্চিত করা হলো
+      const cats = (data || []).filter((c) => c.shop_count > 0);
+      renderCatChips(cats);
+    }
+
+    // ---------- সার্চ সাজেশন ----------
+    function hideSuggest() {
+      suggestBox.style.display = 'none';
+      suggestBox.innerHTML = '';
+    }
+
+    function renderSuggest(rows, q) {
+      const shops = rows.filter((r) => r.kind === 'shop');
+      const prods = rows.filter((r) => r.kind === 'product');
+
+      if (rows.length === 0) {
+        suggestBox.innerHTML = `<div class="suggest-empty">"${esc(q)}" নামে কিছু পাওয়া যায়নি</div>`;
+        suggestBox.style.display = 'block';
+        return;
+      }
+
+      let html = '';
+
+      if (shops.length) {
+        html += '<div class="suggest-head">শপ</div>';
+        shops.forEach((s) => {
+          html += `<a class="suggest-item" href="/${encodeURIComponent(s.shop_slug)}">
+            <span class="suggest-ico">${s.shop_logo ? `<img src="${esc(s.shop_logo)}" alt="" loading="lazy" />` : '<i class="fas fa-store"></i>'}</span>
+            <span class="suggest-txt"><b>${esc(s.shop_name)}</b></span>
+          </a>`;
+        });
+      }
+
+      if (prods.length) {
+        html += '<div class="suggest-head">প্রোডাক্ট</div>';
+        prods.forEach((p) => {
+          const sub = esc(p.shop_name) + (p.matched_description ? ' · বিবরণে মিলেছে' : '') + (p.is_sold_out ? ' · স্টক নেই' : '');
+          html += `<a class="suggest-item" href="/product/${encodeURIComponent(p.listing_id)}">
+            <span class="suggest-ico"><i class="fas fa-box"></i></span>
+            <span class="suggest-txt"><b>${esc(p.title)}</b><small>${sub}</small></span>
+          </a>`;
+        });
+      }
+
+      suggestBox.innerHTML = html;
+      suggestBox.style.display = 'block';
+    }
+
+    let debounceTimer;
+    searchInput.addEventListener('input', (e) => {
+      const q = e.target.value.trim();
+      searchClear.style.display = e.target.value ? 'block' : 'none';
+      clearTimeout(debounceTimer);
+
+      if (q.length < 2) {
+        searchSeq++;
+        hideSuggest();
+        return;
+      }
+
+      debounceTimer = setTimeout(async () => {
+        const seq = ++searchSeq;
+        const { data, error } = await supabase.rpc('search_shop_catalog', {
+          p_q: q,
+          p_shop_limit: 4,
+          p_product_limit: 8,
+        });
+        if (seq !== searchSeq) return; // পুরনো রেসপন্স বাদ
+        if (error) { hideSuggest(); return; }
+        renderSuggest(data || [], q);
+      }, 250);
+    });
+
+    searchClear.addEventListener('click', () => {
+      searchInput.value = '';
+      searchClear.style.display = 'none';
+      searchSeq++;
+      hideSuggest();
+      searchInput.focus();
+    });
 
     searchInput.addEventListener('focus', () => {
       setTimeout(() => {
@@ -385,15 +787,11 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       }, 300);
     });
 
-    let debounceTimer;
-    searchInput.addEventListener('input', (e) => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        searchQuery = e.target.value;
-        renderShops();
-      }, 120);
+    document.addEventListener('click', (e) => {
+      if (!searchBox.contains(e.target)) hideSuggest();
     });
 
+    // ---------- ডেটা লোড ----------
     async function loadMyShopId() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
@@ -407,43 +805,30 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       myShopId = data?.shop_id || null;
     }
 
-    async function loadProductCounts(shops) {
-      const shopIds = shops.map((s) => s.id).filter(Boolean);
-      if (shopIds.length === 0) return;
-
-      const { data } = await supabase
-        .from('listings')
-        .select('shop_id')
-        .eq('category', 'online-shop')
-        .eq('status', 'active')
-        .in('shop_id', shopIds);
-
-      (data || []).forEach((row) => {
-        productCounts[row.shop_id] = (productCounts[row.shop_id] || 0) + 1;
-      });
-    }
-
     async function loadShops() {
-      await loadMyShopId();
+      loadingState.style.display = 'flex';
+      emptyState.style.display = 'none';
 
-      const { data, error } = await supabase
-        .from('shops')
-        .select('*')
-        .eq('is_active', true)
-        .order('shop_order', { ascending: true });
+      const { data, error } = await supabase.rpc('list_public_shops', {
+        p_category: activeCat === 'all' ? null : activeCat,
+        p_limit: 200,
+      });
 
       loadingState.style.display = 'none';
 
       if (error) {
-        grid.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        grid.innerHTML = `<p style="grid-column:1/-1;text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি, একটু পরে আবার চেষ্টা করুন</p>`;
         return;
       }
 
       allShops = data || [];
-      await loadProductCounts(allShops);
       renderShops();
     }
 
+    applyView();
+    // প্যারালালে লোড: শপ তালিকা আটকে না থেকে সাথে সাথে আসে, "আমার শপ" ব্যাজ পরে বসে
     loadShops();
+    loadCategories();
+    loadMyShopId().then(() => { if (myShopId && allShops.length) renderShops(); });
   </script>
 </BaseLayout>
