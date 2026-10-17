@@ -18,12 +18,16 @@
 import { toWhatsAppNumber } from '../../lib/whatsapp.js';
 import { formatPrice } from '../../lib/price.js';
 
-const { shop, products } = Astro.props;
+const {
+  shop,
+  products,
+  total = products.length,
+  categories = [],
+  pageSize = 10,
+} = Astro.props;
 
-const sortedProducts = [...products].sort((a, b) => {
-  if (!!a.is_sold_out !== !!b.is_sold_out) return a.is_sold_out ? 1 : -1;
-  return (b.is_best_seller ? 1 : 0) - (a.is_best_seller ? 1 : 0);
-});
+// products আগে থেকেই DB তে সাজানো: স্টকে আছে আগে, বেস্ট সেলার আগে, নতুন আগে
+const sortedProducts = products;
 ---
 
 <div class="shop-page">
@@ -44,7 +48,7 @@ const sortedProducts = [...products].sort((a, b) => {
           {shop.location_name && (
             <span class="meta-chip"><i class="fas fa-location-dot"></i> {shop.location_name}</span>
           )}
-          <span class="meta-chip"><i class="fas fa-box"></i> {products.length} প্রোডাক্ট</span>
+          <span class="meta-chip"><i class="fas fa-box"></i> {total} প্রোডাক্ট</span>
         </div>
       </div>
 
@@ -81,15 +85,24 @@ const sortedProducts = [...products].sort((a, b) => {
     <div class="products-block">
       <div class="products-block-header">
         <p class="section-label"><i class="fas fa-shop"></i> প্রোডাক্টসমূহ</p>
-        {products.length > 0 && (
+        {total > 0 && (
           <div class="search-box">
             <i class="fas fa-magnifying-glass"></i>
-            <input type="text" id="productSearchInput" placeholder="প্রোডাক্ট খুঁজুন..." />
+            <input type="text" id="productSearchInput" placeholder="প্রোডাক্টের নাম বা বিবরণ খুঁজুন..." autocomplete="off" />
           </div>
         )}
       </div>
 
-      {products.length === 0 ? (
+      {categories.length > 0 && (
+        <div class="pcat-tabs" id="pcatTabs">
+          <button type="button" class="pcat-tab sel" data-cat="all">সব</button>
+          {categories.map((c) => (
+            <button type="button" class="pcat-tab" data-cat={c.id}>{c.name}</button>
+          ))}
+        </div>
+      )}
+
+      {total === 0 ? (
         <div class="empty-state">
           <i class="fas fa-box-open"></i>
           <p>এখনো কোনো প্রোডাক্ট যোগ হয়নি</p>
@@ -97,17 +110,22 @@ const sortedProducts = [...products].sort((a, b) => {
       ) : (
         <>
           <div class="product-grid" id="productGrid">
-            {sortedProducts.map((item) => (
+            {sortedProducts.map((item, idx) => (
               <a
                 href={`/product/${item.id}`}
                 class={`product-card ${item.is_best_seller ? 'best-seller-card' : ''} ${item.is_sold_out ? 'sold-out-card' : ''}`}
                 data-listing-id={item.id}
                 data-shop-id={shop.id}
-                data-search={`${item.title || ''} ${item.description || ''}`.toLowerCase()}
               >
                 <div class="product-photo-wrap">
                   {item.images && item.images.length > 0 ? (
-                    <img src={item.images[0]} alt={item.title} class="product-photo" />
+                    <img
+                      src={item.images[0]}
+                      alt={item.title}
+                      class="product-photo"
+                      loading={idx < 4 ? 'eager' : 'lazy'}
+                      decoding="async"
+                    />
                   ) : (
                     <div class="product-icon">
                       <i class="fas fa-box"></i>
@@ -139,12 +157,23 @@ const sortedProducts = [...products].sort((a, b) => {
           </div>
 
           <p class="no-results" id="noResults" style="display:none;">কোনো ফলাফল পাওয়া যায়নি</p>
+          <div class="grid-loading" id="gridLoading" style="display:none;"><div class="grid-spinner"></div></div>
+          <p class="end-note" id="endNote" style="display:none;">সব প্রোডাক্ট দেখানো হয়েছে</p>
+          <div id="loadSentinel" style="height:1px;"></div>
         </>
       )}
     </div>
   </div>
 
-  <script type="application/json" id="shopMetaData" set:html={JSON.stringify({ slug: shop.slug, name: shop.name })} />
+  <div class="shop-suggest" id="shopSuggest" aria-hidden="true">
+    <div class="shop-suggest-head">
+      <span><i class="fas fa-store"></i> আরও শপ দেখুন</span>
+      <button type="button" id="shopSuggestClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="shop-suggest-track" id="shopSuggestTrack"></div>
+  </div>
+
+  <script type="application/json" id="shopMetaData" set:html={JSON.stringify({ slug: shop.slug, name: shop.name, id: shop.id, total, pageSize })} />
 </div>
 
 <style is:global>
@@ -552,87 +581,501 @@ const sortedProducts = [...products].sort((a, b) => {
     font-size: 0.95rem;
     padding: 40px 0;
   }
+
+  /* প্রোডাক্ট ক্যাটাগরি ট্যাব */
+  .pcat-tabs {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 2px 12px;
+    margin-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .pcat-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pcat-tab {
+    flex-shrink: 0;
+    border: 1.5px solid #E5EAF0;
+    background: #fff;
+    color: #1B2A4A;
+    padding: 7px 15px;
+    border-radius: 40px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .pcat-tab.sel {
+    background: #FF6B35;
+    border-color: #FF6B35;
+    color: #fff;
+  }
+
+  .grid-loading {
+    display: flex;
+    justify-content: center;
+    padding: 24px 0;
+  }
+
+  .grid-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid #E5EAF0;
+    border-top-color: #FF6B35;
+    border-radius: 50%;
+    animation: shopSpin 0.8s linear infinite;
+  }
+
+  @keyframes shopSpin {
+    to { transform: rotate(360deg); }
+  }
+
+  .end-note {
+    text-align: center;
+    color: #A0AFC0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 22px 0 8px;
+  }
+
+  .shop-page {
+    padding-bottom: 150px;
+  }
+
+  /* শেষে অন্য শপের মিনি সাজেশন (স্ক্রলে আসে, উপরে স্ক্রলে লুকায়) */
+  .shop-suggest {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(70px + env(safe-area-inset-bottom));
+    z-index: 900;
+    background: #fff;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -8px 28px rgba(15, 23, 42, 0.14);
+    padding: 10px 0 12px;
+    transform: translateY(130%);
+    transition: transform 0.28s ease;
+    pointer-events: none;
+  }
+
+  .shop-suggest.show {
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .shop-suggest-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px 8px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #1B2A4A;
+  }
+
+  .shop-suggest-head i {
+    color: #FF6B35;
+    margin-right: 4px;
+  }
+
+  .shop-suggest-head button {
+    border: 0;
+    background: #F4F7FC;
+    color: #5A6E85;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .shop-suggest-track {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 0 16px;
+    scrollbar-width: none;
+  }
+
+  .shop-suggest-track::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ss-card {
+    flex: 0 0 150px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 9px;
+    text-decoration: none;
+    color: #1B2A4A;
+  }
+
+  .ss-logo {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+    background: #FFF0EA;
+    color: #FF6B35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    font-size: 0.9rem;
+  }
+
+  .ss-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .ss-txt {
+    min-width: 0;
+  }
+
+  .ss-txt b {
+    display: block;
+    font-size: 0.78rem;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .ss-txt small {
+    font-size: 0.68rem;
+    color: #8FA0BC;
+  }
 </style>
 
 <script>
   import { supabase } from '../../lib/supabase.js';
+  import { formatPrice } from '../../lib/price.js';
 
   const metaEl = document.getElementById('shopMetaData');
   const shopMeta = metaEl ? JSON.parse(metaEl.textContent) : {};
+  const PAGE = shopMeta.pageSize || 10;
+  const COLS = 'id, title, price, price_unit, images, is_sold_out, is_best_seller, shop_category_id';
 
-  const cards = document.querySelectorAll('.product-card');
+  const grid = document.getElementById('productGrid');
   const searchInput = document.getElementById('productSearchInput');
   const noResults = document.getElementById('noResults');
+  const gridLoading = document.getElementById('gridLoading');
+  const endNote = document.getElementById('endNote');
+  const sentinel = document.getElementById('loadSentinel');
+  const tabsEl = document.getElementById('pcatTabs');
+  const suggestEl = document.getElementById('shopSuggest');
+  const suggestTrack = document.getElementById('shopSuggestTrack');
 
   let currentUserId = null;
 
-  searchInput?.addEventListener('input', () => {
-    const keyword = searchInput.value.trim().toLowerCase();
-    let visibleCount = 0;
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
 
-    cards.forEach((card) => {
-      const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
-      if (matches) {
-        card.classList.remove('hidden');
-        visibleCount++;
-      } else {
-        card.classList.add('hidden');
-      }
+  // ---------- স্টেট ----------
+  const state = {
+    cat: 'all',
+    q: '',
+    offset: grid ? grid.children.length : 0, // সার্ভার থেকে প্রথম পেজ আগেই এসেছে
+    total: shopMeta.total || 0,
+    loading: false,
+    done: grid ? grid.children.length >= (shopMeta.total || 0) : true,
+    seq: 0,
+  };
+
+  // ---------- কার্ড (সার্ভারের মার্কআপের সাথে হুবহু মিল) ----------
+  function cardHtml(item) {
+    const img = item.images && item.images.length > 0
+      ? `<img src="${esc(item.images[0])}" alt="${esc(item.title)}" class="product-photo" loading="lazy" decoding="async" />`
+      : '<div class="product-icon"><i class="fas fa-box"></i></div>';
+
+    return `
+      <div class="product-photo-wrap">
+        ${img}
+        ${item.is_best_seller ? '<span class="best-seller-overlay"><i class="fas fa-star"></i> বেস্ট সেলার</span>' : ''}
+        ${item.is_sold_out ? '<span class="sold-out-overlay"><i class="fas fa-ban"></i> সোল্ড আউট</span>' : ''}
+      </div>
+      <div class="product-card-body">
+        <h3 class="product-title">${esc(item.title)}</h3>
+        ${item.price ? `<p class="product-price">${esc(formatPrice(item.price, item.price_unit))}</p>` : ''}
+        ${item.is_sold_out
+          ? '<button type="button" class="add-cart-btn sold-out" disabled><i class="fas fa-ban"></i> স্টক নেই</button>'
+          : `<button type="button" class="add-cart-btn" data-listing-id="${esc(item.id)}" data-shop-id="${esc(shopMeta.id)}"><i class="fas fa-cart-plus"></i> কার্টে যোগ করুন</button>`}
+      </div>`;
+  }
+
+  function appendCards(rows) {
+    const frag = document.createDocumentFragment();
+    rows.forEach((item) => {
+      const a = document.createElement('a');
+      a.href = '/product/' + encodeURIComponent(item.id);
+      a.className = 'product-card' + (item.is_best_seller ? ' best-seller-card' : '') + (item.is_sold_out ? ' sold-out-card' : '');
+      a.dataset.listingId = item.id;
+      a.dataset.shopId = shopMeta.id;
+      a.innerHTML = cardHtml(item);
+      frag.appendChild(a);
     });
+    grid.appendChild(frag);
+  }
 
-    if (noResults) {
-      noResults.style.display = visibleCount === 0 ? 'block' : 'none';
+  // ---------- সার্ভার থেকে পেজ আনা ----------
+  async function loadMore(reset) {
+    if (!grid || state.loading) return;
+    if (!reset && state.done) return;
+
+    state.loading = true;
+    const seq = ++state.seq;
+
+    if (reset) {
+      state.offset = 0;
+      state.done = false;
+      grid.innerHTML = '';
+      noResults.style.display = 'none';
+      endNote.style.display = 'none';
+      resetEnd();
     }
+    gridLoading.style.display = 'flex';
+
+    let qb = supabase
+      .from('listings')
+      .select(COLS, { count: 'exact' })
+      .eq('category', 'online-shop')
+      .eq('shop_id', shopMeta.id)
+      .eq('status', 'active');
+
+    if (state.cat !== 'all') qb = qb.eq('shop_category_id', state.cat);
+
+    // সার্চ: নাম বা বিবরণে মিল (বিশেষ চিহ্ন বাদ দেওয়া হয়, যাতে ফিল্টার ভেঙে না যায়)
+    const clean = state.q.replace(/[,()%*_\\"]/g, ' ').trim();
+    if (clean) qb = qb.or(`title.ilike."%${clean}%",description.ilike."%${clean}%"`);
+
+    const { data, count, error } = await qb
+      .order('is_sold_out', { ascending: true, nullsFirst: true })
+      .order('is_best_seller', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .range(state.offset, state.offset + PAGE - 1);
+
+    if (seq !== state.seq) { state.loading = false; return; } // পুরনো রেসপন্স বাদ
+    gridLoading.style.display = 'none';
+    state.loading = false;
+
+    if (error) {
+      window.showToast?.('প্রোডাক্ট লোড করা যায়নি, আবার চেষ্টা করুন', 'error');
+      return;
+    }
+
+    const rows = data || [];
+    appendCards(rows);
+    state.offset += rows.length;
+    state.total = count ?? state.total;
+    state.done = rows.length < PAGE || state.offset >= state.total;
+
+    if (state.offset === 0) {
+      noResults.style.display = 'block';
+    } else if (state.done) {
+      endNote.style.display = 'block';
+      markEnd();
+    }
+  }
+
+  // স্ক্রল করে নিচে এলে পরের পেজ
+  if (sentinel && 'IntersectionObserver' in window) {
+    new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMore(false);
+    }, { rootMargin: '500px 0px' }).observe(sentinel);
+  }
+
+  // প্রথম পেজেই সব প্রোডাক্ট থাকলে শেষের ধাপ সাথে সাথে চালু
+  if (grid && state.done && state.offset > 0) {
+    endNote.style.display = 'block';
+    markEnd();
+  }
+
+  // ---------- ক্যাটাগরি ট্যাব ও সার্চ ----------
+  tabsEl?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.pcat-tab');
+    if (!btn) return;
+    state.cat = btn.dataset.cat;
+    tabsEl.querySelectorAll('.pcat-tab').forEach((b) => b.classList.toggle('sel', b === btn));
+    state.loading = false;
+    loadMore(true);
   });
 
-  document.querySelectorAll('.add-cart-btn:not(.sold-out)').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+  let searchTimer;
+  searchInput?.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      const q = searchInput.value.trim();
+      if (q === state.q) return;
+      state.q = q;
+      state.loading = false;
+      loadMore(true);
+    }, 300);
+  });
 
-      if (btn.disabled) return;
+  // ---------- শেষে অন্য শপের সাজেশন স্ট্রিপ ----------
+  // নিয়ম: প্রোডাক্ট শেষ হওয়ার পর আরও কিছুটা স্ক্রল (বা টান) করলে আসে, ১ম বারেই নয়;
+  // উপরে স্ক্রল করলে লুকায়; ✕ চাপলে এই ভিজিটে আর আসে না।
+  let endReached = false;
+  let endAt = 0;
+  let downAcc = 0;
+  let suggestLoaded = false;
+  let suggestHasCards = false;
+  let suggestDismissed = false;
+  let lastY = window.scrollY;
 
-      if (!currentUserId) {
-        window.openAuthModal?.('login');
-        return;
-      }
+  function markEnd() {
+    if (endReached) return;
+    endReached = true;
+    endAt = Date.now();
+    downAcc = 0;
+    loadSuggestions();
+  }
 
-      const listingId = btn.dataset.listingId;
-      const originalHtml = btn.innerHTML;
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  function resetEnd() {
+    endReached = false;
+    downAcc = 0;
+    hideStrip();
+  }
 
-      const { data: existing } = await supabase
-        .from('cart_items')
-        .select('id, quantity')
-        .eq('user_id', currentUserId)
-        .eq('listing_id', listingId)
-        .maybeSingle();
+  async function loadSuggestions() {
+    if (suggestLoaded) return;
+    suggestLoaded = true;
 
-      if (existing) {
-        await supabase.from('cart_items').update({ quantity: existing.quantity + 1 }).eq('id', existing.id);
-      } else {
-        await supabase.from('cart_items').insert({ user_id: currentUserId, listing_id: listingId, quantity: 1 });
-      }
+    const { data } = await supabase.rpc('list_public_shops', { p_category: null, p_limit: 30 });
+    const others = (data || []).filter((s) => s.id !== shopMeta.id);
 
-      await supabase.from('product_events').insert({
-        event_type: 'cart_add',
-        shop_id: btn.dataset.shopId,
-        listing_id: listingId,
-        user_id: currentUserId,
-      });
+    // এলোমেলো করে সর্বোচ্চ ৮টা
+    for (let i = others.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [others[i], others[j]] = [others[j], others[i]];
+    }
+    const picks = others.slice(0, 8);
+    if (picks.length === 0) return;
 
-      btn.classList.add('added');
-      btn.innerHTML = '<i class="fas fa-check"></i>';
-      btn.disabled = false;
+    const bn = (n) => String(n).replace(/[0-9]/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+    suggestTrack.innerHTML = picks.map((s) => `
+      <a class="ss-card" href="/${encodeURIComponent(s.slug)}">
+        <span class="ss-logo">${s.logo_image ? `<img src="${esc(s.logo_image)}" alt="" loading="lazy" decoding="async" />` : '<i class="fas fa-store"></i>'}</span>
+        <span class="ss-txt"><b>${esc(s.name)}</b><small>${bn(s.product_count || 0)} প্রোডাক্ট</small></span>
+      </a>`).join('');
+    suggestHasCards = true;
+  }
 
-      setTimeout(() => {
-        btn.classList.remove('added');
-        btn.innerHTML = originalHtml;
-      }, 1200);
+  function showStrip() {
+    if (!suggestHasCards || suggestDismissed) return;
+    suggestEl.classList.add('show');
+    suggestEl.setAttribute('aria-hidden', 'false');
+  }
 
-      refreshCartCount();
+  function hideStrip() {
+    suggestEl?.classList.remove('show');
+    suggestEl?.setAttribute('aria-hidden', 'true');
+  }
+
+  function nearEnd() {
+    const el = endNote;
+    if (!el) return false;
+    return el.getBoundingClientRect().top < window.innerHeight + 120;
+  }
+
+  // delta > 0 = নিচে স্ক্রল/টান, delta < 0 = উপরে
+  function onScrollDelta(delta) {
+    if (!endReached) return;
+    if (delta < -6) {
+      hideStrip();
+      downAcc = 0;
+      return;
+    }
+    if (delta > 0) {
+      downAcc += delta;
+      if (downAcc >= 140 && Date.now() - endAt > 1000 && nearEnd()) showStrip();
+    }
+  }
+
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY;
+    onScrollDelta(y - lastY);
+    lastY = y;
+  }, { passive: true });
+
+  // পেজ ছোট হলে স্ক্রল ইভেন্ট আসে না, তাই হুইল/টাচ টানও গোনা হয়
+  window.addEventListener('wheel', (e) => onScrollDelta(e.deltaY), { passive: true });
+
+  let touchY = 0;
+  window.addEventListener('touchstart', (e) => { touchY = e.touches[0].clientY; }, { passive: true });
+  window.addEventListener('touchmove', (e) => {
+    const y = e.touches[0].clientY;
+    onScrollDelta(touchY - y);
+    touchY = y;
+  }, { passive: true });
+
+  document.getElementById('shopSuggestClose')?.addEventListener('click', () => {
+    suggestDismissed = true;
+    hideStrip();
+  });
+
+  // ---------- কার্টে যোগ (ইভেন্ট ডেলিগেশন: পরে লোড হওয়া কার্ডেও কাজ করে) ----------
+  grid?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.add-cart-btn');
+    if (!btn || btn.classList.contains('sold-out')) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (btn.disabled) return;
+
+    if (!currentUserId) {
+      window.openAuthModal?.('login');
+      return;
+    }
+
+    const listingId = btn.dataset.listingId;
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+    const { data: existing } = await supabase
+      .from('cart_items')
+      .select('id, quantity')
+      .eq('user_id', currentUserId)
+      .eq('listing_id', listingId)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase.from('cart_items').update({ quantity: existing.quantity + 1 }).eq('id', existing.id);
+    } else {
+      await supabase.from('cart_items').insert({ user_id: currentUserId, listing_id: listingId, quantity: 1 });
+    }
+
+    await supabase.from('product_events').insert({
+      event_type: 'cart_add',
+      shop_id: btn.dataset.shopId,
+      listing_id: listingId,
+      user_id: currentUserId,
     });
+
+    btn.classList.add('added');
+    btn.innerHTML = '<i class="fas fa-check"></i>';
+    btn.disabled = false;
+
+    setTimeout(() => {
+      btn.classList.remove('added');
+      btn.innerHTML = originalHtml;
+    }, 1200);
+
+    refreshCartCount();
   });
 
   document.getElementById('shareShopBtn')?.addEventListener('click', async () => {

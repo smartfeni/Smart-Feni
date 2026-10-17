@@ -54,6 +54,9 @@ if (club) {
 // club না পাওয়া গেলে shops টেবিলে চেক
 let shop = null;
 let shopProducts = [];
+let shopTotal = 0;
+let shopCategories = [];
+const SHOP_PAGE_SIZE = 10;
 
 if (!club) {
   const { data: shopData, error: shopError } = await supabase
@@ -70,15 +73,40 @@ if (!club) {
   shop = shopData || null;
 
   if (shop) {
-    const { data: productData } = await supabase
-      .from('listings')
-      .select('*')
-      .eq('category', 'online-shop')
-      .eq('shop_id', shop.id)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false });
+    // ব্যাচ ৩: শুধু প্রথম ১০টা প্রোডাক্ট সার্ভার থেকে (বাকি স্ক্রলে ক্লায়েন্ট আনে),
+    // সাথে শপের প্রোডাক্ট ক্যাটাগরি; যে ক্যাটাগরিতে প্রোডাক্ট নেই সেটা বাদ
+    const [firstPage, catRows, catLinks] = await Promise.all([
+      supabase
+        .from('listings')
+        .select('id, title, price, price_unit, images, is_sold_out, is_best_seller, shop_category_id', { count: 'exact' })
+        .eq('category', 'online-shop')
+        .eq('shop_id', shop.id)
+        .eq('status', 'active')
+        .order('is_sold_out', { ascending: true, nullsFirst: true })
+        .order('is_best_seller', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .range(0, SHOP_PAGE_SIZE - 1),
+      supabase
+        .from('shop_product_categories')
+        .select('id, name')
+        .eq('shop_id', shop.id)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('listings')
+        .select('shop_category_id')
+        .eq('category', 'online-shop')
+        .eq('shop_id', shop.id)
+        .eq('status', 'active')
+        .not('shop_category_id', 'is', null)
+        .limit(2000),
+    ]);
 
-    shopProducts = productData || [];
+    shopProducts = firstPage.data || [];
+    shopTotal = firstPage.count ?? shopProducts.length;
+
+    const usedCats = new Set((catLinks.data || []).map((r) => r.shop_category_id));
+    shopCategories = (catRows.data || []).filter((c) => usedCats.has(c.id));
   }
 }
 
@@ -109,7 +137,7 @@ const canonicalPath = club ? `/${club.slug}` : shop ? `/${shop.slug}` : undefine
   {club ? (
     <ClubProfile club={club} members={members} posts={posts} />
   ) : shop ? (
-    <ShopProfile shop={shop} products={shopProducts} />
+    <ShopProfile shop={shop} products={shopProducts} total={shopTotal} categories={shopCategories} pageSize={SHOP_PAGE_SIZE} />
   ) : (
     <section class="not-found">
       <div class="container">
