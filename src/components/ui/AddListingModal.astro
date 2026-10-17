@@ -106,7 +106,7 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     )}
 
     <label class="listing-label">{titleLabel}<span class="required-mark">*</span></label>
-    <input type="text" class="listing-input" id="listingTitle" required placeholder="" />
+    <input type="text" class="listing-input" id="listingTitle" required placeholder="" maxlength={isShopProduct ? 80 : undefined} />
     <div class="field-error-msg" data-error-for="listingTitle">
       <i class="fas fa-circle-exclamation"></i><span>{titleLabel} দিন</span>
     </div>
@@ -115,9 +115,32 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     <textarea class="listing-input" id="listingDescription" rows="3" placeholder=""></textarea>
     {isShopProduct && <p class="listing-field-hint">পণ্যের পরিমাণ অথবা পণ্য সম্পর্কে লিখুন</p>}
 
-    <label class="listing-label">{priceLabel}</label>
-    <input type="text" class="listing-input" id="listingPrice" placeholder="" />
-    {isShopProduct && <p class="listing-field-hint">উদাহরণ: ১০০ টাকা, অথবা এককসহ যেমন ১৫০ টাকা (প্রতি কেজি)</p>}
+    {isShopProduct ? (
+      <>
+        <label class="listing-label" for="listingPrice">{priceLabel}<span class="required-mark">*</span></label>
+        <div class="listing-money">
+          <b>৳</b>
+          <input type="text" id="listingPrice" inputmode="numeric" autocomplete="off" required placeholder="যেমন: ১০০" />
+        </div>
+        <div class="field-error-msg" data-error-for="listingPrice">
+          <i class="fas fa-circle-exclamation"></i><span>দাম সংখ্যায় লিখুন</span>
+        </div>
+        <p class="listing-field-hint">শুধু সংখ্যা লিখুন। ৳ বা "টাকা" লেখার দরকার নেই।</p>
+
+        <label class="listing-label">একক (ঐচ্ছিক)</label>
+        <div class="listing-chip-row" id="listingUnitChips"></div>
+
+        <div id="listingProdCatWrap" style="display:none;">
+          <label class="listing-label">প্রোডাক্ট ক্যাটাগরি (ঐচ্ছিক)</label>
+          <div class="listing-chip-row" id="listingProdCatChips"></div>
+        </div>
+      </>
+    ) : (
+      <>
+        <label class="listing-label">{priceLabel}</label>
+        <input type="text" class="listing-input" id="listingPrice" placeholder="" />
+      </>
+    )}
 
     {!isShopProduct && (
       <>
@@ -394,12 +417,75 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
   .listing-image-remove-btn:hover {
     background: #D14343;
   }
+
+  /* শপ প্রোডাক্ট ফর্ম: ৳ প্রিফিক্সসহ দামের বক্স + একক/ক্যাটাগরি চিপ
+     (ProductsTab এর এডিট মোডালও এই ক্লাসগুলো রিইউজ করে) */
+  .listing-money {
+    display: flex;
+    align-items: center;
+    border: 1.5px solid #E5EAF0;
+    border-radius: 14px;
+    background: #FBFCFE;
+    overflow: hidden;
+  }
+
+  .listing-money:focus-within {
+    border-color: #FF6B35;
+    background: #fff;
+  }
+
+  .listing-money:has(.field-invalid) {
+    border-color: #D14343;
+  }
+
+  .listing-money b {
+    padding: 0 4px 0 14px;
+    color: #FF6B35;
+    font-size: 1.05rem;
+  }
+
+  .listing-money input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    padding: 12px 14px 12px 6px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    color: #1B2A4A;
+  }
+
+  .listing-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .listing-chip {
+    border: 1.5px solid #E5EAF0;
+    background: #fff;
+    color: #1B2A4A;
+    padding: 6px 13px;
+    border-radius: 40px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .listing-chip.sel {
+    background: #FF6B35;
+    border-color: #FF6B35;
+    color: #fff;
+  }
 </style>
 
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { compressImages } from '../../lib/imageCompress.js';
   import { getUnionsOfUpazilaName } from '../../data/feniAreas.js';
+  import { sanitizePriceInput, PRICE_UNITS } from '../../lib/price.js';
 
   const overlay = document.getElementById('listingOverlay');
   const closeBtn = document.getElementById('listingClose');
@@ -432,6 +518,62 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
   const isShopProduct = category === 'online-shop';
   const nounLabel = overlay?.dataset.nounLabel || 'লিস্টিং';
 
+  // ===== শপ প্রোডাক্ট: দাম শুধু সংখ্যা (৳ অটো), একক ও প্রোডাক্ট ক্যাটাগরি চিপ =====
+  let selectedUnit = '';
+  let selectedProdCat = '';
+  let shopProductCategories = [];
+  const priceInput = document.getElementById('listingPrice');
+  const unitChipsEl = document.getElementById('listingUnitChips');
+  const prodCatWrap = document.getElementById('listingProdCatWrap');
+  const prodCatChipsEl = document.getElementById('listingProdCatChips');
+
+  function renderChips(container, items, selected, onPick) {
+    if (!container) return;
+    container.innerHTML = '';
+    items.forEach((it) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'listing-chip' + (selected === it.value ? ' sel' : '');
+      b.textContent = it.label;
+      b.addEventListener('click', () => onPick(selected === it.value ? '' : it.value));
+      container.appendChild(b);
+    });
+  }
+
+  function renderUnitChips() {
+    renderChips(unitChipsEl, PRICE_UNITS.map((u) => ({ value: u, label: 'প্রতি ' + u })), selectedUnit, (v) => {
+      selectedUnit = v;
+      renderUnitChips();
+    });
+  }
+
+  function renderProdCatChips() {
+    if (!prodCatWrap) return;
+    prodCatWrap.style.display = shopProductCategories.length ? 'block' : 'none';
+    renderChips(prodCatChipsEl, shopProductCategories.map((c) => ({ value: c.id, label: c.name })), selectedProdCat, (v) => {
+      selectedProdCat = v;
+      renderProdCatChips();
+    });
+  }
+
+  if (isShopProduct) {
+    renderUnitChips();
+
+    priceInput?.addEventListener('input', () => {
+      const clean = sanitizePriceInput(priceInput.value);
+      if (clean !== priceInput.value) {
+        const hadSymbol = /[^0-9০-৯]/.test(priceInput.value);
+        priceInput.value = clean;
+        if (hadSymbol) window.showToast?.('শুধু সংখ্যা লিখুন, ৳ নিজে থেকে বসবে');
+      }
+    });
+
+    window.addEventListener('smartfeni:product-categories', (e) => {
+      shopProductCategories = e.detail?.categories || [];
+      renderProdCatChips();
+    });
+  }
+
   // "অন্যান্য" সিলেক্ট করলে কাস্টম-টাইপ ইনপুট বক্স দেখানো/লুকানো
   // (দেখানো অবস্থাতেই শুধু required — লুকানো থাকলে ভ্যালিডেশনে ধরা পড়বে না)
   function toggleCustomType() {
@@ -457,6 +599,13 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
       typeSelect.value = presetType;
     }
     toggleCustomType();
+    if (isShopProduct) {
+      shopProductCategories = window.__shopProductCategories || shopProductCategories;
+      selectedUnit = '';
+      selectedProdCat = '';
+      renderUnitChips();
+      renderProdCatChips();
+    }
     overlay?.classList.add('open');
     document.body.style.overflow = 'hidden';
   }
@@ -587,12 +736,19 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     let type = typeSelect?.value;
     const title = document.getElementById('listingTitle')?.value?.trim();
     let description = document.getElementById('listingDescription')?.value?.trim();
-    const price = document.getElementById('listingPrice')?.value?.trim();
+    const priceRaw = document.getElementById('listingPrice')?.value?.trim();
+    // শপ প্রোডাক্টে দাম শুধু ইংরেজি অঙ্ক হিসেবে সেভ হয়, ৳ ডিসপ্লেতে অটো বসে (lib/price.js)
+    const price = isShopProduct ? sanitizePriceInput(priceRaw) : priceRaw;
     const phone = document.getElementById('listingPhone')?.value?.trim();
     const companyInput = document.getElementById('listingCompany');
     const company = companyInput?.value?.trim();
 
     if (!window.SFValidateForm(overlay)) {
+      return;
+    }
+
+    if (isShopProduct && (!price || Number(price) < 1)) {
+      showMessage('দাম সংখ্যায় লিখুন (যেমন ১০০)');
       return;
     }
 
@@ -655,6 +811,11 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
 
     if (isShopProduct && targetShopId) {
       insertPayload.shop_id = targetShopId;
+    }
+
+    if (isShopProduct) {
+      insertPayload.price_unit = selectedUnit || null;
+      insertPayload.shop_category_id = selectedProdCat || null;
     }
 
     if (autoActive) {

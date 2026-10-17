@@ -61,7 +61,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
     <p class="form-msg" id="editMessage"></p>
 
     <label class="form-label">প্রোডাক্টের নাম<span class="required-mark">*</span></label>
-    <input type="text" class="form-input" id="editTitle" required />
+    <input type="text" class="form-input" id="editTitle" required maxlength="80" />
     <div class="field-error-msg" data-error-for="editTitle">
       <i class="fas fa-circle-exclamation"></i><span>প্রোডাক্টের নাম দিন</span>
     </div>
@@ -70,9 +70,23 @@ import AddListingModal from '../ui/AddListingModal.astro';
     <textarea class="form-input" id="editDescription" rows="3"></textarea>
     <p class="form-hint">পণ্যের পরিমাণ অথবা পণ্য সম্পর্কে লিখুন</p>
 
-    <label class="form-label">দাম</label>
-    <input type="text" class="form-input" id="editPrice" />
-    <p class="form-hint">উদাহরণ: ১০০ টাকা, অথবা এককসহ যেমন ১৫০ টাকা (প্রতি কেজি)</p>
+    <label class="form-label" for="editPrice">দাম<span class="required-mark">*</span></label>
+    <div class="listing-money">
+      <b>৳</b>
+      <input type="text" id="editPrice" inputmode="numeric" autocomplete="off" required placeholder="যেমন: ১০০" />
+    </div>
+    <div class="field-error-msg" data-error-for="editPrice">
+      <i class="fas fa-circle-exclamation"></i><span>দাম সংখ্যায় লিখুন</span>
+    </div>
+    <p class="form-hint">শুধু সংখ্যা লিখুন। ৳ বা "টাকা" লেখার দরকার নেই।</p>
+
+    <label class="form-label">একক (ঐচ্ছিক)</label>
+    <div class="listing-chip-row" id="editUnitChips"></div>
+
+    <div id="editCatWrap" style="display:none;">
+      <label class="form-label">প্রোডাক্ট ক্যাটাগরি (ঐচ্ছিক)</label>
+      <div class="listing-chip-row" id="editCatChips"></div>
+    </div>
 
     <label class="form-label">ছবি</label>
     <input type="file" id="editImagesInput" accept="image/*" multiple hidden />
@@ -297,9 +311,8 @@ import AddListingModal from '../ui/AddListingModal.astro';
     font-weight: 700;
     color: #1B2A4A;
     margin-bottom: 4px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
   }
 
   .product-price {
@@ -424,6 +437,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { compressImages } from '../../lib/imageCompress.js';
+  import { formatPrice, parsePriceText, sanitizePriceInput, guessUnit, PRICE_UNITS } from '../../lib/price.js';
 
   const productsContainer = document.getElementById('productsContainer');
   const emptyState = document.getElementById('emptyState');
@@ -432,6 +446,10 @@ import AddListingModal from '../ui/AddListingModal.astro';
   let currentShopId = null;
   let currentShopSlug = null;
   let products = [];
+
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
 
   async function loadProducts() {
     const { data, error } = await supabase
@@ -463,7 +481,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
       card.className = `product-card ${p.is_sold_out ? 'sold-out' : ''}`;
 
       const imageHtml = p.images && p.images.length > 0
-        ? `<div class="product-photo-frame"><img src="${p.images[0]}" alt="${p.title || ''}" /></div>`
+        ? `<div class="product-photo-frame"><img src="${esc(p.images[0])}" alt="${esc(p.title || '')}" /></div>`
         : `<div class="product-icon-frame"><i class="fas fa-box"></i></div>`;
 
       const bestSellerBadge = p.is_best_seller
@@ -481,8 +499,8 @@ import AddListingModal from '../ui/AddListingModal.astro';
           ${soldOutBadge}
         </div>
         <div class="product-body">
-          <p class="product-title">${p.title || ''}</p>
-          ${p.price ? `<span class="product-price">৳${p.price}</span>` : ''}
+          <p class="product-title">${esc(p.title || '')}</p>
+          ${p.price ? `<span class="product-price">${esc(formatPrice(p.price, p.price_unit))}</span>` : ''}
           <div class="product-actions">
             <button class="btn-edit"><i class="fas fa-pen"></i> এডিট</button>
             <button class="btn-delete"><i class="fas fa-trash"></i> ডিলিট</button>
@@ -550,6 +568,8 @@ import AddListingModal from '../ui/AddListingModal.astro';
   const editImagesInput = document.getElementById('editImagesInput');
   const editImageGrid = document.getElementById('editImageGrid');
   let editingId = null;
+  let editUnit = ''; // দামের একক ("কেজি" ইত্যাদি), খালি = কোনোটা না
+  let editCat = ''; // শপের প্রোডাক্ট ক্যাটাগরির id, খালি = ক্যাটাগরি নেই
   let existingImageUrls = []; // ইতিমধ্যে আপলোড করা ছবি (URL) — রিমুভ করা যাবে
   let newImageFiles = []; // নতুন যোগ করা ছবি (কম্প্রেসড File) — সেভে আপলোড হবে
 
@@ -650,18 +670,56 @@ import AddListingModal from '../ui/AddListingModal.astro';
     return urls;
   }
 
+  const editUnitChips = document.getElementById('editUnitChips');
+  const editCatWrap = document.getElementById('editCatWrap');
+  const editCatChips = document.getElementById('editCatChips');
+
+  function renderEditChips() {
+    const mk = (container, items, selected, pick) => {
+      if (!container) return;
+      container.innerHTML = '';
+      items.forEach((it) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'listing-chip' + (selected === it.value ? ' sel' : '');
+        b.textContent = it.label;
+        b.addEventListener('click', () => {
+          pick(selected === it.value ? '' : it.value);
+          renderEditChips();
+        });
+        container.appendChild(b);
+      });
+    };
+    mk(editUnitChips, PRICE_UNITS.map((u) => ({ value: u, label: 'প্রতি ' + u })), editUnit, (v) => { editUnit = v; });
+    const cats = window.__shopProductCategories || [];
+    if (editCatWrap) editCatWrap.style.display = cats.length ? 'block' : 'none';
+    mk(editCatChips, cats.map((c) => ({ value: c.id, label: c.name })), editCat, (v) => { editCat = v; });
+  }
+
+  // দামের বক্সে শুধু সংখ্যা: বাংলা অঙ্ক ইংরেজি হয়ে যায়, ৳/টাকা/কমা মুছে যায়
+  editPriceInput?.addEventListener('input', () => {
+    const clean = sanitizePriceInput(editPriceInput.value);
+    if (clean !== editPriceInput.value) editPriceInput.value = clean;
+  });
+
   function openEdit(product) {
     editingId = product.id;
     editTitleInput.value = product.title || '';
     editDescInput.value = product.description || '';
-    editPriceInput.value = product.price || '';
+    // পুরনো টেক্সট-দাম ("৪২০ টাকা") থেকে সংখ্যা ও এককের আন্দাজ বের করে বসানো হয়
+    const parsedPrice = parsePriceText(product.price);
+    editPriceInput.value = parsedPrice.amount === null ? '' : String(Math.round(parsedPrice.amount));
+    editUnit = product.price_unit || guessUnit(product.price);
+    editCat = product.shop_category_id || '';
+    renderEditChips();
     existingImageUrls = [...(product.images || [])];
     newImageFiles = [];
     renderEditImageGrid();
     editMessage.className = 'form-msg';
     editMessage.textContent = '';
     editTitleInput.classList.remove('field-invalid');
-    editOverlay.querySelector('.field-error-msg')?.classList.remove('show');
+    editOverlay.querySelectorAll('.field-error-msg').forEach((m) => m.classList.remove('show'));
+    editPriceInput.classList.remove('field-invalid');
     editOverlay.classList.add('open');
     document.body.style.overflow = 'hidden';
   }
@@ -682,6 +740,12 @@ import AddListingModal from '../ui/AddListingModal.astro';
     }
 
     const title = editTitleInput.value.trim();
+    const priceDigits = sanitizePriceInput(editPriceInput.value);
+    if (!priceDigits || Number(priceDigits) < 1) {
+      window.showToast?.('দাম সংখ্যায় লিখুন (যেমন ১০০)', 'error', 3000);
+      editPriceInput.focus();
+      return;
+    }
 
     editSaveBtn.disabled = true;
     const textEl = editSaveBtn.querySelector('span');
@@ -700,7 +764,9 @@ import AddListingModal from '../ui/AddListingModal.astro';
       .update({
         title,
         description: editDescInput.value.trim(),
-        price: editPriceInput.value.trim(),
+        price: priceDigits,
+        price_unit: editUnit || null,
+        shop_category_id: editCat || null,
         images: finalImages,
       })
       .eq('id', editingId);
@@ -742,6 +808,21 @@ import AddListingModal from '../ui/AddListingModal.astro';
       listingOverlay.dataset.targetShopId = currentShopId;
     }
 
-    loadProducts();
+    loadProductCategories().then(loadProducts);
   });
+
+  // শপের নিজস্ব প্রোডাক্ট ক্যাটাগরি — AddListingModal ও এডিট মোডালের চিপের জন্য
+  async function loadProductCategories() {
+    const { data } = await supabase
+      .from('shop_product_categories')
+      .select('id, name, sort_order')
+      .eq('shop_id', currentShopId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true });
+
+    window.__shopProductCategories = data || [];
+    window.dispatchEvent(new CustomEvent('smartfeni:product-categories', {
+      detail: { categories: window.__shopProductCategories },
+    }));
+  }
 </script>
