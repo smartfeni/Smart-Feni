@@ -25,7 +25,27 @@
 // স্লাইড বদলালে কার্ডের লিংকও সাথে সাথে বদলে যায়।
 // ============================================================
 
+import { supabase } from '../../lib/supabase.js';
+
 const fallbackSrc = '/featured/featured-photo.jpg';
+
+// পারফরম্যান্স: প্রথম ফিচার্ড ছবির URL সার্ভারেই বের করে HTML-এ বসানো হচ্ছে,
+// যাতে ব্রাউজার ছবিটা সাথে সাথে ডাউনলোড শুরু করে (আগে ফ্যালব্যাক নামত, তারপর JS
+// চলে আসল ছবি আনত = দুইবার ডাউনলোড + দেরি)। ব্যর্থ হলে ফ্যালব্যাকই থাকবে।
+let firstSrc = fallbackSrc;
+try {
+  const { data: firstRow } = await supabase
+    .from('featured_photos')
+    .select('storage_path')
+    .order('sort_order', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (firstRow?.storage_path) {
+    firstSrc = supabase.storage.from('listing-images').getPublicUrl(firstRow.storage_path).data.publicUrl;
+  }
+} catch (e) {
+  // fallback ছবিই থাকবে
+}
 ---
 
 <section class="featured-photo-section">
@@ -33,7 +53,7 @@ const fallbackSrc = '/featured/featured-photo.jpg';
     <a class="photo-card" data-photo-card>
       <img
         class="photo-layer photo-base"
-        src={fallbackSrc}
+        src={firstSrc}
         alt="স্মার্ট ফেনী কমিউনিটি ফটো"
         loading="eager"
         fetchpriority="high"
