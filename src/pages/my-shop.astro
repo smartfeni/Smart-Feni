@@ -55,6 +55,22 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
           </div>
         </div>
 
+        <div class="shop-overview" id="shopOverview">
+          <div class="ov-stats">
+            <div class="ov-stat"><b id="ovPending">–</b><span>নতুন অর্ডার</span></div>
+            <div class="ov-stat"><b id="ovToday">–</b><span>আজকের অর্ডার</span></div>
+            <div class="ov-stat"><b id="ovProducts">–</b><span>প্রোডাক্ট</span></div>
+          </div>
+          <div class="ov-status">
+            <span class="ov-dot" id="ovDot"></span>
+            <span class="ov-status-text" id="ovStatusText">শপের অবস্থা দেখা হচ্ছে...</span>
+            <label class="ov-pause" id="ovPauseWrap">
+              <span>সাময়িক বন্ধ</span>
+              <span class="ov-switch"><input type="checkbox" id="ovPause" /><i></i></span>
+            </label>
+          </div>
+        </div>
+
         <div class="myshop-tabs" id="myshopTabs">
           <button class="myshop-tab" data-tab="products"><i class="fas fa-box"></i> প্রোডাক্ট</button>
           <button class="myshop-tab active" data-tab="orders">
@@ -265,6 +281,139 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
     .myshop-tab.active .tab-badge {
       background: #fff;
       color: #D92D20;
+    }
+
+    /* ওভারভিউ স্ট্রিপ */
+    .shop-overview {
+      background: #fff;
+      border-radius: 20px;
+      padding: 14px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+    }
+
+    .ov-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .ov-stat {
+      background: #F8FAFC;
+      border-radius: 14px;
+      padding: 10px 6px;
+      text-align: center;
+    }
+
+    .ov-stat b {
+      display: block;
+      font-size: 1.3rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      line-height: 1.2;
+    }
+
+    .ov-stat span {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #8FA0BC;
+    }
+
+    .ov-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed #E5EAF0;
+    }
+
+    .ov-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #C5CFDD;
+      flex-shrink: 0;
+    }
+
+    .ov-dot.live {
+      background: #22A559;
+      box-shadow: 0 0 0 4px rgba(34, 165, 89, 0.18);
+    }
+
+    .ov-dot.hidden-now {
+      background: #D14343;
+      box-shadow: 0 0 0 4px rgba(209, 67, 67, 0.15);
+    }
+
+    .ov-status-text {
+      flex: 1;
+      min-width: 0;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #3A4A60;
+      line-height: 1.4;
+    }
+
+    .ov-pause {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: #5A6E85;
+      cursor: pointer;
+    }
+
+    .ov-switch {
+      position: relative;
+      width: 42px;
+      height: 24px;
+    }
+
+    .ov-switch input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      opacity: 0;
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .ov-switch i {
+      position: absolute;
+      inset: 0;
+      border-radius: 24px;
+      background: #D7E0EC;
+      transition: background 0.2s ease;
+    }
+
+    .ov-switch i::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25);
+      transition: transform 0.2s ease;
+    }
+
+    .ov-switch input:checked + i {
+      background: #D14343;
+    }
+
+    .ov-switch input:checked + i::after {
+      transform: translateX(18px);
+    }
+
+    body.mod-no-settings .ov-pause {
+      display: none;
     }
   </style>
 
@@ -747,6 +896,8 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
         ordersTabBadge.textContent = bn(pending);
         ordersTabBadge.style.display = 'inline-flex';
       }
+
+      loadOverview(cleanShop, pending);
     }
 
     // ============================================================
@@ -778,6 +929,94 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
     });
 
     profileEditLink?.addEventListener('click', () => activateTab('profile'));
+
+    // ============================================================
+    // ওভারভিউ স্ট্রিপ: সংখ্যা + শপ এখন ক্রেতাদের তালিকায় দেখা যাচ্ছে কিনা
+    // (শুধু ওনার দেখে; ক্রেতারা কোনো খোলা/বন্ধ লেবেল দেখে না)
+    // ============================================================
+    const ovPending = document.getElementById('ovPending');
+    const ovToday = document.getElementById('ovToday');
+    const ovProducts = document.getElementById('ovProducts');
+    const ovDot = document.getElementById('ovDot');
+    const ovStatusText = document.getElementById('ovStatusText');
+    const ovPause = document.getElementById('ovPause');
+    const ov = { shopId: null, hours: null, paused: false };
+
+    async function refreshLiveStatus() {
+      const { data, error } = await supabase.rpc('shop_is_open_now', {
+        p_hours: ov.hours,
+        p_paused: ov.paused,
+      });
+      if (error || typeof data !== 'boolean') {
+        ovStatusText.textContent = 'শপের অবস্থা দেখা যাচ্ছে না';
+        ovDot.className = 'ov-dot';
+        return;
+      }
+      if (data) {
+        ovDot.className = 'ov-dot live';
+        ovStatusText.textContent = 'আপনার শপ এখন ক্রেতাদের তালিকায় দেখা যাচ্ছে';
+      } else {
+        ovDot.className = 'ov-dot hidden-now';
+        ovStatusText.textContent = ov.paused
+          ? 'সাময়িক বন্ধ চালু আছে, ক্রেতাদের তালিকায় শপ লুকানো'
+          : 'এখন খোলার সময়ের বাইরে, ক্রেতাদের তালিকায় শপ লুকানো';
+      }
+    }
+
+    async function loadOverview(shop, pending) {
+      ov.shopId = shop.id;
+      ov.hours = shop.opening_hours || null;
+      ov.paused = !!shop.temporarily_closed;
+
+      ovPending.textContent = bn(pending);
+      ovPause.checked = ov.paused;
+
+      // আজকের শুরু (বাংলাদেশ সময় UTC+6)
+      const DHAKA = 6 * 3600 * 1000;
+      const dayStart = new Date(Math.floor((Date.now() + DHAKA) / 86400000) * 86400000 - DHAKA).toISOString();
+
+      const [prod, today] = await Promise.all([
+        supabase.from('listings').select('id', { count: 'exact', head: true })
+          .eq('category', 'online-shop').eq('shop_id', shop.id).eq('status', 'active'),
+        supabase.from('orders').select('id', { count: 'exact', head: true })
+          .eq('shop_id', shop.id).gte('created_at', dayStart),
+      ]);
+
+      ovProducts.textContent = prod.error ? '–' : bn(prod.count || 0);
+      ovToday.textContent = today.error ? '–' : bn(today.count || 0);
+
+      refreshLiveStatus();
+    }
+
+    ovPause?.addEventListener('change', async () => {
+      if (!ov.shopId) return;
+      const next = ovPause.checked;
+      ovPause.disabled = true;
+      const { error } = await supabase.from('shops').update({ temporarily_closed: next }).eq('id', ov.shopId);
+      ovPause.disabled = false;
+
+      if (error) {
+        ovPause.checked = !next;
+        window.showToast?.('বদলানো যায়নি: ' + error.message, 'error', 3500);
+        return;
+      }
+
+      ov.paused = next;
+      window.dispatchEvent(new CustomEvent('smartfeni:shop-hours-changed', {
+        detail: { opening_hours: ov.hours, temporarily_closed: next, from: 'overview' },
+      }));
+      window.showToast?.(next ? 'শপ সাময়িক বন্ধ, তালিকা থেকে লুকানো হলো' : 'শপ আবার চালু হলো ✓', 'success');
+      refreshLiveStatus();
+    });
+
+    // খোলার সময় কার্ড থেকে সেভ করলে স্ট্রিপও আপডেট
+    window.addEventListener('smartfeni:shop-hours-changed', (e) => {
+      if (e.detail?.from === 'overview') return;
+      ov.hours = e.detail?.opening_hours ?? null;
+      ov.paused = !!e.detail?.temporarily_closed;
+      if (ovPause) ovPause.checked = ov.paused;
+      refreshLiveStatus();
+    });
 
     init();
   </script>
