@@ -608,6 +608,54 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     }
     overlay?.classList.add('open');
     document.body.style.overflow = 'hidden';
+    await applyCooldownState();
+  }
+
+  // ===== রিজেক্ট কুলডাউন: ২৪ ঘণ্টায় ৩টির বেশি বাতিল হলে ২৪ ঘণ্টা নতুন লিস্টিং বন্ধ =====
+  // (আসল ব্লক ডাটাবেস ট্রিগারে; এখানে শুধু আগেভাগে মেসেজ, যাতে ফর্ম পূরণ ও ছবি আপলোড বৃথা না যায়)
+  function formatTimeLeft(until) {
+    const mins = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60000));
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    const bn = (n) => n.toLocaleString('bn-BD');
+    return h > 0 ? `${bn(h)} ঘণ্টা ${bn(m)} মিনিট` : `${bn(m)} মিনিট`;
+  }
+
+  function cooldownText(until) {
+    return `আপনার কয়েকটি লিস্টিং বাতিল হওয়ায় নতুন লিস্টিং দেওয়া সাময়িকভাবে বন্ধ আছে। আর ${formatTimeLeft(until)} পরে আবার চেষ্টা করুন।`;
+  }
+
+  async function getCooldownUntil(userId) {
+    if (isShopProduct || !userId) return null;
+    try {
+      const { data } = await supabase
+        .from('listing_cooldowns')
+        .select('blocked_until')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!data?.blocked_until) return null;
+      const until = new Date(data.blocked_until);
+      return until.getTime() > Date.now() ? until : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ব্লক থাকলে true (মেসেজ দেখায় + সাবমিট বাটন বন্ধ), নাহলে false
+  async function applyCooldownState() {
+    if (isShopProduct) return false;
+    const { data: { session } } = await supabase.auth.getSession();
+    const until = await getCooldownUntil(session?.user?.id);
+    if (until) {
+      if (messageEl) {
+        messageEl.textContent = cooldownText(until);
+        messageEl.className = 'listing-message show-error';
+      }
+      if (submitBtn) submitBtn.disabled = true;
+      return true;
+    }
+    if (submitBtn) submitBtn.disabled = false;
+    return false;
   }
 
   function closeListingModal() {
@@ -765,6 +813,8 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
       description = `${companyLabel}: ${company}${description ? '\n' + description : ''}`;
     }
 
+    if (await applyCooldownState()) return;
+
     const textEl = submitBtn.querySelector('.listing-submit-text');
     const originalText = textEl.textContent;
     textEl.textContent = 'পোস্ট হচ্ছে...';
@@ -829,6 +879,12 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
     submitBtn.disabled = false;
 
     if (error) {
+      if (error.code === 'P0001' && (error.message || '').includes('বাতিল')) {
+        const until = error.details ? new Date(error.details) : null;
+        showMessage(until && !isNaN(until.getTime()) ? cooldownText(until) : error.message);
+        submitBtn.disabled = true;
+        return;
+      }
       showMessage('পোস্ট করা যায়নি: ' + error.message);
       return;
     }
