@@ -218,6 +218,132 @@ export function initSFLoader() {
     if (e.persisted) reset();
   });
 
+  // ---------- অটো-আপগ্রেড: পুরনো স্পিনার ও "…হচ্ছে..." বাটন ----------
+  // বাদ দিতে চাইলে এলিমেন্টে (বা তার কোনো প্যারেন্টে) data-sf-loader="off" দাও।
+  const OFF = '[data-sf-loader="off"]';
+  const SPINNER_SEL = 'i.fa-spin, i.fa-spinner, [class*="spinner"]';
+  const LOADING_TEXT = /(\.{2,}|…)\s*$/;
+  const SVG_INNER =
+    '<svg viewBox="0 0 100 60" focusable="false" aria-hidden="true">' +
+    '<path class="sf-l-track" pathLength="200" d="' + PATH + '"/>' +
+    '<path class="sf-l-run" pathLength="200" d="' + PATH + '"/>' +
+    '</svg>';
+
+  function sizeFromFont(px) {
+    if (!(px > 0)) return 'sm';
+    if (px <= 18) return 'sm';
+    if (px <= 28) return 'md';
+    return 'lg';
+  }
+
+  function sizeFromWidth(px) {
+    if (!(px > 0)) return 'md';
+    if (px <= 26) return 'sm';
+    if (px <= 44) return 'md';
+    return 'lg';
+  }
+
+  function upgradeSpinner(el) {
+    if (!el || el.nodeType !== 1 || el.dataset.sfUpgraded === '1') return;
+    if (el.closest(OFF)) return;
+    if (el.closest('.sf-loader, .sf-auto-spinner, .sf-loading-overlay, .sf-ptr-indicator')) return;
+
+    if (el.tagName === 'I') {
+      if (!el.classList.contains('fa-spin') && !el.classList.contains('fa-spinner')) return;
+      const fontSize = parseFloat(getComputedStyle(el).fontSize);
+      Array.from(el.classList).forEach((c) => {
+        if (/^fa([a-z]?|-.+)$/.test(c)) el.classList.remove(c);
+      });
+      el.classList.add('sf-loader', 'sf-loader-' + sizeFromFont(fontSize), 'sf-loader-current');
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-label', 'লোড হচ্ছে');
+      el.innerHTML = SVG_INNER;
+    } else {
+      // ভেতরে কিছু থাকলে (কন্টেইনার বা লেখাসহ) ছোঁব না, শুধু খালি spinner div
+      if (el.children.length || (el.textContent || '').trim()) return;
+      const width = parseFloat(getComputedStyle(el).width);
+      el.classList.add('sf-auto-spinner', 'sf-as-' + sizeFromWidth(width));
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-label', 'লোড হচ্ছে');
+      el.innerHTML = SVG_INNER;
+    }
+    el.dataset.sfUpgraded = '1';
+  }
+
+  function scanSpinners(root) {
+    if (!root || root.nodeType !== 1) return;
+    if (root.matches && root.matches(SPINNER_SEL)) upgradeSpinner(root);
+    if (root.querySelectorAll) root.querySelectorAll(SPINNER_SEL).forEach(upgradeSpinner);
+  }
+
+  function syncButton(btn) {
+    if (!btn || btn.tagName !== 'BUTTON') return;
+    const existing = btn.querySelector(':scope > .sf-btn-auto');
+    let should = false;
+    if (
+      btn.disabled &&
+      btn.dataset.sfBusy !== '1' &&
+      !btn.closest(OFF) &&
+      !btn.querySelector('.sf-loader:not(.sf-btn-auto), .sf-auto-spinner')
+    ) {
+      should = LOADING_TEXT.test((btn.textContent || '').trim());
+    }
+    if (should && !existing) {
+      const span = document.createElement('span');
+      span.className = 'sf-loader sf-loader-sm sf-loader-current sf-btn-auto';
+      span.setAttribute('aria-hidden', 'true');
+      span.innerHTML = SVG_INNER;
+      btn.insertBefore(span, btn.firstChild);
+    } else if (!should && existing) {
+      existing.remove();
+    }
+  }
+
+  const pending = new Set();
+  let rafId = 0;
+
+  function flush() {
+    rafId = 0;
+    const nodes = Array.from(pending);
+    pending.clear();
+    nodes.forEach((n) => {
+      if (!n.isConnected) return;
+      scanSpinners(n);
+      const own = n.closest ? n.closest('button') : null;
+      if (own) syncButton(own);
+      if (n.querySelectorAll) n.querySelectorAll('button:disabled').forEach(syncButton);
+    });
+  }
+
+  function queue(node) {
+    if (node && node.nodeType === 1) pending.add(node);
+    if (!rafId) rafId = requestAnimationFrame(flush);
+  }
+
+  const observer = new MutationObserver((records) => {
+    for (const r of records) {
+      if (r.type === 'attributes') {
+        queue(r.target);
+      } else if (r.type === 'characterData') {
+        queue(r.target.parentElement);
+      } else {
+        r.addedNodes.forEach(queue);
+        const host = r.target && r.target.closest ? r.target.closest('button') : null;
+        if (host) queue(host);
+      }
+    }
+  });
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['disabled'],
+    characterData: true,
+  });
+
+  queue(document.documentElement);
+
   window.SFLoader = { markup: loaderMarkup, block: blockMarkup };
   window.SFLoading = { show, hide, run, wrap, reset };
 }
