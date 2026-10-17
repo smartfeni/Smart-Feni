@@ -34,12 +34,27 @@
 import AddListingModal from '../ui/AddListingModal.astro';
 ---
 
+<!-- ===== প্রোডাক্ট ক্যাটাগরি ম্যানেজার ===== -->
+<div class="dash-card" id="pcatCard">
+  <h3><i class="fas fa-layer-group"></i> প্রোডাক্ট ক্যাটাগরি</h3>
+  <p class="form-hint" style="margin:-6px 0 12px;">নিজের মতো ক্যাটাগরি বানান (যেমন: কেক, পেস্ট্রি)। ক্রেতারা শপ পেজে ক্যাটাগরি ধরে প্রোডাক্ট দেখবে।</p>
+
+  <div class="pcat-add">
+    <input type="text" class="form-input" id="pcatNewName" maxlength="24" placeholder="নতুন ক্যাটাগরির নাম" />
+    <button type="button" class="pcat-add-btn" id="pcatAddBtn"><i class="fas fa-plus"></i> যোগ</button>
+  </div>
+
+  <div id="pcatList" class="pcat-list"></div>
+</div>
+
 <div class="dash-card">
   <h3><i class="fas fa-box"></i> প্রোডাক্ট তালিকা</h3>
 
   <button class="primary-btn" id="openAddListing" type="button" style="margin-top:0; margin-bottom:20px;">
     <i class="fas fa-plus"></i> নতুন প্রোডাক্ট যোগ করুন
   </button>
+
+  <div class="pcat-filter" id="pcatFilter"></div>
 
   <div id="productsContainer" class="products-grid"></div>
 
@@ -432,6 +447,127 @@ import AddListingModal from '../ui/AddListingModal.astro';
   body.mod-no-delete .btn-delete {
     display: none !important;
   }
+
+  body.mod-no-edit-listings #pcatCard {
+    display: none !important;
+  }
+
+  /* প্রোডাক্ট ক্যাটাগরি ম্যানেজার ও ফিল্টার */
+  .pcat-add {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .pcat-add .form-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .pcat-add-btn {
+    flex-shrink: 0;
+    border: none;
+    background: #FF6B35;
+    color: #fff;
+    padding: 0 16px;
+    border-radius: 14px;
+    font-weight: 700;
+    font-size: 0.84rem;
+    cursor: pointer;
+  }
+
+  .pcat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .pcat-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #F8FAFC;
+    border-radius: 14px;
+    padding: 8px 8px 8px 14px;
+  }
+
+  .pcat-row-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    overflow-wrap: anywhere;
+  }
+
+  .pcat-row-name small {
+    color: #8FA0BC;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+
+  .pcat-row button {
+    border: none;
+    background: #fff;
+    color: #5A6E85;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .pcat-row button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
+  .pcat-row .pcat-del {
+    color: #D14343;
+  }
+
+  .pcat-filter {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 12px;
+    scrollbar-width: none;
+  }
+
+  .pcat-filter::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pcat-filter-chip {
+    flex-shrink: 0;
+    border: 1.5px solid #E5EAF0;
+    background: #fff;
+    color: #1B2A4A;
+    padding: 6px 14px;
+    border-radius: 40px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .pcat-filter-chip.sel {
+    background: #FF6B35;
+    border-color: #FF6B35;
+    color: #fff;
+  }
+
+  .product-cat {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #5A6E85;
+    background: #F1F5FA;
+    padding: 2px 9px;
+    border-radius: 20px;
+    margin-bottom: 8px;
+  }
 </style>
 
 <script>
@@ -467,7 +603,16 @@ import AddListingModal from '../ui/AddListingModal.astro';
     renderProducts();
   }
 
+  let activeFilter = 'all';
+
+  function catName(p) {
+    const c = (window.__shopProductCategories || []).find((x) => x.id === p.shop_category_id);
+    return c ? c.name : '';
+  }
+
   function renderProducts() {
+    renderPcatFilter();
+    renderPcatManager();
     productsContainer.innerHTML = '';
 
     if (products.length === 0) {
@@ -476,7 +621,16 @@ import AddListingModal from '../ui/AddListingModal.astro';
     }
     emptyState.style.display = 'none';
 
-    products.forEach((p) => {
+    const visible = activeFilter === 'all'
+      ? products
+      : products.filter((p) => p.shop_category_id === activeFilter);
+
+    if (visible.length === 0) {
+      productsContainer.innerHTML = '<p class="empty-note" style="grid-column:1/-1;">এই ক্যাটাগরিতে কোনো প্রোডাক্ট নেই</p>';
+      return;
+    }
+
+    visible.forEach((p) => {
       const card = document.createElement('div');
       card.className = `product-card ${p.is_sold_out ? 'sold-out' : ''}`;
 
@@ -500,6 +654,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
         </div>
         <div class="product-body">
           <p class="product-title">${esc(p.title || '')}</p>
+          ${catName(p) ? `<span class="product-cat">${esc(catName(p))}</span><br />` : ''}
           ${p.price ? `<span class="product-price">${esc(formatPrice(p.price, p.price_unit))}</span>` : ''}
           <div class="product-actions">
             <button class="btn-edit"><i class="fas fa-pen"></i> এডিট</button>
@@ -824,5 +979,154 @@ import AddListingModal from '../ui/AddListingModal.astro';
     window.dispatchEvent(new CustomEvent('smartfeni:product-categories', {
       detail: { categories: window.__shopProductCategories },
     }));
+    renderPcatFilter();
+    renderPcatManager();
   }
+
+  // ============================================================
+  // প্রোডাক্ট ক্যাটাগরি ম্যানেজার (shop_product_categories)
+  // সর্বোচ্চ ২০টা, নাম ২৪ অক্ষর, একই নাম দুইবার নয় — নিয়মগুলো DB ট্রিগারেও আছে।
+  // ক্যাটাগরি ডিলিট করলে প্রোডাক্ট মুছে যায় না, শুধু "ক্যাটাগরি ছাড়া" হয়ে যায়।
+  // ============================================================
+  const pcatList = document.getElementById('pcatList');
+  const pcatNewName = document.getElementById('pcatNewName');
+  const pcatFilterEl = document.getElementById('pcatFilter');
+
+  function renderPcatFilter() {
+    const cats = window.__shopProductCategories || [];
+    pcatFilterEl.innerHTML = '';
+    if (cats.length === 0) return;
+
+    const mk = (id, label) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pcat-filter-chip' + (activeFilter === id ? ' sel' : '');
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        activeFilter = id;
+        renderProducts();
+      });
+      pcatFilterEl.appendChild(b);
+    };
+
+    mk('all', 'সব (' + products.length + ')');
+    cats.forEach((c) => {
+      const n = products.filter((p) => p.shop_category_id === c.id).length;
+      mk(c.id, c.name + ' (' + n + ')');
+    });
+  }
+
+  function renderPcatManager() {
+    const cats = window.__shopProductCategories || [];
+    pcatList.innerHTML = '';
+
+    if (cats.length === 0) {
+      pcatList.innerHTML = '<p class="empty-note" style="padding:8px 0;">এখনো কোনো ক্যাটাগরি নেই</p>';
+      return;
+    }
+
+    cats.forEach((c, idx) => {
+      const n = products.filter((p) => p.shop_category_id === c.id).length;
+      const row = document.createElement('div');
+      row.className = 'pcat-row';
+      row.innerHTML = `
+        <span class="pcat-row-name">${esc(c.name)}<small>${n}টা প্রোডাক্ট</small></span>
+        <button type="button" class="pcat-up" aria-label="উপরে"><i class="fas fa-arrow-up"></i></button>
+        <button type="button" class="pcat-down" aria-label="নিচে"><i class="fas fa-arrow-down"></i></button>
+        <button type="button" class="pcat-ren" aria-label="নাম বদলান"><i class="fas fa-pen"></i></button>
+        <button type="button" class="pcat-del" aria-label="মুছুন"><i class="fas fa-trash"></i></button>
+      `;
+      const up = row.querySelector('.pcat-up');
+      const down = row.querySelector('.pcat-down');
+      up.disabled = idx === 0;
+      down.disabled = idx === cats.length - 1;
+      up.addEventListener('click', () => moveCategory(idx, -1));
+      down.addEventListener('click', () => moveCategory(idx, 1));
+      row.querySelector('.pcat-ren').addEventListener('click', () => renameCategory(c));
+      row.querySelector('.pcat-del').addEventListener('click', () => deleteCategory(c, n));
+      pcatList.appendChild(row);
+    });
+  }
+
+  function pcatError(error) {
+    if (error.code === '23505') return 'এই নামে ক্যাটাগরি আগেই আছে';
+    return error.message;
+  }
+
+  async function addCategory() {
+    const name = pcatNewName.value.trim();
+    if (!name) {
+      window.showToast?.('ক্যাটাগরির নাম লিখুন', 'error', 2500);
+      return;
+    }
+    const cats = window.__shopProductCategories || [];
+    const { error } = await supabase
+      .from('shop_product_categories')
+      .insert({ shop_id: currentShopId, name, sort_order: cats.length });
+    if (error) {
+      window.showToast?.(pcatError(error), 'error', 3500);
+      return;
+    }
+    pcatNewName.value = '';
+    window.showToast?.('ক্যাটাগরি যোগ হয়েছে ✓', 'success');
+    await loadProductCategories();
+    renderProducts();
+  }
+
+  async function renameCategory(cat) {
+    const input = prompt('ক্যাটাগরির নতুন নাম', cat.name);
+    if (input === null) return;
+    const name = input.trim().slice(0, 24);
+    if (!name || name === cat.name) return;
+    const { error } = await supabase.from('shop_product_categories').update({ name }).eq('id', cat.id);
+    if (error) {
+      window.showToast?.(pcatError(error), 'error', 3500);
+      return;
+    }
+    await loadProductCategories();
+    renderProducts();
+  }
+
+  async function deleteCategory(cat, count) {
+    const warn = count > 0
+      ? `"${cat.name}" মুছলে এর ${count}টা প্রোডাক্ট মুছবে না, শুধু ক্যাটাগরি ছাড়া হয়ে যাবে। মুছবেন?`
+      : `"${cat.name}" ক্যাটাগরি মুছবেন?`;
+    if (!confirm(warn)) return;
+    const { error } = await supabase.from('shop_product_categories').delete().eq('id', cat.id);
+    if (error) {
+      window.showToast?.('মোছা যায়নি: ' + error.message, 'error', 3500);
+      return;
+    }
+    if (activeFilter === cat.id) activeFilter = 'all';
+    // প্রোডাক্টের ক্যাটাগরি লিংক DB তে null হয়েছে, তাই তালিকা নতুন করে আনা
+    await loadProductCategories();
+    await loadProducts();
+  }
+
+  async function moveCategory(idx, dir) {
+    const cats = [...(window.__shopProductCategories || [])];
+    const j = idx + dir;
+    if (j < 0 || j >= cats.length) return;
+    [cats[idx], cats[j]] = [cats[j], cats[idx]];
+
+    // সবার sort_order নতুন করে 0,1,2… (আগে সব ০ থাকলেও অদলবদল কাজ করে)
+    const changed = cats.map((c, i) => ({ c, i })).filter((x) => x.c.sort_order !== x.i);
+    const results = await Promise.all(
+      changed.map((x) => supabase.from('shop_product_categories').update({ sort_order: x.i }).eq('id', x.c.id))
+    );
+    const failed = results.find((r) => r.error);
+    if (failed) {
+      window.showToast?.('ক্রম বদলানো যায়নি: ' + failed.error.message, 'error', 3500);
+    }
+    await loadProductCategories();
+    renderProducts();
+  }
+
+  document.getElementById('pcatAddBtn')?.addEventListener('click', addCategory);
+  pcatNewName?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addCategory();
+    }
+  });
 </script>
