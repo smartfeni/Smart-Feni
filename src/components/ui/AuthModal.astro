@@ -227,6 +227,20 @@ const upazilas = [
         মনে পড়েছে? <button class="auth-link" id="backToLoginFromForgot" type="button">লগইনে ফিরে যান</button>
       </p>
     </div>
+
+    <!-- ===== ডিলিটের অপেক্ষায় থাকা অ্যাকাউন্ট — ফিরিয়ে আনার প্যানেল ===== -->
+    <div class="auth-pane" id="restorePane">
+      <h2 class="auth-title">অ্যাকাউন্ট ডিলিটের অপেক্ষায়</h2>
+      <p class="auth-subtitle" id="restoreInfo"></p>
+
+      <button class="auth-submit" id="restoreConfirm" type="button">
+        <i class="fas fa-rotate-left"></i> <span class="auth-submit-text">অ্যাকাউন্ট ফিরিয়ে আনুন</span>
+      </button>
+
+      <p class="auth-switch">
+        <button class="auth-link" id="restoreDecline" type="button">না, ডিলিটই থাক (লগআউট)</button>
+      </p>
+    </div>
   </div>
 </div>
 
@@ -722,9 +736,16 @@ const upazilas = [
     clearMessage();
   }
 
+  // ডিলিটের অপেক্ষায় থাকা অ্যাকাউন্টে লগইন হলে true — ফিরিয়ে না এনে মোডাল বন্ধ করলে লগআউট
+  let restorePending = false;
+
   function closeAuthModal() {
     overlay?.classList.remove('open');
     document.body.style.overflow = '';
+    if (restorePending) {
+      restorePending = false;
+      supabase.auth.signOut();
+    }
   }
 
   function clearFieldErrors() {
@@ -1066,6 +1087,18 @@ const upazilas = [
       return;
     }
 
+    // ডিলিটের অপেক্ষায় (৭ দিনের গ্রেস পিরিয়ড) থাকলে ফিরিয়ে আনার অপশন দেখাও
+    try {
+      const { data: delStatus } = await supabase.rpc('get_my_deletion_status');
+      if (delStatus?.pending) {
+        setLoading(loginSubmit, false);
+        showRestorePane(delStatus.scheduled_for, profile);
+        return;
+      }
+    } catch (e) {
+      // স্ট্যাটাস চেক ব্যর্থ হলে স্বাভাবিক লগইন চলবে
+    }
+
     setLoading(loginSubmit, false);
     notifyHeader(profile?.full_name, profile?.avatar_url);
     closeAuthModal();
@@ -1107,6 +1140,49 @@ const upazilas = [
       setLoading(forgotSubmit, false);
       showMessage('নেটওয়ার্ক সমস্যা, আবার চেষ্টা করুন');
     }
+  });
+
+  // ===== ডিলিটের অপেক্ষায় থাকা অ্যাকাউন্ট — ফিরিয়ে আনা =====
+  let restoreProfile = null;
+
+  function showRestorePane(scheduledFor, profile) {
+    restorePending = true;
+    restoreProfile = profile || null;
+
+    const msLeft = new Date(scheduledFor).getTime() - Date.now();
+    const days = Math.max(1, Math.ceil(msLeft / 86400000));
+    const info = document.getElementById('restoreInfo');
+    if (info) {
+      info.textContent = `আপনার অ্যাকাউন্ট ডিলিটের অপেক্ষায় আছে। আর ${days.toLocaleString('bn-BD')} দিন পর এটি স্থায়ীভাবে মুছে যাবে। এখন ফিরিয়ে আনলে আপনার সব তথ্য ও পোস্ট আগের মতো চালু হবে।`;
+    }
+
+    tabs.forEach((t) => t.classList.remove('active'));
+    panes.forEach((p) => p.classList.toggle('active', p.id === 'restorePane'));
+    clearMessage();
+    clearFieldErrors();
+  }
+
+  const restoreConfirm = document.getElementById('restoreConfirm');
+  restoreConfirm?.addEventListener('click', async () => {
+    setLoading(restoreConfirm, true, 'ফিরিয়ে আনা হচ্ছে...');
+    const { data, error } = await supabase.rpc('restore_my_account');
+    setLoading(restoreConfirm, false);
+
+    if (error || !data?.ok) {
+      showMessage('ফিরিয়ে আনা যায়নি, আবার চেষ্টা করুন');
+      return;
+    }
+
+    restorePending = false;
+    notifyHeader(restoreProfile?.full_name, restoreProfile?.avatar_url);
+    closeAuthModal();
+    window.showToast('অ্যাকাউন্ট ফিরে এসেছে ✓', 'success');
+  });
+
+  // "না" চাপলে closeAuthModal() নিজেই লগআউট করে দেয় (restorePending true থাকায়)
+  document.getElementById('restoreDecline')?.addEventListener('click', () => {
+    closeAuthModal();
+    setTab('login');
   });
 
   // গ্লোবালি অ্যাক্সেসযোগ্য করা হলো যাতে Header.astro থেকে খোলা যায়
