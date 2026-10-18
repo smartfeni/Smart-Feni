@@ -15,6 +15,8 @@
 // (শুধু বাংলাদেশের আশেপাশের রেঞ্জে, যাতে দাম/নম্বরকে ভুল না ধরে)।
 // ============================================================
 
+import { getCurrentPosition } from './native-bridge.js';
+
 const URL_REGEX = /(https?:\/\/[^\s<>"']+|geo:[^\s<>"']+)/gi;
 const COORD_REGEX = /(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})/;
 
@@ -153,4 +155,64 @@ export function createNavButton(link, label = 'নেভিগেট করু�
 export function getNavUrl(text) {
   const link = findMapLink(text);
   return link ? link.navUrl : null;
+}
+
+// ---------------- ডেলিভারি UI v2 যোগ ----------------
+
+// টেক্সট থেকে ম্যাপ লিংক/কোঅর্ডিনেট সরিয়ে ফেলে (ইউজারকে লিংক দেখানো হবে না)।
+// রিটার্ন: { text: লিংক ছাড়া পরিষ্কার টেক্সট, link: findMapLink-এর ফলাফল বা null }
+export function splitMapLink(text) {
+  const link = findMapLink(text);
+  if (!link) return { text: typeof text === 'string' ? text.trim() : '', link: null };
+  const cleaned = text
+    .replace(link.matchedText, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return { text: cleaned, link };
+}
+
+// অ্যাড্রেস দেখানোর কাজ: টেক্সট textContent-এ (নিরাপদ), লিংক থাকলে শুধু "নেভিগেট করুন" বাটন।
+// coords = { lat, lng } দিলে (যেমন lat/lng কলাম থেকে) লিংক না থাকলেও বাটন আসে।
+export function renderAddressWithNav(container, text, opts = {}) {
+  if (!container) return;
+  container.textContent = '';
+  const { text: clean, link } = splitMapLink(text);
+  if (clean) {
+    const p = document.createElement('div');
+    p.textContent = clean;
+    container.appendChild(p);
+  }
+  let navLink = link;
+  const c = opts.coords;
+  if (!navLink && c && Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng))) {
+    const url = navUrlFromCoords(Number(c.lat), Number(c.lng));
+    navLink = { url, navUrl: url, lat: Number(c.lat), lng: Number(c.lng) };
+  }
+  if (navLink) container.appendChild(createNavButton(navLink, opts.label));
+}
+
+// "বর্তমান লোকেশন পাঠান": ব্যাকগ্রাউন্ডে GPS নেয় (অ্যাপে Capacitor, ব্রাউজারে navigator)।
+// রিটার্ন Promise<{ lat, lng, accuracy, navUrl }>; পারমিশন না দিলে/টাইমআউটে reject।
+// UI-তে লিংক দেখাবে না; navUrl অ্যাড্রেস টেক্সটের সাথে জমা রাখলে রাইডার/অ্যাডমিন বাটন পাবে।
+export function requestCurrentLocation(options = {}) {
+  return new Promise((resolve, reject) => {
+    getCurrentPosition(
+      (pos) => {
+        const lat = pos && pos.coords ? pos.coords.latitude : null;
+        const lng = pos && pos.coords ? pos.coords.longitude : null;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          reject(new Error('Location unavailable'));
+          return;
+        }
+        resolve({
+          lat,
+          lng,
+          accuracy: pos.coords.accuracy ?? null,
+          navUrl: navUrlFromCoords(lat, lng),
+        });
+      },
+      (err) => reject(err),
+      { enableHighAccuracy: true, timeout: 10000, ...options }
+    );
+  });
 }

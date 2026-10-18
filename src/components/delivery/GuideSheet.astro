@@ -1,0 +1,134 @@
+---
+// path: src/components/delivery/GuideSheet.astro
+// প্রতি পেজের "কিভাবে ব্যবহার করবেন" ম্যানুয়াল (ⓘ বাটন + নিচ থেকে ওঠা শিট)।
+// রেন্ডার ও লজিক: src/lib/guideSheet.js (ব্লকের ধরনের তালিকা ওই ফাইলের মাথায়)।
+//
+// ব্যবহার:
+//   import GuideSheet from '../components/delivery/GuideSheet.astro';
+//   <GuideSheet id="customer-drop" title="অর্ডারের নিয়ম" subtitle="ধাপ ১ · ড্রপ লোকেশন"
+//     showButton steps={[{ caption: 'ম্যাপে পিন বসান', blocks: [{ kind: 'map', marker: { x: 55, y: 45, tap: true } }] }]} />
+//
+// showButton: ⓘ বাটন এখানেই বসবে (সাধারণত হেডারের পাশে)। না দিলে নিজের বাটনে
+//   data-sf-guide-open="<id>" দিন। firstVisit: প্রথমবার পেজ খুললে নিজে থেকে খুলবে।
+// buttonTone: 'dark' (সাদা আইকন, নেভি হেডারে) | 'light' (নেভি আইকন, সাদা ব্যাকগ্রাউন্ডে)
+interface Props {
+  id: string;
+  title: string;
+  subtitle?: string;
+  steps: Array<{ caption: string; blocks: Array<Record<string, unknown>> }>;
+  showButton?: boolean;
+  firstVisit?: boolean;
+  buttonTone?: 'dark' | 'light';
+}
+
+const { id, title, subtitle = '', steps, showButton = false, firstVisit = false, buttonTone = 'dark' } = Astro.props;
+
+// </script> ইনজেকশন ঠেকাতে < কে < করা হলো
+const json = JSON.stringify({ title, subtitle, steps, firstVisit }).replace(/</g, '\\u003c');
+---
+
+{
+  showButton && (
+    <button
+      type="button"
+      class={`sfg-info-btn sfg-info-${buttonTone}`}
+      data-sf-guide-open={id}
+      aria-label="নিয়মাবলি দেখুন"
+    >
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v5M12 8v.01" />
+      </svg>
+    </button>
+  )
+}
+<script is:inline type="application/json" class="sfg-data" data-sf-guide-id={id} set:html={json}></script>
+
+<script>
+  import { initGuideSheets } from '../../lib/guideSheet.js';
+  initGuideSheets();
+</script>
+
+<style is:global>
+  .sfg-info-btn { width: 44px; height: 44px; border-radius: 22px; border: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; padding: 0; }
+  .sfg-info-dark { background: rgba(255, 255, 255, 0.14); color: #fff; }
+  .sfg-info-light { background: #eef2f8; color: #1b2a4a; }
+
+  .sfg-overlay { position: fixed; inset: 0; z-index: 10050; display: none; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1b2a4a; }
+  .sfg-overlay.open { display: block; }
+  .sfg-overlay * { box-sizing: border-box; }
+  .sfg-backdrop { position: absolute; inset: 0; background: rgba(27, 42, 74, 0.55); }
+  .sfg-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-width: 520px; margin: 0 auto; max-height: 94vh; max-height: 94dvh; background: #fff; border-radius: 24px 24px 0 0; display: flex; flex-direction: column; padding: 8px 16px calc(14px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 40px rgba(27, 42, 74, 0.28); animation: sfg-up 0.28s ease-out; }
+  .sfg-grab { width: 44px; height: 5px; border-radius: 3px; background: #d5dce8; margin: 2px auto 8px; flex: none; }
+  .sfg-head { display: flex; align-items: flex-start; gap: 10px; flex: none; }
+  .sfg-titles { flex: 1; min-width: 0; }
+  .sfg-title { margin: 0; font-size: 19px; font-weight: 700; line-height: 1.3; }
+  .sfg-sub { margin: 2px 0 0; font-size: 13px; color: #5b6b86; }
+  .sfg-close { width: 44px; height: 44px; border-radius: 22px; border: 0; background: #eef2f8; display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; padding: 0; }
+  .sfg-caption { margin: 8px 0 10px; padding: 10px 14px; background: #fff6f1; border: 1.5px solid #ff6b35; border-radius: 14px; font-size: 15.5px; font-weight: 700; line-height: 1.4; flex: none; }
+  .sfg-stage { flex: 1; min-height: 0; overflow-y: auto; display: flex; justify-content: center; padding: 4px 0 10px; }
+  .sfg-phone { width: 262px; min-height: 430px; background: #f8fafc; border: 6px solid #1b2a4a; border-radius: 30px; padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative; overflow: hidden; flex: none; }
+  .sfg-dots { display: flex; justify-content: center; gap: 2px; flex: none; }
+  .sfg-dots[hidden] { display: none; }
+  .sfg-dot { width: 28px; height: 28px; border: 0; background: none; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .sfg-dot-mark { width: 8px; height: 8px; border-radius: 4px; background: #d5dce8; transition: all 0.2s; }
+  .sfg-dot.is-active .sfg-dot-mark { width: 22px; background: #ff6b35; }
+  .sfg-foot { display: flex; gap: 10px; margin-top: 6px; flex: none; }
+  .sfg-btn { flex: 1; height: 50px; border-radius: 15px; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; }
+  .sfg-prev { background: #fff; border: 1.5px solid #d5dce8; color: #1b2a4a; }
+  .sfg-prev:disabled { opacity: 0.4; cursor: default; }
+  .sfg-next { flex: 1.4; background: #ff6b35; border: 0; color: #1b2a4a; }
+
+  .sfg-grow { flex: 1; min-width: 0; }
+  .sfg-b-map { position: relative; border-radius: 14px; overflow: hidden; flex: none; }
+  .sfg-b-map > svg { width: 100%; height: 100%; display: block; }
+  .sfg-b-map .sfg-area { position: absolute; inset: 0; }
+  .sfg-marker { position: absolute; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; }
+  .sfg-marker-label { margin-bottom: 2px; background: #1b2a4a; color: #fff; white-space: nowrap; }
+  .sfg-b-stepper { display: flex; gap: 4px; flex: none; }
+  .sfg-step { flex: 1; text-align: center; font-size: 11px; font-weight: 600; padding: 5px 2px; border-radius: 8px; background: #eef2f8; color: #5b6b86; }
+  .sfg-step.is-active { background: #1b2a4a; color: #fff; }
+  .sfg-b-row { display: grid; gap: 6px; flex: none; }
+  .sfg-b-field { position: relative; min-height: 40px; border: 1.5px solid #d5dce8; border-radius: 12px; background: #fff; padding: 8px 10px; font-size: 13px; display: flex; align-items: center; gap: 6px; flex: none; }
+  .sfg-b-field.is-muted { color: #5b6b86; }
+  .sfg-b-textarea { min-height: 62px; align-items: flex-start; }
+  .sfg-b-button { position: relative; height: 40px; border: 1.5px solid #d5dce8; border-radius: 12px; background: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 8px; flex: none; }
+  .sfg-b-button.is-primary { border-color: #ff6b35; background: #fff6f1; }
+  .sfg-b-cta { position: relative; height: 44px; border-radius: 13px; background: #ff6b35; color: #1b2a4a; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+  .sfg-b-title { font-size: 15px; font-weight: 700; flex: none; }
+  .sfg-b-text { font-size: 12.5px; flex: none; }
+  .sfg-b-text.is-muted { color: #5b6b86; }
+  .sfg-b-chips, .sfg-b-tabs { position: relative; display: flex; flex-wrap: wrap; gap: 5px; flex: none; }
+  .sfg-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 9px; font-size: 11.5px; font-weight: 600; background: #eef2f8; color: #1b2a4a; }
+  .sfg-chip.is-active { background: #1b2a4a; color: #fff; }
+  .sfg-b-tabs { flex-wrap: nowrap; gap: 0; border-bottom: 1.5px solid #e3e8f0; }
+  .sfg-tab { flex: 1; text-align: center; font-size: 12px; font-weight: 600; padding: 7px 2px; color: #8a97b0; border-bottom: 3px solid transparent; margin-bottom: -1.5px; }
+  .sfg-tab.is-active { color: #1b2a4a; border-bottom-color: #ff6b35; }
+  .sfg-b-card { position: relative; background: #fff; border-radius: 14px; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.08); padding: 9px 11px; flex: none; }
+  .sfg-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
+  .sfg-card-title { font-size: 13.5px; font-weight: 700; }
+  .sfg-card-line { font-size: 12px; color: #5b6b86; padding: 1px 0; }
+  .sfg-b-item { position: relative; display: flex; align-items: center; gap: 8px; background: #fff; border-radius: 12px; padding: 6px 8px; box-shadow: 0 1px 6px rgba(27, 42, 74, 0.08); flex: none; }
+  .sfg-item-tile { width: 34px; height: 34px; border-radius: 9px; background: #ffe4d6; flex: none; }
+  .sfg-item-name { font-size: 12.5px; font-weight: 700; }
+  .sfg-item-sub { font-size: 11.5px; color: #5b6b86; }
+  .sfg-b-counter { position: relative; display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; flex: none; }
+  .sfg-count-btn { width: 30px; height: 30px; border-radius: 15px; border: 1.5px solid #d5dce8; background: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; }
+  .sfg-count-btn.is-plus { background: #ff6b35; border-color: #ff6b35; }
+  .sfg-count-val { min-width: 20px; text-align: center; font-weight: 700; font-size: 14px; }
+  .sfg-b-notice { background: #fff4e5; border: 1.5px solid #ffd8a8; border-radius: 12px; padding: 8px 10px; font-size: 12px; font-weight: 600; color: #5e3000; flex: none; }
+  .sfg-b-spacer { flex: 1; }
+
+  /* ক্লিকের জায়গার কমলা pulsing মার্কার */
+  .sfg-tap { position: relative; }
+  .sfg-tap::after { content: ''; position: absolute; inset: -4px; border: 3px solid #ff6b35; border-radius: 16px; pointer-events: none; animation: sfg-pulse 1.4s ease-out infinite; }
+  .sfg-marker.sfg-tap::after { inset: -6px -6px 14px; border-radius: 50%; }
+  .sfg-pin { position: absolute; top: -10px; right: -6px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #ff6b35; color: #1b2a4a; font-size: 11.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; z-index: 1; }
+
+  @keyframes sfg-up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes sfg-pulse { 0% { opacity: 1; transform: scale(0.97); } 70% { opacity: 0.15; transform: scale(1.07); } 100% { opacity: 0; transform: scale(1.07); } }
+  @media (prefers-reduced-motion: reduce) {
+    .sfg-sheet { animation: none; }
+    .sfg-tap::after { animation: none; opacity: 0.9; }
+  }
+</style>
