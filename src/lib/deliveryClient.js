@@ -82,6 +82,13 @@ export function createServiceRequest({
   vehicleType,
   seatCount,
   askingPrice,
+  // ডেলিভারি UI v2 (সবগুলো ঐচ্ছিক — না দিলে আগের মতোই কাজ করে)
+  dropUnion,
+  pickupUpazila,
+  pickupUnion,
+  dropLocSource,
+  pickupLocSource,
+  orderItems,
 }) {
   return callDeliveryApi('create-request', {
     category,
@@ -98,6 +105,12 @@ export function createServiceRequest({
     vehicleType,
     seatCount,
     askingPrice,
+    dropUnion,
+    pickupUpazila,
+    pickupUnion,
+    dropLocSource,
+    pickupLocSource,
+    orderItems,
   });
 }
 

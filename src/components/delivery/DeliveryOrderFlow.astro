@@ -1,0 +1,1532 @@
+<!-- path: src/components/delivery/DeliveryOrderFlow.astro -->
+---
+// ============================================================
+// কম্পোনেন্ট: ডেলিভারি অর্ডার v2 — ফুলস্ক্রিন ৩-ধাপ ফ্লো (কাস্টমার)
+// ডিজাইন: DELIVERY_V2_UI_SPEC.md + মকআপ (Main / Pickup / Shop / Review)
+// কন্ট্রাক্ট: DELIVERY_V2_CONTRACT.md (ব্রিফ A)
+//
+// ধাপ ১ ড্রপ: ম্যাপ (পিন → উপজেলা/ইউনিয়ন অটো), ঠিকানা/ম্যাপ লিংক (লিংক লুকানো),
+//             "বর্তমান লোকেশন পাঠান", ঐচ্ছিক বিবরণ
+// ধাপ ২ পিকআপ: ঠিকানা + "রেস্টুরেন্ট / দোকান থেকে বেছে নিন" (delivery_shops) + "কী লাগবে"
+// ধাপ ৩ রিভিউ: আইটেমের দাম / ডেলিভারি চার্জ / মোট + হুবহু নোটিশ + অর্ডার পাঠান
+//
+// ব্যবহার: DeliveryHeroCard.astro-র ভেতরে <DeliveryOrderFlow /> বসে; কার্ডের বাটন
+//   window.SFDeliveryFlow.open() ডাকে। অ্যাভেইলেবিলিটি (অনলাইন রাইডার) চেক
+//   riderAvailability.js দিয়ে — কার্ডের NoRiderNotice (#dhNotice) ও #dhForm ব্যবহার করে।
+//
+// নিয়ম: ইউজারের লেখা সব textContent/.value দিয়ে (innerHTML-এ কখনো নয়);
+//   ম্যাপ লিংক UI-তে দেখানো হয় না (splitMapLink); জমা হয় ঠিকানার টেক্সটের শেষে।
+// Android back: ওভারলের ক্লাসে "overlay"+".open", back বাটনের aria-label-এ "বন্ধ" —
+//   native-bridge.js-এর closeTopOverlay ধরে; আসল কাজ data-sfo-back হ্যান্ডলারে (ধাপ অনুযায়ী)।
+// ============================================================
+
+import GuideSheet from './GuideSheet.astro';
+
+const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
+
+const backSvg =
+  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1B2A4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
+const targetSvg =
+  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1B2A4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
+const shopSvg =
+  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1B2A4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9l1.5-5h13L20 9M4 9v11h16V9M4 9h16M9 20v-6h6v6"/></svg>';
+const chevronSvg =
+  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1B2A4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
+const searchSvg =
+  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B6B86" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>';
+
+// ---------- ⓘ গাইড (প্রতি ধাপে এক লাইনের নির্দেশনা, GuideSheet-এর ব্লক দিয়ে আঁকা) ----------
+const stepperBlock = (active: number) => ({ kind: 'stepper', active, labels: ['ড্রপ', 'পিকআপ', 'কনফার্ম'] });
+
+const guideDrop = [
+  {
+    caption: 'ম্যাপে আপনার জায়গায় ট্যাপ করে পিন বসান',
+    blocks: [stepperBlock(0), { kind: 'map', h: 170, area: true, marker: { x: 55, y: 50, label: 'আপনি', tap: true } }, { kind: 'field', text: 'ঠিকানা বা ম্যাপ লিংক', muted: true }],
+  },
+  {
+    caption: 'উপজেলা ও ইউনিয়ন ম্যাপ থেকে নিজে ঠিক হয়',
+    blocks: [stepperBlock(0), { kind: 'row', cols: [{ kind: 'field', text: 'ফেনী সদর', chevron: true }, { kind: 'field', text: 'ধলিয়া', chevron: true, tap: true }] }, { kind: 'chips', items: ['ম্যাপ থেকে অটো'] }],
+  },
+  {
+    caption: 'অথবা "বর্তমান লোকেশন পাঠান" চাপুন',
+    blocks: [stepperBlock(0), { kind: 'button', text: 'বর্তমান লোকেশন পাঠান', tap: true }, { kind: 'textarea', text: 'ঠিকানা বা ম্যাপ লিংক' }],
+  },
+  {
+    caption: 'তারপর "পরের ধাপ" চাপুন',
+    blocks: [stepperBlock(0), { kind: 'spacer' }, { kind: 'cta', text: 'পরের ধাপ: পিকআপ →', tap: true }],
+  },
+];
+
+const guidePickup = [
+  {
+    caption: 'পিকআপের জায়গা লিখুন বা ম্যাপে বসান',
+    blocks: [stepperBlock(1), { kind: 'map', h: 120, area: true, marker: { x: 45, y: 55, tap: true } }, { kind: 'textarea', text: 'ঠিকানা বা ম্যাপ লিংক' }],
+  },
+  {
+    caption: '"রেস্টুরেন্ট / দোকান" চাপলে মেনু খোলে',
+    blocks: [stepperBlock(1), { kind: 'button', text: 'রেস্টুরেন্ট / দোকান থেকে বেছে নিন', primary: true, tap: true }],
+  },
+  {
+    caption: 'আইটেম বেছে নিলে পিকআপ নিজে সেট হয়',
+    blocks: [stepperBlock(1), { kind: 'item', name: 'কাচ্চি বিরিয়ানি', price: '৳৩৫০', qty: 2 }, { kind: 'counter', value: 2, tap: true }, { kind: 'chips', items: ['পিকআপ অটো সেট'] }],
+  },
+  {
+    caption: 'দোকানের বাইরের জিনিস নিচের বক্সে লিখুন',
+    blocks: [stepperBlock(1), { kind: 'textarea', text: 'অতিরিক্ত জিনিস লিখুন', tap: true }, { kind: 'spacer' }, { kind: 'cta', text: 'পরের ধাপ: রিভিউ →' }],
+  },
+];
+
+const guideShop = [
+  { caption: 'উপরে দোকান বেছে নিন', blocks: [{ kind: 'field', text: 'দোকান বা খাবার খুঁজুন', muted: true }, { kind: 'chips', items: ['কাচ্চি ঘর', 'মিষ্টি বিতান', 'পিঠা ঘর'], active: 0, tap: true }] },
+  { caption: '+ চেপে আইটেম যোগ করুন', blocks: [{ kind: 'item', name: 'কাচ্চি বিরিয়ানি', price: '৳৩৫০' }, { kind: 'counter', value: 2, tap: true }, { kind: 'item', name: 'বোরহানি', price: '৳৪০' }] },
+  { caption: '"কী লাগবে"-তে যোগ করুন চাপুন', blocks: [{ kind: 'spacer' }, { kind: 'cta', text: '"কী লাগবে"-তে যোগ করুন', tap: true }] },
+];
+
+const guideReview = [
+  {
+    caption: 'ঠিকানা ও আইটেম মিলিয়ে দেখুন',
+    blocks: [stepperBlock(2), { kind: 'card', title: 'পিকআপ → ড্রপ', lines: ['কাচ্চি ঘর', 'ধলিয়া, ফেনী সদর'], tap: true }, { kind: 'card', title: 'কী লাগবে', lines: ['কাচ্চি বিরিয়ানি × ২'] }],
+  },
+  {
+    caption: 'ডেলিভারি চার্জ ঠিক করুন',
+    blocks: [stepperBlock(2), { kind: 'card', title: 'ডেলিভারি চার্জ', lines: ['আইটেমের দাম ৳৮৬০', 'মোট ৳৯৪০'] }, { kind: 'counter', value: 80, tap: true }],
+  },
+  {
+    caption: '"অর্ডার পাঠান" চাপুন',
+    blocks: [stepperBlock(2), { kind: 'notice', text: 'অগ্রিম পেমেন্ট লাগবে। ডেলিভারি চার্জ আগেই ফিক্স করে নিন।' }, { kind: 'spacer' }, { kind: 'cta', text: 'অর্ডার পাঠান', tap: true }],
+  },
+];
+---
+
+<div class="sfo-overlay" id="sfoOverlay" role="dialog" aria-modal="true" aria-label="ডেলিভারি অর্ডার">
+
+  <!-- ================= ধাপ ১: ড্রপ ================= -->
+  <section class="sfo-step active" data-step="1" aria-label="ধাপ ১: ড্রপ লোকেশন">
+    <div class="sfo-col">
+      <div class="sfo-mapwrap" style="height:360px">
+        <div class="sfo-map" id="sfoMap1"></div>
+        <div class="sfo-top">
+          <button type="button" class="sfo-round" data-sfo-back aria-label="পিছনে যান বা বন্ধ করুন"><Fragment set:html={backSvg} /></button>
+          <div class="sfo-pill"><span class="sfo-chip sfo-chip-on">১ ড্রপ</span><span>২ পিকআপ</span><span>৩ কনফার্ম</span></div>
+          <GuideSheet id="customer-drop" title="অর্ডারের নিয়মাবলি" subtitle="ধাপ ১ / ৩ · ড্রপ লোকেশন" showButton buttonTone="light" steps={guideDrop} />
+        </div>
+      </div>
+      <div class="sfo-sheet">
+        <div class="sfo-grab"></div>
+        <form id="sfoForm1" class="sfo-form" novalidate>
+          <div class="sfo-title">কোথায় পৌঁছাতে হবে?</div>
+
+          <div class="sfo-blocked" hidden role="alert">
+            <div class="sfo-blocked-title"></div>
+            <div class="sfo-blocked-text"></div>
+            <a class="sfo-blocked-wa" target="_blank" rel="noopener noreferrer">WhatsApp-এ যোগাযোগ করুন</a>
+          </div>
+
+          <div class="sfo-grid2">
+            <div class="sfo-fld">
+              <label class="sfo-lbl" for="dhUpazila">উপজেলা<span class="required-mark">*</span></label>
+              <select id="dhUpazila" class="sfo-input sfo-select" required>
+                <option value="" disabled selected>সিলেক্ট করুন</option>
+                {upazilaList.map((u) => <option value={u}>{u}</option>)}
+              </select>
+              <div class="field-error-msg" data-error-for="dhUpazila"><i class="fas fa-circle-exclamation"></i><span>উপজেলা সিলেক্ট করুন</span></div>
+            </div>
+            <div class="sfo-fld">
+              <div class="sfo-lblrow">
+                <label class="sfo-lbl" for="sfoUnion">ইউনিয়ন<span class="required-mark">*</span></label>
+                <span class="sfo-chip sfo-chip-green" id="sfoAutoChip" hidden>ম্যাপ থেকে অটো</span>
+              </div>
+              <select id="sfoUnion" class="sfo-input sfo-select" required disabled>
+                <option value="" disabled selected>আগে উপজেলা</option>
+              </select>
+              <div class="field-error-msg" data-error-for="sfoUnion"><i class="fas fa-circle-exclamation"></i><span>ইউনিয়ন সিলেক্ট করুন</span></div>
+            </div>
+          </div>
+
+          <button type="button" class="sfo-ghost" id="sfoCurrentBtn"><Fragment set:html={targetSvg} /><span>বর্তমান লোকেশন পাঠান</span></button>
+          <div class="sfo-chip sfo-chip-green sfo-fit" id="sfoCurrentChip" hidden>বর্তমান লোকেশন পাঠানো হয়েছে</div>
+
+          <div class="sfo-fld">
+            <textarea id="sfoAddr1" class="sfo-input sfo-ta" placeholder="ঠিকানা বা ম্যাপ লিংক" maxlength="400" aria-label="ড্রপ ঠিকানা"></textarea>
+            <button type="button" class="sfo-linkchip" id="sfoLink1" hidden aria-label="ম্যাপ লিংক সরান"><span class="sfo-chip sfo-chip-green">ম্যাপ লিংক যোগ হয়েছে ✕</span></button>
+            <div class="sfo-hint">ম্যাপ লিংক দিলে রাইডার শুধু "নেভিগেট করুন" বাটন দেখবে।</div>
+            <div class="field-error-msg" data-error-for="sfoAddr1"><i class="fas fa-circle-exclamation"></i><span>ঠিকানা লিখুন, ম্যাপে পিন বসান বা বর্তমান লোকেশন পাঠান</span></div>
+          </div>
+
+          <input type="text" id="sfoDetail1" class="sfo-input" placeholder="বিস্তারিত (ঐচ্ছিক)" maxlength="200" aria-label="বিস্তারিত (ঐচ্ছিক)" />
+
+          <div class="sfo-spacer"></div>
+          <button type="button" class="sfo-cta" id="sfoNext1">পরের ধাপ: পিকআপ →</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ধাপ ২: পিকআপ ================= -->
+  <section class="sfo-step" data-step="2" aria-label="ধাপ ২: পিকআপ">
+    <div class="sfo-col">
+      <div class="sfo-mapwrap" style="height:220px">
+        <div class="sfo-map" id="sfoMap2"></div>
+        <div class="sfo-top">
+          <button type="button" class="sfo-round" data-sfo-back aria-label="পিছনে যান বা বন্ধ করুন"><Fragment set:html={backSvg} /></button>
+          <div class="sfo-pill"><span>১ ড্রপ</span><span class="sfo-chip sfo-chip-on">২ পিকআপ</span><span>৩ কনফার্ম</span></div>
+          <GuideSheet id="customer-pickup" title="অর্ডারের নিয়মাবলি" subtitle="ধাপ ২ / ৩ · পিকআপ" showButton buttonTone="light" steps={guidePickup} />
+        </div>
+      </div>
+      <div class="sfo-sheet">
+        <div class="sfo-grab"></div>
+        <form id="sfoForm2" class="sfo-form" novalidate>
+          <div class="sfo-title">কোথা থেকে নিতে হবে?</div>
+
+          <div class="sfo-fld">
+            <textarea id="sfoAddr2" class="sfo-input sfo-ta" placeholder="ঠিকানা বা ম্যাপ লিংক" maxlength="400" aria-label="পিকআপ ঠিকানা"></textarea>
+            <button type="button" class="sfo-linkchip" id="sfoLink2" hidden aria-label="ম্যাপ লিংক সরান"><span class="sfo-chip sfo-chip-green">ম্যাপ লিংক যোগ হয়েছে ✕</span></button>
+            <span class="sfo-chip sfo-chip-blue sfo-fit" id="sfoPickupArea" hidden></span>
+            <div class="field-error-msg" data-error-for="sfoAddr2"><i class="fas fa-circle-exclamation"></i><span>পিকআপের ঠিকানা লিখুন, ম্যাপে পিন বসান বা দোকান বেছে নিন</span></div>
+          </div>
+
+          <button type="button" class="sfo-ghost sfo-ghost-orange" id="sfoShopBtn">
+            <Fragment set:html={shopSvg} /><span class="sfo-grow">রেস্টুরেন্ট / দোকান থেকে বেছে নিন</span><Fragment set:html={chevronSvg} />
+          </button>
+
+          <div class="sfo-need" id="sfoCartBlock">
+            <div class="sfo-need-title">কী লাগবে</div>
+            <div id="sfoCartGroups"></div>
+            <textarea id="sfoManual" class="sfo-input sfo-ta sfo-ta-sm" placeholder="দোকানের বাইরের বা অতিরিক্ত জিনিস লিখুন" maxlength="500" aria-label="অতিরিক্ত জিনিস"></textarea>
+            <div class="field-error-msg" data-error-for="sfoManual"><i class="fas fa-circle-exclamation"></i><span>দোকান থেকে আইটেম বেছে নিন, অথবা কী লাগবে লিখুন</span></div>
+          </div>
+
+          <div class="sfo-spacer"></div>
+          <button type="button" class="sfo-cta" id="sfoNext2">পরের ধাপ: রিভিউ →</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ধাপ ৩: রিভিউ ================= -->
+  <section class="sfo-step" data-step="3" aria-label="ধাপ ৩: রিভিউ ও কনফার্ম">
+    <div class="sfo-col">
+      <div class="sfo-top sfo-top-static">
+        <button type="button" class="sfo-round" data-sfo-back aria-label="পিছনে যান বা বন্ধ করুন"><Fragment set:html={backSvg} /></button>
+        <div class="sfo-pill"><span>১ ড্রপ</span><span>২ পিকআপ</span><span class="sfo-chip sfo-chip-on">৩ কনফার্ম</span></div>
+        <GuideSheet id="customer-review" title="অর্ডারের নিয়মাবলি" subtitle="ধাপ ৩ / ৩ · রিভিউ ও কনফার্ম" showButton buttonTone="light" steps={guideReview} />
+      </div>
+      <form id="sfoForm3" class="sfo-review" novalidate>
+        <div class="sfo-title sfo-title-lg">অর্ডার রিভিউ</div>
+
+        <div class="sfo-blocked" hidden role="alert">
+          <div class="sfo-blocked-title"></div>
+          <div class="sfo-blocked-text"></div>
+          <a class="sfo-blocked-wa" target="_blank" rel="noopener noreferrer">WhatsApp-এ যোগাযোগ করুন</a>
+        </div>
+
+        <div class="sfo-card sfo-route" id="sfoRevRoute"></div>
+        <div class="sfo-card" id="sfoRevItems"></div>
+
+        <div class="sfo-card">
+          <div class="sfo-ln" id="sfoItemsLine"><span>আইটেমের দাম</span><b id="sfoItemsTotal">৳০</b></div>
+          <div class="sfo-ln"><span>ডেলিভারি চার্জ <span class="sfo-mut">(আপনার প্রস্তাব)</span><span class="required-mark">*</span></span><b id="sfoChargeShown">৳০</b></div>
+          <div class="sfo-stepper">
+            <button type="button" class="sfo-count" data-price-step="-10" aria-label="১০ টাকা কমান">−</button>
+            <span class="sfo-cur">৳</span>
+            <input type="number" id="dhPrice" class="sfo-input sfo-price" placeholder="যেমন: ৮০" min="1" inputmode="numeric" required aria-label="ডেলিভারি চার্জ" />
+            <button type="button" class="sfo-count sfo-count-plus" data-price-step="10" aria-label="১০ টাকা বাড়ান">+</button>
+          </div>
+          <div class="sfo-quick">
+            <button type="button" data-price-step="5">+৫</button>
+            <button type="button" data-price-step="10">+১০</button>
+            <button type="button" data-price-step="20">+২০</button>
+          </div>
+          <div class="field-error-msg" data-error-for="dhPrice"><i class="fas fa-circle-exclamation"></i><span>ডেলিভারি চার্জ দিন</span></div>
+          <div class="sfo-ln sfo-total"><b>মোট</b><b id="sfoTotal">৳০</b></div>
+          <div class="sfo-mut" id="sfoOutsideNote" hidden>সিস্টেমের বাইরের জিনিস রাইডার আলাদা হিসাব করবে।</div>
+        </div>
+
+        <div class="sfo-card">
+          <div class="sfo-lbl">বাহন (ঐচ্ছিক)</div>
+          <div class="sfo-vehicles">
+            <button type="button" class="sfo-vbtn dh-vehicle-btn active" data-vehicle="any">যেকোনো</button>
+            <button type="button" class="sfo-vbtn dh-vehicle-btn" data-vehicle="bike">বাইক</button>
+            <button type="button" class="sfo-vbtn dh-vehicle-btn" data-vehicle="cycle">সাইকেল</button>
+            <button type="button" class="sfo-vbtn dh-vehicle-btn" data-vehicle="cng">সিএনজি</button>
+          </div>
+          <input type="hidden" id="dhVehicleType" value="any" />
+        </div>
+
+        <div class="sfo-notice">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7A3E00" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16v.01"/></svg>
+          <div>অগ্রিম পেমেন্ট লাগবে। ডেলিভারি চার্জ আগেই ফিক্স করে নিন।</div>
+        </div>
+
+        <p class="sfo-error" id="dhError" hidden></p>
+        <div class="sfo-spacer"></div>
+        <button type="button" class="sfo-cta" id="dhSubmitBtn">অর্ডার পাঠান</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ================= সফল ================= -->
+  <section class="sfo-step" data-step="4" aria-label="অর্ডার পাঠানো হয়েছে">
+    <div class="sfo-col sfo-success">
+      <div class="sfo-success-icon"><i class="fas fa-check"></i></div>
+      <h3>অর্ডার পাঠানো হয়েছে!</h3>
+      <p id="sfoSuccessText"></p>
+      <a href="/my-orders" class="sfo-cta sfo-cta-link">আমার অর্ডার দেখুন</a>
+      <button type="button" class="sfo-ghost sfo-ghost-wide" id="sfoSuccessClose">বন্ধ করুন</button>
+    </div>
+  </section>
+</div>
+
+<!-- ================= দোকান ও মেনু শিট ================= -->
+<div class="sfo-shop-overlay" id="sfoShop" role="dialog" aria-modal="true" aria-label="দোকান ও মেনু">
+  <div class="sfo-shop-col">
+    <div class="sfo-shop-head">
+      <button type="button" class="sfo-round sfo-round-gray" id="sfoShopBack" aria-label="ফিরে যান, বন্ধ করুন"><Fragment set:html={backSvg} /></button>
+      <h2>দোকান ও মেনু</h2>
+      <GuideSheet id="customer-shop" title="অর্ডারের নিয়মাবলি" subtitle="দোকান ও মেনু" showButton buttonTone="light" steps={guideShop} />
+    </div>
+    <div class="sfo-shop-body" id="sfoShopBody">
+      <label class="sfo-search"><Fragment set:html={searchSvg} /><input type="search" id="sfoShopSearch" placeholder="দোকান বা খাবার খুঁজুন" aria-label="দোকান বা খাবার খুঁজুন" autocomplete="off" /></label>
+      <div class="sfo-shop-pills" id="sfoShopPills"></div>
+      <div id="sfoShopHead"></div>
+      <div id="sfoShopList" class="sfo-shop-list"></div>
+    </div>
+    <div class="sfo-shopbar">
+      <div class="sfo-shopbar-sum"><span id="sfoShopCount">০টি আইটেম</span><b id="sfoShopTotal">৳০</b></div>
+      <button type="button" class="sfo-cta sfo-shopbar-cta" id="sfoShopDone">"কী লাগবে"-তে যোগ করুন</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { splitMapLink, requestCurrentLocation } from '../../lib/mapLinks.js';
+  import {
+    UPAZILAS,
+    loadFeniGeo,
+    findAreaAt,
+    getFeniBounds,
+    getUpazilaBounds,
+    getDistrictBorder,
+    getLabelPoints,
+    getUnionsOfUpazilaName,
+  } from '../../data/feniAreas.js';
+  import {
+    bn,
+    taka,
+    tileColor,
+    UNION_EN_BY_BN,
+    fetchDeliveryShops,
+    filterShops,
+    cartCount,
+    groupCartByShop,
+    computeTotals,
+    buildOrderItems,
+    buildDescription,
+    composeAddress,
+    hasLocation,
+  } from '../../lib/deliveryOrderForm.js';
+  import { createServiceRequest } from '../../lib/deliveryClient.js';
+  import { initRiderAvailability } from '../../lib/riderAvailability.js';
+
+  const FENI_CENTER = [23.0159, 91.3976];
+  const $ = (id) => document.getElementById(id);
+
+  function h(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = String(text);
+    return n;
+  }
+
+  function toast(msg) {
+    if (typeof window.showToast === 'function') window.showToast(msg);
+    else alert(msg);
+  }
+
+  function showErr(id, on) {
+    const el = document.querySelector(`.field-error-msg[data-error-for="${id}"]`);
+    if (el) el.classList.toggle('show', !!on);
+  }
+
+  function newLoc() {
+    return { text: '', nav: '', lat: null, lng: null, upazila: '', union: '', current: false, fromShops: false };
+  }
+
+  const S = {
+    step: 1,
+    drop: newLoc(),
+    pickup: newLoc(),
+    detail: '',
+    cart: new Map(), // itemId -> { item, shop, qty }
+    shops: [],
+    shopsLoaded: false,
+    shopsError: '',
+  };
+
+  // এই ইনস্ট্যান্সের লোকেশন কোথা থেকে এল (DB: map|manual|link|current)
+  function sourceOf(loc) {
+    if (loc.current) return 'current';
+    if (loc.nav) return 'link';
+    if (loc.lat !== null && loc.lng !== null) return 'map';
+    return 'manual';
+  }
+
+  // ====================== Leaflet + geojson ======================
+  let geo = null;
+  let readyPromise = null;
+  const maps = { drop: null, pickup: null };
+
+  function ensureLeaflet() {
+    if (window.L) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      if (!document.querySelector('link[href*="leaflet.min.css"]')) {
+        const css = document.createElement('link');
+        css.rel = 'stylesheet';
+        css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+        document.head.appendChild(css);
+      }
+      const existing = document.querySelector('script[src*="leaflet.min.js"]');
+      if (existing) {
+        if (window.L) return resolve();
+        existing.addEventListener('load', () => resolve());
+        existing.addEventListener('error', () => reject(new Error('Leaflet লোড ব্যর্থ')));
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('Leaflet লোড ব্যর্থ'));
+      document.head.appendChild(s);
+    });
+  }
+
+  function ensureReady() {
+    if (!readyPromise) {
+      readyPromise = Promise.all([ensureLeaflet(), loadFeniGeo().catch(() => null)])
+        .then(([, g]) => {
+          geo = g;
+          return true;
+        })
+        .catch((err) => {
+          readyPromise = null;
+          throw err;
+        });
+    }
+    return readyPromise;
+  }
+
+  function pinIcon(color) {
+    const L = window.L;
+    return L.divIcon({
+      className: '',
+      html:
+        '<svg width="34" height="42" viewBox="0 0 34 42" style="display:block;filter:drop-shadow(0 2px 3px rgba(27,42,74,.35))" aria-hidden="true">' +
+        `<path d="M17 41C17 41 3 26 3 16a14 14 0 0 1 28 0c0 10-14 25-14 25z" fill="${color}"/>` +
+        '<circle cx="17" cy="16" r="5.5" fill="#fff"/></svg>',
+      iconSize: [34, 42],
+      iconAnchor: [17, 41],
+    });
+  }
+
+  function makeMap(kind) {
+    const L = window.L;
+    const el = $(kind === 'drop' ? 'sfoMap1' : 'sfoMap2');
+    const map = L.map(el, { zoomControl: true });
+    map.setView(FENI_CENTER, 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    if (geo) {
+      L.polyline(getDistrictBorder(geo), { color: '#FF6B35', weight: 3, opacity: 0.9, interactive: false }).addTo(map);
+      map.fitBounds(getFeniBounds(geo, 0.02));
+      map.setMaxBounds(getFeniBounds(geo, 0.06));
+      map.setMinZoom(9);
+    }
+    const m = { kind, map, hl: L.layerGroup().addTo(map), pin: null, dot: null };
+    map.on('click', (e) => onMapTap(kind, e.latlng.lat, e.latlng.lng));
+    return m;
+  }
+
+  function setPin(m, lat, lng, zoom) {
+    const L = window.L;
+    if (m.pin) {
+      m.pin.setLatLng([lat, lng]);
+    } else {
+      m.pin = L.marker([lat, lng], { draggable: true, icon: pinIcon(m.kind === 'drop' ? '#1B2A4A' : '#FF6B35') }).addTo(m.map);
+      m.pin.on('dragend', () => {
+        const p = m.pin.getLatLng();
+        const ok = onMapTap(m.kind, p.lat, p.lng);
+        const st = S[m.kind];
+        if (!ok && st.lat !== null) m.pin.setLatLng([st.lat, st.lng]);
+      });
+    }
+    if (zoom) m.map.setView([lat, lng], 16);
+  }
+
+  function clearPin(kind) {
+    const m = maps[kind];
+    if (m && m.pin) {
+      m.map.removeLayer(m.pin);
+      m.pin = null;
+    }
+    S[kind].lat = null;
+    S[kind].lng = null;
+  }
+
+  function highlightUnion(m, unionBn, fit) {
+    const L = window.L;
+    m.hl.clearLayers();
+    const en = UNION_EN_BY_BN[unionBn];
+    if (!geo || !en) return;
+    const feature = (geo.features || []).find((f) => f.properties && f.properties.shapeName === en);
+    if (!feature) return;
+    const layer = L.geoJSON(feature, {
+      interactive: false,
+      style: { color: '#FF6B35', weight: 2.5, dashArray: '7 6', fillColor: '#FF6B35', fillOpacity: 0.08 },
+    }).addTo(m.hl);
+    const pt = getLabelPoints(geo).unions[en];
+    if (pt) {
+      const chip = document.createElement('div');
+      chip.className = 'sfo-mapchip';
+      chip.textContent = unionBn;
+      L.marker(pt, {
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({ className: '', html: chip, iconSize: [0, 0], iconAnchor: [0, 0] }),
+      }).addTo(m.hl);
+    }
+    if (fit) m.map.fitBounds(layer.getBounds(), { padding: [24, 24], maxZoom: 16 });
+  }
+
+  async function ensureMapFor(kind) {
+    try {
+      await ensureReady();
+    } catch (e) {
+      const el = $(kind === 'drop' ? 'sfoMap1' : 'sfoMap2');
+      if (el && !el.dataset.failed) {
+        el.dataset.failed = '1';
+        el.appendChild(h('div', 'sfo-mapfail', 'ম্যাপ লোড হয়নি — ঠিকানা লিখে এগিয়ে যান'));
+      }
+      return;
+    }
+    if (!maps[kind]) {
+      maps[kind] = makeMap(kind);
+      const st = S[kind];
+      if (st.lat !== null) setPin(maps[kind], st.lat, st.lng, true);
+      if (st.union) highlightUnion(maps[kind], st.union, st.lat === null);
+    }
+    const m = maps[kind];
+    setTimeout(() => {
+      m.map.invalidateSize();
+      if (kind === 'pickup') updateDropDot();
+    }, 60);
+  }
+
+  // ধাপ ২-এর ম্যাপে ড্রপ লোকেশন নেভি ডট
+  function updateDropDot() {
+    const m = maps.pickup;
+    if (!m) return;
+    const L = window.L;
+    if (m.dot) {
+      m.map.removeLayer(m.dot);
+      m.dot = null;
+    }
+    if (S.drop.lat !== null) {
+      m.dot = L.circleMarker([S.drop.lat, S.drop.lng], {
+        radius: 7,
+        color: '#fff',
+        weight: 2,
+        fillColor: '#1B2A4A',
+        fillOpacity: 1,
+        interactive: false,
+      }).addTo(m.map);
+    }
+  }
+
+  // ====================== এলাকা (উপজেলা/ইউনিয়ন) ======================
+  const selUp = $('dhUpazila');
+  const selUnion = $('sfoUnion');
+  const autoChip = $('sfoAutoChip');
+  let programmatic = false;
+
+  function fillUnions(upName) {
+    selUnion.textContent = '';
+    const ph = h('option', '', 'সিলেক্ট করুন');
+    ph.value = '';
+    ph.disabled = true;
+    ph.selected = true;
+    selUnion.appendChild(ph);
+    getUnionsOfUpazilaName(upName).forEach((u) => {
+      const o = h('option', '', u);
+      o.value = u;
+      selUnion.appendChild(o);
+    });
+    selUnion.disabled = false;
+  }
+
+  function setSelectValues(upName, unionBn, auto) {
+    programmatic = true;
+    selUp.value = upName;
+    fillUnions(upName);
+    selUnion.value = unionBn || '';
+    selUp.dispatchEvent(new Event('change')); // riderAvailability শোনে
+    programmatic = false;
+    autoChip.hidden = !auto;
+    showErr('dhUpazila', false);
+    showErr('sfoUnion', false);
+  }
+
+  function applyArea(kind, area) {
+    if (!area) return;
+    const st = S[kind];
+    st.upazila = area.upazilaName;
+    st.union = area.unionBn;
+    if (kind === 'drop') setSelectValues(area.upazilaName, area.unionBn, true);
+    else renderPickupArea();
+    if (maps[kind]) highlightUnion(maps[kind], area.unionBn, false);
+  }
+
+  function renderPickupArea() {
+    const chip = $('sfoPickupArea');
+    const p = S.pickup;
+    const text = [p.union, p.upazila].filter(Boolean).join(' · ');
+    chip.textContent = text;
+    chip.hidden = !text;
+  }
+
+  selUp.addEventListener('change', () => {
+    if (programmatic) return;
+    const st = S.drop;
+    st.upazila = selUp.value;
+    st.union = '';
+    fillUnions(selUp.value);
+    autoChip.hidden = true;
+    showErr('dhUpazila', false);
+    const m = maps.drop;
+    if (m) {
+      if (st.lat !== null) clearPin('drop');
+      m.hl.clearLayers();
+      const up = UPAZILAS.find((u) => u.name === selUp.value);
+      const b = geo && up ? getUpazilaBounds(geo, up.id) : null;
+      if (b) m.map.fitBounds(b, { padding: [16, 16] });
+    }
+  });
+
+  selUnion.addEventListener('change', () => {
+    const st = S.drop;
+    st.union = selUnion.value;
+    autoChip.hidden = true;
+    showErr('sfoUnion', false);
+    const m = maps.drop;
+    if (m) {
+      if (st.lat !== null) clearPin('drop');
+      highlightUnion(m, st.union, true);
+    }
+  });
+
+  // ====================== ম্যাপ ট্যাপ / ঠিকানা বক্স / বর্তমান লোকেশন ======================
+  function onMapTap(kind, lat, lng) {
+    const area = geo ? findAreaAt(lat, lng, geo) : null;
+    if (geo && !area) {
+      toast('এই লোকেশন ফেনী জেলার বাইরে — ফেনীর ভেতরে পিন বসান');
+      return false;
+    }
+    const st = S[kind];
+    st.lat = lat;
+    st.lng = lng;
+    st.nav = '';
+    st.current = false;
+    st.fromShops = false;
+    setLinkChip(kind, false);
+    if (kind === 'drop') $('sfoCurrentChip').hidden = true;
+    applyArea(kind, area);
+    if (maps[kind]) setPin(maps[kind], lat, lng, false);
+    showErr(kind === 'drop' ? 'sfoAddr1' : 'sfoAddr2', false);
+    refreshGroupChips();
+    return true;
+  }
+
+  function setLinkChip(kind, on) {
+    const el = $(kind === 'drop' ? 'sfoLink1' : 'sfoLink2');
+    if (el) el.hidden = !on;
+  }
+
+  function onAddressInput(kind) {
+    const ta = $(kind === 'drop' ? 'sfoAddr1' : 'sfoAddr2');
+    const st = S[kind];
+    const { text, link } = splitMapLink(ta.value);
+    if (link) {
+      ta.value = text;
+      st.text = text;
+      st.nav = link.navUrl;
+      st.current = false;
+      setLinkChip(kind, true);
+      if (kind === 'drop') $('sfoCurrentChip').hidden = true;
+      if (link.lat !== null && link.lng !== null) {
+        const area = geo ? findAreaAt(link.lat, link.lng, geo) : null;
+        if (!geo || area) {
+          st.lat = link.lat;
+          st.lng = link.lng;
+          applyArea(kind, area);
+          if (maps[kind]) setPin(maps[kind], link.lat, link.lng, true);
+        }
+      }
+    } else {
+      st.text = ta.value;
+    }
+    if (kind === 'pickup') {
+      st.fromShops = false;
+      refreshGroupChips();
+    }
+    showErr(kind === 'drop' ? 'sfoAddr1' : 'sfoAddr2', false);
+  }
+
+  function removeLink(kind) {
+    const st = S[kind];
+    st.nav = '';
+    if (st.current) st.current = false;
+    setLinkChip(kind, false);
+    if (kind === 'drop') $('sfoCurrentChip').hidden = true;
+  }
+
+  $('sfoAddr1').addEventListener('input', () => onAddressInput('drop'));
+  $('sfoAddr2').addEventListener('input', () => onAddressInput('pickup'));
+  $('sfoLink1').addEventListener('click', () => removeLink('drop'));
+  $('sfoLink2').addEventListener('click', () => removeLink('pickup'));
+  $('sfoDetail1').addEventListener('input', (e) => {
+    S.detail = e.target.value;
+  });
+  $('sfoManual').addEventListener('input', () => showErr('sfoManual', false));
+
+  // "বর্তমান লোকেশন পাঠান" = শুধু বাটন; ব্যাকগ্রাউন্ডে GPS, লিংক দেখানো হয় না
+  const currentBtn = $('sfoCurrentBtn');
+  currentBtn.addEventListener('click', async () => {
+    if (currentBtn.disabled) return;
+    const label = currentBtn.querySelector('span');
+    currentBtn.disabled = true;
+    label.textContent = 'লোকেশন নেওয়া হচ্ছে…';
+    try {
+      await ensureReady().catch(() => null);
+      const p = await requestCurrentLocation();
+      const area = geo ? findAreaAt(p.lat, p.lng, geo) : null;
+      if (geo && !area) {
+        toast('আপনি এখন ফেনীর বাইরে আছেন — ম্যাপে ফেনীর ভেতরে পিন বসান');
+        return;
+      }
+      const st = S.drop;
+      st.lat = p.lat;
+      st.lng = p.lng;
+      st.nav = p.navUrl;
+      st.current = true;
+      setLinkChip('drop', false);
+      applyArea('drop', area);
+      if (maps.drop) setPin(maps.drop, p.lat, p.lng, true);
+      $('sfoCurrentChip').hidden = false;
+      showErr('sfoAddr1', false);
+    } catch (e) {
+      toast('লোকেশন পাওয়া যায়নি। পারমিশন দিন, অথবা ম্যাপে পিন বসান।');
+    } finally {
+      currentBtn.disabled = false;
+      label.textContent = 'বর্তমান লোকেশন পাঠান';
+    }
+  });
+
+  // ====================== কী লাগবে (ধাপ ২) ======================
+  function itemTile(item, size) {
+    const wrap = h('div', 'sfo-tile');
+    wrap.style.width = wrap.style.height = size + 'px';
+    wrap.style.background = tileColor(item.id);
+    if (item.image_url) {
+      const img = document.createElement('img');
+      img.src = item.image_url;
+      img.alt = item.name || '';
+      img.loading = 'lazy';
+      img.onerror = () => {
+        img.remove();
+        wrap.appendChild(h('i', 'fas fa-utensils'));
+      };
+      wrap.appendChild(img);
+    } else {
+      wrap.appendChild(h('i', 'fas fa-utensils'));
+    }
+    return wrap;
+  }
+
+  function renderCartBlock() {
+    const box = $('sfoCartGroups');
+    box.textContent = '';
+    groupCartByShop(S.cart).forEach((g) => {
+      const grp = h('div', 'sfo-group');
+      const head = h('div', 'sfo-group-head');
+      head.appendChild(h('span', 'sfo-group-name', g.shop.name));
+      const chip = h('span', 'sfo-chip sfo-chip-green sfo-auto-pick', 'পিকআপ অটো সেট');
+      chip.hidden = !S.pickup.fromShops;
+      head.appendChild(chip);
+      grp.appendChild(head);
+      g.lines.forEach((c) => {
+        const row = h('div', 'sfo-line');
+        row.appendChild(itemTile(c.item, 44));
+        const mid = h('div', 'sfo-line-mid');
+        mid.appendChild(h('div', 'sfo-line-name', c.item.name));
+        mid.appendChild(h('div', 'sfo-line-sub', `${taka(c.item.price)} × ${bn(c.qty)}`));
+        row.appendChild(mid);
+        row.appendChild(h('b', 'sfo-line-total', taka(Number(c.item.price) * c.qty)));
+        grp.appendChild(row);
+      });
+      box.appendChild(grp);
+    });
+  }
+
+  function refreshGroupChips() {
+    document.querySelectorAll('.sfo-auto-pick').forEach((c) => {
+      c.hidden = !S.pickup.fromShops;
+    });
+  }
+
+  // দোকান বাছা হলে পিকআপ নিজে সেট (ঠিকানা, উপজেলা/ইউনিয়ন, লোকেশন)
+  function applyShopsToPickup() {
+    const groups = groupCartByShop(S.cart);
+    const p = S.pickup;
+    const ta = $('sfoAddr2');
+    if (!groups.length) {
+      if (p.fromShops) {
+        clearPin('pickup');
+        Object.assign(p, newLoc());
+        ta.value = '';
+        setLinkChip('pickup', false);
+        if (maps.pickup) maps.pickup.hl.clearLayers();
+        renderPickupArea();
+      }
+      return;
+    }
+    const names = groups
+      .map((g) => (g.shop.address ? `${g.shop.name} (${g.shop.address})` : g.shop.name))
+      .join(' · ');
+    const first = groups[0].shop;
+    p.text = names;
+    p.nav = '';
+    p.current = false;
+    p.fromShops = true;
+    ta.value = names;
+    setLinkChip('pickup', false);
+    p.upazila = first.upazila || '';
+    p.union = first.union_name || '';
+    if (first.lat !== null && first.lat !== undefined && first.lng !== null && first.lng !== undefined) {
+      p.lat = Number(first.lat);
+      p.lng = Number(first.lng);
+      if (maps.pickup) setPin(maps.pickup, p.lat, p.lng, true);
+    } else {
+      clearPin('pickup');
+    }
+    if (maps.pickup) highlightUnion(maps.pickup, p.union, false);
+    renderPickupArea();
+    showErr('sfoAddr2', false);
+  }
+
+  // ====================== দোকান ও মেনু শিট ======================
+  const shopEl = $('sfoShop');
+  let draft = new Map(); // itemId -> qty
+  let activeShopId = null;
+  let shopQuery = '';
+
+  function lookupItem(id) {
+    for (const s of S.shops) {
+      const it = s.items.find((x) => x.id === id);
+      if (it) return { item: it, shop: s };
+    }
+    return null;
+  }
+
+  function draftTotals() {
+    let count = 0;
+    let sum = 0;
+    draft.forEach((qty, id) => {
+      const f = lookupItem(id);
+      if (!f) return;
+      count += qty;
+      sum += Number(f.item.price) * qty;
+    });
+    return { count, sum };
+  }
+
+  function renderShopBar() {
+    const t = draftTotals();
+    $('sfoShopCount').textContent = `${bn(t.count)}টি আইটেম`;
+    $('sfoShopTotal').textContent = taka(t.sum);
+    const done = $('sfoShopDone');
+    done.disabled = t.count === 0 && S.cart.size === 0;
+  }
+
+  function setDraft(id, qty) {
+    if (qty <= 0) draft.delete(id);
+    else draft.set(id, Math.min(qty, 50));
+    renderShopSheet();
+  }
+
+  function renderShopSheet() {
+    const pills = $('sfoShopPills');
+    const head = $('sfoShopHead');
+    const list = $('sfoShopList');
+    pills.textContent = '';
+    head.textContent = '';
+    list.textContent = '';
+
+    if (!S.shopsLoaded) {
+      list.appendChild(h('div', 'sfo-empty', 'লোড হচ্ছে…'));
+      renderShopBar();
+      return;
+    }
+    if (S.shopsError) {
+      list.appendChild(h('div', 'sfo-empty', 'দোকানের তালিকা লোড করা যায়নি। পরে চেষ্টা করুন, অথবা কী লাগবে নিজে লিখুন।'));
+      renderShopBar();
+      return;
+    }
+    if (!S.shops.length) {
+      list.appendChild(h('div', 'sfo-empty', 'এখনো কোনো দোকান যোগ হয়নি। পিকআপের ঠিকানা ও কী লাগবে নিজে লিখে অর্ডার করুন।'));
+      renderShopBar();
+      return;
+    }
+
+    const shown = filterShops(S.shops, shopQuery);
+    if (!shown.length) {
+      list.appendChild(h('div', 'sfo-empty', 'কিছু পাওয়া যায়নি'));
+      renderShopBar();
+      return;
+    }
+    if (!shown.some((s) => s.id === activeShopId)) activeShopId = shown[0].id;
+
+    shown.forEach((s) => {
+      const b = h('button', 'sfo-shopchip' + (s.id === activeShopId ? ' active' : ''), s.name);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        activeShopId = s.id;
+        renderShopSheet();
+      });
+      pills.appendChild(b);
+    });
+
+    const shop = shown.find((s) => s.id === activeShopId);
+    const hd = h('div', 'sfo-shophead');
+    const logo = h('div', 'sfo-tile');
+    logo.style.width = logo.style.height = '52px';
+    logo.style.background = tileColor(shop.id);
+    if (shop.image_url) {
+      const img = document.createElement('img');
+      img.src = shop.image_url;
+      img.alt = shop.name || '';
+      img.loading = 'lazy';
+      img.onerror = () => {
+        img.remove();
+        logo.appendChild(h('i', 'fas fa-store'));
+      };
+      logo.appendChild(img);
+    } else {
+      logo.appendChild(h('i', 'fas fa-store'));
+    }
+    hd.appendChild(logo);
+    const info = h('div', 'sfo-shophead-info');
+    info.appendChild(h('div', 'sfo-shophead-name', shop.name));
+    const where = [shop.union_name ? shop.union_name + ' ইউনিয়ন' : '', shop.upazila].filter(Boolean).join(', ');
+    const addr = shop.address || where;
+    if (addr) info.appendChild(h('div', 'sfo-shophead-addr', addr));
+    hd.appendChild(info);
+    if (shop.is_popular) hd.appendChild(h('span', 'sfo-chip sfo-chip-yellow', 'জনপ্রিয়'));
+    head.appendChild(hd);
+
+    shop.items.forEach((it) => {
+      const row = h('div', 'sfo-row');
+      row.appendChild(itemTile(it, 64));
+      const mid = h('div', 'sfo-row-mid');
+      mid.appendChild(h('div', 'sfo-row-name', it.name));
+      mid.appendChild(h('div', 'sfo-row-price', taka(it.price)));
+      row.appendChild(mid);
+
+      const qty = draft.get(it.id) || 0;
+      if (qty > 0) {
+        const ctr = h('div', 'sfo-ctr');
+        const minus = h('button', 'sfo-count', '−');
+        minus.type = 'button';
+        minus.setAttribute('aria-label', `${it.name} কমান`);
+        minus.addEventListener('click', () => setDraft(it.id, qty - 1));
+        const plus = h('button', 'sfo-count sfo-count-plus', '+');
+        plus.type = 'button';
+        plus.setAttribute('aria-label', `${it.name} বাড়ান`);
+        plus.addEventListener('click', () => setDraft(it.id, qty + 1));
+        ctr.appendChild(minus);
+        ctr.appendChild(h('span', 'sfo-ctr-val', bn(qty)));
+        ctr.appendChild(plus);
+        row.appendChild(ctr);
+      } else {
+        const add = h('button', 'sfo-add', 'যোগ করুন');
+        add.type = 'button';
+        add.setAttribute('aria-label', `${it.name} যোগ করুন`);
+        add.addEventListener('click', () => setDraft(it.id, 1));
+        row.appendChild(add);
+      }
+      list.appendChild(row);
+    });
+    renderShopBar();
+  }
+
+  async function openShopSheet() {
+    draft = new Map();
+    S.cart.forEach((c, id) => draft.set(id, c.qty));
+    shopQuery = '';
+    $('sfoShopSearch').value = '';
+    shopEl.classList.add('open');
+    renderShopSheet();
+    // প্রতিবার খোলার সময় নতুন করে লোড (অ্যাডমিন মেনু বদলাতে পারে)
+    const res = await fetchDeliveryShops();
+    S.shops = res.shops;
+    S.shopsError = res.error || '';
+    S.shopsLoaded = true;
+    // যে আইটেম আর নেই, কার্ট/ড্রাফট থেকে বাদ
+    Array.from(draft.keys()).forEach((id) => {
+      if (!lookupItem(id)) draft.delete(id);
+    });
+    if (!activeShopId && S.cart.size) {
+      const first = groupCartByShop(S.cart)[0];
+      activeShopId = first ? first.shop.id : null;
+    }
+    renderShopSheet();
+  }
+
+  function closeShopSheet() {
+    shopEl.classList.remove('open');
+  }
+
+  function commitShopSheet() {
+    const next = new Map();
+    draft.forEach((qty, id) => {
+      const f = lookupItem(id);
+      if (f) next.set(id, { item: f.item, shop: f.shop, qty });
+    });
+    S.cart = next;
+    closeShopSheet();
+    applyShopsToPickup();
+    renderCartBlock();
+    showErr('sfoManual', false);
+  }
+
+  $('sfoShopBtn').addEventListener('click', openShopSheet);
+  $('sfoShopBack').addEventListener('click', closeShopSheet);
+  $('sfoShopDone').addEventListener('click', commitShopSheet);
+  $('sfoShopSearch').addEventListener('input', (e) => {
+    shopQuery = e.target.value;
+    renderShopSheet();
+  });
+
+  // ====================== রিভিউ (ধাপ ৩) ======================
+  const priceInput = $('dhPrice');
+
+  function displayAddress(loc) {
+    const t = String(loc.text || '').trim();
+    if (t) return t;
+    const area = [loc.union, loc.upazila].filter(Boolean).join(', ');
+    if (area) return area;
+    return loc.current ? 'বর্তমান লোকেশন' : 'ম্যাপ লোকেশন';
+  }
+
+  function renderReview() {
+    // ঠিকানা কার্ড: বাঁয়ে কমলা ডট — লাইন — নেভি ডট
+    const route = $('sfoRevRoute');
+    route.textContent = '';
+    const rail = h('div', 'sfo-rail');
+    const d1 = h('span', 'sfo-dot sfo-dot-orange');
+    const ln = h('span', 'sfo-rail-line');
+    const d2 = h('span', 'sfo-dot sfo-dot-navy');
+    rail.appendChild(d1);
+    rail.appendChild(ln);
+    rail.appendChild(d2);
+    route.appendChild(rail);
+    const col = h('div', 'sfo-route-col');
+
+    const pBlock = h('div');
+    pBlock.appendChild(h('div', 'sfo-mut', 'পিকআপ'));
+    pBlock.appendChild(h('div', 'sfo-route-val', displayAddress(S.pickup)));
+    const shopCount = groupCartByShop(S.cart).length;
+    if (shopCount >= 2) pBlock.appendChild(h('span', 'sfo-chip sfo-chip-gray', `${bn(shopCount)}টি দোকান`));
+    col.appendChild(pBlock);
+
+    const dBlock = h('div');
+    dBlock.appendChild(h('div', 'sfo-mut', 'ড্রপ'));
+    dBlock.appendChild(h('div', 'sfo-route-val', displayAddress(S.drop)));
+    if (S.drop.current) dBlock.appendChild(h('span', 'sfo-chip sfo-chip-green', 'বর্তমান লোকেশন পাঠানো হয়েছে'));
+    col.appendChild(dBlock);
+    route.appendChild(col);
+
+    // কী লাগবে কার্ড
+    const items = $('sfoRevItems');
+    items.textContent = '';
+    items.appendChild(h('div', 'sfo-mut sfo-mut-b', 'কী লাগবে'));
+    S.cart.forEach((c) => {
+      const l = h('div', 'sfo-ln');
+      l.appendChild(h('span', '', `${c.item.name} × ${bn(c.qty)}`));
+      l.appendChild(h('b', '', taka(Number(c.item.price) * c.qty)));
+      items.appendChild(l);
+    });
+    const manual = $('sfoManual').value.trim();
+    if (manual) {
+      const l = h('div', 'sfo-ln sfo-ln-manual');
+      l.appendChild(h('span', 'sfo-manual-text', manual));
+      l.appendChild(h('span', 'sfo-chip sfo-chip-amber', 'ম্যানুয়াল'));
+      items.appendChild(l);
+    }
+
+    $('sfoItemsLine').hidden = S.cart.size === 0;
+    $('sfoOutsideNote').hidden = !manual;
+    updateTotals();
+  }
+
+  function updateTotals() {
+    const t = computeTotals(S.cart, priceInput.value);
+    $('sfoItemsTotal').textContent = taka(t.itemsTotal);
+    $('sfoChargeShown').textContent = taka(t.deliveryCharge);
+    $('sfoTotal').textContent = taka(t.total);
+  }
+
+  priceInput.addEventListener('input', () => {
+    showErr('dhPrice', false);
+    updateTotals();
+  });
+
+  document.querySelectorAll('[data-price-step]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cur = Number(priceInput.value) || 0;
+      priceInput.value = String(Math.max(1, cur + Number(btn.dataset.priceStep)));
+      priceInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  });
+
+  // ====================== ধাপ নেভিগেশন ======================
+  const overlay = $('sfoOverlay');
+
+  function go(n) {
+    S.step = n;
+    overlay.querySelectorAll('.sfo-step').forEach((sec) => {
+      sec.classList.toggle('active', Number(sec.dataset.step) === n);
+    });
+    const active = overlay.querySelector('.sfo-step.active');
+    if (active) active.scrollTop = 0;
+    if (n === 1) ensureMapFor('drop');
+    if (n === 2) {
+      renderCartBlock();
+      renderPickupArea();
+      ensureMapFor('pickup');
+    }
+    if (n === 3) {
+      renderReview();
+      syncBlocked();
+    }
+  }
+
+  function validateStep1() {
+    const form = $('sfoForm1');
+    let ok = true;
+    if (typeof window.SFValidateForm === 'function') {
+      ok = !!window.SFValidateForm(form);
+    } else {
+      if (!selUp.value) { showErr('dhUpazila', true); ok = false; }
+      if (!selUnion.value) { showErr('sfoUnion', true); ok = false; }
+    }
+    if (!hasLocation(S.drop)) {
+      showErr('sfoAddr1', true);
+      ok = false;
+    }
+    return ok;
+  }
+
+  function validateStep2() {
+    let ok = true;
+    const manual = $('sfoManual').value.trim();
+    if (!hasLocation(S.pickup) && S.cart.size === 0) {
+      showErr('sfoAddr2', true);
+      ok = false;
+    }
+    if (S.cart.size === 0 && !manual) {
+      showErr('sfoManual', true);
+      ok = false;
+    }
+    return ok;
+  }
+
+  $('sfoNext1').addEventListener('click', () => {
+    if (validateStep1()) go(2);
+  });
+  $('sfoNext2').addEventListener('click', () => {
+    if (validateStep2()) go(3);
+  });
+
+  function closeFlow() {
+    overlay.classList.remove('open');
+    closeShopSheet();
+    document.body.style.overflow = '';
+  }
+
+  function openFlow() {
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    go(S.step === 4 ? 1 : S.step);
+    syncBlocked();
+  }
+
+  function goBack() {
+    if (shopEl.classList.contains('open')) {
+      closeShopSheet();
+      return;
+    }
+    if (S.step === 4) {
+      finishAndReset();
+      return;
+    }
+    if (S.step > 1) go(S.step - 1);
+    else closeFlow();
+  }
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target.closest && e.target.closest('[data-sfo-back]')) goBack();
+  });
+
+  // ====================== রাইডার অ্যাভেইলেবিলিটি ======================
+  const submitBtn = $('dhSubmitBtn');
+  const vehicleInput = $('dhVehicleType');
+  const vehicleButtons = document.querySelectorAll('.dh-vehicle-btn');
+  const cardForm = $('dhForm'); // কার্ডের CTA র‍্যাপার (DeliveryHeroCard)
+
+  vehicleButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      vehicleButtons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      vehicleInput.value = btn.dataset.vehicle;
+    });
+  });
+
+  let availability = null;
+  if (cardForm) {
+    availability = initRiderAvailability({
+      category: 'delivery',
+      root: $('dhNotice'),
+      form: cardForm,
+      upazilaSelect: selUp,
+      vehicleInput,
+      vehicleButtons,
+      submitBtn,
+    });
+  }
+
+  // কার্ডের NoRiderNotice-এর অবস্থা ফ্লোর ভেতরের নোটিশ বক্সগুলোতে কপি
+  function syncBlocked() {
+    const n = $('dhNotice');
+    const blocked = !!n && !n.hidden;
+    document.querySelectorAll('.sfo-blocked').forEach((box) => {
+      box.hidden = !blocked;
+      if (!blocked) return;
+      const t = n.querySelector('[data-notice-title]');
+      const x = n.querySelector('[data-notice-text]');
+      const w = n.querySelector('[data-notice-wa]');
+      box.querySelector('.sfo-blocked-title').textContent = t ? t.textContent : '';
+      box.querySelector('.sfo-blocked-text').textContent = x ? x.textContent : '';
+      const a = box.querySelector('.sfo-blocked-wa');
+      if (w && w.href) a.href = w.href;
+    });
+  }
+  setInterval(() => {
+    if (overlay.classList.contains('open')) syncBlocked();
+  }, 1500);
+  vehicleButtons.forEach((b) => b.addEventListener('click', () => setTimeout(syncBlocked, 0)));
+  selUp.addEventListener('change', () => setTimeout(syncBlocked, 0));
+
+  // ====================== সাবমিট ======================
+  const errorEl = $('dhError');
+
+  function releaseSubmit() {
+    delete submitBtn.dataset.busy;
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'অর্ডার পাঠান';
+    if (availability) availability.apply();
+  }
+
+  submitBtn.addEventListener('click', async () => {
+    if (submitBtn.dataset.busy === '1' || submitBtn.disabled) return;
+    errorEl.hidden = true;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      window.openAuthModal?.('login');
+      return;
+    }
+
+    if (typeof window.SFValidateForm === 'function') {
+      if (!window.SFValidateForm($('sfoForm3'))) return;
+    } else if (!(Number(priceInput.value) > 0)) {
+      showErr('dhPrice', true);
+      return;
+    }
+
+    submitBtn.dataset.busy = '1';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'পাঠানো হচ্ছে...';
+
+    const drop = S.drop;
+    const pickup = S.pickup;
+    const dropPayload = { ...drop, source: sourceOf(drop) };
+    const pickupPayload = { ...pickup, source: sourceOf(pickup) };
+
+    const description = buildDescription(S.cart, $('sfoManual').value);
+    const orderItems = buildOrderItems(S.cart);
+
+    const { data, error, code } = await createServiceRequest({
+      category: 'delivery',
+      upazila: drop.upazila || selUp.value,
+      pickupAddress: composeAddress(pickupPayload),
+      pickupLat: pickup.lat,
+      pickupLng: pickup.lng,
+      pickupInstructions: '',
+      dropAddress: composeAddress(dropPayload),
+      dropLat: drop.lat,
+      dropLng: drop.lng,
+      dropInstructions: (S.detail || '').trim(),
+      description,
+      vehicleType: vehicleInput.value,
+      askingPrice: priceInput.value,
+      dropUnion: drop.union || selUnion.value,
+      pickupUpazila: pickup.upazila || '',
+      pickupUnion: pickup.union || '',
+      dropLocSource: dropPayload.source,
+      pickupLocSource: pickupPayload.source,
+      orderItems,
+    });
+
+    releaseSubmit();
+
+    if (error) {
+      errorEl.textContent = error;
+      errorEl.hidden = false;
+      if (code === 'NO_RIDER_ONLINE' && availability) availability.refresh();
+      if (code === 'ITEM_UNAVAILABLE') {
+        // কোনো আইটেম/দোকান এর মধ্যে বন্ধ হয়েছে — মেনু আবার বেছে নিতে হবে
+        S.cart = new Map();
+        applyShopsToPickup();
+        go(2);
+        toast(error);
+      }
+      return;
+    }
+
+    const pending = data && data.request && data.request.publish_status === 'pending';
+    $('sfoSuccessText').textContent = pending
+      ? 'আপনার অর্ডার পেয়েছি। যাচাই শেষে রাইডারদের কাছে পাঠানো হবে। অফার এলে "আমার অর্ডার"-এ দেখতে পারবেন।'
+      : 'সব ডেলিভারি হিরোকে নোটিফাই করা হয়েছে। অফার আসলে "আমার অর্ডার" এ দেখতে পারবেন।';
+    if (cardForm) cardForm.dataset.done = '1';
+    go(4);
+  });
+
+  // ====================== রিসেট ======================
+  function resetAll() {
+    S.drop = newLoc();
+    S.pickup = newLoc();
+    S.detail = '';
+    S.cart = new Map();
+    ['sfoAddr1', 'sfoAddr2', 'sfoManual', 'sfoDetail1'].forEach((id) => { $(id).value = ''; });
+    priceInput.value = '';
+    selUp.value = '';
+    selUnion.textContent = '';
+    const ph = h('option', '', 'আগে উপজেলা');
+    ph.value = '';
+    ph.disabled = true;
+    ph.selected = true;
+    selUnion.appendChild(ph);
+    selUnion.disabled = true;
+    autoChip.hidden = true;
+    $('sfoCurrentChip').hidden = true;
+    setLinkChip('drop', false);
+    setLinkChip('pickup', false);
+    renderPickupArea();
+    ['drop', 'pickup'].forEach((k) => {
+      const m = maps[k];
+      if (m) {
+        if (m.pin) { m.map.removeLayer(m.pin); m.pin = null; }
+        m.hl.clearLayers();
+        if (m.dot) { m.map.removeLayer(m.dot); m.dot = null; }
+      }
+    });
+    vehicleButtons.forEach((b) => b.classList.toggle('active', b.dataset.vehicle === 'any'));
+    vehicleInput.value = 'any';
+    overlay.querySelectorAll('.field-error-msg.show').forEach((e) => e.classList.remove('show'));
+  }
+
+  function finishAndReset() {
+    resetAll();
+    if (cardForm) delete cardForm.dataset.done;
+    S.step = 1;
+    closeFlow();
+    if (availability) availability.apply();
+  }
+
+  $('sfoSuccessClose').addEventListener('click', finishAndReset);
+
+  // কার্ড থেকে খোলার এন্ট্রি পয়েন্ট
+  window.SFDeliveryFlow = { open: openFlow, close: closeFlow };
+</script>
+
+<style is:global>
+  .sfo-overlay { position: fixed; inset: 0; z-index: 9990; background: #f8fafc; display: none; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1b2a4a; }
+  .sfo-overlay.open { display: block; }
+  .sfo-overlay *, .sfo-shop-overlay * { box-sizing: border-box; }
+  .sfo-overlay button, .sfo-shop-overlay button { font: inherit; cursor: pointer; }
+  .sfo-step { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; display: none; -webkit-overflow-scrolling: touch; }
+  .sfo-step.active { display: block; }
+  .sfo-col { max-width: 520px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; position: relative; }
+
+  /* ম্যাপ + ওপরের ভাসমান সারি */
+  .sfo-mapwrap { position: relative; flex: none; background: #e3e8f0; }
+  .sfo-map { position: absolute; inset: 0; z-index: 0; isolation: isolate; }
+  .sfo-mapfail { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px; font-size: 14px; color: #5b6b86; z-index: 3; }
+  .sfo-top { position: absolute; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: calc(12px + env(safe-area-inset-top)) 12px 0; }
+  .sfo-top-static { position: relative; padding-bottom: 8px; }
+  .sfo-round { width: 44px; height: 44px; border-radius: 22px; border: 0; background: #fff; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.18); display: flex; align-items: center; justify-content: center; flex: none; padding: 0; }
+  .sfo-round-gray { background: #f1f5f9; box-shadow: none; }
+  .sfo-top .sfg-info-btn { background: #fff; color: #1b2a4a; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.18); }
+  .sfo-pill { flex: 1; height: 44px; border-radius: 22px; background: #fff; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.18); display: flex; align-items: center; justify-content: space-around; padding: 0 6px; font-size: 13px; font-weight: 600; color: #5b6b86; white-space: nowrap; }
+  .sfo-mapchip { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: none; font-weight: 700; font-size: 12px; line-height: 1.2; color: #1b2a4a; background: #fff; padding: 2px 8px; border-radius: 10px; box-shadow: 0 1px 5px rgba(27, 42, 74, 0.3); }
+
+  /* নিচের সাদা শিট */
+  .sfo-sheet { margin-top: -28px; background: #fff; border-radius: 28px 28px 0 0; padding: 12px 20px calc(20px + env(safe-area-inset-bottom)); position: relative; z-index: 6; flex: 1; display: flex; flex-direction: column; box-shadow: 0 -6px 24px rgba(27, 42, 74, 0.12); }
+  .sfo-grab { width: 44px; height: 5px; border-radius: 3px; background: #d5dce8; margin: 0 auto 10px; flex: none; }
+  .sfo-form { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+  .sfo-spacer { flex: 1; min-height: 4px; }
+  .sfo-title { font-size: 21px; font-weight: 700; }
+  .sfo-title-lg { font-size: 22px; padding: 0 2px; }
+  .sfo-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sfo-fld { min-width: 0; }
+  .sfo-lbl { display: block; font-size: 12.5px; font-weight: 600; color: #5b6b86; margin-bottom: 4px; }
+  .sfo-lblrow { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 4px; min-height: 22px; }
+  .sfo-lblrow .sfo-lbl { margin: 0; }
+  .sfo-input { width: 100%; border: 1.5px solid #d5dce8; border-radius: 14px; background: #fff; padding: 10px 14px; font: inherit; font-size: 15px; color: #1b2a4a; min-height: 48px; }
+  .sfo-input:focus { outline: none; border-color: #ff6b35; }
+  .sfo-select { appearance: none; -webkit-appearance: none; padding-right: 36px; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%231B2A4A' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>"); background-repeat: no-repeat; background-position: right 12px center; }
+  .sfo-select:disabled { background-color: #f1f5f9; color: #5b6b86; }
+  .sfo-ta { resize: none; min-height: 76px; }
+  .sfo-ta-sm { min-height: 64px; margin-top: 8px; }
+  .sfo-hint { font-size: 12.5px; color: #5b6b86; margin-top: 6px; }
+
+  .sfo-cta { height: 52px; border: 0; border-radius: 16px; background: #ff6b35; color: #1b2a4a; font-weight: 700; font-size: 17px; width: 100%; flex: none; }
+  .sfo-cta:disabled { opacity: 0.5; cursor: not-allowed; }
+  .sfo-cta-link { display: flex; align-items: center; justify-content: center; text-decoration: none; }
+  .sfo-ghost { height: 46px; border: 1.5px solid #d5dce8; border-radius: 14px; background: #fff; color: #1b2a4a; font-weight: 600; font-size: 15px; padding: 0 14px; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+  .sfo-ghost-orange { border-color: #ff6b35; background: #fff6f1; justify-content: space-between; }
+  .sfo-ghost-orange span { text-align: left; }
+  .sfo-ghost-wide { width: 100%; }
+  .sfo-ghost:disabled { opacity: 0.6; }
+  .sfo-grow { flex: 1; }
+
+  /* চিপ */
+  .sfo-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 10px; font-size: 12.5px; font-weight: 600; }
+  .sfo-chip-on { background: #ff6b35; color: #1b2a4a; }
+  .sfo-chip-green { background: #e8f7ee; color: #14693a; }
+  .sfo-chip-yellow { background: #fff1c9; color: #6b4a00; }
+  .sfo-chip-amber { background: #fff4e5; color: #7a3e00; }
+  .sfo-chip-blue { background: #e8eef9; color: #1b2a4a; margin-top: 8px; }
+  .sfo-chip-gray { background: #eef2f8; color: #1b2a4a; margin-top: 4px; }
+  .sfo-fit { align-self: flex-start; }
+  .sfo-chip[hidden], .sfo-linkchip[hidden] { display: none; }
+  .sfo-linkchip { background: none; border: 0; padding: 0; min-height: 44px; display: inline-flex; align-items: center; }
+
+  /* ত্রুটি */
+  .sfo-overlay .field-error-msg { display: none; font-size: 12.5px; color: #b3261e; margin-top: 4px; align-items: center; gap: 6px; }
+  .sfo-overlay .field-error-msg.show { display: flex; }
+  .sfo-error { margin: 0; padding: 10px 14px; border-radius: 14px; background: #fdecea; color: #b3261e; font-size: 14px; font-weight: 600; }
+  .sfo-error[hidden] { display: none; }
+
+  /* রাইডার নেই নোটিশ */
+  .sfo-blocked { background: #fff4e5; border: 1.5px solid #ffd8a8; border-radius: 16px; padding: 12px 14px; color: #5e3000; }
+  .sfo-blocked[hidden] { display: none; }
+  .sfo-blocked-title { font-weight: 700; font-size: 14.5px; }
+  .sfo-blocked-text { font-size: 13.5px; margin-top: 2px; }
+  .sfo-blocked-wa { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; font-size: 14px; color: #7a3e00; text-decoration: underline; }
+
+  /* ধাপ ২: কী লাগবে */
+  .sfo-need { background: #f1f5f9; border-radius: 18px; padding: 10px; }
+  .sfo-need-title { font-size: 13.5px; font-weight: 700; color: #5b6b86; margin: 2px 4px 6px; }
+  .sfo-group { margin-bottom: 8px; }
+  .sfo-group-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 2px 6px; }
+  .sfo-group-name { font-size: 13.5px; font-weight: 700; }
+  .sfo-line { background: #fff; border-radius: 14px; padding: 8px; display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .sfo-line-mid { flex: 1; min-width: 0; }
+  .sfo-line-name { font-size: 14.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .sfo-line-sub { font-size: 12.5px; color: #5b6b86; }
+  .sfo-line-total { font-size: 15px; font-weight: 700; flex: none; }
+  .sfo-tile { border-radius: 14px; flex: none; display: flex; align-items: center; justify-content: center; overflow: hidden; color: #1b2a4a; }
+  .sfo-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  /* ধাপ ৩ */
+  .sfo-review { padding: 4px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; flex: 1; }
+  .sfo-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27, 42, 74, 0.08); padding: 14px 16px; }
+  .sfo-route { display: flex; gap: 12px; }
+  .sfo-rail { display: flex; flex-direction: column; align-items: center; padding-top: 5px; }
+  .sfo-dot { width: 12px; height: 12px; border-radius: 6px; display: block; }
+  .sfo-dot-orange { background: #ff6b35; }
+  .sfo-dot-navy { background: #1b2a4a; }
+  .sfo-rail-line { flex: 1; width: 2px; background: #d5dce8; margin: 4px 0; }
+  .sfo-route-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .sfo-route-val { font-size: 15.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .sfo-mut { color: #5b6b86; font-size: 13px; }
+  .sfo-mut-b { font-weight: 600; margin-bottom: 2px; }
+  .sfo-ln { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 15px; padding: 5px 0; }
+  .sfo-ln[hidden] { display: none; }
+  .sfo-ln-manual { border-top: 1px dashed #d5dce8; margin-top: 4px; padding-top: 9px; }
+  .sfo-manual-text { overflow-wrap: anywhere; }
+  .sfo-total { border-top: 1.5px solid #e3e8f0; margin-top: 6px; padding-top: 10px; font-size: 18px; }
+  .sfo-stepper { display: flex; align-items: center; gap: 8px; margin: 6px 0 8px; }
+  .sfo-cur { font-size: 18px; font-weight: 700; }
+  .sfo-price { flex: 1; min-width: 0; text-align: center; font-weight: 700; font-size: 17px; }
+  .sfo-count { width: 44px; height: 44px; border-radius: 14px; border: 1.5px solid #d5dce8; background: #fff; font-size: 22px; font-weight: 600; color: #1b2a4a; display: flex; align-items: center; justify-content: center; flex: none; padding: 0; }
+  .sfo-count-plus { background: #ff6b35; border-color: #ff6b35; }
+  .sfo-quick { display: flex; gap: 8px; margin-bottom: 4px; }
+  .sfo-quick button { flex: 1; height: 44px; border: 1.5px solid #ff6b35; background: #fff6f1; border-radius: 14px; font-weight: 700; font-size: 14.5px; color: #1b2a4a; }
+  .sfo-vehicles { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sfo-vbtn { height: 44px; border-radius: 22px; padding: 0 16px; border: 1.5px solid #d5dce8; background: #fff; font-weight: 600; font-size: 14.5px; color: #1b2a4a; }
+  .sfo-vbtn.active { background: #1b2a4a; border-color: #1b2a4a; color: #fff; }
+  .sfo-notice { background: #fff4e5; border: 1.5px solid #ffd8a8; border-radius: 16px; padding: 12px 14px; display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px; font-weight: 600; color: #5e3000; }
+  .sfo-notice svg { flex: none; margin-top: 2px; }
+
+  /* সফল */
+  .sfo-success { align-items: center; justify-content: center; text-align: center; padding: 24px 20px; gap: 12px; }
+  .sfo-success-icon { width: 72px; height: 72px; border-radius: 36px; background: #e8f7ee; color: #14693a; display: flex; align-items: center; justify-content: center; font-size: 30px; }
+  .sfo-success h3 { margin: 0; font-size: 22px; font-weight: 700; }
+  .sfo-success p { margin: 0 0 8px; font-size: 15px; color: #5b6b86; max-width: 340px; }
+
+  /* দোকান ও মেনু শিট */
+  .sfo-shop-overlay { position: fixed; inset: 0; z-index: 10000; background: #f8fafc; display: none; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1b2a4a; }
+  .sfo-shop-overlay.open { display: block; }
+  .sfo-shop-col { max-width: 520px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; }
+  .sfo-shop-head { display: flex; align-items: center; gap: 10px; background: #fff; padding: calc(10px + env(safe-area-inset-top)) 12px 10px; flex: none; }
+  .sfo-shop-head h2 { flex: 1; margin: 0; font-size: 19px; font-weight: 700; }
+  .sfo-shop-body { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .sfo-search { display: flex; align-items: center; gap: 8px; border: 1.5px solid #d5dce8; border-radius: 14px; background: #fff; padding: 0 14px; min-height: 48px; flex: none; }
+  .sfo-search input { flex: 1; min-width: 0; border: 0; outline: 0; font: inherit; font-size: 15px; background: transparent; color: #1b2a4a; }
+  .sfo-shop-pills { display: flex; gap: 8px; overflow-x: auto; flex: none; padding-bottom: 2px; }
+  .sfo-shopchip { height: 44px; border-radius: 22px; padding: 0 16px; border: 1.5px solid #d5dce8; background: #fff; font-weight: 600; font-size: 14.5px; color: #1b2a4a; white-space: nowrap; flex: none; }
+  .sfo-shopchip.active { background: #1b2a4a; border-color: #1b2a4a; color: #fff; }
+  .sfo-shophead { display: flex; align-items: center; gap: 10px; }
+  .sfo-shophead-info { flex: 1; min-width: 0; }
+  .sfo-shophead-name { font-size: 18px; font-weight: 700; }
+  .sfo-shophead-addr { font-size: 13px; color: #5b6b86; }
+  .sfo-shop-list { display: flex; flex-direction: column; gap: 10px; }
+  .sfo-row { background: #fff; border-radius: 18px; padding: 10px; display: flex; align-items: center; gap: 12px; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.07); }
+  .sfo-row-mid { flex: 1; min-width: 0; }
+  .sfo-row-name { font-size: 15.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .sfo-row-price { font-size: 14px; color: #5b6b86; }
+  .sfo-ctr { display: flex; align-items: center; gap: 6px; flex: none; }
+  .sfo-ctr-val { min-width: 22px; text-align: center; font-weight: 700; font-size: 16px; }
+  .sfo-add { height: 44px; border: 1.5px solid #ff6b35; background: #fff6f1; border-radius: 14px; font-weight: 700; font-size: 14.5px; color: #1b2a4a; padding: 0 16px; flex: none; }
+  .sfo-empty { text-align: center; color: #5b6b86; font-size: 14.5px; padding: 28px 12px; }
+  .sfo-shopbar { background: #fff; box-shadow: 0 -6px 24px rgba(27, 42, 74, 0.12); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; flex: none; }
+  .sfo-shopbar-sum { display: flex; flex-direction: column; flex: 1; font-size: 13px; color: #5b6b86; }
+  .sfo-shopbar-sum b { font-size: 20px; font-weight: 700; color: #1b2a4a; }
+  .sfo-shopbar-cta { flex: 1.4; width: auto; font-size: 15.5px; }
+
+  @media (prefers-reduced-motion: reduce) { .sfo-overlay *, .sfo-shop-overlay * { animation: none !important; transition: none !important; } }
+</style>

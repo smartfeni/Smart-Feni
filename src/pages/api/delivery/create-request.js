@@ -80,6 +80,13 @@ export async function POST({ request }) {
       vehicleType,
       seatCount,
       askingPrice,
+      // ডেলিভারি UI v2 (ঐচ্ছিক)
+      dropUnion,
+      pickupUpazila,
+      pickupUnion,
+      dropLocSource,
+      pickupLocSource,
+      orderItems,
     } = await request.json();
 
     const finalCategory = VALID_CATEGORIES.includes(category) ? category : 'delivery';
@@ -93,6 +100,32 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'উপজেলা, পিকআপ/ড্রপ ঠিকানা, বিবরণ ও দাম আবশ্যক' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // ===== ডেলিভারি UI v2: ঐচ্ছিক নতুন কলাম (পুরনো ক্লায়েন্ট না পাঠালে কিছুই বদলায় না) =====
+    // order_items শুধু [{item_id, qty}] যায়; নাম/দাম/দোকান DB trigger (delivery_normalize_items)
+    // নিজে বসায়, তাই ক্লায়েন্টের পাঠানো দাম কখনো বিশ্বাস করা হয় না।
+    const LOC_SOURCES = ['map', 'manual', 'link', 'current'];
+    const cleanText = (v, max = 120) =>
+      typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
+    const extraColumns = {};
+    const dropUnionClean = cleanText(dropUnion);
+    const pickupUpazilaClean = cleanText(pickupUpazila);
+    const pickupUnionClean = cleanText(pickupUnion);
+    if (dropUnionClean) extraColumns.drop_union = dropUnionClean;
+    if (pickupUpazilaClean) extraColumns.pickup_upazila = pickupUpazilaClean;
+    if (pickupUnionClean) extraColumns.pickup_union = pickupUnionClean;
+    if (LOC_SOURCES.includes(dropLocSource)) extraColumns.drop_loc_source = dropLocSource;
+    if (LOC_SOURCES.includes(pickupLocSource)) extraColumns.pickup_loc_source = pickupLocSource;
+    if (finalCategory === 'delivery' && Array.isArray(orderItems) && orderItems.length > 0) {
+      const cleanItems = orderItems
+        .slice(0, 40)
+        .map((it) => ({
+          item_id: String((it && it.item_id) || ''),
+          qty: Math.min(50, Math.max(1, parseInt(it && it.qty, 10) || 1)),
+        }))
+        .filter((it) => it.item_id);
+      if (cleanItems.length > 0) extraColumns.order_items = cleanItems;
     }
 
     const price = Number(askingPrice);
@@ -191,11 +224,29 @@ export async function POST({ request }) {
         customer_asking_price: price,
         status: 'open',
         expires_at: expiresAt,
+        ...extraColumns,
       })
       .select()
       .single();
 
     if (insertError) {
+      // আইটেম/দোকান এর মধ্যে বন্ধ হয়ে গেলে বা আইটেম সংখ্যা বেশি হলে (trigger delivery_normalize_items)
+      const insertMsg = String(insertError.message || '');
+      if (insertMsg.includes('ITEM_UNAVAILABLE')) {
+        return new Response(
+          JSON.stringify({
+            error: 'বেছে নেওয়া কোনো আইটেম এখন পাওয়া যাচ্ছে না। মেনু থেকে আবার বেছে নিন।',
+            code: 'ITEM_UNAVAILABLE',
+          }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (insertMsg.includes('TOO_MANY_ITEMS')) {
+        return new Response(
+          JSON.stringify({ error: 'একসাথে অনেক বেশি আইটেম বেছে নেওয়া হয়েছে', code: 'TOO_MANY_ITEMS' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       // DB trigger (trg_block_paused_service): চেক ও insert-এর মাঝে সুইচ অফ হলে
       if (String(insertError.message || '').includes('SERVICE_PAUSED')) {
         return pausedResponse(finalCategory);
@@ -211,6 +262,15 @@ export async function POST({ request }) {
       return new Response(
         JSON.stringify({ error: 'রিকোয়েস্ট তৈরি ব্যর্থ: ' + insertError.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // পাবলিশ গেট চালু থাকলে অর্ডার 'pending' থাকে — রাইডারদের নোটিফিকেশন তখন যাবে না;
+    // পাবলিশের মুহূর্তে DB (private.publish_delivery_order) নিজেই in-app + push পাঠায়
+    if (data && data.publish_status && data.publish_status !== 'published') {
+      return new Response(
+        JSON.stringify({ success: true, request: data }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
