@@ -1,0 +1,962 @@
+---
+// path: src/pages/admin/delivery-shops.astro
+// ============================================================
+// পেজ: ডেলিভারি দোকান ও মেনু ম্যানেজমেন্ট (/admin/delivery-shops)
+// admin ও moderator দুজনেই ব্যবহার করতে পারবে (RLS: is_admin_or_mod())
+// ব্রিফ B ব্যাচ ১ (ডেলিভারি UI v2) — কাস্টমারের "রেস্টুরেন্ট / দোকান" শিট এই ডেটা দেখায়।
+//
+// কাজ: দোকান যোগ/এডিট/ডিলিট (নাম, ছবি, উপজেলা, ইউনিয়ন, ম্যাপ লোকেশন,
+// জনপ্রিয়/চালু সুইচ) + প্রতিটা দোকানের মেনু আইটেম (ছবি, নাম, দাম, পাওয়া যাচ্ছে সুইচ)।
+// টেবিল: delivery_shops, delivery_shop_items · বাকেট: delivery-shop-images (public, ৩MB, jpeg/png/webp)
+// ছবি আপলোডের আগে ক্লায়েন্টে কমপ্রেস (imageCompress.js), ৩MB-এর বেশি হলে আটকায়।
+// লোকেশন: LocationPicker (ম্যাপ পিন) — ঠিকানা + lat/lng দোকানে সেভ হয়।
+// প্যাটার্ন: adminGuard.js + smartfeni:admin-ready (বাকি admin পেজের মতোই)
+// ইউজারের লেখা সব টেক্সট textContent দিয়ে বসানো (innerHTML-এ নয়)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import GuideSheet from '../../components/delivery/GuideSheet.astro';
+import LocationPicker from '../../components/delivery/LocationPicker.astro';
+
+const guideSteps = [
+  {
+    caption: 'নতুন দোকান যোগ করতে "নতুন দোকান" চাপুন',
+    blocks: [
+      { kind: 'title', text: 'ডেলিভারি দোকান' },
+      { kind: 'field', text: 'দোকান খুঁজুন', muted: true },
+      { kind: 'button', text: '+ নতুন দোকান', primary: true, tap: true },
+      { kind: 'card', title: 'নবী হোটেল', lines: ['ফেনী সদর · ফেনী পৌরসভা', '৩টি আইটেম'], badge: 'জনপ্রিয়' },
+    ],
+  },
+  {
+    caption: 'নাম, এলাকা আর ম্যাপ লোকেশন দিয়ে সেভ করুন',
+    blocks: [
+      { kind: 'button', text: 'ছবি যোগ করুন' },
+      { kind: 'field', text: 'দোকানের নাম *', tap: '১' },
+      { kind: 'row', cols: [{ kind: 'field', text: 'ফেনী সদর', chevron: true }, { kind: 'field', text: 'ইউনিয়ন', chevron: true }] },
+      { kind: 'button', text: 'ম্যাপে সিলেক্ট করুন', tap: '২' },
+      { kind: 'spacer' },
+      { kind: 'cta', text: 'দোকান সেভ করুন', tap: '৩' },
+    ],
+  },
+  {
+    caption: 'সেভের পর মেনুতে আইটেম যোগ করুন',
+    blocks: [
+      { kind: 'title', text: 'মেনু' },
+      { kind: 'item', name: 'চিকেন বার্গার', price: '৳১২০' },
+      { kind: 'item', name: 'বিফ বিরিয়ানি', price: '৳২২০' },
+      { kind: 'spacer' },
+      { kind: 'button', text: '+ আইটেম যোগ করুন', primary: true, tap: true },
+    ],
+  },
+  {
+    caption: 'আইটেম শেষ হলে "পাওয়া যাচ্ছে" সুইচ বন্ধ করুন',
+    blocks: [
+      { kind: 'item', name: 'চিকেন বার্গার', price: '৳১২০' },
+      { kind: 'item', name: 'বিফ বিরিয়ানি', price: '৳২২০', tap: 'বন্ধ করুন' },
+      { kind: 'notice', text: 'বন্ধ আইটেম কাস্টমার অর্ডারে নিতে পারবে না।' },
+    ],
+  },
+];
+---
+
+<BaseLayout title="ডেলিভারি দোকান ও মেনু | স্মার্ট ফেনী">
+  <div class="dsa-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="dsa-loading">
+        <div class="dsa-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" style="display:none;">
+
+        <a href="/admin" class="dsa-back"><i class="fas fa-arrow-left"></i> অ্যাডমিন ড্যাশবোর্ড</a>
+        <div class="dsa-top">
+          <div>
+            <h1 class="dsa-title">ডেলিভারি দোকান ও মেনু</h1>
+            <p class="dsa-sub">কাস্টমার ডেলিভারি অর্ডারে এই দোকান ও আইটেম থেকে বেছে নেয়।</p>
+          </div>
+          <GuideSheet id="admin-delivery-shops" title="দোকান ও মেনুর নিয়ম" subtitle="অ্যাডমিন · ডেলিভারি দোকান" showButton buttonTone="light" steps={guideSteps} />
+        </div>
+
+        <!-- ===== ভিউ ১: দোকানের তালিকা ===== -->
+        <section id="viewList">
+          <div class="dsa-bar">
+            <input class="dsa-in" id="searchIn" type="search" placeholder="দোকান খুঁজুন" autocomplete="off" />
+            <button class="dsa-btn dsa-primary" id="newShopBtn" type="button"><i class="fas fa-plus"></i> নতুন দোকান</button>
+          </div>
+          <div class="dsa-count" id="countLbl"></div>
+          <div id="shopList"><p class="dsa-muted">লোড হচ্ছে...</p></div>
+        </section>
+
+        <!-- ===== ভিউ ২: দোকান এডিট + মেনু ===== -->
+        <section id="viewEdit" style="display:none;">
+          <button class="dsa-link" id="backToList" type="button"><i class="fas fa-arrow-left"></i> সব দোকান</button>
+
+          <div class="dsa-card" id="shopForm">
+            <div class="dsa-card-h" id="shopFormTitle">নতুন দোকান</div>
+
+            <div class="dsa-imgrow">
+              <div class="dsa-imgbox" id="sImgBox"></div>
+              <div class="dsa-imgbtns">
+                <button class="dsa-btn dsa-ghost" id="sImgPick" type="button">ছবি যোগ করুন</button>
+                <button class="dsa-btn dsa-ghost dsa-danger" id="sImgRm" type="button">ছবি সরান</button>
+                <input type="file" id="sImgFile" accept="image/jpeg,image/png,image/webp" style="display:none;" />
+              </div>
+            </div>
+
+            <label class="dsa-lbl" for="sName">দোকানের নাম<span class="required-mark">*</span></label>
+            <input class="dsa-in" id="sName" maxlength="120" placeholder="যেমন: নবী হোটেল" required />
+            <div class="field-error-msg" data-error-for="sName"><i class="fas fa-circle-exclamation"></i><span>দোকানের নাম লিখুন</span></div>
+
+            <div class="dsa-two">
+              <div>
+                <label class="dsa-lbl" for="sUpazila">উপজেলা</label>
+                <select class="dsa-in" id="sUpazila"></select>
+              </div>
+              <div>
+                <label class="dsa-lbl" for="sUnion">ইউনিয়ন / পৌরসভা</label>
+                <select class="dsa-in" id="sUnion"></select>
+              </div>
+            </div>
+
+            <div class="dsa-loc">
+              <LocationPicker id="shop" label="দোকানের লোকেশন" required={false} allowAutoLocate={true} enableSavedLocations={false} placeholder="ঠিকানা লিখুন বা ম্যাপে সিলেক্ট করুন" />
+              <p class="dsa-hint" id="locHint"></p>
+            </div>
+
+            <div class="dsa-two">
+              <label class="dsa-sw"><input type="checkbox" id="sPopular" /><span class="dsa-sw-track"></span><span class="dsa-sw-txt">জনপ্রিয় দোকান</span></label>
+              <label class="dsa-sw"><input type="checkbox" id="sActive" checked /><span class="dsa-sw-track"></span><span class="dsa-sw-txt">কাস্টমারকে দেখান</span></label>
+            </div>
+
+            <label class="dsa-lbl" for="sSort">ক্রম (ছোট নম্বর আগে দেখাবে)</label>
+            <input class="dsa-in" id="sSort" type="number" inputmode="numeric" value="100" />
+
+            <p class="dsa-err" id="shopErr" style="display:none;"></p>
+
+            <div class="dsa-actions">
+              <button class="dsa-btn dsa-primary" id="saveShopBtn" type="button">দোকান সেভ করুন</button>
+              <button class="dsa-btn dsa-ghost dsa-danger" id="delShopBtn" type="button" style="display:none;">ডিলিট</button>
+            </div>
+          </div>
+
+          <!-- ===== মেনু ===== -->
+          <div id="menuSection" style="display:none;">
+            <div class="dsa-menu-head">
+              <div class="dsa-card-h" style="margin:0;">মেনু <span id="itemCountLbl"></span></div>
+              <button class="dsa-btn dsa-primary dsa-sm" id="newItemBtn" type="button"><i class="fas fa-plus"></i> আইটেম যোগ করুন</button>
+            </div>
+
+            <div class="dsa-card" id="itemForm" style="display:none;">
+              <div class="dsa-card-h" id="itemFormTitle">নতুন আইটেম</div>
+
+              <div class="dsa-imgrow">
+                <div class="dsa-imgbox" id="iImgBox"></div>
+                <div class="dsa-imgbtns">
+                  <button class="dsa-btn dsa-ghost" id="iImgPick" type="button">ছবি যোগ করুন</button>
+                  <button class="dsa-btn dsa-ghost dsa-danger" id="iImgRm" type="button">ছবি সরান</button>
+                  <input type="file" id="iImgFile" accept="image/jpeg,image/png,image/webp" style="display:none;" />
+                </div>
+              </div>
+
+              <label class="dsa-lbl" for="iName">আইটেমের নাম<span class="required-mark">*</span></label>
+              <input class="dsa-in" id="iName" maxlength="120" placeholder="যেমন: চিকেন বার্গার" required />
+              <div class="field-error-msg" data-error-for="iName"><i class="fas fa-circle-exclamation"></i><span>আইটেমের নাম লিখুন</span></div>
+
+              <label class="dsa-lbl" for="iPrice">দাম (৳)<span class="required-mark">*</span></label>
+              <input class="dsa-in" id="iPrice" type="number" inputmode="decimal" min="0" max="1000000" step="any" placeholder="যেমন: 120" required />
+              <div class="field-error-msg" data-error-for="iPrice"><i class="fas fa-circle-exclamation"></i><span>দাম লিখুন</span></div>
+
+              <label class="dsa-sw" style="margin-top:14px;"><input type="checkbox" id="iAvail" checked /><span class="dsa-sw-track"></span><span class="dsa-sw-txt">পাওয়া যাচ্ছে</span></label>
+
+              <label class="dsa-lbl" for="iSort">ক্রম (ছোট নম্বর আগে দেখাবে)</label>
+              <input class="dsa-in" id="iSort" type="number" inputmode="numeric" value="10" />
+
+              <p class="dsa-err" id="itemErr" style="display:none;"></p>
+
+              <div class="dsa-actions">
+                <button class="dsa-btn dsa-primary" id="saveItemBtn" type="button">আইটেম সেভ করুন</button>
+                <button class="dsa-btn dsa-ghost" id="cancelItemBtn" type="button">বাতিল</button>
+              </div>
+            </div>
+
+            <div id="itemList"><p class="dsa-muted">লোড হচ্ছে...</p></div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .dsa-page { min-height: 60vh; padding: 28px 0 90px; }
+    .dsa-page * { box-sizing: border-box; }
+    .dsa-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .dsa-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: dsaSpin 0.8s linear infinite; }
+    @keyframes dsaSpin { to { transform: rotate(360deg); } }
+
+    .dsa-back { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 700; color: #64748B; text-decoration: none; margin-bottom: 10px; }
+    .dsa-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+    .dsa-title { margin: 0; font-size: 1.5rem; font-weight: 800; color: #1B2A4A; }
+    .dsa-sub { margin: 4px 0 0; font-size: 0.84rem; color: #64748B; }
+    .dsa-muted { font-size: 0.86rem; color: #64748B; padding: 8px 2px; }
+    .dsa-count { font-size: 0.8rem; font-weight: 700; color: #64748B; margin: 10px 2px 8px; }
+    .dsa-hint { margin: 6px 2px 0; font-size: 0.78rem; color: #64748B; }
+    .dsa-link { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 4px 0 10px; font: inherit; font-size: 0.84rem; font-weight: 700; color: #64748B; cursor: pointer; }
+
+    .dsa-bar { display: flex; gap: 8px; }
+    .dsa-bar .dsa-in { flex: 1; min-width: 0; }
+
+    .dsa-card { background: #fff; border: 1px solid #E5EAF0; border-radius: 18px; padding: 16px; margin-bottom: 16px; }
+    .dsa-card-h { font-size: 0.95rem; font-weight: 800; color: #1B2A4A; margin-bottom: 8px; }
+    .dsa-card-h span { font-weight: 600; color: #64748B; font-size: 0.8rem; }
+    .dsa-lbl { display: block; margin: 12px 0 5px; font-size: 0.78rem; font-weight: 700; color: #64748B; }
+    .dsa-in { width: 100%; border: 1.5px solid #E5EAF0; border-radius: 12px; padding: 11px 12px; font: inherit; font-size: 0.92rem; color: #1B2A4A; background: #fff; }
+    .dsa-in:focus { outline: 0; border-color: #FF6B35; }
+    .dsa-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .dsa-two .dsa-sw { margin-top: 14px; }
+    .dsa-loc { margin-top: 12px; }
+    .dsa-loc .lp-instructions-wrap { display: none; }
+    .dsa-err { margin: 12px 0 0; font-size: 0.84rem; font-weight: 600; color: #D14343; }
+
+    .dsa-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .dsa-btn { border: 0; border-radius: 12px; padding: 12px 16px; font: inherit; font-size: 0.88rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .dsa-btn:disabled { opacity: 0.6; cursor: default; }
+    .dsa-primary { background: #FF6B35; color: #fff; }
+    .dsa-actions .dsa-primary { flex: 1; }
+    .dsa-ghost { background: #F1F5F9; color: #1B2A4A; }
+    .dsa-danger { color: #D14343; }
+    .dsa-sm { padding: 9px 12px; font-size: 0.82rem; }
+
+    .dsa-imgrow { display: flex; align-items: center; gap: 12px; }
+    .dsa-imgbox { width: 92px; height: 92px; border-radius: 16px; background: #F1F5F9; border: 1.5px dashed #CBD5E1; display: flex; align-items: center; justify-content: center; overflow: hidden; flex: none; color: #94A3B8; font-size: 1.5rem; }
+    .dsa-imgbox img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .dsa-imgbtns { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+
+    .dsa-sw { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.86rem; font-weight: 700; color: #1B2A4A; }
+    .dsa-sw input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .dsa-sw-track { position: relative; width: 44px; height: 26px; border-radius: 13px; background: #CBD5E1; flex: none; transition: background 0.15s; }
+    .dsa-sw-track::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+    .dsa-sw input:checked + .dsa-sw-track { background: #FF6B35; }
+    .dsa-sw input:checked + .dsa-sw-track::after { transform: translateX(18px); }
+    .dsa-sw input:focus-visible + .dsa-sw-track { outline: 2px solid #1B2A4A; outline-offset: 2px; }
+
+    .dsa-shop { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid #E5EAF0; border-radius: 16px; padding: 10px; margin-bottom: 8px; font: inherit; cursor: pointer; }
+    .dsa-shop.off { opacity: 0.55; }
+    .dsa-thumb { width: 56px; height: 56px; border-radius: 12px; background: #F1F5F9; display: flex; align-items: center; justify-content: center; overflow: hidden; flex: none; color: #94A3B8; }
+    .dsa-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .dsa-info { flex: 1; min-width: 0; }
+    .dsa-name { font-size: 0.92rem; font-weight: 800; color: #1B2A4A; line-height: 1.3; }
+    .dsa-meta { font-size: 0.78rem; color: #64748B; margin-top: 2px; }
+    .dsa-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+    .dsa-badge { font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #F1F5F9; color: #475569; }
+    .dsa-badge.hot { background: #FFF1EA; color: #E0561F; }
+    .dsa-badge.off { background: #FEE2E2; color: #B91C1C; }
+    .dsa-chev { color: #94A3B8; flex: none; }
+
+    .dsa-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 2px 10px; }
+    .dsa-item { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #E5EAF0; border-radius: 14px; padding: 9px 9px 9px 10px; margin-bottom: 8px; }
+    .dsa-item.off .dsa-thumb, .dsa-item.off .dsa-info { opacity: 0.5; }
+    .dsa-item .dsa-thumb { width: 48px; height: 48px; }
+    .dsa-price { font-size: 0.82rem; font-weight: 800; color: #FF6B35; margin-top: 2px; }
+    .dsa-item-tools { display: flex; align-items: center; gap: 6px; flex: none; }
+    .dsa-ic { width: 36px; height: 36px; border-radius: 10px; border: 1px solid #E5EAF0; background: #F8FAFC; color: #1B2A4A; cursor: pointer; font-size: 0.85rem; }
+    .dsa-ic.del { color: #D14343; }
+    .dsa-item .dsa-sw-txt { display: none; }
+
+    @media (max-width: 380px) {
+      .dsa-two { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { compressImage } from '../../lib/imageCompress.js';
+    import { UPAZILAS, getUnionsOfUpazilaName, getUnionBn } from '../../data/feniAreas.js';
+
+    const BUCKET = 'delivery-shop-images';
+    const MAX_BYTES = 3 * 1024 * 1024;
+    const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
+
+    const $ = (id) => document.getElementById(id);
+    const pickerWrap = () => document.querySelector('[data-lp-id="shop"]');
+
+    let userId = null;
+    let shops = [];
+    let counts = {};       // shop_id -> আইটেম সংখ্যা
+    let editing = null;    // বর্তমানে এডিট হওয়া দোকান (null = নতুন)
+    let items = [];
+    let editingItem = null;
+    let loc = { lat: null, lng: null };
+    let busyShop = false;
+    let busyItem = false;
+
+    function toast(msg, type) { if (window.showToast) window.showToast(msg, type); }
+
+    function showErr(id, text) {
+      const el = $(id);
+      if (!text) { el.style.display = 'none'; return; }
+      el.textContent = text;
+      el.style.display = 'block';
+      toast(text, 'error');
+    }
+
+    // ---------- ছবি (আপলোড + কমপ্রেস) ----------
+    function storagePathOf(url) {
+      if (typeof url !== 'string') return null;
+      const parts = url.split('/' + BUCKET + '/');
+      if (parts.length < 2) return null;
+      try { return decodeURIComponent(parts[1].split('?')[0]); } catch (e) { return null; }
+    }
+
+    async function removeStored(url) {
+      const p = storagePathOf(url);
+      if (!p) return;
+      try { await supabase.storage.from(BUCKET).remove([p]); } catch (e) { /* ছবি রয়ে গেলেও ক্ষতি নেই */ }
+    }
+
+    async function uploadImage(file, folder) {
+      const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+      const path = folder + '/' + crypto.randomUUID() + '.' + ext;
+      const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+        contentType: file.type,
+        cacheControl: '3600',
+        upsert: false,
+      });
+      if (error) throw error;
+      return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+    }
+
+    function makeImage(prefix) {
+      const box = $(prefix + 'ImgBox');
+      const input = $(prefix + 'ImgFile');
+      const pick = $(prefix + 'ImgPick');
+      const rm = $(prefix + 'ImgRm');
+      const st = { url: null, file: null, remove: false, objUrl: null };
+
+      function paint() {
+        box.innerHTML = '';
+        const src = st.file ? st.objUrl : (st.remove ? null : st.url);
+        if (src) {
+          const im = document.createElement('img');
+          im.alt = '';
+          im.src = src;
+          box.appendChild(im);
+        } else {
+          const ic = document.createElement('i');
+          ic.className = 'fas fa-image';
+          box.appendChild(ic);
+        }
+        rm.style.display = src ? '' : 'none';
+        pick.textContent = src ? 'ছবি বদলান' : 'ছবি যোগ করুন';
+      }
+
+      function dropObj() {
+        if (st.objUrl) { URL.revokeObjectURL(st.objUrl); st.objUrl = null; }
+      }
+
+      pick.addEventListener('click', () => input.click());
+      rm.addEventListener('click', () => {
+        dropObj();
+        st.file = null;
+        st.remove = true;
+        paint();
+      });
+
+      input.addEventListener('change', async () => {
+        const f = input.files && input.files[0];
+        input.value = '';
+        if (!f) return;
+        if (!f.type || f.type.indexOf('image/') !== 0) { toast('শুধু ছবি বাছুন।', 'error'); return; }
+        pick.disabled = true;
+        let out = f;
+        try {
+          out = await compressImage(f, { maxDimension: 1200, quality: 0.8, mimeType: 'image/jpeg', skipIfSmallerThan: 200 * 1024 });
+        } catch (e) { out = f; }
+        pick.disabled = false;
+        if (ALLOWED.indexOf(out.type) === -1) { toast('শুধু JPG, PNG বা WebP ছবি দেওয়া যাবে।', 'error'); return; }
+        if (out.size > MAX_BYTES) { toast('ছবি ৩MB-এর বেশি। ছোট ছবি বাছুন।', 'error'); return; }
+        dropObj();
+        st.file = out;
+        st.objUrl = URL.createObjectURL(out);
+        st.remove = false;
+        paint();
+      });
+
+      return {
+        st,
+        reset(url) { dropObj(); st.url = url || null; st.file = null; st.remove = false; paint(); },
+      };
+    }
+
+    const shopImg = makeImage('s');
+    const itemImg = makeImage('i');
+    shopImg.reset(null);
+    itemImg.reset(null);
+
+    // ---------- উপজেলা / ইউনিয়ন ----------
+    function fillUpazilas() {
+      const sel = $('sUpazila');
+      sel.innerHTML = '';
+      const o0 = document.createElement('option');
+      o0.value = '';
+      o0.textContent = 'উপজেলা বাছুন';
+      sel.appendChild(o0);
+      UPAZILAS.forEach((u) => {
+        const o = document.createElement('option');
+        o.value = u.name;
+        o.textContent = u.name;
+        sel.appendChild(o);
+      });
+    }
+
+    function fillUnions(upName, selected) {
+      const sel = $('sUnion');
+      sel.innerHTML = '';
+      const o0 = document.createElement('option');
+      o0.value = '';
+      o0.textContent = 'ইউনিয়ন বাছুন';
+      sel.appendChild(o0);
+      const list = upName ? getUnionsOfUpazilaName(upName) : [];
+      list.forEach((n) => {
+        const o = document.createElement('option');
+        o.value = n;
+        o.textContent = n;
+        sel.appendChild(o);
+      });
+      if (selected) {
+        if (list.indexOf(selected) === -1) {
+          const ex = document.createElement('option');
+          ex.value = selected;
+          ex.textContent = selected;
+          sel.appendChild(ex);
+        }
+        sel.value = selected;
+      }
+    }
+
+    // ম্যাপ পিন থেকে আসা উপজেলা/ইউনিয়ন ড্রপডাউনে বসানো
+    function setUpazilaUnion(up, un) {
+      if (!up || !UPAZILAS.some((u) => u.name === up)) return;
+      $('sUpazila').value = up;
+      fillUnions(up);
+      if (!un) return;
+      const list = getUnionsOfUpazilaName(up);
+      const bn = getUnionBn(un);
+      const hit = list.indexOf(un) !== -1 ? un : (list.indexOf(bn) !== -1 ? bn : null);
+      if (hit) $('sUnion').value = hit;
+    }
+
+    $('sUpazila').addEventListener('change', () => fillUnions($('sUpazila').value));
+    fillUpazilas();
+    fillUnions('');
+
+    // ---------- লোকেশন পিকার ----------
+    function setPickerValues(address, lat, lng, upazila, union) {
+      const w = pickerWrap();
+      if (!w) return;
+      const set = (sel, v) => { const e = w.querySelector(sel); if (e) e.value = (v === null || v === undefined) ? '' : String(v); };
+      set('.lp-address-input', address);
+      set('.lp-out-address', address);
+      set('.lp-out-lat', lat);
+      set('.lp-out-lng', lng);
+      set('.lp-out-upazila', upazila);
+      set('.lp-out-union', union);
+    }
+
+    function paintLocHint() {
+      $('locHint').textContent = (loc.lat !== null && loc.lng !== null) ? 'ম্যাপ পিন সেভ আছে ✓' : 'ম্যাপে পিন বসালে রাইডার সরাসরি নেভিগেট করতে পারবে।';
+    }
+
+    document.addEventListener('lp:location-changed', (e) => {
+      const d = (e && e.detail) || {};
+      if (d.id !== 'shop') return;
+      if (d.cleared) { loc.lat = null; loc.lng = null; paintLocHint(); return; }
+      if (typeof d.lat === 'number' && typeof d.lng === 'number' && !isNaN(d.lat) && !isNaN(d.lng)) {
+        loc.lat = d.lat;
+        loc.lng = d.lng;
+      }
+      if (d.upazila) setUpazilaUnion(d.upazila, d.union);
+      paintLocHint();
+    });
+
+    // ---------- ভিউ বদল ----------
+    function showView(name) {
+      $('viewList').style.display = name === 'list' ? '' : 'none';
+      $('viewEdit').style.display = name === 'edit' ? '' : 'none';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ---------- দোকানের তালিকা ----------
+    function nextShopSort() {
+      if (!shops.length) return 100;
+      return Math.max(...shops.map((s) => s.sort_order || 0)) + 10;
+    }
+
+    function renderShops() {
+      const wrap = $('shopList');
+      wrap.innerHTML = '';
+      const q = $('searchIn').value.trim().toLowerCase();
+      const list = shops.filter((s) => {
+        if (!q) return true;
+        return [s.name, s.upazila, s.union_name].some((v) => (v || '').toLowerCase().indexOf(q) !== -1);
+      });
+      $('countLbl').textContent = shops.length ? 'মোট ' + shops.length + 'টি দোকান' + (q ? ' · পাওয়া গেছে ' + list.length + 'টি' : '') : '';
+
+      if (!list.length) {
+        const p = document.createElement('p');
+        p.className = 'dsa-muted';
+        p.textContent = shops.length ? 'কোনো দোকান মেলেনি।' : 'এখনো কোনো দোকান নেই। "নতুন দোকান" চেপে যোগ করুন।';
+        wrap.appendChild(p);
+        return;
+      }
+
+      list.forEach((s) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dsa-shop' + (s.is_active ? '' : ' off');
+
+        const th = document.createElement('div');
+        th.className = 'dsa-thumb';
+        if (s.image_url) {
+          const im = document.createElement('img');
+          im.alt = '';
+          im.loading = 'lazy';
+          im.src = s.image_url;
+          th.appendChild(im);
+        } else {
+          const ic = document.createElement('i');
+          ic.className = 'fas fa-store';
+          th.appendChild(ic);
+        }
+
+        const info = document.createElement('div');
+        info.className = 'dsa-info';
+        const n = document.createElement('div');
+        n.className = 'dsa-name';
+        n.textContent = s.name;
+        const m = document.createElement('div');
+        m.className = 'dsa-meta';
+        m.textContent = [s.upazila, s.union_name].filter(Boolean).join(' · ') || 'এলাকা বাছা হয়নি';
+        const bd = document.createElement('div');
+        bd.className = 'dsa-badges';
+        const addBadge = (text, cls) => {
+          const sp = document.createElement('span');
+          sp.className = 'dsa-badge' + (cls ? ' ' + cls : '');
+          sp.textContent = text;
+          bd.appendChild(sp);
+        };
+        if (s.is_popular) addBadge('জনপ্রিয়', 'hot');
+        if (!s.is_active) addBadge('বন্ধ', 'off');
+        addBadge((counts[s.id] || 0) + 'টি আইটেম', '');
+        info.appendChild(n);
+        info.appendChild(m);
+        info.appendChild(bd);
+
+        const ch = document.createElement('i');
+        ch.className = 'fas fa-chevron-right dsa-chev';
+
+        b.appendChild(th);
+        b.appendChild(info);
+        b.appendChild(ch);
+        b.addEventListener('click', () => openEdit(s));
+        wrap.appendChild(b);
+      });
+    }
+
+    async function loadShops() {
+      const [sr, ir] = await Promise.all([
+        supabase.from('delivery_shops').select('*').order('sort_order', { ascending: true }).order('name', { ascending: true }),
+        supabase.from('delivery_shop_items').select('id, shop_id'),
+      ]);
+      if (sr.error) {
+        const wrap = $('shopList');
+        wrap.innerHTML = '';
+        const p = document.createElement('p');
+        p.className = 'dsa-err';
+        p.textContent = 'লোড করতে সমস্যা হয়েছে: ' + sr.error.message;
+        wrap.appendChild(p);
+        return;
+      }
+      shops = sr.data || [];
+      counts = {};
+      (ir.data || []).forEach((r) => { counts[r.shop_id] = (counts[r.shop_id] || 0) + 1; });
+      renderShops();
+    }
+
+    // ---------- দোকান এডিট ----------
+    function openEdit(shop) {
+      editing = shop || null;
+      showErr('shopErr', '');
+      hideItemForm();
+      $('shopFormTitle').textContent = shop ? 'দোকান এডিট করুন' : 'নতুন দোকান';
+      $('sName').value = shop ? shop.name : '';
+      const up = shop && shop.upazila ? shop.upazila : '';
+      $('sUpazila').value = up;
+      fillUnions(up, shop && shop.union_name ? shop.union_name : '');
+      $('sPopular').checked = shop ? !!shop.is_popular : false;
+      $('sActive').checked = shop ? !!shop.is_active : true;
+      $('sSort').value = String(shop ? (shop.sort_order || 0) : nextShopSort());
+      shopImg.reset(shop ? shop.image_url : null);
+
+      loc = {
+        lat: shop && shop.lat !== null && shop.lat !== undefined ? Number(shop.lat) : null,
+        lng: shop && shop.lng !== null && shop.lng !== undefined ? Number(shop.lng) : null,
+      };
+      setPickerValues(shop ? shop.address : '', loc.lat, loc.lng, up, shop ? shop.union_name : '');
+      paintLocHint();
+
+      $('delShopBtn').style.display = shop ? '' : 'none';
+      $('menuSection').style.display = shop ? '' : 'none';
+      items = [];
+      if (shop) loadItems(shop.id);
+      showView('edit');
+    }
+
+    async function saveShop() {
+      if (busyShop) return;
+      showErr('shopErr', '');
+      if (!window.SFValidateForm($('shopForm'))) return showErr('shopErr', 'লাল চিহ্নিত ঘরগুলো পূরণ করুন।');
+
+      const name = $('sName').value.trim();
+      if (!name) return showErr('shopErr', 'দোকানের নাম লিখুন।');
+      const w = pickerWrap();
+      const addrInput = w ? w.querySelector('.lp-address-input') : null;
+      const address = addrInput ? addrInput.value.trim() : '';
+      if (address.length > 300) return showErr('shopErr', 'ঠিকানা ৩০০ অক্ষরের মধ্যে রাখুন।');
+
+      // পিকারের লুকানো ঘর থেকেও পড়ি (ইভেন্ট মিস হলেও যেন পিন না হারায়)
+      let lat = loc.lat;
+      let lng = loc.lng;
+      if ((lat === null || lng === null) && w) {
+        const hl = parseFloat((w.querySelector('.lp-out-lat') || {}).value);
+        const hg = parseFloat((w.querySelector('.lp-out-lng') || {}).value);
+        if (!isNaN(hl) && !isNaN(hg)) { lat = hl; lng = hg; }
+      }
+      if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) { lat = null; lng = null; }
+
+      const sort = parseInt($('sSort').value, 10);
+      const payload = {
+        name,
+        upazila: $('sUpazila').value || null,
+        union_name: $('sUnion').value || null,
+        address: address || null,
+        lat,
+        lng,
+        is_popular: $('sPopular').checked,
+        is_active: $('sActive').checked,
+        sort_order: Number.isFinite(sort) ? sort : 0,
+      };
+
+      busyShop = true;
+      const btn = $('saveShopBtn');
+      btn.disabled = true;
+      btn.textContent = 'সেভ হচ্ছে...';
+
+      let newUrl = null;
+      let oldToRemove = null;
+      try {
+        const cur = editing ? editing.image_url : null;
+        if (shopImg.st.file) {
+          newUrl = await uploadImage(shopImg.st.file, 'shops');
+          payload.image_url = newUrl;
+          oldToRemove = cur;
+        } else if (shopImg.st.remove) {
+          payload.image_url = null;
+          oldToRemove = cur;
+        }
+
+        let res;
+        if (editing) {
+          res = await supabase.from('delivery_shops').update(payload).eq('id', editing.id).select().single();
+        } else {
+          if (userId) payload.created_by = userId;
+          res = await supabase.from('delivery_shops').insert(payload).select().single();
+        }
+        if (res.error) throw res.error;
+
+        if (oldToRemove) removeStored(oldToRemove);
+        const wasNew = !editing;
+        editing = res.data;
+        shopImg.reset(editing.image_url);
+        $('shopFormTitle').textContent = 'দোকান এডিট করুন';
+        $('delShopBtn').style.display = '';
+        $('menuSection').style.display = '';
+        if (wasNew) { items = []; renderItems(); }
+        toast(wasNew ? 'দোকান সেভ হয়েছে ✓ এবার মেনুর আইটেম যোগ করুন।' : 'সেভ হয়েছে ✓', 'success');
+        await loadShops();
+      } catch (err) {
+        if (newUrl) removeStored(newUrl);
+        showErr('shopErr', 'সেভ হয়নি: ' + ((err && err.message) || 'অজানা সমস্যা'));
+      } finally {
+        busyShop = false;
+        btn.disabled = false;
+        btn.textContent = 'দোকান সেভ করুন';
+      }
+    }
+
+    async function deleteShop() {
+      if (!editing || busyShop) return;
+      const n = counts[editing.id] || 0;
+      const msg = '"' + editing.name + '" ডিলিট করবেন?' + (n ? ' এর ' + n + 'টি আইটেমও মুছে যাবে।' : '') + ' এটা ফেরানো যাবে না।';
+      if (!confirm(msg)) return;
+      busyShop = true;
+      const btn = $('delShopBtn');
+      btn.disabled = true;
+      try {
+        const ir = await supabase.from('delivery_shop_items').select('image_url').eq('shop_id', editing.id);
+        const imgs = [editing.image_url].concat((ir.data || []).map((r) => r.image_url)).filter(Boolean);
+        const { error } = await supabase.from('delivery_shops').delete().eq('id', editing.id);
+        if (error) throw error;
+        imgs.forEach((u) => removeStored(u));
+        toast('দোকান ডিলিট হয়েছে।', 'success');
+        editing = null;
+        await loadShops();
+        showView('list');
+      } catch (err) {
+        toast('ডিলিট হয়নি: ' + ((err && err.message) || 'অজানা সমস্যা'), 'error');
+      } finally {
+        busyShop = false;
+        btn.disabled = false;
+      }
+    }
+
+    // ---------- মেনু আইটেম ----------
+    function fmtPrice(p) {
+      const n = Number(p);
+      return '৳' + (Number.isInteger(n) ? String(n) : n.toFixed(2));
+    }
+
+    function nextItemSort() {
+      if (!items.length) return 10;
+      return Math.max(...items.map((i) => i.sort_order || 0)) + 10;
+    }
+
+    function hideItemForm() {
+      $('itemForm').style.display = 'none';
+      editingItem = null;
+      showErr('itemErr', '');
+    }
+
+    function openItemForm(it) {
+      editingItem = it || null;
+      showErr('itemErr', '');
+      $('itemFormTitle').textContent = it ? 'আইটেম এডিট করুন' : 'নতুন আইটেম';
+      $('iName').value = it ? it.name : '';
+      $('iPrice').value = it ? String(Number(it.price)) : '';
+      $('iAvail').checked = it ? !!it.is_available : true;
+      $('iSort').value = String(it ? (it.sort_order || 0) : nextItemSort());
+      itemImg.reset(it ? it.image_url : null);
+      $('itemForm').style.display = '';
+      $('itemForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function renderItems() {
+      const wrap = $('itemList');
+      wrap.innerHTML = '';
+      $('itemCountLbl').textContent = items.length ? '(' + items.length + 'টি)' : '';
+      if (!items.length) {
+        const p = document.createElement('p');
+        p.className = 'dsa-muted';
+        p.textContent = 'এখনো কোনো আইটেম নেই। "আইটেম যোগ করুন" চাপুন।';
+        wrap.appendChild(p);
+        return;
+      }
+      items.forEach((it) => {
+        const row = document.createElement('div');
+        row.className = 'dsa-item' + (it.is_available ? '' : ' off');
+
+        const th = document.createElement('div');
+        th.className = 'dsa-thumb';
+        if (it.image_url) {
+          const im = document.createElement('img');
+          im.alt = '';
+          im.loading = 'lazy';
+          im.src = it.image_url;
+          th.appendChild(im);
+        } else {
+          const ic = document.createElement('i');
+          ic.className = 'fas fa-utensils';
+          th.appendChild(ic);
+        }
+
+        const info = document.createElement('div');
+        info.className = 'dsa-info';
+        const n = document.createElement('div');
+        n.className = 'dsa-name';
+        n.textContent = it.name;
+        const pr = document.createElement('div');
+        pr.className = 'dsa-price';
+        pr.textContent = fmtPrice(it.price) + (it.is_available ? '' : ' · শেষ');
+        info.appendChild(n);
+        info.appendChild(pr);
+
+        const tools = document.createElement('div');
+        tools.className = 'dsa-item-tools';
+
+        const sw = document.createElement('label');
+        sw.className = 'dsa-sw';
+        sw.title = 'পাওয়া যাচ্ছে';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!it.is_available;
+        cb.setAttribute('aria-label', 'পাওয়া যাচ্ছে');
+        const tr = document.createElement('span');
+        tr.className = 'dsa-sw-track';
+        sw.appendChild(cb);
+        sw.appendChild(tr);
+        cb.addEventListener('change', () => toggleAvail(it, cb));
+
+        const eb = document.createElement('button');
+        eb.type = 'button';
+        eb.className = 'dsa-ic';
+        eb.setAttribute('aria-label', 'এডিট');
+        eb.innerHTML = '<i class="fas fa-pen"></i>';
+        eb.addEventListener('click', () => openItemForm(it));
+
+        const db = document.createElement('button');
+        db.type = 'button';
+        db.className = 'dsa-ic del';
+        db.setAttribute('aria-label', 'ডিলিট');
+        db.innerHTML = '<i class="fas fa-trash"></i>';
+        db.addEventListener('click', () => deleteItem(it));
+
+        tools.appendChild(sw);
+        tools.appendChild(eb);
+        tools.appendChild(db);
+        row.appendChild(th);
+        row.appendChild(info);
+        row.appendChild(tools);
+        wrap.appendChild(row);
+      });
+    }
+
+    async function loadItems(shopId) {
+      $('itemList').innerHTML = '';
+      const p = document.createElement('p');
+      p.className = 'dsa-muted';
+      p.textContent = 'লোড হচ্ছে...';
+      $('itemList').appendChild(p);
+      const { data, error } = await supabase
+        .from('delivery_shop_items')
+        .select('*')
+        .eq('shop_id', shopId)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+      if (!editing || editing.id !== shopId) return; // এর মধ্যে অন্য দোকানে চলে গেলে
+      if (error) {
+        $('itemList').innerHTML = '';
+        const e = document.createElement('p');
+        e.className = 'dsa-err';
+        e.textContent = 'মেনু লোড হয়নি: ' + error.message;
+        $('itemList').appendChild(e);
+        return;
+      }
+      items = data || [];
+      counts[shopId] = items.length;
+      renderItems();
+    }
+
+    async function saveItem() {
+      if (busyItem || !editing) return;
+      showErr('itemErr', '');
+      if (!window.SFValidateForm($('itemForm'))) return showErr('itemErr', 'লাল চিহ্নিত ঘরগুলো পূরণ করুন।');
+      const name = $('iName').value.trim();
+      if (!name) return showErr('itemErr', 'আইটেমের নাম লিখুন।');
+      const price = parseFloat($('iPrice').value);
+      if (isNaN(price) || price < 0 || price > 1000000) return showErr('itemErr', 'দাম ০ থেকে ১০,০০,০০০ টাকার মধ্যে দিন।');
+      const sort = parseInt($('iSort').value, 10);
+
+      const payload = {
+        shop_id: editing.id,
+        name,
+        price: Math.round(price * 100) / 100,
+        is_available: $('iAvail').checked,
+        sort_order: Number.isFinite(sort) ? sort : 0,
+      };
+
+      busyItem = true;
+      const btn = $('saveItemBtn');
+      btn.disabled = true;
+      btn.textContent = 'সেভ হচ্ছে...';
+
+      let newUrl = null;
+      let oldToRemove = null;
+      try {
+        const cur = editingItem ? editingItem.image_url : null;
+        if (itemImg.st.file) {
+          newUrl = await uploadImage(itemImg.st.file, 'items/' + editing.id);
+          payload.image_url = newUrl;
+          oldToRemove = cur;
+        } else if (itemImg.st.remove) {
+          payload.image_url = null;
+          oldToRemove = cur;
+        }
+        const res = editingItem
+          ? await supabase.from('delivery_shop_items').update(payload).eq('id', editingItem.id)
+          : await supabase.from('delivery_shop_items').insert(payload);
+        if (res.error) throw res.error;
+        if (oldToRemove) removeStored(oldToRemove);
+        toast('আইটেম সেভ হয়েছে ✓', 'success');
+        hideItemForm();
+        await loadItems(editing.id);
+        renderShops();
+      } catch (err) {
+        if (newUrl) removeStored(newUrl);
+        showErr('itemErr', 'সেভ হয়নি: ' + ((err && err.message) || 'অজানা সমস্যা'));
+      } finally {
+        busyItem = false;
+        btn.disabled = false;
+        btn.textContent = 'আইটেম সেভ করুন';
+      }
+    }
+
+    async function toggleAvail(it, cb) {
+      const want = cb.checked;
+      cb.disabled = true;
+      const { error } = await supabase.from('delivery_shop_items').update({ is_available: want }).eq('id', it.id);
+      if (error) {
+        cb.checked = !want;
+        cb.disabled = false;
+        toast('বদলানো যায়নি: ' + error.message, 'error');
+        return;
+      }
+      it.is_available = want;
+      renderItems();
+    }
+
+    async function deleteItem(it) {
+      if (!confirm('"' + it.name + '" আইটেম ডিলিট করবেন?')) return;
+      const { error } = await supabase.from('delivery_shop_items').delete().eq('id', it.id);
+      if (error) { toast('ডিলিট হয়নি: ' + error.message, 'error'); return; }
+      if (it.image_url) removeStored(it.image_url);
+      if (editingItem && editingItem.id === it.id) hideItemForm();
+      toast('আইটেম ডিলিট হয়েছে।', 'success');
+      if (editing) await loadItems(editing.id);
+      renderShops();
+    }
+
+    // ---------- ইভেন্ট ----------
+    $('searchIn').addEventListener('input', renderShops);
+    $('newShopBtn').addEventListener('click', () => openEdit(null));
+    $('backToList').addEventListener('click', () => { hideItemForm(); showView('list'); });
+    $('saveShopBtn').addEventListener('click', saveShop);
+    $('delShopBtn').addEventListener('click', deleteShop);
+    $('newItemBtn').addEventListener('click', () => openItemForm(null));
+    $('saveItemBtn').addEventListener('click', saveItem);
+    $('cancelItemBtn').addEventListener('click', hideItemForm);
+
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      const d = e && e.detail;
+      userId = d && d.session && d.session.user ? d.session.user.id : null;
+      loadShops();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
