@@ -25,7 +25,7 @@
 //      তাই HTML ক্যাশ করাই যথেষ্ট — আলাদা ডেটা-ক্যাশ লাগে না) — অফলাইনে
 //      সবচেয়ে বেশি দরকার, tel: লিংক নেট ছাড়াও কাজ করে
 // ============================================================
-const CACHE_NAME = "smartfeni-v2";
+const CACHE_NAME = "smartfeni-v3";
 const IMAGE_CACHE_NAME = "smartfeni-images-v1";
 const MAX_IMAGE_CACHE_ITEMS = 60;
 const NETWORK_TIMEOUT_MS = 4000;
@@ -36,6 +36,7 @@ const OFFLINE_URL = "/offline.html";
 const NEVER_CACHE_PATH_PREFIXES = [
   "/api/", "/admin", "/cart", "/checkout", "/my-listings", "/my-orders",
   "/my-shop", "/my-club", "/profile", "/reset-password", "/become-a-shop-owner",
+  "/services/blood/",
 ];
 
 // হোমপেজের মতো stale-while-revalidate (সাথে সাথে ক্যাশ, ব্যাকগ্রাউন্ডে আপডেট)
@@ -127,16 +128,10 @@ async function networkFirstWithTimeout(request) {
 // (ইমার্জেন্সি নম্বর, ডাক্তার/হাসপাতাল তালিকা, ব্লাড ডোনার — tel: লিংক নেট
 // ছাড়াও কাজ করে)। প্রতিটা আলাদাভাবে try করা হয়, একটা ব্যর্থ হলেও বাকিগুলো
 // ও install থেমে যাবে না।
-const BLOOD_GROUP_SLUGS = [
-  "a-positive", "a-negative", "b-positive", "b-negative",
-  "ab-positive", "ab-negative", "o-positive", "o-negative",
-];
-
 const PRECACHE_PAGES = [
   "/services/emergency",
   "/services/doctor-directory",
   "/services/blood",
-  ...BLOOD_GROUP_SLUGS.map((slug) => `/services/blood/${slug}`),
 ];
 
 self.addEventListener("install", (event) => {

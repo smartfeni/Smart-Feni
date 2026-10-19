@@ -21,6 +21,7 @@ export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import { supabase } from '../../lib/supabase.js';
+import GuideSheet from '../../components/delivery/GuideSheet.astro';
 
 const bloodGroupSlugs = [
   { group: 'A+', slug: 'a-positive' },
@@ -38,23 +39,77 @@ const upazilas = ['ফেনী সদর', 'ছাগলনাইয়া', '�
 // DB ফাংশন notify_matching_donors এই হুবহু ভ্যালু চেক করে
 const WHOLE_DISTRICT = 'পুরো জেলা';
 
-const [{ data: profileGroups }, { data: manualGroups }] = await Promise.all([
-  supabase
-    .from('profiles')
-    .select('blood_group')
-    .eq('is_blood_donor', true)
-    .eq('donor_disabled', false),
-  supabase
-    .from('manual_blood_donors')
-    .select('blood_group')
-    .eq('status', 'active'),
-]);
+// গোপনীয়তা: শুধু গ্রুপ-ভিত্তিক সংখ্যা আসে (RPC blood_donor_counts), নাম/ফোন নয়
+const { data: countRows } = await supabase.rpc('blood_donor_counts');
 
 const countMap = {};
-[...(profileGroups || []), ...(manualGroups || [])].forEach((row) => {
+(countRows || []).forEach((row) => {
   if (!row.blood_group) return;
-  countMap[row.blood_group] = (countMap[row.blood_group] || 0) + 1;
+  countMap[row.blood_group] = Number(row.donor_count) || 0;
 });
+
+// "রক্ত খুঁজবেন যেভাবে" গাইড শিট (সাধারণ ইউজার গ্রুপ টাইলে ট্যাপ করলে খোলে)
+const guideSteps = [
+  {
+    caption: 'ধাপ ১: উপরের লাল "ব্লাড রিকোয়েস্ট" বাটনে ট্যাপ করুন (লগইন লাগবে)',
+    blocks: [
+      { kind: 'title', text: 'ফেনীর রক্তদাতা' },
+      { kind: 'text', text: 'রক্ত লাগলে রিকোয়েস্ট দিন', muted: true },
+      { kind: 'button', text: 'রক্তদাতা রেজিস্ট্রেশন' },
+      { kind: 'button', text: 'ব্লাড রিকোয়েস্ট', primary: true, tap: '১ এখানে' },
+      { kind: 'chips', items: ['A+', 'B+', 'O+', 'AB+'] },
+      { kind: 'notice', text: 'গ্রুপে ট্যাপ করলে নাম্বার দেখা যায় না, শুধু কতজন ডোনার আছেন তা দেখায়' },
+    ],
+  },
+  {
+    caption: 'ধাপ ২: নাম ও ফোন নম্বর লিখুন',
+    blocks: [
+      { kind: 'tabs', items: ['নতুন রিকোয়েস্ট', 'বর্তমান রিকোয়েস্ট'], active: 0 },
+      { kind: 'text', text: 'আপনার নাম' },
+      { kind: 'field', text: 'যেমন: রাহিম উদ্দিন', muted: true, tap: '১ নাম' },
+      { kind: 'text', text: 'ফোন নম্বর' },
+      { kind: 'field', text: '017XXXXXXXX', muted: true, tap: '২ ফোন' },
+    ],
+  },
+  {
+    caption: 'ধাপ ৩: রক্তের গ্রুপ ও উপজেলা বাছুন',
+    blocks: [
+      { kind: 'tabs', items: ['নতুন রিকোয়েস্ট', 'বর্তমান রিকোয়েস্ট'], active: 0 },
+      {
+        kind: 'row',
+        cols: [
+          { kind: 'field', text: 'A+', chevron: true, tap: '৩ গ্রুপ' },
+          { kind: 'field', text: 'ফেনী সদর', chevron: true, tap: '৪ উপজেলা' },
+        ],
+      },
+      { kind: 'text', text: 'খুব জরুরি হলে উপজেলায় "পুরো জেলা" বাছুন, জেলার সব ডোনারের কাছে নোটিফিকেশন যাবে', muted: true },
+    ],
+  },
+  {
+    caption: 'ধাপ ৪: বিস্তারিত লিখে "রিকোয়েস্ট পাঠান" চাপুন',
+    blocks: [
+      { kind: 'text', text: 'বিস্তারিত' },
+      { kind: 'textarea', text: 'হাসপাতালের নাম, কত ব্যাগ রক্ত, কখন লাগবে', tap: '৫ বিস্তারিত' },
+      { kind: 'spacer' },
+      { kind: 'cta', text: 'রিকোয়েস্ট পাঠান', tap: '৬ পাঠান' },
+    ],
+  },
+  {
+    caption: 'ধাপ ৫: ডোনার আগ্রহী হলে "বর্তমান রিকোয়েস্ট" ট্যাবে তার নাম্বার দেখুন',
+    blocks: [
+      { kind: 'tabs', items: ['নতুন রিকোয়েস্ট', 'বর্তমান রিকোয়েস্ট'], active: 1, tap: '৭ ট্যাব' },
+      {
+        kind: 'card',
+        title: 'A+ · ফেনী সদর',
+        badge: 'চলমান',
+        lines: ['আগ্রহী ডোনার (১)', 'রাহিম  017XXXXXXXX'],
+        tap: '৮ নাম্বার',
+      },
+      { kind: 'text', text: 'নাম্বারে ট্যাপ করে ডোনারকে ফোন করুন। রক্ত পেয়ে গেলে নিচের বাটন চাপুন', muted: true },
+      { kind: 'button', text: 'ব্লাড ম্যানেজ হয়ে গেছে' },
+    ],
+  },
+];
 
 const totalDonors = Object.values(countMap).reduce((sum, c) => sum + c, 0);
 
@@ -70,7 +125,7 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
       <h1>ফেনীর <span class="accent">রক্তদাতা</span> খুঁজুন</h1>
       <p>
         ফেনীর সবচেয়ে বড় অনলাইন ব্লাড ডিরেক্টরি —
-        <strong>{totalDonors} জন</strong> রক্তদাতার মধ্য থেকে খুঁজে নিন আপনার প্রয়োজনীয় রক্তদাতা
+        <strong>{totalDonors} জন</strong> রক্তদাতা আছেন। রক্ত লাগলে নিচের "ব্লাড রিকোয়েস্ট" বাটনে রিকোয়েস্ট দিন, আগ্রহী ডোনারের নাম্বার আপনি পাবেন
       </p>
 
       <div class="header-actions">
@@ -80,6 +135,14 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
         <button type="button" id="openBloodRequestBtn" class="btn-request">
           <i class="fas fa-triangle-exclamation"></i> ব্লাড রিকোয়েস্ট
         </button>
+        <GuideSheet
+          id="blood-search"
+          title="রক্ত খুঁজবেন যেভাবে"
+          subtitle="ব্লাড রিকোয়েস্ট দিন"
+          showButton
+          buttonTone="light"
+          steps={guideSteps}
+        />
       </div>
     </div>
   </section>
@@ -101,6 +164,8 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
             <a
               href={`/services/blood/${g.slug}`}
               class={`group-tile ${g.count === 0 ? 'is-empty' : ''}`}
+              data-blood-tile
+              data-group={g.group}
             >
               <span class="group-badge">{g.group}</span>
               <span class="group-count">
@@ -294,6 +359,49 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
   });
 
   // ============================================================
+  // গ্রুপ টাইল: শুধু অ্যাডমিন/মডারেটর ডোনার লিস্টে যেতে পারবে।
+  // বাকিরা ট্যাপ করলে "রক্ত খুঁজবেন যেভাবে" গাইড শিট খোলে।
+  // (আসল তালা ডাটাবেস RLS-এ; এটা UI গেট। JS না চললে href-এ গেলেও
+  //  লিস্ট পেজ নিজে রোল দেখে রিডাইরেক্ট করে।)
+  // ============================================================
+  let canViewListPromise: Promise<boolean> | null = null;
+
+  function canViewDonorList(): Promise<boolean> {
+    if (!canViewListPromise) {
+      canViewListPromise = (async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) return false;
+          const { data: me } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', session.user.id)
+            .single();
+          return me?.role === 'admin' || me?.role === 'moderator';
+        } catch (err) {
+          return false;
+        }
+      })();
+    }
+    return canViewListPromise;
+  }
+
+  window.addEventListener('smartfeni:auth-changed', () => {
+    canViewListPromise = null;
+  });
+
+  document.querySelectorAll('[data-blood-tile]').forEach((tile) => {
+    tile.addEventListener('click', async (e) => {
+      e.preventDefault();
+      if (await canViewDonorList()) {
+        window.location.href = tile.getAttribute('href');
+      } else {
+        (window as any).SFGuide?.open('blood-search');
+      }
+    });
+  });
+
+  // ============================================================
   // ডিপ-লিংক: নোটিফিকেশন থেকে /services/blood?tab=current এ এলে
   // (রক্ত যে খুঁজছে তার রিকোয়েস্ট আপডেট) মোডাল খুলে সরাসরি
   // "বর্তমান রিকোয়েস্ট" ট্যাব দেখানো। রিফ্রেশে আবার না খুলতে URL পরিষ্কার।
@@ -381,6 +489,16 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
     return `${Math.floor(hrs / 24)} দিন আগে`;
   }
 
+  // ইউজারের লেখা টেক্সট innerHTML-এ বসানোর আগে এস্কেপ
+  function esc(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   async function loadCurrentRequests() {
     const loading = document.getElementById('currentRequestsLoading');
     const empty = document.getElementById('currentRequestsEmpty');
@@ -428,8 +546,8 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
       const responseListHtml = (responses && responses.length > 0)
         ? responses.map((r) => `
             <div class="donor-row">
-              <span class="donor-name">${r.donor_name}</span>
-              <a href="tel:${r.donor_phone}" class="donor-phone">${r.donor_phone}</a>
+              <span class="donor-name">${esc(r.donor_name)}</span>
+              <a href="tel:${esc(r.donor_phone)}" class="donor-phone">${esc(r.donor_phone)}</a>
             </div>
           `).join('')
         : `<p class="no-responses">এখনো কেউ আগ্রহ দেখায়নি</p>`;
@@ -439,8 +557,8 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
           <span class="req-group">${req.blood_group}</span>
           <span class="req-status status-${req.status}">${statusLabel}</span>
         </div>
-        <p class="req-meta">${req.upazila} · ${formatTimeAgo(req.created_at)}</p>
-        ${req.details ? `<p class="req-details">${req.details}</p>` : ''}
+        <p class="req-meta">${esc(req.upazila)} · ${formatTimeAgo(req.created_at)}</p>
+        ${req.details ? `<p class="req-details">${esc(req.details)}</p>` : ''}
         <div class="donor-list">
           <p class="donor-list-title">আগ্রহী ডোনার (${responses?.length || 0})</p>
           ${responseListHtml}
