@@ -1442,11 +1442,28 @@ import ChatModal from '../components/delivery/ChatModal.astro';
         .or(`vehicle_type.eq.${riderRow.vehicle_type},vehicle_type.eq.any`)
         .order('created_at', { ascending: false });
 
-      if (heroUpazila) {
+      // সেটিং delivery_rider_scope: 'all' (ডিফল্ট) হলে সব উপজেলার অর্ডার দেখাবে,
+      // নিজের উপজেলার অর্ডার আগে
+      let scopeAll = true;
+      try {
+        const { data: scopeRow } = await supabase
+          .from('site_settings')
+          .select('value')
+          .eq('key', 'delivery_rider_scope')
+          .maybeSingle();
+        scopeAll = !scopeRow || scopeRow.value !== 'upazila';
+      } catch (_) {
+        scopeAll = true;
+      }
+
+      if (heroUpazila && !scopeAll) {
         query = query.eq('upazila', heroUpazila);
       }
 
-      const { data: openRequests } = await query;
+      const { data: openRequestsRaw } = await query;
+      const openRequests = (openRequestsRaw || [])
+        .slice()
+        .sort((a, b) => (b.upazila === heroUpazila) - (a.upazila === heroUpazila));
 
       if (!openRequests || openRequests.length === 0) {
         riderOpenRequestsList.innerHTML = '';

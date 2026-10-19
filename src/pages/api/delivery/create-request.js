@@ -156,13 +156,30 @@ export async function POST({ request }) {
     const { client: availabilityAdmin } = getAdminClient();
     const availabilityClient = availabilityAdmin || client;
 
+    // সেটিং delivery_rider_scope: 'all' (ডিফল্ট) হলে সব উপজেলার রাইডার ম্যাচ করবে
+    let riderScopeAll = true;
+    try {
+      const { data: scopeRow } = await availabilityClient
+        .from('site_settings')
+        .select('value')
+        .eq('key', 'delivery_rider_scope')
+        .maybeSingle();
+      riderScopeAll = !scopeRow || scopeRow.value !== 'upazila';
+    } catch (_) {
+      riderScopeAll = true;
+    }
+    const whereLabel = riderScopeAll ? 'ফেনীতে' : `${upazila}-এ`;
+
     let onlineQuery = availabilityClient
       .from('delivery_riders')
       .select('id', { count: 'exact', head: true })
       .eq('verification_status', 'approved')
       .eq(finalCategory === 'ride' ? 'ride_online' : 'delivery_online', true)
-      .eq(finalCategory === 'ride' ? 'offers_ride' : 'offers_delivery', true)
-      .eq('upazila', upazila);
+      .eq(finalCategory === 'ride' ? 'offers_ride' : 'offers_delivery', true);
+
+    if (!riderScopeAll) {
+      onlineQuery = onlineQuery.eq('upazila', upazila);
+    }
 
     if (finalVehicleType !== 'any') {
       onlineQuery = onlineQuery.eq('vehicle_type', finalVehicleType);
@@ -188,8 +205,8 @@ export async function POST({ request }) {
     if (!onlineRiderCount) {
       const noRiderMessage =
         finalVehicleType !== 'any'
-          ? `${upazila}-এ এই বাহনের কোনো রাইডার এই মুহূর্তে সক্রিয় নেই। "যেকোনো" বেছে নিন, অথবা কিছুক্ষণ পর চেষ্টা করুন।`
-          : `দুঃখিত, ${upazila}-এ এই মুহূর্তে কোনো রাইডার সক্রিয় নেই। অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন। জরুরি প্রয়োজনে WhatsApp করুন: +8801816355833`;
+          ? `${whereLabel} এই বাহনের কোনো রাইডার এই মুহূর্তে সক্রিয় নেই। "যেকোনো" বেছে নিন, অথবা কিছুক্ষণ পর চেষ্টা করুন।`
+          : `দুঃখিত, ${whereLabel} এই মুহূর্তে কোনো রাইডার সক্রিয় নেই। অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন। জরুরি প্রয়োজনে WhatsApp করুন: +8801816355833`;
 
       return new Response(
         JSON.stringify({ error: noRiderMessage, code: 'NO_RIDER_ONLINE' }),
@@ -282,12 +299,14 @@ export async function POST({ request }) {
       .select('profile_id, profiles!delivery_riders_profile_id_fkey(telegram_chat_id)')
       .eq('verification_status', 'approved')
       .eq(finalCategory === 'ride' ? 'offers_ride' : 'offers_delivery', true)
-      .eq('upazila', upazila)
       // কাস্টমার নিজে হিরো হলে নিজের অর্ডারের নোটিফিকেশন (Telegram + in-app/push) নিজে পাবে না
       .neq('profile_id', user.id);
 
     if (finalVehicleType !== 'any') {
       heroQuery = heroQuery.eq('vehicle_type', finalVehicleType);
+    }
+    if (!riderScopeAll) {
+      heroQuery = heroQuery.eq('upazila', upazila);
     }
 
     const { data: matchingHeroes } = await heroQuery;

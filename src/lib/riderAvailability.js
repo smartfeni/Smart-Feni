@@ -45,12 +45,23 @@ export async function fetchServiceAccepting(category) {
   return data[category === 'ride' ? 'ride' : 'delivery'] !== false;
 }
 
-export function evaluateAvailability(riders, upazila, vehicleType) {
+// সেটিং delivery_rider_scope: 'all' (ডিফল্ট) হলে true — সব উপজেলার রাইডার ম্যাচ করে
+export async function fetchRiderScopeAll() {
+  const { data, error } = await supabase
+    .from('site_settings')
+    .select('value')
+    .eq('key', 'delivery_rider_scope')
+    .maybeSingle();
+  if (error || !data) return true;
+  return data.value !== 'upazila';
+}
+
+export function evaluateAvailability(riders, upazila, vehicleType, scopeAll = false) {
   if (riders === null) return 'unknown';
   if (riders.length === 0) return 'none-district';
   if (!upazila) return 'ok';
 
-  const inUpazila = riders.filter((r) => r.upazila === upazila);
+  const inUpazila = scopeAll ? riders : riders.filter((r) => r.upazila === upazila);
   if (inUpazila.length === 0) return 'none-upazila';
 
   if (vehicleType && vehicleType !== 'any') {
@@ -63,7 +74,8 @@ export function evaluateAvailability(riders, upazila, vehicleType) {
 
 const SUPPORT_LINE = 'জরুরি প্রয়োজনে যোগাযোগ করুন।';
 
-function getNoticeCopy(state, upazila) {
+function getNoticeCopy(state, upazila, scopeAll = false) {
+  const where = scopeAll ? 'ফেনীতে' : `${upazila}-এ`;
   if (state === 'paused') {
     return {
       title: 'দুঃখিত, এই সেবা এই মুহূর্তে বন্ধ আছে',
@@ -73,14 +85,14 @@ function getNoticeCopy(state, upazila) {
 
   if (state === 'none-vehicle') {
     return {
-      title: `${upazila}-এ এই বাহনের কোনো রাইডার সক্রিয় নেই`,
+      title: `${where} এই বাহনের কোনো রাইডার সক্রিয় নেই`,
       text: `"যেকোনো" বেছে নিন, অথবা কিছুক্ষণ পর চেষ্টা করুন। ${SUPPORT_LINE}`,
     };
   }
 
   if (state === 'none-upazila') {
     return {
-      title: `দুঃখিত, ${upazila}-এ এই মুহূর্তে কোনো রাইডার সক্রিয় নেই`,
+      title: `দুঃখিত, ${where} এই মুহূর্তে কোনো রাইডার সক্রিয় নেই`,
       text: `অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন। ${SUPPORT_LINE}`,
     };
   }
@@ -115,6 +127,7 @@ export function initRiderAvailability({
 }) {
   let riders = null;
   let accepting = true;
+  let scopeAll = true;
 
   const titleEl = root?.querySelector('[data-notice-title]');
   const textEl = root?.querySelector('[data-notice-text]');
@@ -133,7 +146,7 @@ export function initRiderAvailability({
 
     const upazila = upazilaSelect?.value || '';
     const state = accepting
-      ? evaluateAvailability(riders, upazila, vehicleInput?.value || 'any')
+      ? evaluateAvailability(riders, upazila, vehicleInput?.value || 'any', scopeAll)
       : 'paused';
     const blocked = state.startsWith('none') || state === 'paused';
 
@@ -141,7 +154,7 @@ export function initRiderAvailability({
     form.style.display = state === 'none-district' || state === 'paused' ? 'none' : '';
 
     if (blocked) {
-      const copy = getNoticeCopy(state, upazila);
+      const copy = getNoticeCopy(state, upazila, scopeAll);
       if (titleEl) titleEl.textContent = copy.title;
       if (textEl) textEl.textContent = copy.text;
 
@@ -159,12 +172,14 @@ export function initRiderAvailability({
   }
 
   async function refresh() {
-    const [onlineRiders, isAccepting] = await Promise.all([
+    const [onlineRiders, isAccepting, isScopeAll] = await Promise.all([
       fetchOnlineRiders(category),
       fetchServiceAccepting(category),
+      fetchRiderScopeAll(),
     ]);
     riders = onlineRiders;
     accepting = isAccepting;
+    scopeAll = isScopeAll;
     apply();
   }
 
