@@ -41,6 +41,8 @@ export async function POST() {
       .from('delivery_requests')
       .update({ status: 'cancelled', updated_at: nowIso })
       .eq('status', 'open')
+      // ডেলিভারি v2 গেট: pending/hold অর্ডার মেয়াদ পেরোলেও বাতিল হবে না
+      .eq('publish_status', 'published')
       .lt('expires_at', nowIso)
       .select('id');
 
