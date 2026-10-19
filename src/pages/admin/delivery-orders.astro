@@ -30,14 +30,65 @@
 // পেমেন্ট প্রুফ আলাদা query (delivery_payment_proofs, admin RLS) + delivery-proofs
 // bucket PRIVATE বলে storageSigned.js দিয়ে signed URL।
 // নোট: ডায়নামিক HTML JS দিয়ে তৈরি, তাই স্টাইল is:global এবং ক্লাস do- দিয়ে শুরু।
+//
+// ডেলিভারি UI v2 (ব্রিফ B ব্যাচ ২) — ইনবক্স:
+//   ট্যাব: নতুন (পাবলিশের অপেক্ষায়/হোল্ড) · ব্যাচ (ইউনিয়ন/উপজেলা/দোকান) · চলমান · সম্পন্ন · ফিড
+//   RPC: admin_delivery_inbox_counts, admin_delivery_batches, admin_publish_delivery_orders,
+//        admin_hold_delivery_orders, admin_assign_delivery_order, admin_add_order_note,
+//        admin_assignable_riders (নতুন; অনুমোদিত সব রাইডার, নিজস্ব ব্যাজ সহ উপরে)
+//   অটো-পাবলিশ মিনিট: site_settings.delivery_auto_publish_minutes (গেট নিজে চালু/বন্ধ C করবে)
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import ChatModal from '../../components/delivery/ChatModal.astro';
+import GuideSheet from '../../components/delivery/GuideSheet.astro';
 
 const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
+
+const guideSteps = [
+  {
+    caption: 'গেট চালু থাকলে নতুন অর্ডার "নতুন" ট্যাবে আসে',
+    blocks: [
+      { kind: 'tabs', items: ['নতুন', 'ব্যাচ', 'চলমান', 'সম্পন্ন'], active: 0, tap: true },
+      { kind: 'card', title: '📦 #SFD-1042', lines: ['ফেনী সদর · ফেনী পৌরসভা', '🛍️ চিকেন বার্গার ×২'], badge: 'পাবলিশের অপেক্ষায়' },
+      { kind: 'notice', text: 'অটো-পাবলিশের কাউন্টডাউন কার্ডেই দেখাবে।' },
+    ],
+  },
+  {
+    caption: 'পাবলিশ করলেই রাইডাররা অর্ডার দেখতে পাবে',
+    blocks: [
+      { kind: 'card', title: '📦 #SFD-1042', lines: ['আইটেম ৳২৪০', 'ডেলিভারি চার্জ ৳৬০', 'মোট ৳৩০০'] },
+      { kind: 'row', cols: [{ kind: 'button', text: '🚀 পাবলিশ', primary: true, tap: true }, { kind: 'button', text: '🛵 রাইডারকে দিন' }] },
+      { kind: 'text', text: 'একসাথে অনেক অর্ডার বেছে "পাবলিশ" চাপলে সব একবারে যায়।', muted: true },
+    ],
+  },
+  {
+    caption: 'ব্যাচ ট্যাবে এলাকা বা দোকান অনুযায়ী একসাথে পাবলিশ করুন',
+    blocks: [
+      { kind: 'chips', items: ['ইউনিয়ন', 'উপজেলা', 'দোকান'], active: 0, tap: true },
+      { kind: 'card', title: '📍 ফেনী পৌরসভা', lines: ['৫টি অর্ডার', 'সবচেয়ে পুরনো ১২ মিনিট আগে'] },
+      { kind: 'button', text: '🚀 সব পাবলিশ', primary: true, tap: true },
+    ],
+  },
+  {
+    caption: 'দাম ঠিক করে সরাসরি রাইডারকে দেওয়া যায়',
+    blocks: [
+      { kind: 'field', text: 'ডেলিভারি চার্জ ৳৬০', tap: '১' },
+      { kind: 'item', name: 'রাইডার করিম', price: '🟢 অনলাইন' },
+      { kind: 'item', name: 'রাইডার সুমন', price: '⚪ অফলাইন' },
+      { kind: 'cta', text: 'রাইডারকে দিন', tap: '২' },
+    ],
+  },
+  {
+    caption: 'বাতিল, নোট, কল, চ্যাট ৩-ডট মেনুতে',
+    blocks: [
+      { kind: 'button', text: '⋯', tap: true },
+      { kind: 'card', title: 'মেনু', lines: ['⏸️ হোল্ডে রাখুন', '📝 নোট যোগ করুন', '📞 কল', '💬 চ্যাট', '❌ বাতিল'] },
+    ],
+  },
+];
 ---
 
 <BaseLayout title="ডেলিভারি ও রাইড অর্ডার | স্মার্ট ফেনী">
@@ -58,7 +109,10 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
             <h1><i class="fas fa-route"></i> ডেলিভারি ও রাইড অর্ডার</h1>
             <p>লাইভ অর্ডার, হিস্ট্রি ও আপডেট — এক জায়গায়</p>
           </div>
-          <button type="button" id="doSoundBtn" class="do-sound" title="নতুন অর্ডারের শব্দ"><i class="fas fa-bell"></i></button>
+          <div style="display:flex;gap:8px;flex:none;">
+            <GuideSheet id="admin-delivery-orders" title="অর্ডার ইনবক্সের নিয়ম" subtitle="অ্যাডমিন · ডেলিভারি অর্ডার" showButton buttonTone="light" steps={guideSteps} />
+            <button type="button" id="doSoundBtn" class="do-sound" title="নতুন অর্ডারের শব্দ"><i class="fas fa-bell"></i></button>
+          </div>
         </div>
 
         <!-- ===== অর্ডার গ্রহণ সুইচ (শুধু অ্যাডমিন বদলাতে পারবে; RPC admin_set_service_accepting) ===== -->
@@ -155,6 +209,17 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
           svcLoad();
         </script>
 
+        <!-- ===== গেট / অটো-পাবলিশ ===== -->
+        <div class="do-gate" id="doGate" style="display:none;">
+          <div class="do-gate-row"><span id="doGateState"></span><small id="doGateNext"></small></div>
+          <div class="do-gate-set">
+            <label for="doAutoMin">অটো-পাবলিশ</label>
+            <input type="number" id="doAutoMin" min="1" max="240" inputmode="numeric" />
+            <span>মিনিট</span>
+            <button type="button" class="do-btn ghost" id="doAutoSave">সেভ</button>
+          </div>
+        </div>
+
         <!-- ===== সামারি ===== -->
         <div class="do-stats" id="doStats">
           <div class="do-stat"><b id="stToday">—</b><span>আজকের অর্ডার</span></div>
@@ -173,9 +238,11 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
 
         <!-- ===== ট্যাব ===== -->
         <div class="do-tabs" role="tablist">
-          <button type="button" class="do-tab active" data-tab="live"><span class="do-dot"></span> লাইভ <em id="tabLiveCount"></em></button>
-          <button type="button" class="do-tab" data-tab="history">📜 হিস্ট্রি</button>
-          <button type="button" class="do-tab" data-tab="feed">⚡ আপডেট ফিড</button>
+          <button type="button" class="do-tab" data-tab="new">🆕 নতুন <em id="tabNewCount"></em></button>
+          <button type="button" class="do-tab" data-tab="batch">🧺 ব্যাচ</button>
+          <button type="button" class="do-tab active" data-tab="live"><span class="do-dot"></span> চলমান <em id="tabLiveCount"></em></button>
+          <button type="button" class="do-tab" data-tab="history">✅ সম্পন্ন</button>
+          <button type="button" class="do-tab" data-tab="feed">⚡ ফিড</button>
         </div>
 
         <!-- ===== ফিল্টার (লাইভ ও হিস্ট্রি) ===== -->
@@ -199,6 +266,22 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
             <label class="do-date"><span>থেকে</span><input type="date" id="fFrom" /></label>
             <label class="do-date"><span>পর্যন্ত</span><input type="date" id="fTo" /></label>
           </div>
+        </div>
+
+        <!-- ===== ব্যাচ গ্রুপ ===== -->
+        <div class="do-chips" id="batchChips" style="display:none;">
+          <button type="button" class="do-chip active" data-group="union">📍 ইউনিয়ন</button>
+          <button type="button" class="do-chip" data-group="upazila">🗺️ উপজেলা</button>
+          <button type="button" class="do-chip" data-group="shop">🏪 দোকান</button>
+        </div>
+
+        <!-- ===== বাল্ক বার (নতুন ট্যাব) ===== -->
+        <div class="do-bulk" id="doBulk" style="display:none;">
+          <label class="do-sel"><input type="checkbox" id="bulkAll" /> সব</label>
+          <span id="bulkCount">কিছু বাছা হয়নি</span>
+          <button type="button" class="do-btn primary-sm" id="bulkPublish" disabled>🚀 পাবলিশ</button>
+          <button type="button" class="do-btn ghost" id="bulkHold" disabled>⏸️ হোল্ড</button>
+          <button type="button" class="do-btn ghost" id="bulkUnhold" disabled>▶️ ছাড়ুন</button>
         </div>
 
         <!-- ===== ইউজার সামারি (ইউজার সার্চে) ===== -->
@@ -266,6 +349,43 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       <p class="do-alert-result" id="cancelResult" style="display:none;"></p>
 
       <button type="button" class="do-btn danger-solid" id="cancelSend"><i class="fas fa-ban"></i> নিশ্চিত, বাতিল করুন</button>
+    </div>
+  </div>
+
+  <!-- ===== রাইডারকে দিন মোডাল ===== -->
+  <div class="do-overlay" id="doAssignOverlay">
+    <div class="do-sheet" role="dialog" aria-label="রাইডারকে অর্ডার দিন">
+      <div class="do-grip"></div>
+      <button type="button" class="do-x" id="doAssignClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      <h3 class="do-sheet-title">🛵 রাইডারকে দিন</h3>
+      <p class="do-sheet-sub" id="assignOrderLine"></p>
+
+      <label class="do-label" for="assignPrice">ডেলিভারি চার্জ (৳) <small>(আইটেমের দাম আলাদা)</small></label>
+      <input type="number" id="assignPrice" class="do-select" style="width:100%;" min="1" max="1000000" inputmode="numeric" />
+
+      <p class="do-label">রাইডার বাছুন</p>
+      <input type="search" id="assignSearch" class="do-select" style="width:100%;margin-bottom:8px;" placeholder="নাম, ফোন বা উপজেলা" autocomplete="off" />
+      <label class="do-radio"><input type="checkbox" id="assignOnline" /> <span>শুধু অনলাইন রাইডার</span></label>
+      <div id="assignList" class="do-riders"></div>
+
+      <p class="do-hint">রাইডার ও কাস্টমার দুজনকেই নোটিফিকেশন যাবে। অন্য সব অফার বন্ধ হয়ে যাবে।</p>
+      <p class="do-alert-result" id="assignResult" style="display:none;"></p>
+      <button type="button" class="do-btn primary" id="assignSend"><i class="fas fa-paper-plane"></i> রাইডারকে দিন</button>
+    </div>
+  </div>
+
+  <!-- ===== নোট মোডাল ===== -->
+  <div class="do-overlay" id="doNoteOverlay">
+    <div class="do-sheet" role="dialog" aria-label="অর্ডারে নোট">
+      <div class="do-grip"></div>
+      <button type="button" class="do-x" id="doNoteClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      <h3 class="do-sheet-title">📝 নোট যোগ করুন</h3>
+      <p class="do-sheet-sub" id="noteOrderLine"></p>
+      <textarea id="noteText" class="do-textarea" rows="4" maxlength="500" placeholder="যেমন: কাস্টমার ফোনে দাম ঠিক করেছেন"></textarea>
+      <p class="do-hint" id="noteCount">০/৫০০</p>
+      <p class="do-hint">নোট শুধু অ্যাডমিন/মডারেটর টাইমলাইনে দেখবে, কাস্টমার বা রাইডার দেখবে না।</p>
+      <p class="do-alert-result" id="noteResult" style="display:none;"></p>
+      <button type="button" class="do-btn primary" id="noteSend"><i class="fas fa-floppy-disk"></i> নোট সেভ করুন</button>
     </div>
   </div>
 
@@ -439,12 +559,63 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
     .do-alert-result { font-size: 0.84rem; font-weight: 700; margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; }
     .do-alert-result.ok { background: #DCFCE7; color: #15803D; }
     .do-alert-result.err { background: #FEE2E2; color: #B91C1C; }
+
+    /* ===== ডেলিভারি UI v2: ইনবক্স ===== */
+    .do-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .do-tabs::-webkit-scrollbar { display: none; }
+    .do-tab { flex: 1 0 auto; padding: 10px 11px; font-size: 0.78rem; white-space: nowrap; }
+
+    .do-gate { background: #fff; border: 1px solid #EEF3F9; border-radius: 16px; padding: 12px 14px; margin-bottom: 16px; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04); }
+    .do-gate-row { display: flex; flex-direction: column; gap: 2px; font-size: 0.84rem; font-weight: 700; color: #1B2A4A; line-height: 1.45; }
+    .do-gate-row small { font-size: 0.74rem; color: #8FA0BC; font-weight: 600; }
+    .do-gate-set { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.8rem; font-weight: 700; color: #5A6E85; }
+    .do-gate-set input { width: 70px; padding: 8px 10px; border: 1.5px solid #E5EAF0; border-radius: 10px; font: inherit; color: #1B2A4A; }
+
+    .do-btn.primary-sm { background: #FF6B35; color: #fff; }
+    .do-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .do-bulk { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: #fff; border: 1px solid #EEF3F9; border-radius: 14px; padding: 8px 10px; margin-bottom: 12px; font-size: 0.8rem; font-weight: 700; color: #5A6E85; }
+    .do-bulk #bulkCount { flex: 1; min-width: 80px; }
+    .do-sel { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; }
+    .do-sel input { width: 20px; height: 20px; accent-color: #FF6B35; }
+
+    .do-items { margin: -2px 0 8px; font-size: 0.78rem; color: #5A6E85; line-height: 1.4; }
+    .do-eta { color: #B45309; font-weight: 700; }
+    .do-eta b { font-weight: 800; }
+    .do-card-actions { flex-wrap: wrap; }
+    .do-card-actions .do-btn { flex: 1 1 auto; }
+
+    .do-ochip { border: 1.5px solid #E5EAF0; background: #F8FAFC; border-radius: 99px; padding: 5px 11px; font-size: 0.74rem; font-weight: 700; color: #1B2A4A; cursor: pointer; font-family: inherit; }
+    .do-chipwrap { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+
+    .do-line { display: flex; justify-content: space-between; align-items: center; font-size: 0.88rem; color: #1B2A4A; padding: 5px 0; }
+    .do-line.tot { border-top: 1.5px dashed #E5EAF0; margin-top: 4px; padding-top: 9px; font-weight: 800; font-size: 0.98rem; }
+    .do-addr { margin-top: 2px; }
+    .do-addr > div { font-size: 0.88rem; color: #1B2A4A; word-break: break-word; }
+
+    .do-more-btn { flex: 0 0 52px !important; font-size: 1.1rem; }
+    .do-menu { display: none; flex-direction: column; background: #F8FAFC; border: 1px solid #E5EAF0; border-radius: 14px; margin-top: 10px; overflow: hidden; }
+    .do-menu.open { display: flex; }
+    .do-menu-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 13px 14px; font: inherit; font-size: 0.86rem; font-weight: 700; color: #1B2A4A; text-decoration: none; cursor: pointer; border-bottom: 1px solid #EEF3F9; box-sizing: border-box; }
+    .do-menu-item:last-child { border-bottom: 0; }
+    .do-menu-item.danger { color: #B91C1C; }
+
+    .do-riders { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; margin-top: 6px; }
+    .do-rider { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left; background: #fff; border: 1.5px solid #E5EAF0; border-radius: 14px; padding: 10px 12px; font: inherit; cursor: pointer; }
+    .do-rider.sel { border-color: #FF6B35; background: #FFF6F1; }
+    .do-rider b { display: block; font-size: 0.88rem; color: #1B2A4A; }
+    .do-rider small { display: block; font-size: 0.72rem; color: #8FA0BC; margin-top: 2px; }
+    .do-rbadges { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+    .do-rbadge { font-size: 0.66rem; font-weight: 800; padding: 2px 8px; border-radius: 99px; background: #F1F5F9; color: #475569; }
+    .do-rbadge.own { background: #FFF0EA; color: #E0561F; }
+    .do-rbadge.on { background: #DCFCE7; color: #15803D; }
   </style>
 
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
     import { getSignedUrls } from '../../lib/storageSigned.js';
+    import { splitMapLink, renderAddressWithNav } from '../../lib/mapLinks.js';
 
     // ================= হেল্পার =================
     const $ = (id) => document.getElementById(id);
@@ -469,6 +640,11 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       dispute_resolved: { icon: '⚖️', text: 'ডিসপিউট নিষ্পত্তি হয়েছে' },
       rider_alert: { icon: '🔔', text: 'রাইডারদের এলার্ট পাঠানো হয়েছে' },
       status_open: { icon: '🔓', text: 'আবার খোলা হয়েছে' },
+      published: { icon: '🚀', text: 'পাবলিশ হয়েছে' },
+      hold: { icon: '⏸️', text: 'হোল্ডে রাখা হয়েছে' },
+      unhold: { icon: '▶️', text: 'হোল্ড ছাড়া হয়েছে' },
+      assigned: { icon: '🛵', text: 'অ্যাডমিন রাইডারকে দিয়েছেন' },
+      admin_note: { icon: '📝', text: 'অ্যাডমিন নোট' },
     };
 
     function esc(value) {
@@ -520,6 +696,9 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       loading: false,
       feed: [],
       feedOldestId: null,
+      group: 'union',
+      selected: new Set(),
+      inbox: null,
       currentOrder: null,
       sound: true,
       initialized: false,
@@ -555,10 +734,17 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
 
     // ================= সামারি =================
     async function loadOverview() {
-      const { data, error } = await supabase.rpc('admin_orders_overview');
+      const [ov, ib] = await Promise.all([
+        supabase.rpc('admin_orders_overview'),
+        supabase.rpc('admin_delivery_inbox_counts'),
+      ]);
+      if (ib && !ib.error && ib.data) { state.inbox = ib.data; paintInbox(); }
+      const { data, error } = ov;
       if (error || !data) return;
       $('stToday').textContent = bn(data.today_total ?? 0);
-      const live = (data.live_open || 0) + (data.live_confirmed || 0) + (data.live_delivered || 0) + (data.disputed || 0);
+      // পাবলিশের অপেক্ষার অর্ডার (pending/hold) "চলমান"-এর গোনায় নয়, ওগুলো "নতুন" ট্যাবে
+      const unpub = state.inbox ? (state.inbox.pending || 0) + (state.inbox.hold || 0) : 0;
+      const live = Math.max(0, (data.live_open || 0) + (data.live_confirmed || 0) + (data.live_delivered || 0) + (data.disputed || 0) - unpub);
       $('stLive').textContent = bn(live);
       $('stDispute').textContent = bn(data.disputed ?? 0);
       $('stDisputeBox').classList.toggle('has', (data.disputed || 0) > 0);
@@ -588,36 +774,51 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
     // ================= অর্ডার কার্ড =================
     function orderCard(o, { fresh = false } = {}) {
       const eff = o.eff_status || o.status;
-      const route = o.pickup_address && o.drop_address
-        ? `${esc(o.pickup_address)} → ${esc(o.drop_address)}`
-        : esc(o.drop_address || o.pickup_address || o.description || '');
+      // ঠিকানায় ম্যাপ লিংক থাকলে কার্ডে লিংক দেখাই না (ডিটেইলে "নেভিগেট করুন" বাটন)
+      const pa = splitMapLink(o.pickup_address || '').text;
+      const da = splitMapLink(o.drop_address || '').text;
+      const route = pa && da
+        ? `${esc(pa)} → ${esc(da)}`
+        : esc(da || pa || o.description || '');
+      const unpub = o.status === 'open' && (o.publish_status === 'pending' || o.publish_status === 'hold');
+      const selectable = unpub && state.tab === 'new';
+      const itemsTxt = Array.isArray(o.order_items) && o.order_items.length
+        ? o.order_items.map((i) => (i.name || '') + (Number(i.qty) > 1 ? ' ×' + bn(i.qty) : '')).join(', ')
+        : '';
       const customer = o.customer || {};
       const rider = o.rider;
-      const canAlert = eff === 'open';
+      const canAlert = eff === 'open' && !unpub;
       const roleTag = o.role ? `<span class="do-role">${o.role === 'customer' ? 'কাস্টমার' : 'রাইডার'} হিসেবে</span>` : '';
 
       return `
         <div class="do-card ${fresh ? 'fresh' : ''}" data-no="${esc(o.order_no)}" data-id="${esc(o.id)}" data-eff="${esc(eff)}" data-cat="${esc(o.category)}" data-upazila="${esc(o.upazila || '')}" data-price="${esc(o.price ?? '')}">
           <div class="do-card-top">
-            <span class="do-no ${o.category === 'ride' ? 'ride' : ''}">${catIcon(o.category)} #${esc(o.order_no)}</span>
-            <span style="display:flex;gap:6px;align-items:center;">${roleTag}<span class="do-badge s-${esc(eff)}">${STATUS_LABEL[eff] || esc(eff)}</span></span>
+            <span style="display:flex;gap:8px;align-items:center;">${selectable ? `<label class="do-sel"><input type="checkbox" class="do-sel-cb" data-id="${esc(o.id)}" aria-label="বাছুন" /></label>` : ''}<span class="do-no ${o.category === 'ride' ? 'ride' : ''}">${catIcon(o.category)} #${esc(o.order_no)}</span></span>
+            <span style="display:flex;gap:6px;align-items:center;">${roleTag}<span class="do-badge ${unpub ? 's-confirmed' : 's-' + esc(eff)}">${unpub ? (o.publish_status === 'hold' ? '⏸️ হোল্ডে' : '🕒 পাবলিশের অপেক্ষায়') : (STATUS_LABEL[eff] || esc(eff))}</span></span>
           </div>
-          <p class="do-route">${route || '—'}<small>${esc(o.upazila || '')}${o.area_detail ? ' · ' + esc(o.area_detail) : ''}</small></p>
+          <p class="do-route">${route || '—'}<small>${esc(o.upazila || '')}${o.drop_union ? ' · ' + esc(o.drop_union) : ''}${o.area_detail ? ' · ' + esc(o.area_detail) : ''}</small></p>
+          ${itemsTxt ? `<p class="do-items">🛍️ ${esc(itemsTxt)}</p>` : ''}
           <div class="do-meta">
             <span class="do-price">${money(o.price)}</span>
             <span><i class="fas fa-user"></i>${esc(customer.name || 'কাস্টমার')}</span>
             ${rider ? `<span><i class="fas fa-motorcycle"></i>${esc(rider.name || 'হিরো')}</span>` : ''}
             ${eff === 'open' ? `<span><i class="fas fa-comments-dollar"></i>${bn(o.offers_count || 0)} অফার</span>` : ''}
+            ${o.items_total !== null && o.items_total !== undefined ? `<span>🛍️ ${money(o.items_total)}</span>` : ''}
             <span><i class="fas fa-clock"></i>${timeAgo(o.created_at)}</span>
+            ${unpub && o.publish_status === 'pending' && o.auto_publish_at ? `<span class="do-eta" data-eta="${esc(o.auto_publish_at)}"><i class="fas fa-hourglass-half"></i> <b></b></span>` : ''}
           </div>
-          ${canAlert ? `<div class="do-card-actions"><button type="button" class="do-btn alert" data-act="alert"><i class="fas fa-bell"></i> রাইডারদের এলার্ট দিন</button></div>` : ''}
+          ${unpub ? `<div class="do-card-actions">
+            <button type="button" class="do-btn primary-sm" data-act="publish">🚀 পাবলিশ</button>
+            <button type="button" class="do-btn blue" data-act="assign">🛵 রাইডারকে দিন</button>
+            <button type="button" class="do-btn ghost" data-act="${o.publish_status === 'hold' ? 'unhold' : 'hold'}">${o.publish_status === 'hold' ? '▶️ ছাড়ুন' : '⏸️ হোল্ড'}</button>
+          </div>` : canAlert ? `<div class="do-card-actions"><button type="button" class="do-btn alert" data-act="alert"><i class="fas fa-bell"></i> রাইডারদের এলার্ট দিন</button><button type="button" class="do-btn blue" data-act="assign">🛵 রাইডারকে দিন</button></div>` : ''}
         </div>`;
     }
 
     // ================= লিস্ট লোড (লাইভ / হিস্ট্রি) =================
     let loadToken = 0;
     async function loadOrders({ reset = true, silent = false } = {}) {
-      if (state.tab === 'feed') return;
+      if (state.tab === 'feed' || state.tab === 'batch') return;
       const token = ++loadToken;
       if (reset) state.offset = 0;
 
@@ -635,13 +836,13 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       const { data, error } = await supabase.rpc('admin_search_orders', {
         p_query: state.q || null,
         // সার্চ চলাকালীন লাইভ + হিস্ট্রি দুটোতেই খুঁজি — যেকোনো সময়ের অর্ডার পাওয়া যাবে
-        p_group: state.q ? 'all' : state.tab,
+        p_group: state.q ? 'all' : (state.tab === 'new' ? 'live' : state.tab),
         p_category: state.cat || null,
         p_status: state.status || null,
         p_upazila: state.upazila || null,
         p_from: fromIso,
         p_to: toIso,
-        p_filter: state.filter || null,
+        p_filter: (state.tab === 'new' && !state.q) ? 'unpublished' : (state.filter || null),
         p_limit: PAGE,
         p_offset: state.offset,
       });
@@ -669,11 +870,14 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       }
 
       renderUsers(data?.users || [], data?.mode);
+      restoreSelection();
+      tickEta();
 
       const shown = $('doList').querySelectorAll('.do-card').length;
       if (shown === 0) {
         const msg = state.q
           ? 'এই সার্চে কোনো অর্ডার পাওয়া যায়নি'
+          : state.tab === 'new' ? 'পাবলিশের অপেক্ষায় কোনো নতুন অর্ডার নেই ✅'
           : state.tab === 'live' ? 'এই মুহূর্তে কোনো চলমান অর্ডার নেই' : 'কোনো অর্ডার পাওয়া যায়নি';
         $('doEmpty').querySelector('p').textContent = msg;
         $('doEmpty').style.display = 'block';
@@ -770,10 +974,15 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
     function applyTabUi() {
       document.querySelectorAll('.do-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === state.tab));
       const isFeed = state.tab === 'feed';
-      $('doFilters').style.display = isFeed ? 'none' : '';
+      const isBatch = state.tab === 'batch';
+      const isNew = state.tab === 'new';
+      $('doFilters').style.display = (isFeed || isBatch) ? 'none' : '';
+      $('fStatus').style.display = isNew ? 'none' : '';
+      $('batchChips').style.display = isBatch ? 'flex' : 'none';
+      $('doBulk').style.display = isNew ? 'flex' : 'none';
       $('dateRow').style.display = state.tab === 'history' ? 'flex' : 'none';
       $('noOfferChip').style.display = state.tab === 'live' ? '' : 'none';
-      $('doUsers').style.display = isFeed ? 'none' : $('doUsers').style.display;
+      $('doUsers').style.display = (isFeed || isBatch) ? 'none' : $('doUsers').style.display;
       fillStatusOptions();
       document.querySelectorAll('#catChips .do-chip[data-cat]').forEach((c) => c.classList.toggle('active', c.dataset.cat === state.cat));
       $('noOfferChip').classList.toggle('active', state.filter === 'no_offer');
@@ -794,6 +1003,7 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
 
     function refreshCurrent({ silent = true } = {}) {
       if (state.tab === 'feed') return loadFeed({ silent });
+      if (state.tab === 'batch') return loadBatches({ silent });
       return loadOrders({ reset: true, silent });
     }
 
@@ -808,6 +1018,9 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
         $('doUsers').style.display = 'none';
         $('doList').innerHTML = '';
         loadFeed();
+      } else if (tab === 'batch') {
+        $('doUsers').style.display = 'none';
+        loadBatches();
       } else {
         loadOrders();
       }
@@ -868,6 +1081,11 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       const c = data.customer || {};
       const r = data.rider;
       const price = o.price;
+      const ps = o.publish_status;
+      const unpub = o.status === 'open' && (ps === 'pending' || ps === 'hold');
+      const items = Array.isArray(o.order_items) ? o.order_items : [];
+      const itemsTotal = o.items_total !== null && o.items_total !== undefined ? Number(o.items_total) : null;
+      const coordsOf = (la, ln) => (la !== null && la !== undefined && ln !== null && ln !== undefined ? { lat: la, lng: ln } : undefined);
 
       const proofUrls = await loadProofUrls(o.id);
 
@@ -914,22 +1132,28 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
         </div>` : '';
 
       $('doDetailBody').innerHTML = `
-        <h3 class="do-sheet-title">${catIcon(o.category)} #${esc(o.order_no)} <span class="do-badge s-${esc(eff)}" style="margin-left:6px;">${STATUS_LABEL[eff] || esc(eff)}</span></h3>
+        <h3 class="do-sheet-title">${catIcon(o.category)} #${esc(o.order_no)} <span class="do-badge ${unpub ? 's-confirmed' : 's-' + esc(eff)}" style="margin-left:6px;">${unpub ? (ps === 'hold' ? '⏸️ হোল্ডে' : '🕒 পাবলিশের অপেক্ষায়') : (STATUS_LABEL[eff] || esc(eff))}</span></h3>
         <p class="do-sheet-sub">${catName(o.category)} · তৈরি: ${fullDate(o.created_at)} · ${timeAgo(o.created_at)}</p>
 
         <div class="do-sec">
           <h5>রুট</h5>
-          <p class="do-text"><b>পিকআপ:</b> ${esc(o.pickup_address || o.area_detail || '—')}${o.pickup_instructions ? `<br><small style="color:#8FA0BC;">${esc(o.pickup_instructions)}</small>` : ''}</p>
-          <p class="do-text" style="margin-top:6px;"><b>${o.category === 'ride' ? 'গন্তব্য' : 'ডেলিভারি'}:</b> ${esc(o.drop_address || '—')}${o.drop_instructions ? `<br><small style="color:#8FA0BC;">${esc(o.drop_instructions)}</small>` : ''}</p>
-          <p class="do-text" style="margin-top:6px;color:#5A6E85;">${esc(o.upazila || '')}${o.vehicle_type ? ' · বাহন: ' + esc(o.vehicle_type) : ''}${o.seat_count ? ' · সিট: ' + bn(o.seat_count) : ''}</p>
+          <div class="do-text"><b>পিকআপ:</b><div id="doPickupAddr" class="do-addr"></div>${o.pickup_instructions ? `<small style="color:#8FA0BC;">${esc(o.pickup_instructions)}</small>` : ''}</div>
+          <div class="do-text" style="margin-top:8px;"><b>${o.category === 'ride' ? 'গন্তব্য' : 'ডেলিভারি'}:</b><div id="doDropAddr" class="do-addr"></div>${o.drop_instructions ? `<small style="color:#8FA0BC;">${esc(o.drop_instructions)}</small>` : ''}</div>
+          <p class="do-text" style="margin-top:8px;color:#5A6E85;">${esc(o.upazila || '')}${o.pickup_union ? ' · পিকআপ: ' + esc(o.pickup_union) : ''}${o.drop_union ? ' · ড্রপ: ' + esc(o.drop_union) : ''}${o.vehicle_type ? ' · বাহন: ' + esc(o.vehicle_type) : ''}${o.seat_count ? ' · সিট: ' + bn(o.seat_count) : ''}</p>
         </div>
 
         ${o.description ? `<div class="do-sec"><h5>বিবরণ</h5><p class="do-text">${esc(o.description)}</p></div>` : ''}
 
+        ${items.length ? `<div class="do-sec"><h5>আইটেম (${bn(items.length)})</h5>${items.map((i) => `<div class="do-offer"><span>${esc(i.name)} × ${bn(i.qty)}${i.shop_name ? ` <small style="color:#9AA8BC;">${esc(i.shop_name)}</small>` : ''}</span><b>${money(Number(i.price) * Number(i.qty))}</b></div>`).join('')}</div>` : ''}
+
         <div class="do-sec">
           <h5>দাম</h5>
-          <p class="do-text"><span class="do-price" style="font-size:1.1rem;">${money(price)}</span>
-            ${o.customer_asking_price ? ` <small style="color:#8FA0BC;">কাস্টমার চেয়েছেন ${money(o.customer_asking_price)}</small>` : ''}</p>
+          ${itemsTotal !== null ? `
+            <div class="do-line"><span>আইটেমের দাম</span><b>${money(itemsTotal)}</b></div>
+            <div class="do-line"><span>ডেলিভারি চার্জ</span><b class="do-price">${money(price)}</b></div>
+            <div class="do-line tot"><span>মোট</span><b>${money(itemsTotal + Number(price || 0))}</b></div>` : `<p class="do-text"><span class="do-price" style="font-size:1.1rem;">${money(price)}</span></p>`}
+          ${o.customer_asking_price ? `<p class="do-text" style="margin-top:4px;"><small style="color:#8FA0BC;">কাস্টমার চেয়েছেন ${money(o.customer_asking_price)}</small></p>` : ''}
+          ${o.admin_fixed_price ? `<p class="do-text" style="margin-top:4px;"><small style="color:#B45309;font-weight:700;">অ্যাডমিন ঠিক করেছেন ${money(o.admin_fixed_price)}</small></p>` : ''}
         </div>
 
         <div class="do-sec">
@@ -948,9 +1172,19 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
         <div class="do-sec"><h5>টাইমলাইন</h5><ul class="do-tl">${tlHtml || '<li>কোনো ইভেন্ট নেই</li>'}</ul></div>
 
         <div class="do-actions">
-          ${eff === 'open' ? `<button type="button" class="do-btn alert" id="detailAlertBtn"><i class="fas fa-bell"></i> রাইডারদের এলার্ট দিন</button>` : ''}
-          ${canCancel ? `<button type="button" class="do-btn danger" id="detailCancelBtn"><i class="fas fa-ban"></i> অর্ডার বাতিল করুন</button>` : ''}
-          ${data.chat_count > 0 ? `<button type="button" class="do-btn ghost" id="detailChatBtn"><i class="fas fa-comment-dots"></i> চ্যাট দেখুন (${bn(data.chat_count)})</button>` : ''}
+          ${unpub ? `<button type="button" class="do-btn primary-sm" id="detailPublishBtn">🚀 পাবলিশ করুন</button>` : ''}
+          ${o.status === 'open' ? `<button type="button" class="do-btn blue" id="detailAssignBtn">🛵 রাইডারকে দিন</button>` : ''}
+          ${eff === 'open' && !unpub ? `<button type="button" class="do-btn alert" id="detailAlertBtn"><i class="fas fa-bell"></i> রাইডারদের এলার্ট দিন</button>` : ''}
+          <button type="button" class="do-btn ghost do-more-btn" id="detailMoreBtn" aria-label="আরও অপশন">⋯</button>
+        </div>
+        <div class="do-menu" id="detailMenu">
+          ${unpub ? `<button type="button" class="do-menu-item" id="detailHoldBtn">${ps === 'hold' ? '▶️ হোল্ড ছাড়ুন (অটো-পাবলিশ টাইমার চালু)' : '⏸️ হোল্ডে রাখুন (অটো-পাবলিশ টাইমার বন্ধ)'}</button>` : ''}
+          <button type="button" class="do-menu-item" id="detailNoteBtn">📝 নোট যোগ করুন</button>
+          ${c.phone ? `<a class="do-menu-item" href="tel:${esc(c.phone)}">📞 কাস্টমারকে কল</a>` : ''}
+          ${r && r.phone ? `<a class="do-menu-item" href="tel:${esc(r.phone)}">📞 রাইডারকে কল</a>` : ''}
+          ${data.chat_count > 0 ? `<button type="button" class="do-menu-item" id="detailChatBtn">💬 চ্যাট দেখুন (${bn(data.chat_count)})</button>` : ''}
+          <a class="do-menu-item" href="/admin/delivery-disputes?q=${encodeURIComponent(o.order_no)}">⚖️ ডিসপিউট</a>
+          ${canCancel ? `<button type="button" class="do-menu-item danger" id="detailCancelBtn">❌ অর্ডার বাতিল করুন</button>` : ''}
         </div>
         <p class="do-cooldown" id="detailCooldown" style="display:none;"></p>`;
 
@@ -975,6 +1209,18 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       });
 
       startCooldownLabel(data.alert_cooldown_secs || 0);
+
+      // ঠিকানা: লিংক লুকিয়ে "নেভিগেট করুন" বাটন (lat/lng থাকলে লিংক ছাড়াও বাটন আসে)
+      renderAddressWithNav($('doPickupAddr'), o.pickup_address || o.area_detail || '—', { coords: coordsOf(o.pickup_lat, o.pickup_lng) });
+      renderAddressWithNav($('doDropAddr'), o.drop_address || '—', { coords: coordsOf(o.drop_lat, o.drop_lng) });
+
+      const srcOrder = { order: { id: o.id, order_no: o.order_no, category: o.category, upazila: o.upazila, price } };
+      $('detailPublishBtn')?.addEventListener('click', () => publishOrders([o.id]));
+      $('detailAssignBtn')?.addEventListener('click', () => openAssign(srcOrder));
+      $('detailHoldBtn')?.addEventListener('click', () => holdOrders([o.id], ps === 'pending'));
+      $('detailNoteBtn')?.addEventListener('click', () => openNote(o));
+      $('detailMoreBtn')?.addEventListener('click', () => $('detailMenu')?.classList.toggle('open'));
+      tickEta();
     }
 
     function closeDetail() {
@@ -1053,6 +1299,8 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
         if (data?.reason === 'cooldown') {
           const s = data.retry_in || 0;
           res.textContent = `এই অর্ডারে সম্প্রতি এলার্ট দেওয়া হয়েছে। ${bn(Math.floor(s / 60))} মিনিট ${bn(s % 60)} সেকেন্ড পর আবার চেষ্টা করুন।`;
+        } else if (data?.reason === 'not_published') {
+          res.textContent = 'অর্ডারটি এখনো পাবলিশ হয়নি। আগে পাবলিশ করুন, তারপর এলার্ট দিন।';
         } else if (data?.reason === 'not_open') {
           res.textContent = 'অর্ডারটি আর খোলা নেই, তাই এলার্ট দেওয়া যাবে না।';
         } else {
@@ -1138,6 +1386,415 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       }, 1200);
     }
 
+    // ================= ডেলিভারি UI v2: ইনবক্স (পাবলিশ / হোল্ড / ব্যাচ / অ্যাসাইন / নোট) =================
+    function toast(text, type = 'success') { if (window.showToast) window.showToast(text, type); }
+
+    function fmtLeft(ms) {
+      if (ms <= 0) return 'এখনই';
+      const s = Math.ceil(ms / 1000);
+      return bn(Math.floor(s / 60)) + ':' + bn(String(s % 60).padStart(2, '0'));
+    }
+
+    // কার্ড/গ্রুপের অটো-পাবলিশ কাউন্টডাউন + গেট ব্যানারের "পরের অটো-পাবলিশ"
+    function tickEta() {
+      document.querySelectorAll('[data-eta]').forEach((el) => {
+        const t = new Date(el.dataset.eta).getTime();
+        const b = el.querySelector('b');
+        if (b && !isNaN(t)) b.textContent = 'অটো-পাবলিশ ' + fmtLeft(t - Date.now());
+      });
+      const nx = state.inbox && state.inbox.next_auto_publish;
+      const nextEl = $('doGateNext');
+      if (nextEl) nextEl.textContent = nx ? 'পরের অটো-পাবলিশ: ' + fmtLeft(new Date(nx).getTime() - Date.now()) : '';
+    }
+
+    function paintInbox() {
+      const ib = state.inbox;
+      if (!ib) return;
+      $('doGate').style.display = '';
+      $('doGateState').textContent = ib.gate_on
+        ? '🟠 গেট চালু — নতুন ডেলিভারি অর্ডার আপনি পাবলিশ করলে (বা ' + bn(ib.auto_minutes) + ' মিনিট পর নিজে) রাইডাররা দেখবে'
+        : '🟢 গেট বন্ধ — সব অর্ডার সরাসরি রাইডারদের কাছে যাচ্ছে';
+      if (document.activeElement !== $('doAutoMin')) $('doAutoMin').value = ib.auto_minutes;
+      const n = (ib.pending || 0) + (ib.hold || 0);
+      const em = $('tabNewCount');
+      em.textContent = bn(n);
+      em.classList.toggle('show', n > 0);
+      tickEta();
+    }
+
+    async function saveAutoMin() {
+      const v = parseInt($('doAutoMin').value, 10);
+      if (!(v >= 1 && v <= 240)) { toast('১ থেকে ২৪০ মিনিটের মধ্যে দিন।', 'error'); return; }
+      const btn = $('doAutoSave');
+      btn.disabled = true;
+      const { error } = await supabase
+        .from('site_settings')
+        .upsert({ key: 'delivery_auto_publish_minutes', value: String(v), updated_at: new Date().toISOString() }, { onConflict: 'key' });
+      btn.disabled = false;
+      if (error) { toast('সেভ হয়নি: ' + error.message, 'error'); return; }
+      toast('অটো-পাবলিশ ' + bn(v) + ' মিনিট সেট হয়েছে (নতুন অর্ডার ও "ছাড়ুন"-এ প্রযোজ্য)');
+      loadOverview();
+    }
+
+    function refreshAfterChange() {
+      loadOverview();
+      refreshCurrent({ silent: true });
+      if ($('doDetailOverlay').classList.contains('active') && state.currentOrder) openDetail(state.currentOrder);
+    }
+
+    async function publishOrders(ids) {
+      if (!ids || !ids.length) return;
+      const { data, error } = await supabase.rpc('admin_publish_delivery_orders', { p_ids: ids });
+      if (error || !data || !data.ok) {
+        toast('পাবলিশ করা যায়নি' + (error ? ': ' + error.message : ''), 'error');
+        return;
+      }
+      toast('🚀 ' + bn(data.published) + 'টি অর্ডার পাবলিশ হয়েছে' + (data.skipped ? ' · ' + bn(data.skipped) + 'টি বাদ (আগেই পাবলিশ বা বাতিল)' : ''));
+      state.selected.clear();
+      refreshAfterChange();
+    }
+
+    async function holdOrders(ids, hold) {
+      if (!ids || !ids.length) return;
+      const { data, error } = await supabase.rpc('admin_hold_delivery_orders', { p_ids: ids, p_hold: hold });
+      if (error || !data || !data.ok) {
+        toast('বদলানো যায়নি' + (error ? ': ' + error.message : ''), 'error');
+        return;
+      }
+      toast(data.changed
+        ? (hold ? '⏸️ ' + bn(data.changed) + 'টি হোল্ডে রাখা হয়েছে (টাইমার বন্ধ)' : '▶️ ' + bn(data.changed) + 'টির হোল্ড ছাড়া হয়েছে (টাইমার চালু)')
+        : 'কোনো পরিবর্তন হয়নি (অর্ডার আগের অবস্থাতেই ছিল)');
+      state.selected.clear();
+      refreshAfterChange();
+    }
+
+    // ---------- সিলেকশন (নতুন ট্যাব) ----------
+    function selectableBoxes() { return [...$('doList').querySelectorAll('.do-sel-cb')]; }
+
+    function updateBulk() {
+      const n = state.selected.size;
+      $('bulkCount').textContent = n ? bn(n) + 'টি বাছা' : 'কিছু বাছা হয়নি';
+      ['bulkPublish', 'bulkHold', 'bulkUnhold'].forEach((id) => { $(id).disabled = !n; });
+      const all = selectableBoxes();
+      $('bulkAll').checked = all.length > 0 && all.every((cb) => cb.checked);
+    }
+
+    function restoreSelection() {
+      const present = new Set();
+      selectableBoxes().forEach((cb) => {
+        present.add(cb.dataset.id);
+        cb.checked = state.selected.has(cb.dataset.id);
+      });
+      [...state.selected].forEach((id) => { if (!present.has(id)) state.selected.delete(id); });
+      updateBulk();
+    }
+
+    function cardAction(act, card) {
+      const id = card.dataset.id;
+      if (act === 'publish') return publishOrders([id]);
+      if (act === 'hold') return holdOrders([id], true);
+      if (act === 'unhold') return holdOrders([id], false);
+      if (act === 'assign') {
+        return openAssign({ order: {
+          id, order_no: card.dataset.no, category: card.dataset.cat, upazila: card.dataset.upazila,
+          price: card.dataset.price ? Number(card.dataset.price) : null,
+        } });
+      }
+      return null;
+    }
+
+    // ---------- ব্যাচ ----------
+    let batchGroups = {};
+
+    function groupCard(g, key) {
+      const nos = g.order_nos || [];
+      const ids = g.order_ids || [];
+      const chips = nos.map((no, i) => `<button type="button" class="do-ochip" data-no="${esc(no)}" data-id="${esc(ids[i] || '')}">#${esc(no)}</button>`).join('');
+      const sub = [g.upazila, g.union].filter(Boolean).map(esc).join(' · ');
+      const icon = state.group === 'shop' ? '🏪' : state.group === 'upazila' ? '🗺️' : '📍';
+      return `
+        <div class="do-card do-group" data-gkey="${key}">
+          <div class="do-card-top">
+            <span class="do-no">${icon} ${esc(g.label)}</span>
+            <span class="do-badge s-confirmed">${bn(g.count)}টি অর্ডার</span>
+          </div>
+          ${sub ? `<p class="do-route"><small>${sub}</small></p>` : ''}
+          <div class="do-meta">
+            <span><i class="fas fa-clock"></i>সবচেয়ে পুরনো ${timeAgo(g.oldest)}</span>
+            ${g.next_auto_publish ? `<span class="do-eta" data-eta="${esc(g.next_auto_publish)}"><i class="fas fa-hourglass-half"></i> <b></b></span>` : ''}
+          </div>
+          <div class="do-chipwrap">${chips}</div>
+          <div class="do-card-actions">
+            <button type="button" class="do-btn primary-sm" data-gact="publish" data-gkey="${key}">🚀 সব পাবলিশ</button>
+            <button type="button" class="do-btn ghost" data-gact="hold" data-gkey="${key}">⏸️ হোল্ড</button>
+            <button type="button" class="do-btn ghost" data-gact="unhold" data-gkey="${key}">▶️ ছাড়ুন</button>
+          </div>
+        </div>`;
+    }
+
+    async function loadBatches({ silent = false } = {}) {
+      const token = ++loadToken;
+      if (!silent) {
+        $('doLoading').style.display = 'flex';
+        $('doList').innerHTML = '';
+      }
+      $('doEmpty').style.display = 'none';
+      $('doMore').style.display = 'none';
+
+      const { data, error } = await supabase.rpc('admin_delivery_batches', { p_group: state.group });
+      if (token !== loadToken) return;
+      $('doLoading').style.display = 'none';
+
+      if (error) {
+        $('doList').innerHTML = `<p style="text-align:center;color:#D14343;padding:30px 0;">ব্যাচ লোড করতে সমস্যা: ${esc(error.message)}</p>`;
+        return;
+      }
+      const groups = Array.isArray(data) ? data : [];
+      batchGroups = {};
+      $('doList').innerHTML = groups.map((g, i) => {
+        batchGroups['g' + i] = g;
+        return groupCard(g, 'g' + i);
+      }).join('');
+      if (!groups.length) {
+        $('doEmpty').querySelector('p').textContent = 'এখন কোনো ব্যাচ নেই — পাবলিশের অপেক্ষায় কোনো অর্ডার নেই ✅';
+        $('doEmpty').style.display = 'block';
+      }
+      tickEta();
+    }
+
+    async function handleGroupAction(btn) {
+      const g = batchGroups[btn.dataset.gkey];
+      if (!g) return;
+      const ids = g.order_ids || [];
+      const act = btn.dataset.gact;
+      if (act === 'publish') {
+        if (!window.confirm('"' + g.label + '"-এর ' + bn(ids.length) + 'টি অর্ডার সব পাবলিশ করবেন?')) return;
+        await publishOrders(ids);
+      } else {
+        await holdOrders(ids, act === 'hold');
+      }
+    }
+
+    // ---------- রাইডারকে দিন ----------
+    let assignTarget = null;
+    let assignRiders = [];
+    let assignPick = null;
+
+    function renderAssignList() {
+      const box = $('assignList');
+      box.innerHTML = '';
+      const q = $('assignSearch').value.trim().toLowerCase();
+      const onlyOnline = $('assignOnline').checked;
+      const list = assignRiders.filter((r) => {
+        if (onlyOnline && !r.online) return false;
+        if (!q) return true;
+        return [r.name, r.phone, r.upazila].some((v) => (v || '').toLowerCase().indexOf(q) !== -1);
+      });
+      if (!list.length) {
+        const p = document.createElement('p');
+        p.className = 'do-hint';
+        p.textContent = assignRiders.length ? 'কোনো রাইডার মেলেনি।' : 'কোনো অনুমোদিত রাইডার নেই।';
+        box.appendChild(p);
+        return;
+      }
+      list.forEach((r) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'do-rider' + (assignPick === r.rider_id ? ' sel' : '');
+        const left = document.createElement('div');
+        const n = document.createElement('b');
+        n.textContent = r.name || 'নামহীন';
+        const s = document.createElement('small');
+        s.textContent = [r.phone, r.upazila, r.vehicle_type, r.total_completed ? bn(r.total_completed) + 'টা সম্পন্ন' : ''].filter(Boolean).join(' · ');
+        left.appendChild(n);
+        left.appendChild(s);
+        const right = document.createElement('div');
+        right.className = 'do-rbadges';
+        if (r.is_own) {
+          const o = document.createElement('span');
+          o.className = 'do-rbadge own';
+          o.textContent = '⭐ নিজস্ব';
+          right.appendChild(o);
+        }
+        const st = document.createElement('span');
+        st.className = 'do-rbadge' + (r.online ? ' on' : '');
+        st.textContent = r.online ? '🟢 অনলাইন' : '⚪ অফলাইন';
+        right.appendChild(st);
+        b.appendChild(left);
+        b.appendChild(right);
+        b.addEventListener('click', () => { assignPick = r.rider_id; renderAssignList(); });
+        box.appendChild(b);
+      });
+    }
+
+    async function openAssign(src) {
+      assignTarget = src.order;
+      assignPick = null;
+      const o = assignTarget;
+      $('assignOrderLine').textContent = catName(o.category) + ' অর্ডার #' + o.order_no + (o.upazila ? ' · ' + o.upazila : '');
+      $('assignPrice').value = o.price ? String(Math.round(o.price)) : '';
+      $('assignSearch').value = '';
+      $('assignOnline').checked = false;
+      const res = $('assignResult');
+      res.style.display = 'none';
+      res.className = 'do-alert-result';
+      $('assignSend').disabled = false;
+      $('assignList').innerHTML = '';
+      const p = document.createElement('p');
+      p.className = 'do-hint';
+      p.textContent = 'রাইডার লোড হচ্ছে...';
+      $('assignList').appendChild(p);
+      openOverlay('doAssignOverlay');
+
+      const { data, error } = await supabase.rpc('admin_assignable_riders', { p_category: o.category });
+      if (!assignTarget || assignTarget.id !== o.id) return;
+      if (error) {
+        $('assignList').innerHTML = '';
+        const e = document.createElement('p');
+        e.className = 'do-alert-result err';
+        e.style.display = 'block';
+        e.textContent = 'রাইডার লোড হয়নি: ' + error.message;
+        $('assignList').appendChild(e);
+        return;
+      }
+      assignRiders = Array.isArray(data) ? data : [];
+      renderAssignList();
+    }
+
+    async function sendAssign() {
+      if (!assignTarget) return;
+      const res = $('assignResult');
+      res.style.display = 'block';
+      const rider = assignRiders.find((r) => r.rider_id === assignPick);
+      const price = parseFloat($('assignPrice').value);
+      if (!rider) { res.className = 'do-alert-result err'; res.textContent = 'একজন রাইডার বাছুন।'; return; }
+      if (isNaN(price) || price <= 0 || price > 1000000) { res.className = 'do-alert-result err'; res.textContent = 'ডেলিভারি চার্জ সঠিক দিন।'; return; }
+      if (!window.confirm('#' + assignTarget.order_no + ' অর্ডার "' + (rider.name || 'রাইডার') + '"-কে ডেলিভারি চার্জ ' + money(price) + ' তে দেবেন?')) return;
+
+      const btn = $('assignSend');
+      btn.disabled = true;
+      const { data, error } = await supabase.rpc('admin_assign_delivery_order', {
+        p_request_id: assignTarget.id,
+        p_rider_id: rider.rider_id,
+        p_price: price,
+      });
+      if (error) {
+        res.className = 'do-alert-result err';
+        res.textContent = 'দেওয়া যায়নি: ' + error.message;
+        btn.disabled = false;
+        return;
+      }
+      if (!data || !data.ok) {
+        res.className = 'do-alert-result err';
+        const m = {
+          bad_price: 'ডেলিভারি চার্জ সঠিক নয়।',
+          not_found: 'অর্ডারটি পাওয়া যায়নি।',
+          not_open: 'অর্ডারটি আর খোলা নেই (স্ট্যাটাস: ' + (STATUS_LABEL[data && data.status] || (data && data.status) || '') + ')।',
+          rider_invalid: 'এই রাইডার এই ধরনের অর্ডারের জন্য উপযুক্ত নন (বা কাস্টমার নিজেই)।',
+        };
+        res.textContent = m[data && data.reason] || 'দেওয়া যায়নি।';
+        btn.disabled = false;
+        return;
+      }
+      res.className = 'do-alert-result ok';
+      res.textContent = '✅ রাইডারকে দেওয়া হয়েছে, দুই পক্ষকে জানানো হয়েছে';
+      setTimeout(() => {
+        closeOverlay('doAssignOverlay');
+        assignTarget = null;
+        refreshAfterChange();
+      }, 1100);
+    }
+
+    // ---------- নোট ----------
+    let noteTarget = null;
+
+    function openNote(o) {
+      noteTarget = o;
+      $('noteOrderLine').textContent = catName(o.category) + ' অর্ডার #' + o.order_no;
+      $('noteText').value = '';
+      $('noteCount').textContent = bn(0) + '/' + bn(500);
+      const res = $('noteResult');
+      res.style.display = 'none';
+      res.className = 'do-alert-result';
+      $('noteSend').disabled = false;
+      openOverlay('doNoteOverlay');
+    }
+
+    async function sendNote() {
+      if (!noteTarget) return;
+      const res = $('noteResult');
+      const note = $('noteText').value.trim();
+      res.style.display = 'block';
+      if (!note) { res.className = 'do-alert-result err'; res.textContent = 'নোট লিখুন।'; return; }
+      const btn = $('noteSend');
+      btn.disabled = true;
+      const { data, error } = await supabase.rpc('admin_add_order_note', { p_request_id: noteTarget.id, p_note: note });
+      if (error || !data || !data.ok) {
+        res.className = 'do-alert-result err';
+        res.textContent = error ? 'সেভ হয়নি: ' + error.message : (data && data.reason === 'bad_note' ? 'নোট ১ থেকে ৫০০ অক্ষরের হতে হবে।' : 'সেভ হয়নি।');
+        btn.disabled = false;
+        return;
+      }
+      res.className = 'do-alert-result ok';
+      res.textContent = '✅ নোট সেভ হয়েছে';
+      setTimeout(() => {
+        closeOverlay('doNoteOverlay');
+        noteTarget = null;
+        if ($('doDetailOverlay').classList.contains('active') && state.currentOrder) openDetail(state.currentOrder);
+      }, 800);
+    }
+
+    function bindInboxEvents() {
+      $('doAutoSave').addEventListener('click', saveAutoMin);
+
+      // বাল্ক
+      $('bulkAll').addEventListener('change', (e) => {
+        selectableBoxes().forEach((cb) => {
+          cb.checked = e.target.checked;
+          if (e.target.checked) state.selected.add(cb.dataset.id); else state.selected.delete(cb.dataset.id);
+        });
+        updateBulk();
+      });
+      $('doList').addEventListener('change', (e) => {
+        const cb = e.target.closest('.do-sel-cb');
+        if (!cb) return;
+        if (cb.checked) state.selected.add(cb.dataset.id); else state.selected.delete(cb.dataset.id);
+        updateBulk();
+      });
+      $('bulkPublish').addEventListener('click', () => {
+        const ids = [...state.selected];
+        if (!ids.length) return;
+        if (!window.confirm(bn(ids.length) + 'টি অর্ডার পাবলিশ করবেন?')) return;
+        publishOrders(ids);
+      });
+      $('bulkHold').addEventListener('click', () => holdOrders([...state.selected], true));
+      $('bulkUnhold').addEventListener('click', () => holdOrders([...state.selected], false));
+
+      // ব্যাচ গ্রুপ
+      document.querySelectorAll('#batchChips .do-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          state.group = chip.dataset.group;
+          document.querySelectorAll('#batchChips .do-chip').forEach((c) => c.classList.toggle('active', c === chip));
+          loadBatches();
+        });
+      });
+
+      // অ্যাসাইন মোডাল
+      $('doAssignClose').addEventListener('click', () => { closeOverlay('doAssignOverlay'); assignTarget = null; });
+      $('doAssignOverlay').addEventListener('click', (e) => { if (e.target === $('doAssignOverlay')) { closeOverlay('doAssignOverlay'); assignTarget = null; } });
+      $('assignSearch').addEventListener('input', renderAssignList);
+      $('assignOnline').addEventListener('change', renderAssignList);
+      $('assignSend').addEventListener('click', sendAssign);
+
+      // নোট মোডাল
+      $('doNoteClose').addEventListener('click', () => { closeOverlay('doNoteOverlay'); noteTarget = null; });
+      $('doNoteOverlay').addEventListener('click', (e) => { if (e.target === $('doNoteOverlay')) { closeOverlay('doNoteOverlay'); noteTarget = null; } });
+      $('noteText').addEventListener('input', (e) => { $('noteCount').textContent = bn(e.target.value.length) + '/' + bn(500); });
+      $('noteSend').addEventListener('click', sendNote);
+
+      setInterval(tickEta, 1000);
+    }
+
     // ================= রিয়েলটাইম + পোলিং =================
     let refreshTimer = null;
     function scheduleRefresh() {
@@ -1207,11 +1864,13 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
         searchTimer = setTimeout(() => {
           state.q = e.target.value.trim();
           syncUrl();
-          // ফিড ট্যাবে থাকলে সার্চের জন্য লাইভ ট্যাবের লিস্টে চলে আসি
-          if (state.tab === 'feed' && state.q) {
+          // ফিড/ব্যাচ ট্যাবে থাকলে সার্চের জন্য চলমান ট্যাবের লিস্টে চলে আসি
+          if ((state.tab === 'feed' || state.tab === 'batch') && state.q) {
             switchTab('live');
           } else if (state.tab === 'feed') {
             loadFeed();
+          } else if (state.tab === 'batch') {
+            loadBatches();
           } else {
             loadOrders();
           }
@@ -1226,9 +1885,14 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
 
       // কার্ড / ফিড ক্লিক (ডেলিগেশন)
       $('doList').addEventListener('click', (e) => {
-        const alertBtn = e.target.closest('[data-act="alert"]');
+        if (e.target.closest('.do-sel')) return; // চেকবক্স ক্লিকে ডিটেইল খুলবে না
+        const gbtn = e.target.closest('[data-gact]');
+        if (gbtn) { handleGroupAction(gbtn); return; }
+        const actBtn = e.target.closest('[data-act]');
+        const alertBtn = actBtn && actBtn.dataset.act === 'alert' ? actBtn : null;
         const card = e.target.closest('[data-no]');
         if (!card) return;
+        if (actBtn && !alertBtn) { e.stopPropagation(); cardAction(actBtn.dataset.act, card); return; }
 
         if (alertBtn) {
           e.stopPropagation();
@@ -1268,6 +1932,7 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       });
 
       $('alertSend').addEventListener('click', sendAlert);
+      bindInboxEvents();
 
       // শব্দ অন/অফ
       $('doSoundBtn').addEventListener('click', () => {
@@ -1279,13 +1944,21 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
     }
 
     // ================= শুরু =================
-    window.addEventListener('smartfeni:admin-ready', () => {
+    window.addEventListener('smartfeni:admin-ready', async () => {
       if (state.initialized) return;
       state.initialized = true;
 
       const params = new URLSearchParams(location.search);
       const tab = params.get('tab');
-      if (['live', 'history', 'feed'].includes(tab)) state.tab = tab;
+      if (['new', 'batch', 'live', 'history', 'feed'].includes(tab)) {
+        state.tab = tab;
+      } else if (!params.get('open') && !params.get('q') && !params.get('filter')) {
+        // পাবলিশের অপেক্ষায় অর্ডার থাকলে সরাসরি "নতুন" ট্যাবে খুলি
+        try {
+          const ib = await supabase.rpc('admin_delivery_inbox_counts');
+          if (ib && !ib.error && ib.data && ((ib.data.pending || 0) + (ib.data.hold || 0)) > 0) state.tab = 'new';
+        } catch (e) { /* পারলে নতুন ট্যাব, না পারলে চলমান */ }
+      }
       if (params.get('filter') === 'no_offer') state.filter = 'no_offer';
       if (params.get('q')) { state.q = params.get('q'); $('doSearch').value = state.q; }
 
@@ -1295,6 +1968,7 @@ const upazilaList = ['ফেনী সদর', 'ছাগলনাইয়া',
       loadOverview();
 
       if (state.tab === 'feed') loadFeed();
+      else if (state.tab === 'batch') loadBatches();
       else loadOrders();
 
       startLive();
