@@ -12,9 +12,9 @@
 //   const compressed = await compressImages(fileList);
 // ============================================================
 
-const DEFAULT_MAX_DIMENSION = 1600;
-const DEFAULT_QUALITY = 0.82;
-const DEFAULT_SKIP_THRESHOLD = 500 * 1024; // 500KB — এর নিচে হলে কম্প্রেস না করলেও চলে
+const DEFAULT_MAX_DIMENSION = 1200;
+const DEFAULT_QUALITY = 0.78;
+const DEFAULT_SKIP_THRESHOLD = 200 * 1024; // 200KB — এর নিচে হলে কম্প্রেস না করলেও চলে
 
 export function compressImage(file, options = {}) {
   const {
