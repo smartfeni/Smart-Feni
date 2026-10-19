@@ -144,6 +144,28 @@ const CATEGORY_CONFIG = {
       },
     },
   },
+  // ডেলিভারি দোকানের মেনু: একটা স্ক্রিনশট = একাধিক আইটেম (array)।
+  // telegram-webhook.js এটা শুধু স্পষ্টভাবে অনুমোদিত চ্যাটে দেখায়।
+  menu: {
+    instruction:
+      'এই স্ক্রিনশটটি একটি রেস্টুরেন্ট/দোকানের মেনু থেকে নেওয়া (ডেলিভারি অ্যাপ বা মেনু কার্ড)। ' +
+      'প্রতিটা খাবারের আইটেমের নাম ও দাম উপর থেকে নিচের ক্রমে JSON array আকারে দাও। ' +
+      'নাম স্ক্রিনশটে যেভাবে লেখা আছে সেভাবেই দাও। দাম শুধু সংখ্যা (টাকায়), ইংরেজি ডিজিটে, কোনো চিহ্ন বা ৳ ছাড়া। ' +
+      'একই আইটেমের হাফ/ফুল বা সাইজ ভেদে আলাদা দাম থাকলে আলাদা আইটেম করো এবং নামে বন্ধনীতে লেখো, যেমন "বিরিয়ানি (হাফ)"। ' +
+      'যে আইটেমের দাম স্পষ্ট দেখা যায় না তা বাদ দাও। অনুমান করে কিছু বানাবে না।',
+    isArray: true,
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          price: { type: 'number' },
+        },
+        required: ['name', 'price'],
+      },
+    },
+  },
 };
 
 // প্রতিটা ক্যাটাগরির বাংলা লেবেল + ইমোজি — Telegram বাটন ও Admin UI তে দেখানোর জন্য
@@ -155,6 +177,7 @@ const CATEGORY_META = {
   tuition: { label: 'টিউশন', emoji: '📚' },
   sports: { label: 'খেলাধুলা ও ইভেন্টস', emoji: '⚽' },
   blood: { label: 'ব্লাড ডোনার', emoji: '🩸' },
+  menu: { label: 'ডেলিভারি মেনু', emoji: '🍽️' },
 };
 
 // telegram-webhook.js ও admin/bot-chats.astro এই লিস্ট থেকে ক্যাটাগরি বাটন/চেকবক্স বানায়
@@ -314,4 +337,24 @@ export function buildBloodDonorRows(extractedArray, upazila, clubNameRaw) {
       status: 'pending',
       source: 'screenshot-import',
     }));
+}
+
+/**
+ * menu: Gemini থেকে আসা array পরিষ্কার করে [{ name, price }] বানায়।
+ * নাম খালি বা দাম অবৈধ/০ হলে বাদ (delivery_shop_items.price NOT NULL),
+ * একই নাম দুবার থাকলে প্রথমটা রাখে।
+ */
+export function normalizeMenuItems(extractedArray) {
+  const seen = new Set();
+  const items = [];
+  (Array.isArray(extractedArray) ? extractedArray : []).forEach((it) => {
+    const name = String(it?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const price = Math.round(Number(it?.price) * 100) / 100;
+    if (!name || !Number.isFinite(price) || price <= 0 || price > 1000000) return;
+    const key = name.normalize('NFC').toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push({ name, price });
+  });
+  return items;
 }
