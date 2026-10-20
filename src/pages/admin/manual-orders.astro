@@ -9,6 +9,8 @@
 //   রাইডারের হাতে ক্যাশ, "জমা নিলাম"/"পে দিলাম" লেনদেন, CSV এক্সপোর্ট।
 // টেবিল: manual_orders, manual_riders, rider_cash_entries (শুধু যোগ), ভিউ manual_rider_balances
 // RLS: অর্ডার/রাইডার = admin + moderator (অস্থায়ী, পরে has_permission); হিসাব = শুধু has_permission (ডিফল্টে admin)
+// অটো-ফিল: নতুন অর্ডার ফর্মে ফেসবুক মেসেজ পেস্ট করলে /api/admin/parse-manual-order (Gemini) ফর্মের ঘর ভরে দেয়;
+//   মানুষ মিলিয়ে সেভ করে। মেসেজ কোথাও সেভ হয় না।
 // ইউজারের লেখা সব টেক্সট textContent দিয়ে বসানো (innerHTML-এ নয়)।
 // ============================================================
 
@@ -73,6 +75,12 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             <button type="button" class="mo-x" id="orderClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
           </div>
 
+          <div class="mo-ai" id="aiBox">
+            <label class="mo-lbl" for="aiText" style="margin-top:8px;">ফেসবুক মেসেজ পেস্ট করুন (অটো-ফিল)</label>
+            <textarea class="mo-in" id="aiText" rows="4" maxlength="4000" placeholder="কাস্টমারের মেসেজ এখানে পেস্ট করুন, নাম/ফোন/ঠিকানা/সময় নিজে বসে যাবে"></textarea>
+            <button type="button" class="mo-cta mo-ai-btn" id="aiBtn">✨ অটো-ফিল করুন</button>
+            <p class="mo-ai-status" id="aiStatus" style="display:none;"></p>
+          </div>
           <div class="mo-sec">কাস্টমার</div>
           <label class="mo-lbl" for="f_name">কাস্টমারের নাম<span class="required-mark">*</span></label>
           <input class="mo-in" id="f_name" maxlength="120" required />
@@ -341,6 +349,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .mo-btns .mo-cta { flex: 1; min-width: 140px; }
     .mo-btns .mo-ghost { height: 44px; }
 
+    .mo-ai { margin-top: 10px; background: #FFF6F1; border: 1.5px dashed #FF6B35; border-radius: 16px; padding: 4px 12px 12px; }
+    .mo-ai-btn { width: 100%; margin-top: 8px; }
+    .mo-ai-status { margin: 8px 2px 0; font-size: 13.5px; font-weight: 600; color: #14693A; }
+    .mo-ai-status.bad { color: #B3261E; }
     .mo-calc { margin-top: 12px; background: #F1F5F9; border-radius: 14px; padding: 10px 14px; display: grid; gap: 4px; font-size: 14px; }
     .mo-calc div { display: flex; justify-content: space-between; gap: 8px; }
     .mo-calc .big { font-weight: 700; color: #C2410C; font-size: 15.5px; }
@@ -819,6 +831,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('statusGroup').style.display = o ? '' : 'none';
       $('delOrderBtn').style.display = o && role === 'admin' ? '' : 'none';
       $('dupWarn').style.display = 'none';
+      $('aiBox').style.display = o ? 'none' : '';
+      $('aiText').value = '';
+      setAiStatus('', false);
       showErr('formErr', '');
       const d = o ? new Date(o.scheduled_at) : new Date();
       $('f_name').value = o ? o.customer_name : '';
@@ -849,6 +864,67 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       updateCalc();
       openSheet('orderOverlay');
       if (focusId) setTimeout(() => { const f = $(focusId); if (f) f.focus(); }, 150);
+    }
+
+    // ---------- অটো-ফিল (ফেসবুক মেসেজ → ফর্ম) ----------
+    function setAiStatus(text, bad) {
+      const s = $('aiStatus');
+      s.textContent = text || '';
+      s.classList.toggle('bad', !!bad);
+      s.style.display = text ? 'block' : 'none';
+    }
+
+    function applyAi(f) {
+      let n = 0;
+      const set = (id, v) => { if (v !== null && v !== undefined && v !== '') { $(id).value = v; n++; } };
+      set('f_name', f.customer_name);
+      set('f_phone', f.customer_phone);
+      set('f_addr', f.drop_address);
+      set('f_dmap', f.drop_map_link);
+      set('f_pname', f.pickup_name);
+      set('f_details', f.details);
+      set('f_date', f.delivery_date);
+      set('f_time', f.delivery_time);
+      if (f.is_asap) { $('f_asap').checked = true; n++; }
+      syncAsap();
+      set('f_price', f.product_price);
+      set('f_fee', f.delivery_fee);
+      set('f_adv', f.advance_amount);
+      if (f.advance_amount > 0 && f.advance_method) $('f_advm').value = f.advance_method;
+      set('f_trx', f.advance_trx_id);
+      set('f_note', f.note);
+      updateCalc();
+      checkDup();
+      if (n) setAiStatus('অটো-ফিল হয়েছে (' + bn(n) + 'টা ঘর)। সেভের আগে সব মিলিয়ে নিন, বিশেষ করে ফোন, সময় ও টাকা।', false);
+      else setAiStatus('মেসেজ থেকে কিছু বের করা যায়নি, হাতে লিখুন।', true);
+    }
+
+    async function aiFill() {
+      if (busy) return;
+      const text = $('aiText').value.trim();
+      if (text.length < 10) return setAiStatus('আগে কাস্টমারের মেসেজটা পেস্ট করুন।', true);
+      busy = true;
+      $('aiBtn').disabled = true;
+      setAiStatus('মেসেজ পড়া হচ্ছে...', false);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/admin/parse-manual-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session ? session.access_token : '') },
+          body: JSON.stringify({ text }),
+        });
+        const out = await res.json().catch(() => null);
+        if (!res.ok || !out || !out.fields) {
+          setAiStatus((out && out.error) || 'অটো-ফিল হয়নি, হাতে লিখুন।', true);
+        } else {
+          applyAi(out.fields);
+        }
+      } catch (e) {
+        setAiStatus('নেটওয়ার্ক সমস্যা, আবার চেষ্টা করুন।', true);
+      } finally {
+        busy = false;
+        $('aiBtn').disabled = false;
+      }
     }
 
     async function checkDup() {
@@ -1166,6 +1242,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       ['f_price', 'f_fee', 'f_adv', 'f_pay'].forEach((id) => $(id).addEventListener('input', updateCalc));
       $('f_asap').addEventListener('change', syncAsap);
       $('f_phone').addEventListener('blur', checkDup);
+      $('aiBtn').addEventListener('click', aiFill);
       $('f_status').addEventListener('change', () => { $('cancelGroup').style.display = $('f_status').value === 'cancelled' ? '' : 'none'; });
       $('f_rider').addEventListener('change', () => {
         if ($('f_rider').value === '__new') {
