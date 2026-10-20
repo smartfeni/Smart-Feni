@@ -61,7 +61,7 @@ export async function POST({ request }) {
     const { client: adminClient, error: adminError } = getAdminClient();
     if (!adminError && adminClient) {
       const { data: order } = await adminClient.from('manual_orders')
-        .select('id, order_no, status, delivery_rider_id, customer_name, customer_phone, drop_address, details, scheduled_at, pickup_name, delivery_fee, rider_pay, cod_amount')
+        .select('id, order_no, status, published_at, delivery_rider_id, customer_name, customer_phone, drop_address, details, scheduled_at, pickup_name, delivery_fee, rider_pay, cod_amount')
         .eq('id', orderId).maybeSingle();
 
       if (order) {
@@ -83,12 +83,24 @@ export async function POST({ request }) {
           });
         } else if (action === 'cancel') {
           const recipients = new Set([order.delivery_rider_id].filter(Boolean));
+          if (order.published_at) {
+            const { data: riders } = await adminClient.from('delivery_riders')
+              .select('profile_id').eq('verification_status', 'approved');
+            (riders || []).forEach(r => { if (r.profile_id) recipients.add(r.profile_id); });
+          }
           const { data: admins } = await adminClient.from('profiles').select('id').eq('role', 'admin');
           (admins || []).forEach(a => recipients.add(a.id));
           await sendBulkNotifications(adminClient, [...recipients], () => ({
             message: `অর্ডার ${order.order_no} অ্যাডমিন বাতিল করেছেন। কারণ: ${String(body.reason || '').slice(0, 160)}`,
             category: 'rider_offer', actionUrl: riderLink,
             relatedEntityType: 'manual_order', relatedEntityId: order.id, priority: 'high',
+          }));
+        } else if (action === 'delivered') {
+          const { data: admins } = await adminClient.from('profiles').select('id').eq('role', 'admin');
+          await sendBulkNotifications(adminClient, (admins || []).map(a => a.id), () => ({
+            message: `অফলাইন অর্ডার ${order.order_no} ডেলিভারড হয়েছে। ক্যাশ: ৳${body.cashReceived ?? 0}.`,
+            category: 'system', actionUrl: '/admin/manual-orders',
+            relatedEntityType: 'manual_order', relatedEntityId: order.id, priority: 'normal',
           }));
         } else if (action === 'accept') {
           const { data: admins } = await adminClient.from('profiles').select('id').eq('role', 'admin');
