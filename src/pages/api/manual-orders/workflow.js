@@ -49,6 +49,10 @@ export async function POST({ request }) {
         p_note: typeof body.note === 'string' ? body.note.slice(0, 500) : null,
       }],
       raise_pay: ['admin_raise_manual_order_rider_pay', { p_order_id: orderId, p_rider_pay: body.riderPay }],
+      adjust_cash: ['admin_adjust_manual_order_cash', {
+        p_order_id: orderId, p_cash_received: body.cashReceived,
+        p_note: typeof body.note === 'string' ? body.note.slice(0, 500) : null,
+      }],
       cancel: ['admin_cancel_manual_order', { p_order_id: orderId, p_reason: String(body.reason || '').slice(0, 300) }],
     };
     if (!rpcByAction[action]) return json({ error: 'অজানা action' }, 400);
