@@ -726,6 +726,40 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         b.addEventListener('click', () => openDeliver(o));
         btns.appendChild(b);
       }
+      if (o.status === 'new' && !o.manual_rider_id) {
+        const pub = el('button', 'mo-cta', o.published_at ? 'রাইডারদের কাছে আবার নোটিফাই' : 'রাইডারদের কাছে প্রকাশ');
+        pub.type = 'button';
+        pub.addEventListener('click', () => workflowAction('publish', o));
+        btns.appendChild(pub);
+        if (o.published_at && role === 'admin') {
+          const pay = el('button', 'mo-ghost', 'রাইডার পে বাড়ান'); pay.type = 'button';
+          pay.addEventListener('click', async () => {
+            const value = prompt('নতুন রাইডার পে লিখুন (বর্তমান: ' + money(o.rider_pay) + ')');
+            if (value === null) return;
+            const amount = Number(value);
+            if (!Number.isFinite(amount) || amount <= Number(o.rider_pay || 0)) return toast('বর্তমান পে-এর চেয়ে বেশি পরিমাণ লিখুন', 'error');
+            await workflowAction('raise_pay', o, { riderPay: amount });
+          });
+          btns.appendChild(pay);
+        }
+      }
+      if (['rider_assigned', 'picked_up'].includes(o.status) && !o.ready_at) {
+        const ready = el('button', 'mo-cta', 'অর্ডার প্রস্তুত (Ready)');
+        ready.type = 'button';
+        ready.addEventListener('click', () => workflowAction('ready', o));
+        btns.appendChild(ready);
+      }
+      if (role === 'admin' && !ACTIVE_OFF.includes(o.status)) {
+        const cancel = el('button', 'mo-ghost mo-red', 'অর্ডার বাতিল');
+        cancel.type = 'button';
+        cancel.addEventListener('click', () => {
+          const reason = prompt('অর্ডার বাতিলের কারণ লিখুন:');
+          if (reason === null) return;
+          if (!reason.trim()) return toast('বাতিলের কারণ লিখুন', 'error');
+          if (confirm(o.order_no + ' অর্ডার বাতিল করবেন?')) workflowAction('cancel', o, { reason: reason.trim() });
+        });
+        btns.appendChild(cancel);
+      }
       const edit = el('button', 'mo-ghost', 'এডিট'); edit.type = 'button';
       edit.addEventListener('click', () => openOrderForm(o));
       btns.appendChild(edit);
@@ -748,6 +782,28 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       }
       card.appendChild(btns2);
       return card;
+    }
+
+    async function workflowAction(action, o, extra = {}) {
+      if (busy) return;
+      busy = true;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error('সেশন শেষ হয়েছে, আবার লগইন করুন।');
+        const res = await fetch('/api/manual-orders/workflow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+          body: JSON.stringify({ action, orderId: o.id, ...extra }),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(out.error || 'অ্যাকশন সম্পন্ন হয়নি');
+        toast(action === 'publish' ? 'রাইডারদের কাছে অর্ডার প্রকাশ করা হয়েছে' :
+          action === 'ready' ? 'রাইডারকে Ready নোটিফিকেশন পাঠানো হয়েছে' :
+          action === 'cancel' ? 'অর্ডার বাতিল হয়েছে' :
+          action === 'raise_pay' ? 'রাইডার পে বাড়ানো হয়েছে' : 'আপডেট হয়েছে', 'success');
+        await loadOrders();
+      } catch (e) { toast(e.message || 'সমস্যা হয়েছে', 'error'); }
+      finally { busy = false; }
     }
 
     // ---------- স্ট্যাটাস ----------
@@ -955,6 +1011,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
       const riderId = $('f_rider').value || null;
       let status = editing ? $('f_status').value : (riderId ? 'rider_assigned' : 'new');
+      if (editing && status === 'cancelled' && editing.status !== 'cancelled') {
+        return showErr('formErr', 'অর্ডার বাতিল করতে কার্ডের “অর্ডার বাতিল” বাটন ব্যবহার করুন, যাতে কারণ ও নোটিফিকেশন সংরক্ষিত হয়।');
+      }
       if (editing) {
         if (status === 'new' && riderId) status = 'rider_assigned';
         else if (status === 'rider_assigned' && !riderId) status = 'new';
