@@ -1,7 +1,7 @@
 ---
 // path: src/pages/admin/manual-orders.astro
 // ============================================================
-// পেজ: ফেসবুক ম্যানুয়াল অর্ডার (/admin/manual-orders)
+// পেজ: ম্যানুয়াল অর্ডার (/admin/manual-orders) — সব সময় বাংলাদেশ টাইম (Asia/Dhaka, UTC+6)
 // ফেসবুক পেজ/মেসেজ থেকে আসা অর্ডার অ্যাডমিন প্যানেল থেকে ইনপুট দিয়ে সামলানোর জন্য।
 // ট্যাব ১ "অর্ডার": ডেলিভারির সময় অনুযায়ী সিরিয়াল (আজ / আগামীকাল / পরে / রাইডার নেই / শেষ),
 //   নতুন অর্ডার ফর্ম, স্ট্যাটাস বাটন (রাইডার ঠিক → পিকআপ → ডেলিভারড), কপি-মেসেজ, WhatsApp।
@@ -17,7 +17,7 @@ export const prerender = false;
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 ---
 
-<BaseLayout title="ফেসবুক অর্ডার | স্মার্ট ফেনী">
+<BaseLayout title="ম্যানুয়াল অর্ডার | স্মার্ট ফেনী">
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <div class="mo-page">
 
@@ -31,8 +31,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       <!-- ===== নেভি হেডার ===== -->
       <div class="mo-head">
         <div class="mo-head-in">
-          <a href="/admin" class="mo-round" aria-label="অ্যাডমিন ড্যাশবোর্ডে ফিরুন"><i class="fas fa-arrow-left"></i></a>
-          <h1 class="mo-title">ফেসবুক অর্ডার</h1>
+          <a href="/" class="mo-round" aria-label="হোমে ফিরুন"><i class="fas fa-arrow-left"></i></a>
+          <h1 class="mo-title">ম্যানুয়াল অর্ডার</h1>
           <button type="button" class="mo-cta mo-cta-sm" id="newOrderBtn">+ নতুন অর্ডার</button>
         </div>
         <div class="mo-tabs" id="mainTabs">
@@ -101,7 +101,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <textarea class="mo-in" id="f_details" rows="3" maxlength="2000" required></textarea>
           <div class="field-error-msg" data-error-for="f_details"><i class="fas fa-circle-exclamation"></i><span>বিবরণ লিখুন</span></div>
 
-          <div class="mo-sec">ডেলিভারি কখন চায়</div>
+          <div class="mo-sec">ডেলিভারি কখন চায় (বাংলাদেশ সময়)</div>
           <div class="mo-two">
             <div>
               <label class="mo-lbl" for="f_date">তারিখ<span class="required-mark">*</span></label>
@@ -444,30 +444,38 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       if (h < 20) return 'সন্ধ্যা';
       return 'রাত';
     }
-    function timeBn(d) {
-      const h = d.getHours();
-      return period12(h) + ' ' + bn(h % 12 || 12) + ':' + bn(String(d.getMinutes()).padStart(2, '0'));
+    // সব সময় বাংলাদেশ টাইম (Asia/Dhaka, UTC+6, DST নেই) — ভিউয়ার ডুবাই/পর্তুগাল/সৌদি যেখানেই থাকুক
+    const BD_OFFSET_MS = 6 * 3600000;
+    function bdp(d) {
+      const x = new Date(d.getTime() + BD_OFFSET_MS);
+      return { y: x.getUTCFullYear(), m: x.getUTCMonth() + 1, d: x.getUTCDate(), h: x.getUTCHours(), mi: x.getUTCMinutes() };
     }
-    function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
-    function dayDiff(d) { return Math.round((startOfDay(d) - startOfDay(new Date())) / 86400000); }
+    function timeBn(d) {
+      const p = bdp(d);
+      return period12(p.h) + ' ' + bn(p.h % 12 || 12) + ':' + bn(String(p.mi).padStart(2, '0'));
+    }
+    function dateBn(d) { const p = bdp(d); return bn(p.d) + '/' + bn(p.m) + '/' + bn(p.y); }
+    function bdDayNum(d) { return Math.floor((d.getTime() + BD_OFFSET_MS) / 86400000); }
+    function startOfDay(d) { return new Date(bdDayNum(d) * 86400000 - BD_OFFSET_MS); }
+    function dayDiff(d) { return bdDayNum(d) - bdDayNum(new Date()); }
     function dayLabel(d) {
       const k = dayDiff(d);
       if (k === 0) return 'আজ';
       if (k === 1) return 'আগামীকাল';
       if (k === -1) return 'গতকাল';
-      return bn(d.getDate()) + '/' + bn(d.getMonth() + 1) + '/' + bn(d.getFullYear());
+      return dateBn(d);
     }
     function fmtEn(d) {
-      const h = d.getHours();
-      return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear() + ', ' + (h % 12 || 12) + ':' + String(d.getMinutes()).padStart(2, '0') + ' ' + (h < 12 ? 'AM' : 'PM');
+      const p = bdp(d);
+      return String(p.d).padStart(2, '0') + '/' + String(p.m).padStart(2, '0') + '/' + p.y + ', ' + (p.h % 12 || 12) + ':' + String(p.mi).padStart(2, '0') + ' ' + (p.h < 12 ? 'AM' : 'PM') + ' (BD time)';
     }
     function fmtDur(min) {
       const m = Math.round(Math.abs(min));
       if (m < 60) return bn(m) + ' মিনিট';
       return bn(Math.floor(m / 60)) + ' ঘণ্টা' + (m % 60 ? ' ' + bn(m % 60) + ' মিনিট' : '');
     }
-    function dateInput(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-    function timeInput(d) { return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+    function dateInput(d) { const p = bdp(d); return p.y + '-' + String(p.m).padStart(2, '0') + '-' + String(p.d).padStart(2, '0'); }
+    function timeInput(d) { const p = bdp(d); return String(p.h).padStart(2, '0') + ':' + String(p.mi).padStart(2, '0'); }
 
     // ---------- ফোন/লিংক ----------
     function waNumber(p) {
@@ -620,7 +628,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       else card.classList.add('done');
 
       const top = el('div', 'mo-row');
-      top.appendChild(el('span', 'mo-time', o.is_asap ? 'এখনই · ' + dayLabel(sched) : dayLabel(sched) + ' · ' + timeBn(sched)));
+      top.appendChild(el('span', 'mo-time', o.is_asap ? 'এখনই · ' + dayLabel(sched) : dayLabel(sched) + ' · ' + timeBn(sched) + ' (BD)'));
       top.appendChild(el('span', 'mo-ono', o.order_no));
       card.appendChild(top);
 
@@ -866,7 +874,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const asap = $('f_asap').checked;
       let when;
       if (asap && !$('f_time').value) when = new Date();
-      else when = new Date($('f_date').value + 'T' + $('f_time').value);
+      else when = new Date($('f_date').value + 'T' + $('f_time').value + ':00+06:00');
       if (isNaN(when.getTime())) return showErr('formErr', 'তারিখ ও সময় ঠিকভাবে দিন।');
 
       const riderId = $('f_rider').value || null;
@@ -954,8 +962,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     function periodStart() {
       const now = new Date();
       if (period === 'today') return startOfDay(now);
-      if (period === 'week') { const d = startOfDay(now); d.setDate(d.getDate() - 6); return d; }
-      if (period === 'month') return new Date(now.getFullYear(), now.getMonth(), 1);
+      if (period === 'week') return new Date(startOfDay(now).getTime() - 6 * 86400000);
+      if (period === 'month') { const p = bdp(now); return new Date(Date.UTC(p.y, p.m - 1, 1) - BD_OFFSET_MS); }
       return null;
     }
 
@@ -1105,7 +1113,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const row = el('div', 'mo-hi');
         const left = el('div', '');
         left.appendChild(el('b', '', x.kind === 'deposit' ? 'জমা নিয়েছি' : 'পে দিয়েছি'));
-        left.appendChild(el('div', 'mo-line', bn(d.getDate()) + '/' + bn(d.getMonth() + 1) + '/' + bn(d.getFullYear()) + ' ' + timeBn(d) + (x.note ? ' · ' + x.note : '')));
+        left.appendChild(el('div', 'mo-line', dateBn(d) + ' ' + timeBn(d) + (x.note ? ' · ' + x.note : '')));
         row.appendChild(left);
         row.appendChild(el('b', '', money(x.amount)));
         box.appendChild(row);
