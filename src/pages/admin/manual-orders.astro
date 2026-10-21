@@ -435,6 +435,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     let active = [];
     let done = [];
     let riders = [];
+    let extraRiders = {};
     let names = {};
     let view = 'today';
     let q = '';
@@ -532,7 +533,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     }
 
     // ---------- কপি-মেসেজ (Excel টেমপ্লেটের মতো) ----------
-    function riderOf(o) { return riders.find((r) => r.id === o.manual_rider_id) || null; }
+    function riderOf(o) { return riders.find((r) => r.id === o.manual_rider_id) || extraRiders[o.manual_rider_id] || null; }
     function riderMsg(o) {
       const lines = [
         '*New Delivery Order #' + o.order_no + '*',
@@ -582,6 +583,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       active = a.data || [];
       done = d.data || [];
       riders = r.data || [];
+      // অ্যাপ রাইডার একসেপ্ট করলে অটো-লিংক হওয়া রাইডার লিস্টে না থাকলেও নাম আনা
+      const missing = [...new Set([...active, ...done].map((o) => o.manual_rider_id).filter(Boolean))].filter((id) => !riders.some((r) => r.id === id) && !extraRiders[id]);
+      if (missing.length) {
+        try {
+          const x = await supabase.from('manual_riders').select('*').in('id', missing);
+          (x.data || []).forEach((r) => { extraRiders[r.id] = r; });
+        } catch (e) { /* নাম না পেলেও চলবে */ }
+      }
       const ids = [...new Set([...active, ...done].map((o) => o.entered_by).filter(Boolean))].filter((id) => !names[id]);
       if (ids.length) {
         try {
@@ -670,7 +679,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       if (o.is_asap) chips.appendChild(el('span', 'mo-chip yel', 'ASAP'));
       if (isActive && !o.manual_rider_id) chips.appendChild(el('span', 'mo-chip red', 'রাইডার ঠিক হয়নি'));
       if (isActive && o.published_at && !o.delivery_rider_id) chips.appendChild(el('span', 'mo-chip yel', 'রাইডারদের কাছে পাবলিশড · ' + money(o.rider_pay)));
-      if (isActive && o.delivery_rider_id) chips.appendChild(el('span', 'mo-chip blue', 'অ্যাপ রাইডার একসেপ্ট করেছে'));
+      if (isActive && o.delivery_rider_id) { const rn = riderOf(o); chips.appendChild(el('span', 'mo-chip blue', '🛵 ' + (rn && rn.name ? rn.name : 'অ্যাপ রাইডার') + ' একসেপ্ট করেছেন')); }
       if (isActive && o.delivery_rider_id) chips.appendChild(el('span', o.ready_at ? 'mo-chip green' : 'mo-chip', o.ready_at ? 'রেডি ✓' : 'রেডি দেওয়া হয়নি'));
       card.appendChild(chips);
 
@@ -1351,7 +1360,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       document.querySelectorAll('#mainTabs .mo-tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
       document.querySelectorAll('.mo-overlay').forEach((ov) => ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('active'); }));
       // প্রতি ৬০ সেকেন্ডে রিফ্রেশ (কোনো শিট খোলা না থাকলে)
-      setInterval(() => { if (!document.hidden && !anyOpen() && $('ordersPane').style.display !== 'none') loadOrders(); }, 60000);
+      setInterval(() => { if (!document.hidden && !anyOpen() && $('ordersPane').style.display !== 'none') loadOrders(); }, 15000);
     }
 
     initAdminGuard();
