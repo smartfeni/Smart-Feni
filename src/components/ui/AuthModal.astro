@@ -873,9 +873,17 @@ const upazilas = [
   // ============================================================
 
   // ফোন নাম্বারকে ডামি ইমেইলে কনভার্ট করা (Supabase Auth ইমেইল-ভিত্তিক বলে)
+  // বাংলাদেশি নাম্বারের যেকোনো ফরম্যাট (+88 018..., 88018..., 018-8389393) → 01XXXXXXXXX
+  // বাংলাদেশি নাম্বারের মতো না হলে শুধু সংখ্যা রেখে ফেরত (আগের আচরণ)
+  function normalizeBdPhone(phone) {
+    let d = String(phone || '').replace(/\D/g, '');
+    if (d.length === 13 && d.startsWith('880')) d = d.slice(2);
+    if (d.length === 10 && d[0] === '1') d = '0' + d;
+    return d;
+  }
+
   function phoneToEmail(phone) {
-    const digitsOnly = phone.replace(/\D/g, '');
-    return `${digitsOnly}@smartfeni.local`;
+    return `${normalizeBdPhone(phone)}@smartfeni.local`;
   }
 
   function setLoading(button, isLoading, loadingText) {
@@ -974,6 +982,21 @@ const upazilas = [
       return;
     }
 
+    // একই নাম্বারে পুরনো ফরম্যাটের (880/+88) অ্যাকাউন্ট থাকলে ডুপ্লিকেট বানানো আটকানো
+    const normPhone = normalizeBdPhone(phone);
+    if (/^01\d{9}$/.test(normPhone)) {
+      const { data: samePhone } = await supabase
+        .from('profiles')
+        .select('id')
+        .in('phone', [normPhone, '+' + normPhone, '88' + normPhone, '+88' + normPhone])
+        .limit(1);
+      if (samePhone && samePhone.length > 0) {
+        showMessage('এই ফোন নাম্বারে আগে থেকেই অ্যাকাউন্ট আছে');
+        setLoading(signupSubmit, false);
+        return;
+      }
+    }
+
     const { data, error } = await supabase.auth.signUp({
       email: phoneToEmail(phone),
       password,
@@ -1063,10 +1086,18 @@ const upazilas = [
       loginEmail = phoneToEmail(identifier);
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    let { data, error } = await supabase.auth.signInWithPassword({
       email: loginEmail,
       password,
     });
+
+    // পুরনো অ্যাকাউন্ট 880XXXXXXXXXXX@smartfeni.local ফরম্যাটে তৈরি — ফলব্যাক
+    if (error && /^01\d{9}@smartfeni\.local$/.test(loginEmail)) {
+      ({ data, error } = await supabase.auth.signInWithPassword({
+        email: '88' + loginEmail,
+        password,
+      }));
+    }
 
     if (error) {
       showMessage('লগইন ব্যর্থ: ফোন নাম্বার/ইমেইল অথবা পাসওয়ার্ড ভুল');
