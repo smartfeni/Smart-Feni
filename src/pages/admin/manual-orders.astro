@@ -222,6 +222,24 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         </div>
       </div>
 
+      <!-- ===== রাইডারে পাবলিশ / চার্জ বাড়ানোর শিট ===== -->
+      <div class="mo-overlay" id="pbOverlay">
+        <div class="mo-sheet" role="dialog" aria-label="রাইডারে পাবলিশ" id="pbSheet">
+          <div class="mo-grip"></div>
+          <div class="mo-sheet-h">
+            <h2 id="pbTitle">রাইডারে পাবলিশ</h2>
+            <button type="button" class="mo-x" id="pbClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+          </div>
+          <p class="mo-muted" id="pbInfo"></p>
+          <label class="mo-lbl" for="pb_pay">রাইডারের ডেলিভারি চার্জ (৳)<span class="required-mark">*</span></label>
+          <input class="mo-in" id="pb_pay" type="number" inputmode="decimal" min="0" step="any" required />
+          <p class="mo-err" id="pbErr" style="display:none;"></p>
+          <div class="mo-actions">
+            <button class="mo-cta" id="pbSave" type="button">পাবলিশ করুন</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ===== রাইডার যোগ শিট ===== -->
       <div class="mo-overlay mo-top" id="rdOverlay">
         <div class="mo-sheet" role="dialog" aria-label="নতুন রাইডার" id="rdSheet">
@@ -651,6 +669,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       if (o.is_strict_time) chips.appendChild(el('span', 'mo-chip red', 'ঠিক সময়েই'));
       if (o.is_asap) chips.appendChild(el('span', 'mo-chip yel', 'ASAP'));
       if (isActive && !o.manual_rider_id) chips.appendChild(el('span', 'mo-chip red', 'রাইডার ঠিক হয়নি'));
+      if (isActive && o.published_at && !o.delivery_rider_id) chips.appendChild(el('span', 'mo-chip yel', 'রাইডারদের কাছে পাবলিশড · ' + money(o.rider_pay)));
+      if (isActive && o.delivery_rider_id) chips.appendChild(el('span', 'mo-chip blue', 'অ্যাপ রাইডার একসেপ্ট করেছে'));
+      if (isActive && o.delivery_rider_id) chips.appendChild(el('span', o.ready_at ? 'mo-chip green' : 'mo-chip', o.ready_at ? 'রেডি ✓' : 'রেডি দেওয়া হয়নি'));
       card.appendChild(chips);
 
       card.appendChild(el('div', 'mo-cname', o.customer_name));
@@ -726,6 +747,21 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         b.addEventListener('click', () => openDeliver(o));
         btns.appendChild(b);
       }
+      if (isActive && o.status === 'new' && !o.manual_rider_id && !o.published_at) {
+        const pb = el('button', 'mo-cta', 'রাইডারে পাবলিশ করুন'); pb.type = 'button';
+        pb.addEventListener('click', () => openPublish(o, 'publish'));
+        btns.appendChild(pb);
+      }
+      if (isActive && o.status === 'new' && o.published_at && !o.delivery_rider_id) {
+        const rb = el('button', 'mo-ghost', 'চার্জ বাড়ান'); rb.type = 'button';
+        rb.addEventListener('click', () => openPublish(o, 'raise'));
+        btns.appendChild(rb);
+      }
+      if (isActive && o.delivery_rider_id && !o.ready_at) {
+        const rd = el('button', 'mo-cta', 'রেডি ✓'); rd.type = 'button';
+        rd.addEventListener('click', () => markReady(o));
+        btns.appendChild(rd);
+      }
       const edit = el('button', 'mo-ghost', 'এডিট'); edit.type = 'button';
       edit.addEventListener('click', () => openOrderForm(o));
       btns.appendChild(edit);
@@ -748,6 +784,61 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       }
       card.appendChild(btns2);
       return card;
+    }
+
+    // ---------- রাইডারে পাবলিশ / চার্জ বাড়ানো / রেডি ----------
+    let pbOrder = null;
+    let pbMode = 'publish';
+    const PB_REASONS = {
+      pay_required: 'ডেলিভারি চার্জ লিখুন (০-এর বেশি)।',
+      not_open: 'অর্ডারটা আর খোলা নেই (কেউ একসেপ্ট করেছে বা স্ট্যাটাস বদলেছে)।',
+      already_published: 'অর্ডারটা আগেই পাবলিশ করা হয়েছে।',
+      must_increase: 'নতুন চার্জ আগের চেয়ে বেশি হতে হবে।',
+      not_found: 'অর্ডার পাওয়া যায়নি।',
+    };
+    function openPublish(o, mode) {
+      pbOrder = o;
+      pbMode = mode;
+      $('pbTitle').textContent = mode === 'raise' ? 'ডেলিভারি চার্জ বাড়ান' : 'রাইডারে পাবলিশ';
+      $('pbSave').textContent = mode === 'raise' ? 'চার্জ বাড়ান' : 'পাবলিশ করুন';
+      $('pbInfo').textContent = mode === 'raise'
+        ? o.order_no + ' · এখন চার্জ ' + money(o.rider_pay) + '। নতুন চার্জ আগের চেয়ে বেশি দিন, সব রাইডার নোটিফিকেশন পাবে।'
+        : o.order_no + ' · পাবলিশ করলে সব approved রাইডার (অনলাইন-অফলাইন) নোটিফিকেশন পাবে, যে আগে একসেপ্ট করবে সে পাবে।';
+      $('pb_pay').value = mode === 'publish' && Number(o.rider_pay) > 0 ? o.rider_pay : '';
+      showErr('pbErr', '');
+      openSheet('pbOverlay');
+    }
+    async function savePublish() {
+      if (busy || !pbOrder) return;
+      const v = num($('pb_pay').value);
+      if (v <= 0) return showErr('pbErr', 'ডেলিভারি চার্জ লিখুন (০-এর বেশি)।');
+      if (pbMode === 'raise' && v <= Number(pbOrder.rider_pay)) return showErr('pbErr', 'নতুন চার্জ আগের চেয়ে বেশি হতে হবে।');
+      busy = true;
+      $('pbSave').disabled = true;
+      const res = pbMode === 'raise'
+        ? await supabase.rpc('admin_raise_rider_pay', { p_order_id: pbOrder.id, p_new_pay: v })
+        : await supabase.rpc('admin_publish_manual_order', { p_order_id: pbOrder.id, p_rider_pay: v });
+      busy = false;
+      $('pbSave').disabled = false;
+      if (res.error) return showErr('pbErr', 'হয়নি, আবার চেষ্টা করুন।');
+      const out = res.data;
+      if (!out || !out.ok) {
+        showErr('pbErr', PB_REASONS[out && out.reason] || 'হয়নি, আবার চেষ্টা করুন।');
+        if (out && (out.reason === 'not_open' || out.reason === 'already_published')) { closeSheet('pbOverlay'); await loadOrders(); }
+        return;
+      }
+      closeSheet('pbOverlay');
+      toast((pbMode === 'raise' ? 'চার্জ বেড়েছে' : 'পাবলিশ হয়েছে') + ' · ' + bn(out.notified || 0) + ' জন রাইডারকে নোটিফিকেশন গেছে', 'success');
+      await loadOrders();
+    }
+    async function markReady(o) {
+      if (busy) return;
+      busy = true;
+      const res = await supabase.rpc('admin_mark_manual_order_ready', { p_order_id: o.id });
+      busy = false;
+      if (res.error || !res.data || !res.data.ok) { toast('রেডি দেওয়া যায়নি, আবার চেষ্টা করুন', 'error'); return; }
+      toast('রেডি দেওয়া হয়েছে, রাইডারকে জানানো হয়েছে', 'success');
+      await loadOrders();
     }
 
     // ---------- স্ট্যাটাস ----------
@@ -1237,6 +1328,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('enClose').addEventListener('click', () => closeSheet('enOverlay'));
       $('enSave').addEventListener('click', saveEntry);
       $('hiClose').addEventListener('click', () => closeSheet('hiOverlay'));
+      $('pbClose').addEventListener('click', () => closeSheet('pbOverlay'));
+      $('pbSave').addEventListener('click', savePublish);
       $('addRiderBtn').addEventListener('click', () => openRiderSheet(null));
       $('csvBtn').addEventListener('click', downloadCsv);
       ['f_price', 'f_fee', 'f_adv', 'f_pay'].forEach((id) => $(id).addEventListener('input', updateCalc));
@@ -1268,6 +1361,16 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       if (role === 'admin') $('accountsTabBtn').style.display = '';
       wire();
       await loadOrders();
+      // রাইডার একসেপ্ট/পিক-আপ/ডেলিভার্ড করলে ফর্ম নিজে আপডেট হয় (Realtime; না চললে ৬০ সেকেন্ডের রিফ্রেশ আছে)
+      try {
+        let rt = null;
+        supabase.channel('mo-admin-orders')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'manual_orders' }, () => {
+            clearTimeout(rt);
+            rt = setTimeout(() => { if (!anyOpen() && $('ordersPane').style.display !== 'none') loadOrders(); }, 800);
+          })
+          .subscribe();
+      } catch (err) { /* Realtime ছাড়াই চলবে */ }
     }, { once: true });
   </script>
 </BaseLayout>
