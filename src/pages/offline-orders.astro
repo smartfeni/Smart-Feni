@@ -1,0 +1,503 @@
+---
+// path: src/pages/offline-orders.astro
+// ============================================================
+// পেজ: অফলাইন অর্ডার (/offline-orders) — রাইডারের জন্য
+// অ্যাডমিন ম্যানুয়াল অর্ডার পাবলিশ করলে সব approved রাইডার এখানে দেখে।
+// ট্যাব "নতুন": খোলা অর্ডার (কাস্টমারের নাম/ফোন একসেপ্টের আগেই দেখা যায়, SF-এর সিদ্ধান্ত ২১ অক্টো) → একসেপ্ট
+// ট্যাব "আমার": একসেপ্ট করা অর্ডার → পিক-আপ (রেডি লাগে না) → ডেলিভার্ড
+//   ডেলিভার্ডে ক্যাশ থাকলে "৳X ক্যাশ রিসিভ করেছেন?" + ঐচ্ছিক নোট
+// ডিপলিংক: /offline-orders?o=<order id> (নোটিফিকেশনের বাটন)
+// ডেটা: সব RPC (rider_manual_orders, rider_accept_manual_order,
+//   rider_pick_up_manual_order, rider_deliver_manual_order) — auth.uid() সার্ভারে।
+// ইউজারের লেখা সব টেক্সট textContent দিয়ে বসানো (innerHTML-এ নয়)।
+// ম্যাপ: src/lib/mapLinks.js-এর "নেভিগেট করুন" বাটন।
+// অটো-রিফ্রেশ: প্রতি ১৫ সেকেন্ডে (কোনো শিট খোলা না থাকলে) ও ট্যাবে ফিরলে।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="অফলাইন অর্ডার | স্মার্ট ফেনী">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="oo-page">
+
+    <div id="ooLoading" class="oo-state">
+      <div class="oo-spinner"></div>
+      <p>লোড হচ্ছে...</p>
+    </div>
+
+    <div id="ooLogin" class="oo-state" style="display:none;">
+      <div class="oo-badge"><i class="fas fa-lock"></i></div>
+      <h2>লগইন করুন</h2>
+      <p>অফলাইন অর্ডার দেখতে আগে লগইন করতে হবে</p>
+      <a href="/" class="oo-link-btn">হোমপেজে যান</a>
+    </div>
+
+    <div id="ooGate" class="oo-state" style="display:none;">
+      <div class="oo-badge"><i class="fas fa-motorcycle"></i></div>
+      <h2 id="ooGateTitle">রাইডার হিসেবে নিবন্ধিত নন</h2>
+      <p id="ooGateText">অফলাইন অর্ডার নিতে ডেলিভারি হিরো হিসেবে নিবন্ধন ও যাচাই লাগবে।</p>
+      <a href="/delivery-hero" class="oo-link-btn">ডেলিভারি হিরো পেজে যান</a>
+    </div>
+
+    <div id="ooContent" style="display:none;">
+      <div class="oo-head">
+        <div class="oo-head-in">
+          <a href="/delivery-hero" class="oo-round" aria-label="ডেলিভারি হিরোতে ফিরুন"><i class="fas fa-arrow-left"></i></a>
+          <h1 class="oo-title">অফলাইন অর্ডার</h1>
+        </div>
+        <div class="oo-tabs" id="ooTabs">
+          <button type="button" class="oo-tab active" data-tab="open">নতুন <b id="cntOpen">০</b></button>
+          <button type="button" class="oo-tab" data-tab="mine">আমার <b id="cntMine">০</b></button>
+        </div>
+      </div>
+      <div class="oo-body" id="ooList"></div>
+    </div>
+
+    <!-- ===== ডেলিভার্ড শিট ===== -->
+    <div class="oo-overlay" id="dvOverlay">
+      <div class="oo-sheet" role="dialog" aria-label="ডেলিভার্ড" id="dvSheet">
+        <div class="oo-grip"></div>
+        <div class="oo-sheet-h">
+          <h2 id="dvTitle">ডেলিভারি সম্পন্ন করবেন?</h2>
+          <button type="button" class="oo-x" id="dvClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+        </div>
+        <p class="oo-muted" id="dvInfo"></p>
+        <div id="dvCashWrap">
+          <label class="oo-lbl" for="dvCash">কাস্টমারের কাছ থেকে আসলে কত ক্যাশ পেয়েছেন (৳)<span class="required-mark">*</span></label>
+          <input class="oo-in" id="dvCash" type="number" inputmode="decimal" min="0" step="any" />
+          <p class="oo-warn" id="dvMismatch" style="display:none;"></p>
+        </div>
+        <label class="oo-lbl" for="dvNote">নোট (ঐচ্ছিক)</label>
+        <textarea class="oo-in" id="dvNote" rows="2" maxlength="500" placeholder="কিছু জানানোর থাকলে লিখুন"></textarea>
+        <p class="oo-err" id="dvErr" style="display:none;"></p>
+        <div class="oo-actions">
+          <button class="oo-cta" id="dvSave" type="button">ডেলিভার্ড নিশ্চিত করুন</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .oo-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; min-height: 60vh; padding-bottom: 90px; overflow-x: hidden; background: #F8FAFC; }
+    .oo-page * { box-sizing: border-box; }
+    .oo-page button, .oo-page input, .oo-page textarea { font-family: inherit; }
+    .oo-state { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 110px 24px; color: #5B6B86; font-weight: 600; }
+    .oo-state h2 { margin: 0; font-size: 20px; color: #1B2A4A; }
+    .oo-state p { margin: 0; font-size: 14.5px; }
+    .oo-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: ooSpin 0.8s linear infinite; }
+    @keyframes ooSpin { to { transform: rotate(360deg); } }
+    .oo-badge { width: 64px; height: 64px; border-radius: 20px; background: #FFF0EA; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; }
+    .oo-link-btn { margin-top: 6px; display: inline-flex; align-items: center; height: 46px; padding: 0 20px; border-radius: 14px; background: #FF6B35; color: #1B2A4A; font-weight: 700; text-decoration: none; }
+
+    .oo-head { position: relative; left: 50%; width: 100vw; margin-left: -50vw; background: #1B2A4A; color: #fff; }
+    .oo-head-in { max-width: 560px; margin: 0 auto; padding: 12px 16px 6px; display: flex; align-items: center; gap: 10px; min-height: 68px; }
+    .oo-title { flex: 1; margin: 0; font-size: 19px; font-weight: 700; color: #fff; }
+    .oo-round { width: 44px; height: 44px; border-radius: 22px; background: rgba(255, 255, 255, 0.14); color: #fff; display: flex; align-items: center; justify-content: center; text-decoration: none; font-size: 17px; flex: none; }
+    .oo-tabs { max-width: 560px; margin: 0 auto; padding: 0 16px; display: flex; gap: 6px; }
+    .oo-tab { flex: 1; height: 44px; border: 0; border-radius: 12px 12px 0 0; background: rgba(255, 255, 255, 0.1); color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; }
+    .oo-tab b { margin-left: 4px; color: #FFB899; }
+    .oo-tab.active { background: #F8FAFC; color: #1B2A4A; }
+    .oo-tab.active b { color: #FF6B35; }
+    .oo-body { max-width: 560px; margin: 0 auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+    .oo-muted { font-size: 14px; color: #5B6B86; padding: 8px 2px; margin: 0; }
+
+    .oo-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27, 42, 74, 0.08); padding: 14px; display: flex; flex-direction: column; gap: 10px; border-left: 6px solid #FF6B35; }
+    .oo-card.done { opacity: 0.8; border-left-color: #14A44D; }
+    .oo-card.hl { box-shadow: 0 0 0 3px #FF6B35, 0 2px 12px rgba(27, 42, 74, 0.08); }
+    .oo-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .oo-time { font-size: 18px; font-weight: 700; }
+    .oo-ono { margin-left: auto; font-size: 12.5px; font-weight: 700; color: #5B6B86; }
+    .oo-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 10px; font-size: 12.5px; font-weight: 700; background: #EEF2F8; color: #1B2A4A; }
+    .oo-chip.green { background: #E8F7EE; color: #14693A; }
+    .oo-chip.yel { background: #FFF1C9; color: #6B4A00; }
+    .oo-chip.red { background: #FDECEA; color: #B3261E; }
+    .oo-chip.blue { background: #DCE8FB; color: #0B3D91; }
+    .oo-line { font-size: 14px; color: #3A4A66; line-height: 1.45; word-break: break-word; display: flex; flex-direction: column; }
+    .oo-lab { color: #5B6B86; font-weight: 600; }
+    .oo-line a.oo-tel { color: #0B63CE; font-weight: 700; text-decoration: none; font-size: 16px; }
+    .oo-cname { font-size: 17px; font-weight: 700; }
+    .oo-money { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .oo-m { background: #F8FAFC; border-radius: 12px; padding: 8px 6px; text-align: center; }
+    .oo-m small { display: block; font-size: 11.5px; font-weight: 600; color: #5B6B86; }
+    .oo-m b { font-size: 16px; }
+    .oo-m.pay { background: #E8F7EE; }
+    .oo-m.pay b { color: #14693A; }
+    .oo-m.cash { background: #FFF1E8; }
+    .oo-m.cash b { color: #C2410C; }
+    .oo-note { font-size: 13px; color: #5B6B86; background: #F1F5F9; border-radius: 12px; padding: 8px 12px; }
+    .oo-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    .oo-cta { height: 46px; border: 0; border-radius: 14px; background: #FF6B35; color: #1B2A4A; font-weight: 700; font-size: 15px; padding: 0 16px; cursor: pointer; flex: 1; min-width: 140px; }
+    .oo-cta:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .oo-overlay { position: fixed; inset: 0; z-index: 1050; background: rgba(27, 42, 74, 0.5); display: none; align-items: flex-end; justify-content: center; }
+    .oo-overlay.active { display: flex; }
+    .oo-sheet { position: relative; width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 28px 28px 0 0; padding: 10px 20px calc(24px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -6px 24px rgba(27, 42, 74, 0.12); }
+    .oo-grip { width: 44px; height: 5px; border-radius: 3px; background: #D5DCE8; margin: 2px auto 8px; }
+    .oo-sheet-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .oo-sheet-h h2 { margin: 0; font-size: 20px; font-weight: 700; color: #1B2A4A; }
+    .oo-x { width: 44px; height: 44px; border-radius: 22px; border: 0; background: #F1F5F9; color: #1B2A4A; cursor: pointer; font-size: 16px; }
+    .oo-lbl { display: block; margin: 12px 0 4px; font-size: 12.5px; font-weight: 600; color: #5B6B86; }
+    .oo-in { width: 100%; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; padding: 10px 14px; font-size: 15px; min-height: 48px; color: #1B2A4A; }
+    .oo-in:focus { outline: 0; border-color: #FF6B35; }
+    textarea.oo-in { resize: vertical; }
+    .oo-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .oo-actions .oo-cta { height: 48px; font-size: 16px; }
+    .oo-warn { margin: 8px 0 0; font-size: 13.5px; font-weight: 600; color: #8A5A00; background: #FFF1C9; border-radius: 12px; padding: 8px 12px; }
+    .oo-err { margin: 12px 0 0; font-size: 14px; font-weight: 600; color: #B3261E; }
+
+    @media (max-width: 380px) { .oo-money { grid-template-columns: 1fr 1fr; } }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+    import { findMapLink, createNavButton } from '../lib/mapLinks.js';
+
+    const $ = (id) => document.getElementById(id);
+    const BN = '০১২৩৪৫৬৭৮৯';
+    const bn = (v) => String(v).replace(/\d/g, (d) => BN[d]);
+    const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+    const money = (n) => '৳' + bn(Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }));
+    const toast = (m, t) => { if (window.showToast) window.showToast(m, t); };
+
+    const REASONS = {
+      taken: 'অর্ডারটা অন্য রাইডার নিয়ে নিয়েছেন বা আর খোলা নেই',
+      not_found: 'অর্ডার পাওয়া যায়নি',
+      not_yours: 'এই অর্ডার আপনার নয়',
+      bad_status: 'অর্ডারের অবস্থা বদলে গেছে, লিস্ট নতুন করে লোড হচ্ছে',
+      cash_required: 'ক্যাশের পরিমাণ লিখুন (না পেলে ০)',
+    };
+
+    let state = { open: [], mine: [] };
+    let tab = 'open';
+    let busy = false;
+    let dvOrder = null;
+    let deepLinkId = null;
+    let deepLinkDone = false;
+
+    function el(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    function show(id) { ['ooLoading', 'ooLogin', 'ooGate', 'ooContent'].forEach((k) => { $(k).style.display = k === id ? '' : 'none'; }); }
+    function anyOpen() { return !!document.querySelector('.oo-overlay.active'); }
+
+    // ---------- বাংলাদেশ টাইম (UTC+6) ----------
+    const BD_OFFSET_MS = 6 * 3600000;
+    function bdp(d) {
+      const x = new Date(d.getTime() + BD_OFFSET_MS);
+      return { y: x.getUTCFullYear(), m: x.getUTCMonth() + 1, d: x.getUTCDate(), h: x.getUTCHours(), mi: x.getUTCMinutes() };
+    }
+    function period12(h) {
+      if (h < 4) return 'রাত';
+      if (h < 6) return 'ভোর';
+      if (h < 12) return 'সকাল';
+      if (h < 15) return 'দুপুর';
+      if (h < 18) return 'বিকাল';
+      if (h < 20) return 'সন্ধ্যা';
+      return 'রাত';
+    }
+    function timeBn(d) { const p = bdp(d); return period12(p.h) + ' ' + bn(p.h % 12 || 12) + ':' + bn(String(p.mi).padStart(2, '0')); }
+    function bdDayNum(d) { return Math.floor((d.getTime() + BD_OFFSET_MS) / 86400000); }
+    function dayLabel(d) {
+      const k = bdDayNum(d) - bdDayNum(new Date());
+      if (k === 0) return 'আজ';
+      if (k === 1) return 'আগামীকাল';
+      if (k === -1) return 'গতকাল';
+      const p = bdp(d);
+      return bn(p.d) + '/' + bn(p.m) + '/' + bn(p.y);
+    }
+    function whenText(o) {
+      const d = new Date(o.scheduled_at);
+      return o.is_asap ? 'এখনই · ' + dayLabel(d) : dayLabel(d) + ' · ' + timeBn(d);
+    }
+
+    // ---------- ম্যাপ/নেভিগেট ----------
+    function addNav(box, link, fallbackText) {
+      let nav = null;
+      const l = typeof link === 'string' ? link.trim() : '';
+      if (l) {
+        const f = findMapLink(l);
+        if (f) nav = f;
+        else if (/^https?:\/\//i.test(l)) nav = { navUrl: l };
+      }
+      if (!nav && fallbackText) nav = { navUrl: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(fallbackText) };
+      if (nav) box.appendChild(createNavButton(nav, 'নেভিগেট করুন'));
+    }
+    function place(label, text, link) {
+      const d = el('div', 'oo-line');
+      d.appendChild(el('span', 'oo-lab', label));
+      d.appendChild(el('span', '', text));
+      addNav(d, link, text);
+      return d;
+    }
+
+    // ---------- কার্ড ----------
+    function moneyBox(o) {
+      const box = el('div', 'oo-money');
+      [['ডেলিভারি চার্জ', o.rider_pay, 'pay'], ['ক্যাশ নেবেন', o.cod_amount, 'cash']].forEach(([l, v, c]) => {
+        const m = el('div', 'oo-m ' + c);
+        m.appendChild(el('small', '', l));
+        m.appendChild(el('b', '', money(v)));
+        box.appendChild(m);
+      });
+      const cost = Number(o.product_cost || 0);
+      const shop = el('div', 'oo-m');
+      shop.appendChild(el('small', '', o.shop_paid_by === 'rider' ? 'দোকানে দেবেন' : 'দোকানের টাকা'));
+      shop.appendChild(el('b', '', o.shop_paid_by === 'rider' ? (cost > 0 ? money(cost) : 'নিজের টাকায়') : 'আমরা দিয়েছি'));
+      box.appendChild(shop);
+      return box;
+    }
+
+    function baseCard(o, done) {
+      const card = el('div', 'oo-card' + (done ? ' done' : ''));
+      card.id = 'oo-' + o.id;
+      const top = el('div', 'oo-row');
+      top.appendChild(el('span', 'oo-time', whenText(o) + (o.is_strict_time ? ' (ঠিক এই সময়েই)' : '')));
+      top.appendChild(el('span', 'oo-ono', o.order_no));
+      card.appendChild(top);
+      return card;
+    }
+
+    function renderOpen(o) {
+      const card = baseCard(o, false);
+      const chips = el('div', 'oo-row');
+      if (o.is_asap) chips.appendChild(el('span', 'oo-chip yel', 'ASAP'));
+      if (o.is_strict_time) chips.appendChild(el('span', 'oo-chip red', 'ঠিক সময়ে লাগবে'));
+      if (chips.childNodes.length) card.appendChild(chips);
+      card.appendChild(el('div', 'oo-cname', o.customer_name || ''));
+      if (o.customer_phone) {
+        const ph = el('div', 'oo-line');
+        const tel = el('a', 'oo-tel', o.customer_phone);
+        tel.href = 'tel:' + String(o.customer_phone).replace(/[^\d+]/g, '');
+        ph.appendChild(tel);
+        card.appendChild(ph);
+      }
+      if (o.pickup_name || o.pickup_map_link) card.appendChild(place('পিকআপ: ', o.pickup_name || 'পিকআপ লোকেশন', o.pickup_map_link));
+      card.appendChild(place('ড্রপ: ', o.drop_address, o.drop_map_link));
+      const dt = el('div', 'oo-line');
+      dt.appendChild(el('span', 'oo-lab', 'অর্ডার: '));
+      dt.appendChild(el('span', '', o.details));
+      card.appendChild(dt);
+      card.appendChild(moneyBox(o));
+      const btns = el('div', 'oo-btns');
+      const b = el('button', 'oo-cta', 'একসেপ্ট করুন');
+      b.type = 'button';
+      b.addEventListener('click', () => acceptOrder(o));
+      btns.appendChild(b);
+      card.appendChild(btns);
+      return card;
+    }
+
+    function renderMine(o) {
+      const done = o.status === 'delivered' || o.status === 'completed';
+      const card = baseCard(o, done);
+      const chips = el('div', 'oo-row');
+      if (done) chips.appendChild(el('span', 'oo-chip green', 'ডেলিভার্ড'));
+      else if (o.status === 'picked_up') chips.appendChild(el('span', 'oo-chip blue', 'পিক-আপ হয়েছে'));
+      else chips.appendChild(el('span', 'oo-chip', 'একসেপ্ট করেছেন'));
+      if (!done && o.status === 'rider_assigned') {
+        chips.appendChild(el('span', o.ready_at ? 'oo-chip green' : 'oo-chip yel', o.ready_at ? 'রেডি ✓' : 'রেডি দেওয়া হয়নি (তবু পিক-আপ করতে পারবেন)'));
+      }
+      card.appendChild(chips);
+
+      card.appendChild(el('div', 'oo-cname', o.customer_name || ''));
+      if (o.customer_phone) {
+        const ph = el('div', 'oo-line');
+        const tel = el('a', 'oo-tel', o.customer_phone);
+        tel.href = 'tel:' + String(o.customer_phone).replace(/[^\d+]/g, '');
+        ph.appendChild(tel);
+        card.appendChild(ph);
+      }
+      if (o.pickup_name || o.pickup_map_link) card.appendChild(place('পিকআপ: ', o.pickup_name || 'পিকআপ লোকেশন', o.pickup_map_link));
+      card.appendChild(place('ড্রপ: ', o.drop_address, o.drop_map_link));
+      const dt = el('div', 'oo-line');
+      dt.appendChild(el('span', 'oo-lab', 'অর্ডার: '));
+      dt.appendChild(el('span', '', o.details));
+      card.appendChild(dt);
+      card.appendChild(moneyBox(o));
+
+      if (done) {
+        if (o.cash_collected != null && Number(o.cod_amount) > 0) {
+          card.appendChild(el('div', 'oo-note', 'আপনি ক্যাশ রিসিভ করেছেন ' + money(o.cash_collected)));
+        }
+        if (o.rider_note) card.appendChild(el('div', 'oo-note', 'আপনার নোট: ' + o.rider_note));
+        return card;
+      }
+      const btns = el('div', 'oo-btns');
+      if (o.status === 'rider_assigned') {
+        const b = el('button', 'oo-cta', 'পিক-আপ করেছি');
+        b.type = 'button';
+        b.addEventListener('click', () => pickUpOrder(o));
+        btns.appendChild(b);
+      } else if (o.status === 'picked_up') {
+        const b = el('button', 'oo-cta', 'ডেলিভার্ড ✓');
+        b.type = 'button';
+        b.addEventListener('click', () => openDeliver(o));
+        btns.appendChild(b);
+      }
+      card.appendChild(btns);
+      return card;
+    }
+
+    function render() {
+      const mine = state.mine.slice().sort((a, b) => {
+        const da = a.status === 'delivered' || a.status === 'completed' ? 1 : 0;
+        const db = b.status === 'delivered' || b.status === 'completed' ? 1 : 0;
+        return da - db;
+      });
+      const activeMine = mine.filter((o) => o.status === 'rider_assigned' || o.status === 'picked_up').length;
+      $('cntOpen').textContent = bn(state.open.length);
+      $('cntMine').textContent = bn(activeMine);
+      document.querySelectorAll('#ooTabs .oo-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+      const box = $('ooList');
+      box.replaceChildren();
+      const list = tab === 'open' ? state.open : mine;
+      if (!list.length) {
+        box.appendChild(el('p', 'oo-muted', tab === 'open' ? 'এখন কোনো খোলা অর্ডার নেই। নতুন অর্ডার এলে নোটিফিকেশন পাবেন।' : 'আপনার কোনো অর্ডার নেই।'));
+        return;
+      }
+      list.forEach((o) => box.appendChild(tab === 'open' ? renderOpen(o) : renderMine(o)));
+    }
+
+    function handleDeepLink() {
+      if (deepLinkDone || !deepLinkId) return;
+      deepLinkDone = true;
+      if (state.open.some((o) => o.id === deepLinkId)) tab = 'open';
+      else if (state.mine.some((o) => o.id === deepLinkId)) tab = 'mine';
+      else { toast('অর্ডারটি আর খোলা নেই বা অন্য রাইডার নিয়েছেন', 'error'); return; }
+      render();
+      const c = $('oo-' + deepLinkId);
+      if (c) { c.classList.add('hl'); setTimeout(() => c.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100); }
+    }
+
+    // ---------- লোড ----------
+    async function load(silent) {
+      const { data, error } = await supabase.rpc('rider_manual_orders');
+      if (error) {
+        if (error.code === '42501' || /not_rider/.test(error.message || '')) { showGate('rider'); return; }
+        if (!silent) toast('লোড করা যায়নি, আবার চেষ্টা করুন', 'error');
+        return;
+      }
+      state = { open: (data && data.open) || [], mine: (data && data.mine) || [] };
+      show('ooContent');
+      render();
+      handleDeepLink();
+    }
+
+    function showGate(kind) {
+      if (kind === 'pending') {
+        $('ooGateTitle').textContent = 'যাচাই চলছে';
+        $('ooGateText').textContent = 'আপনার রাইডার আবেদন যাচাই হলে তবেই অফলাইন অর্ডার নিতে পারবেন।';
+      } else if (kind === 'rejected') {
+        $('ooGateTitle').textContent = 'আবেদন গৃহীত হয়নি';
+        $('ooGateText').textContent = 'ডেলিভারি হিরো পেজে কারণ দেখুন।';
+      }
+      show('ooGate');
+    }
+
+    // ---------- অ্যাকশন ----------
+    async function act(fn, args, okMsg) {
+      if (busy) return false;
+      busy = true;
+      try {
+        const { data, error } = await supabase.rpc(fn, args);
+        if (error) { toast('হয়নি, আবার চেষ্টা করুন', 'error'); return false; }
+        if (!data || !data.ok) {
+          toast(REASONS[data && data.reason] || 'হয়নি, আবার চেষ্টা করুন', 'error');
+          await load(true);
+          return false;
+        }
+        if (okMsg) toast(okMsg, 'success');
+        await load(true);
+        return true;
+      } finally {
+        busy = false;
+      }
+    }
+
+    async function acceptOrder(o) {
+      if (!confirm(o.order_no + ' অর্ডারটা একসেপ্ট করবেন? ডেলিভারি চার্জ ' + money(o.rider_pay))) return;
+      const ok = await act('rider_accept_manual_order', { p_order_id: o.id }, 'একসেপ্ট হয়েছে। "আমার" ট্যাবে দেখুন।');
+      if (ok) { tab = 'mine'; render(); }
+    }
+
+    async function pickUpOrder(o) {
+      if (!confirm('দোকান/পিকআপ জায়গা থেকে অর্ডার নিয়েছেন?')) return;
+      await act('rider_pick_up_manual_order', { p_order_id: o.id }, 'পিক-আপ হয়েছে');
+    }
+
+    // ---------- ডেলিভার্ড শিট ----------
+    function showDvErr(t) {
+      const e = $('dvErr');
+      e.textContent = t || '';
+      e.style.display = t ? 'block' : 'none';
+      if (t) toast(t, 'error');
+    }
+    function updateMismatch() {
+      const cod = Number(dvOrder ? dvOrder.cod_amount : 0);
+      const w = $('dvMismatch');
+      const v = $('dvCash').value;
+      if (cod > 0 && v !== '' && num(v) !== cod) {
+        w.textContent = 'প্রত্যাশিত ' + money(cod) + ' থেকে আলাদা। অ্যাডমিনকে জানিয়ে দেওয়া হবে।';
+        w.style.display = 'block';
+      } else w.style.display = 'none';
+    }
+    function openDeliver(o) {
+      dvOrder = o;
+      const cod = Number(o.cod_amount || 0);
+      $('dvTitle').textContent = cod > 0 ? money(cod) + ' ক্যাশ রিসিভ করেছেন?' : 'ডেলিভারি সম্পন্ন করবেন?';
+      $('dvInfo').textContent = o.order_no + ' · ' + (o.customer_name || '');
+      $('dvCashWrap').style.display = cod > 0 ? '' : 'none';
+      $('dvCash').value = cod > 0 ? cod : '';
+      $('dvNote').value = '';
+      $('dvMismatch').style.display = 'none';
+      showDvErr('');
+      $('dvOverlay').classList.add('active');
+    }
+    async function saveDeliver() {
+      if (busy || !dvOrder) return;
+      const cod = Number(dvOrder.cod_amount || 0);
+      let cash = null;
+      if (cod > 0) {
+        const v = $('dvCash').value;
+        if (v === '' || num(v) < 0) return showDvErr('ক্যাশের পরিমাণ লিখুন (না পেলে ০)।');
+        cash = num(v);
+      }
+      $('dvSave').disabled = true;
+      const ok = await act('rider_deliver_manual_order', { p_order_id: dvOrder.id, p_cash_received: cash, p_note: $('dvNote').value.trim() || null }, 'ডেলিভার্ড হয়েছে');
+      $('dvSave').disabled = false;
+      if (ok) $('dvOverlay').classList.remove('active');
+    }
+
+    // ---------- ইনিট ----------
+    async function init() {
+      try { deepLinkId = new URLSearchParams(location.search).get('o'); } catch (e) { deepLinkId = null; }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { show('ooLogin'); return; }
+
+      const { data: rider } = await supabase.from('delivery_riders').select('verification_status').eq('profile_id', session.user.id).maybeSingle();
+      if (!rider) return showGate('none');
+      if (rider.verification_status === 'pending') return showGate('pending');
+      if (rider.verification_status === 'rejected') return showGate('rejected');
+
+      document.querySelectorAll('#ooTabs .oo-tab').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
+      $('dvClose').addEventListener('click', () => $('dvOverlay').classList.remove('active'));
+      $('dvSave').addEventListener('click', saveDeliver);
+      $('dvCash').addEventListener('input', updateMismatch);
+      $('dvOverlay').addEventListener('click', (e) => { if (e.target === $('dvOverlay')) $('dvOverlay').classList.remove('active'); });
+
+      await load(false);
+
+      setInterval(() => { if (!document.hidden && !anyOpen() && !busy) load(true); }, 15000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && !anyOpen() && !busy) load(true); });
+    }
+
+    init().catch(() => { show('ooGate'); });
+  </script>
+</BaseLayout>
