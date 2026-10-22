@@ -30,13 +30,9 @@ export function compressImage(file, options = {}) {
       return;
     }
 
-    // HEIC/HEIF ব্রাউজারের canvas API দিয়ে ডিকোড করা যায় না —
-    // স্কিপ করে original ফেরত দিচ্ছি, আপলোড আটকাবে না
-    const isHeic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name || '');
-    if (isHeic) {
-      resolve(file);
-      return;
-    }
+    // HEIC/HEIF: সব ব্রাউজার canvas-এ ডিকোড করতে পারে না (iPhone Safari পারে, Chrome পারে না)।
+    // তাই আগেই স্কিপ না করে ডিকোড চেষ্টা করা হচ্ছে; না পারলে img.onerror-এ আসল ফাইল ফেরত
+    // যায়, আর ক্যালার isHeicFile() দিয়ে সেটা আটকায় (ছবি বাছাই বা আপলোডের সময়)।
 
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
@@ -96,6 +92,13 @@ export function compressImage(file, options = {}) {
 
     img.src = objectUrl;
   });
+}
+
+// HEIC/HEIF কিনা (নাম বা টাইপ দেখে)। কমপ্রেসের পরেও HEIC থেকে গেলে বুঝতে হবে
+// ব্রাউজার ডিকোড করতে পারেনি — ওই ছবি আপলোড করা যাবে না (৪MB+ কাঁচা ফাইল egress খায়)।
+export function isHeicFile(file) {
+  if (!file) return false;
+  return /heic|heif/i.test(file.type || '') || /\.(heic|heif)$/i.test(file.name || '');
 }
 
 // একাধিক ফাইল (multi-image upload point) একসাথে কম্প্রেস করার জন্য

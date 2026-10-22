@@ -91,6 +91,12 @@ export async function POST({ request }) {
       return json({ error: 'অবৈধ পাথ' }, 400);
     }
 
+    // HEIC/HEIF ব্লক: কাঁচা iPhone ছবি (৪MB+) egress অনেক বাড়ায় আর Android ব্রাউজারে দেখাও যায় না
+    const mimeHint = String(file.type || '') + ' ' + String(explicitContentType || '');
+    if (/heic|heif/i.test(mimeHint) || /\.(heic|heif)$/i.test(path)) {
+      return json({ error: 'HEIC ছবি চলে না, ছবি JPEG বা PNG করে দিন' }, 415);
+    }
+
     // 'site/' ফোল্ডার শুধু admin/moderator-এর জন্য — বাকি সব ফোল্ডার
     // (avatars, clubs, club-posts, club-members, listing ইত্যাদি)
     // যেকোনো লগইন করা ইউজারের জন্য উন্মুক্ত
