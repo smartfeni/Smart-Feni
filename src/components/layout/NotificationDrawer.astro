@@ -4,6 +4,9 @@
 // কম্পোনেন্ট: নোটিফিকেশন স্লাইড-ইন ড্রয়ার
 // (আগের সব কমেন্ট/হিস্ট্রি অপরিবর্তিত)
 //
+// আপডেট (Oct 2026 — গেস্ট ফুল-ভিউ): গেস্টের "অফার ও খবর" কার্ডে ট্যাপ করলে logged-in
+// ড্রয়ারের একই পপ-আপ (notifModalOverlay) খোলে — ছবি zoom, লিংক/ফোন ক্লিকযোগ্য,
+// link_label অ্যাকশন বাটন। গেস্টের জন্য আগের/পরের তীর নেই।
 // আপডেট (Oct 2026 — লগইন ছাড়া মেসেজ বক্স): "মেসেজ" বাটন এখন লগইন ছাড়াও
 // খোলে। লগইন না থাকলে ব্যক্তিগত ইনবক্সের বদলে গেস্ট প্যানেল "অফার ও খবর"
 // (guest_promos — পাবলিক টেবিল, শুধু অ্যাডমিনের পাঠানো প্রমো) খোলে। লগইন
@@ -1715,7 +1718,7 @@
         img.src = p.image_url;
         img.alt = '';
         img.loading = 'lazy';
-        img.style.cssText = 'width:100%;border-radius:12px;margin-bottom:10px;display:block;object-fit:cover;max-height:220px;';
+        img.style.cssText = 'width:100%;border-radius:12px;margin-bottom:10px;display:block;object-fit:contain;background:#F1F5F9;max-height:260px;';
         card.appendChild(img);
       }
 
@@ -1733,8 +1736,125 @@
         card.appendChild(link);
       }
 
+      // ট্যাপ করলে ফুল-ভিউ পপ-আপ; ভেতরের লিংক বাটন আলাদাভাবে কাজ করে
+      card.style.cursor = 'pointer';
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+
+      const more = document.createElement('div');
+      more.style.cssText = 'margin-top:10px;font-size:0.74rem;font-weight:700;color:#8FA0BC;';
+      more.textContent = 'পুরো দেখতে ট্যাপ করুন';
+      card.appendChild(more);
+
+      card.addEventListener('click', (e) => {
+        if (e.target.closest && e.target.closest('a')) return;
+        openGuestPromoModal(p);
+      });
+      card.addEventListener('keydown', (e) => {
+        if (e.target.closest && e.target.closest('a')) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openGuestPromoModal(p);
+        }
+      });
+
       gpList.appendChild(card);
     });
+  }
+
+  // ===== ফুল-ভিউ: logged-in ড্রয়ারের একই পপ-আপ (notifModalOverlay) পুনর্ব্যবহার =====
+  // বন্ধ করা, ছবি zoom ও "বন্ধ করুন" বাটন মূল স্ক্রিপ্টের হ্যান্ডলারেই চলে।
+  const gmOverlay = document.getElementById('notifModalOverlay');
+  const gmCard = document.getElementById('notifModalCard');
+  const gmHead = document.getElementById('notifModalHead');
+  const gmBody = document.getElementById('notifModalBody');
+  const gmFoot = document.getElementById('notifModalFoot');
+  let guestModalOpen = false;
+  let guestModalPromo = null;
+
+  function gEsc(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
+  // আগে escape, তারপর শুধু http(s) ও 01XXXXXXXXX লিংক হয়
+  function gLinkify(text) {
+    const safe = gEsc(text);
+    return safe.replace(/(https?:\/\/[^\s<]+)|(\b01[0-9]{9}\b)/g, (m, url, phone) => {
+      if (url) {
+        const clean = url.replace(/[.,।)!?]+$/, '');
+        const tail = url.slice(clean.length);
+        return `<a href="${clean}" target="_blank" rel="noopener noreferrer nofollow">${clean}</a>${tail}`;
+      }
+      return `<a href="tel:${phone}">${phone}</a>`;
+    });
+  }
+
+  // প্রথম লাইন ছোট (≤৮০ অক্ষর) হলে শিরোনাম
+  function gSplitTitle(message) {
+    const text = String(message ?? '');
+    const lines = text.split('\n');
+    if (lines.length > 1 && lines[0].trim().length > 0 && lines[0].length <= 80) {
+      return { title: lines[0].trim(), body: lines.slice(1).join('\n').trim() };
+    }
+    return { title: '', body: text };
+  }
+
+  function openGuestPromoModal(p) {
+    if (!gmOverlay || !gmBody || !gmHead || !gmFoot) return;
+    const { title, body } = gSplitTitle(p.body);
+    const hasImg = p.image_url && /^https:\/\//i.test(p.image_url);
+    const hasAct = isSafeUrl(p.action_url);
+
+    guestModalOpen = true;
+    guestModalPromo = p;
+    gmCard?.style.setProperty('--c', '#EC4899');
+
+    gmHead.innerHTML = `
+      <span class="nd-mh-icon">🎁</span>
+      <span class="nd-mh-meta">
+        <span class="nd-mh-cat">অফার-প্রমো</span>
+        <span class="nd-mh-time">${gEsc(formatWhen(p.created_at))}</span>
+      </span>
+    `;
+
+    gmBody.innerHTML = `
+      ${hasImg ? `<img src="${gEsc(p.image_url)}" alt="" class="nd-detail-image" data-zoom />` : ''}
+      ${title ? `<h3 class="nd-detail-title">${gEsc(title)}</h3>` : ''}
+      <p class="nd-detail-text${title ? '' : ' nd-detail-text-lg'}">${gLinkify(body)}</p>
+    `;
+    const img = gmBody.querySelector('.nd-detail-image');
+    img?.addEventListener('error', () => img.remove());
+
+    gmFoot.innerHTML = `
+      <div class="nd-acts">
+        ${hasAct ? `<button type="button" class="nd-act primary" data-gact>${gEsc(p.link_label || 'বিস্তারিত দেখুন')} →</button>` : ''}
+        <button type="button" class="nd-act ghost" data-close>বন্ধ করুন</button>
+      </div>
+    `;
+
+    gmBody.scrollTop = 0;
+    gmOverlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  // অ্যাকশন বাটন (data-gact; মূল স্ক্রিপ্টের data-act থেকে আলাদা)
+  gmFoot?.addEventListener('click', (e) => {
+    if (!guestModalOpen || !e.target.closest('[data-gact]')) return;
+    if (guestModalPromo && isSafeUrl(guestModalPromo.action_url)) {
+      window.location.href = guestModalPromo.action_url;
+    }
+  });
+
+  // পপ-আপ বন্ধ হলে (যেভাবেই) গেস্ট প্যানেল খোলা থাকলে স্ক্রল-লক ফিরিয়ে দেওয়া
+  if (gmOverlay) {
+    new MutationObserver(() => {
+      if (gmOverlay.classList.contains('open') || !guestModalOpen) return;
+      guestModalOpen = false;
+      guestModalPromo = null;
+      if (gpOverlay?.classList.contains('open')) document.body.style.overflow = 'hidden';
+    }).observe(gmOverlay, { attributes: true, attributeFilter: ['class'] });
   }
 
   async function openGuestPanel(highlightId) {
@@ -1774,7 +1894,7 @@
     if (e.target === gpOverlay) closeGuestPanel();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && gpOverlay?.classList.contains('open')) closeGuestPanel();
+    if (e.key === 'Escape' && gpOverlay?.classList.contains('open') && !guestModalOpen) closeGuestPanel();
   });
 
   gpLoginBtn?.addEventListener('click', () => {
