@@ -87,6 +87,11 @@ export async function POST({ request }) {
       dropLocSource,
       pickupLocSource,
       orderItems,
+      // ডেলিভারি অটো চার্জ যাচাইয়ের কোঅর্ডিনেট (ঐচ্ছিক)
+      fareDropLat,
+      fareDropLng,
+      farePickupLat,
+      farePickupLng,
     } = await request.json();
 
     const finalCategory = VALID_CATEGORIES.includes(category) ? category : 'delivery';
@@ -143,6 +148,40 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'রাইড রিকোয়েস্টে সাইকেল সিলেক্ট করা যাবে না' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // ===== ডেলিভারি অটো চার্জ: সার্ভারে সর্বনিম্ন চার্জ যাচাই (RPC calc_delivery_fare) =====
+    // শুধু delivery। সেটিং বন্ধ / "এর কমে অর্ডার নয়" বন্ধ / কোঅর্ডিনেট নেই / RPC ব্যর্থ হলে অর্ডার আটকায় না।
+    // কোঅর্ডিনেট: পিন থাকলে dropLat/Lng, না থাকলে ক্লায়েন্টের পাঠানো ইউনিয়ন-কেন্দ্র (fare*)।
+    if (finalCategory === 'delivery') {
+      try {
+        const toNum = (v) => {
+          if (v === null || v === undefined || v === '') return null;
+          const n = Number(v);
+          return Number.isFinite(n) ? n : null;
+        };
+        const { data: fareRes, error: fareErr } = await client.rpc('calc_delivery_fare', {
+          p_pickup_lat: toNum(pickupLat) ?? toNum(farePickupLat),
+          p_pickup_lng: toNum(pickupLng) ?? toNum(farePickupLng),
+          p_drop_lat: toNum(dropLat) ?? toNum(fareDropLat),
+          p_drop_lng: toNum(dropLng) ?? toNum(fareDropLng),
+          p_drop_union: dropUnionClean,
+          p_category: 'delivery',
+        });
+        const minFare = fareRes ? Number(fareRes.fare) : 0;
+        if (!fareErr && fareRes && fareRes.enabled && fareRes.enforce_floor && minFare > 0 && price < minFare) {
+          return new Response(
+            JSON.stringify({
+              error: `ডেলিভারি চার্জ কমপক্ষে ৳${minFare} দিতে হবে`,
+              code: 'FARE_TOO_LOW',
+              minFare,
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+      } catch (_) {
+        // ফেয়ার চেক ব্যর্থ হলে অর্ডার চলতে দাও
+      }
     }
 
     // ===== অ্যাডমিন সুইচ: এই সেবার অর্ডার গ্রহণ বন্ধ কিনা =====

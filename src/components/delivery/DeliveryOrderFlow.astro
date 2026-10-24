@@ -237,6 +237,7 @@ const guideReview = [
             <button type="button" data-price-step="10">+১০</button>
             <button type="button" data-price-step="20">+২০</button>
           </div>
+          <div class="sfo-mut" id="sfoFareHint" hidden></div>
           <div class="field-error-msg" data-error-for="dhPrice"><i class="fas fa-circle-exclamation"></i><span>ডেলিভারি চার্জ দিন</span></div>
           <div class="sfo-ln sfo-total"><b>মোট</b><b id="sfoTotal">৳০</b></div>
           <div class="sfo-mut" id="sfoOutsideNote" hidden>সিস্টেমের বাইরের জিনিস রাইডার আলাদা হিসাব করবে।</div>
@@ -327,6 +328,7 @@ const guideReview = [
     hasLocation,
   } from '../../lib/deliveryOrderForm.js';
   import { createServiceRequest } from '../../lib/deliveryClient.js';
+  import { fetchDeliveryFare } from '../../lib/fareCalc.js';
   import { initRiderAvailability } from '../../lib/riderAvailability.js';
 
   const FENI_CENTER = [23.0159, 91.3976];
@@ -362,6 +364,8 @@ const guideReview = [
     shops: [],
     shopsLoaded: false,
     shopsError: '',
+    priceTouched: false, // কাস্টমার নিজে দাম বদলালে true (অটো চার্জ তখন ওভাররাইট করে না)
+    fare: null, // সর্বশেষ সাজেস্টেড চার্জ (calc_delivery_fare)
   };
 
   // এই ইনস্ট্যান্সের লোকেশন কোথা থেকে এল (DB: map|manual|link|current)
@@ -1087,7 +1091,8 @@ const guideReview = [
     $('sfoTotal').textContent = taka(t.total);
   }
 
-  priceInput.addEventListener('input', () => {
+  priceInput.addEventListener('input', (e) => {
+    if (e && e.isTrusted) S.priceTouched = true;
     showErr('dhPrice', false);
     updateTotals();
   });
@@ -1095,10 +1100,63 @@ const guideReview = [
   document.querySelectorAll('[data-price-step]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const cur = Number(priceInput.value) || 0;
-      priceInput.value = String(Math.max(1, cur + Number(btn.dataset.priceStep)));
+      S.priceTouched = true;
+      priceInput.value = String(Math.max(minCharge(), cur + Number(btn.dataset.priceStep)));
       priceInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
   });
+
+  // ====================== অটো ডেলিভারি চার্জ (জিরো পয়েন্ট থেকে কিমি) ======================
+  // হিসাব সার্ভারের RPC calc_delivery_fare-এ (সেটিং: /admin/delivery-fare); এখানে শুধু
+  // সাজেস্টেড দাম বসানো ও ন্যূনতম সীমা। কিছু ব্যর্থ হলে আগের মতোই হাতে দাম লেখা চলে।
+  let fareSeq = 0;
+
+  function unionCenter(unionBn) {
+    const en = UNION_EN_BY_BN[unionBn];
+    if (!geo || !en) return null;
+    const pt = getLabelPoints(geo).unions[en];
+    return pt ? { lat: pt[0], lng: pt[1] } : null;
+  }
+
+  // পিন থাকলে পিন, না থাকলে ইউনিয়নের কেন্দ্র, তাও না থাকলে null
+  function fareCoords(loc) {
+    if (loc.lat !== null && loc.lng !== null) return { lat: Number(loc.lat), lng: Number(loc.lng) };
+    return loc.union ? unionCenter(loc.union) : null;
+  }
+
+  // "এর কমে অর্ডার নয়" চালু থাকলে সাজেস্টেড চার্জই ন্যূনতম, নইলে ১
+  function minCharge() {
+    const f = S.fare;
+    return f && f.enforceFloor && f.fare ? f.fare : 1;
+  }
+
+  async function applySuggestedFare() {
+    const seq = ++fareSeq;
+    const hint = $('sfoFareHint');
+    const res = await fetchDeliveryFare({
+      pickup: fareCoords(S.pickup),
+      drop: fareCoords(S.drop),
+      dropUnion: S.drop.union || selUnion.value,
+    });
+    if (seq !== fareSeq || S.step !== 3) return;
+    if (!res || !res.enabled || !res.fare) {
+      S.fare = null;
+      hint.hidden = true;
+      return;
+    }
+    S.fare = res;
+    const cur = Number(priceInput.value) || 0;
+    if (!S.priceTouched || cur < minCharge()) {
+      priceInput.value = String(res.fare);
+      showErr('dhPrice', false);
+      updateTotals();
+    }
+    const where = res.source === 'override' ? 'এই এলাকার নির্ধারিত চার্জ' : 'সাজেস্টেড চার্জ';
+    const km = res.km !== null && res.source !== 'override' ? ` · আনুমানিক ${bn(res.km)} কিমি` : '';
+    const floor = res.enforceFloor ? ' · এর কমে অর্ডার হবে না, বাড়ানো যাবে' : '';
+    hint.textContent = `${where} ${taka(res.fare)}${km}${floor}`;
+    hint.hidden = false;
+  }
 
   // ====================== ধাপ নেভিগেশন ======================
   const overlay = $('sfoOverlay');
@@ -1119,6 +1177,7 @@ const guideReview = [
     if (n === 3) {
       renderReview();
       syncBlocked();
+      applySuggestedFare();
     }
   }
 
@@ -1265,6 +1324,13 @@ const guideReview = [
       return;
     }
 
+    const floorCharge = minCharge();
+    if (floorCharge > 1 && Number(priceInput.value) < floorCharge) {
+      errorEl.textContent = `ডেলিভারি চার্জ কমপক্ষে ${taka(floorCharge)} দিতে হবে`;
+      errorEl.hidden = false;
+      return;
+    }
+
     submitBtn.dataset.busy = '1';
     submitBtn.disabled = true;
     submitBtn.textContent = 'পাঠানো হচ্ছে...';
@@ -1297,6 +1363,11 @@ const guideReview = [
       dropLocSource: dropPayload.source,
       pickupLocSource: pickupPayload.source,
       orderItems,
+      // অটো চার্জ যাচাইয়ের কোঅর্ডিনেট (পিন না থাকলে ইউনিয়নের কেন্দ্র)
+      fareDropLat: (fareCoords(drop) || {}).lat ?? null,
+      fareDropLng: (fareCoords(drop) || {}).lng ?? null,
+      farePickupLat: (fareCoords(pickup) || {}).lat ?? null,
+      farePickupLng: (fareCoords(pickup) || {}).lng ?? null,
     });
 
     releaseSubmit();
@@ -1305,6 +1376,7 @@ const guideReview = [
       errorEl.textContent = error;
       errorEl.hidden = false;
       if (code === 'NO_RIDER_ONLINE' && availability) availability.refresh();
+      if (code === 'FARE_TOO_LOW') applySuggestedFare(); // সর্বনিম্ন চার্জ আবার বসাও
       if (code === 'ITEM_UNAVAILABLE') {
         // কোনো আইটেম/দোকান এর মধ্যে বন্ধ হয়েছে — মেনু আবার বেছে নিতে হবে
         S.cart = new Map();
@@ -1331,6 +1403,10 @@ const guideReview = [
     S.cart = new Map();
     ['sfoAddr1', 'sfoAddr2', 'sfoManual', 'sfoDetail1'].forEach((id) => { $(id).value = ''; });
     priceInput.value = '';
+    S.priceTouched = false;
+    S.fare = null;
+    fareSeq++;
+    $('sfoFareHint').hidden = true;
     selUp.value = '';
     selUnion.textContent = '';
     const ph = h('option', '', 'আগে উপজেলা');

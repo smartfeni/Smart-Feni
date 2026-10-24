@@ -1,0 +1,520 @@
+---
+// path: src/pages/admin/delivery-fare.astro
+// ============================================================
+// পেজ: ডেলিভারি অটো চার্জ সেটিং (/admin/delivery-fare) — শুধু অ্যাডমিন
+// কাস্টমার রিভিউ ধাপে সাজেস্টেড চার্জ বসে জিরো পয়েন্ট থেকে কিমি হিসাব করে:
+//   চার্জ = বেস + (রোড কিমি × প্রতি কিমি রেট), ন্যূনতম, তারপর রাউন্ড (ডিফল্ট ৫ টাকা)
+//   রোড কিমি = সরলরেখার কিমি × রোড ফ্যাক্টর
+//   পিকআপ জিরো পয়েন্টের "শহর ব্যাসার্ধ"-এর ভেতরে হলে জিরো পয়েন্ট → ড্রপ, বাইরে হলে পিকআপ → ড্রপ
+// টেবিল: delivery_fare_settings (category='delivery'), delivery_fare_overrides (ইউনিয়নভিত্তিক নির্ধারিত চার্জ)
+// RLS: শুধু is_admin() — মডারেটর দেখতেও পারবে না। হিসাব: RPC calc_delivery_fare (সার্ভারে)।
+// রাইড হিরো পরে: category='ride' সারি যোগ করলেই চলবে।
+// ইউজারের/অ্যাডমিনের লেখা সব টেক্সট textContent দিয়ে বসানো।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import GuideSheet from '../../components/delivery/GuideSheet.astro';
+
+const guideSteps = [
+  {
+    caption: 'বেস চার্জ আর প্রতি কিমি রেট বসান',
+    blocks: [
+      { kind: 'field', text: 'বেস চার্জ ৳৩০', tap: '১' },
+      { kind: 'field', text: 'প্রতি কিমি ৳১৫', tap: '২' },
+      { kind: 'text', text: 'চার্জ = বেস + (রোড কিমি × রেট)', muted: true },
+    ],
+  },
+  {
+    caption: 'জিরো পয়েন্ট ঠিক করুন, এখান থেকেই কিমি মাপা হবে',
+    blocks: [
+      { kind: 'field', text: 'অক্ষাংশ ২৩.০১৫৯' },
+      { kind: 'field', text: 'দ্রাঘিমাংশ ৯১.৩৯৭৬' },
+      { kind: 'button', text: 'ফেনী সদরের ডিফল্ট', tap: true },
+    ],
+  },
+  {
+    caption: 'কোনো এলাকায় ফিক্স চার্জ লাগলে নিচে যোগ করুন',
+    blocks: [
+      { kind: 'row', cols: [{ kind: 'field', text: 'ইউনিয়ন', chevron: true }, { kind: 'field', text: '৳১৫০' }] },
+      { kind: 'button', text: '+ যোগ করুন', primary: true, tap: true },
+      { kind: 'notice', text: 'ফিক্স চার্জ থাকলে ওই ইউনিয়নে কিমি হিসাব হবে না।' },
+    ],
+  },
+  {
+    caption: 'শেষে "সেভ করুন" চাপুন',
+    blocks: [
+      { kind: 'text', text: '"এর কমে অর্ডার নয়" চালু থাকলে কাস্টমার সাজেস্টেড চার্জের নিচে দিতে পারবে না, শুধু বাড়াতে পারবে।', muted: true },
+      { kind: 'spacer' },
+      { kind: 'cta', text: 'সেভ করুন', tap: true },
+    ],
+  },
+];
+---
+
+<BaseLayout title="ডেলিভারি চার্জ সেটিং | স্মার্ট ফেনী">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="dfa-page">
+
+    <div id="adminLoadingState" class="dfa-loading">
+      <div class="dfa-spinner"></div>
+      <p>যাচাই করা হচ্ছে...</p>
+    </div>
+
+    <div id="adminGuardedContent" style="display:none;">
+
+      <div class="dfa-head">
+        <div class="dfa-head-in">
+          <a href="/admin/delivery-orders" class="dfa-round" aria-label="ডেলিভারি অর্ডারে ফিরুন"><i class="fas fa-arrow-left"></i></a>
+          <h1 class="dfa-title">ডেলিভারি চার্জ সেটিং</h1>
+          <GuideSheet id="admin-delivery-fare" title="চার্জ সেটিংয়ের নিয়ম" subtitle="অ্যাডমিন · ডেলিভারি চার্জ" showButton buttonTone="dark" steps={guideSteps} />
+        </div>
+      </div>
+
+      <div class="dfa-body">
+        <p class="dfa-muted" id="loadMsg">লোড হচ্ছে...</p>
+
+        <form id="fareForm" novalidate hidden>
+
+          <!-- ===== সুইচ ===== -->
+          <div class="dfa-card">
+            <div class="dfa-swrow">
+              <span>অটো চার্জ চালু<small>বন্ধ থাকলে কাস্টমার নিজে দাম লেখে (আগের মতো)</small></span>
+              <button type="button" class="dfa-sw" id="swEnabled" role="switch" aria-checked="true" aria-label="অটো চার্জ চালু"><i></i></button>
+            </div>
+            <div class="dfa-swrow">
+              <span>এর কমে অর্ডার নয়<small>চালু থাকলে সাজেস্টেড চার্জের নিচে অর্ডার হবে না, শুধু বাড়ানো যাবে</small></span>
+              <button type="button" class="dfa-sw" id="swFloor" role="switch" aria-checked="true" aria-label="সাজেস্টেড চার্জের কমে অর্ডার নয়"><i></i></button>
+            </div>
+          </div>
+
+          <!-- ===== হিসাবের সংখ্যা ===== -->
+          <div class="dfa-card">
+            <div class="dfa-h">হিসাবের সংখ্যা</div>
+            <div class="dfa-two">
+              <div>
+                <label class="dfa-lbl" for="fBase">বেস চার্জ (৳)<span class="required-mark">*</span></label>
+                <input class="dfa-in" id="fBase" type="number" inputmode="decimal" min="0" max="5000" step="any" required />
+                <div class="field-error-msg" data-error-for="fBase"><i class="fas fa-circle-exclamation"></i><span>০–৫০০০ এর মধ্যে লিখুন</span></div>
+              </div>
+              <div>
+                <label class="dfa-lbl" for="fPerKm">প্রতি কিমি (৳)<span class="required-mark">*</span></label>
+                <input class="dfa-in" id="fPerKm" type="number" inputmode="decimal" min="0" max="1000" step="any" required />
+                <div class="field-error-msg" data-error-for="fPerKm"><i class="fas fa-circle-exclamation"></i><span>০–১০০০ এর মধ্যে লিখুন</span></div>
+              </div>
+              <div>
+                <label class="dfa-lbl" for="fMin">ন্যূনতম চার্জ (৳)<span class="required-mark">*</span></label>
+                <input class="dfa-in" id="fMin" type="number" inputmode="decimal" min="0" max="5000" step="any" required />
+                <div class="field-error-msg" data-error-for="fMin"><i class="fas fa-circle-exclamation"></i><span>০–৫০০০ এর মধ্যে লিখুন</span></div>
+              </div>
+              <div>
+                <label class="dfa-lbl" for="fRoad">রোড ফ্যাক্টর<span class="required-mark">*</span></label>
+                <input class="dfa-in" id="fRoad" type="number" inputmode="decimal" min="1" max="3" step="any" required />
+                <div class="field-error-msg" data-error-for="fRoad"><i class="fas fa-circle-exclamation"></i><span>১ থেকে ৩ এর মধ্যে লিখুন</span></div>
+              </div>
+              <div>
+                <label class="dfa-lbl" for="fTown">শহর ব্যাসার্ধ (কিমি)<span class="required-mark">*</span></label>
+                <input class="dfa-in" id="fTown" type="number" inputmode="decimal" min="0" max="50" step="any" required />
+                <div class="field-error-msg" data-error-for="fTown"><i class="fas fa-circle-exclamation"></i><span>০–৫০ এর মধ্যে লিখুন</span></div>
+              </div>
+              <div>
+                <label class="dfa-lbl" for="fRound">রাউন্ড (৳)<span class="required-mark">*</span></label>
+                <input class="dfa-in" id="fRound" type="number" inputmode="numeric" min="1" max="100" step="1" required />
+                <div class="field-error-msg" data-error-for="fRound"><i class="fas fa-circle-exclamation"></i><span>১–১০০ এর মধ্যে পূর্ণ সংখ্যা লিখুন</span></div>
+              </div>
+            </div>
+            <p class="dfa-hint">রোড ফ্যাক্টর: সরলরেখার কিমি রাস্তার চেয়ে কম আসে, তাই গুণ হয় (যেমন ১.৩)। শহর ব্যাসার্ধ: পিকআপ জিরো পয়েন্টের এর ভেতরে হলে জিরো পয়েন্ট থেকে ড্রপ মাপা হয়, বাইরে হলে পিকআপ থেকে ড্রপ। রাউন্ড: চার্জ এই সংখ্যার গুণিতকে ওপরে ওঠে (যেমন ৫ মানে ১০৮ → ১১০)।</p>
+          </div>
+
+          <!-- ===== জিরো পয়েন্ট ===== -->
+          <div class="dfa-card">
+            <div class="dfa-h">জিরো পয়েন্ট</div>
+            <div class="dfa-two">
+              <div>
+                <label class="dfa-lbl" for="fLat">অক্ষাংশ (lat)<span class="required-mark">*</span></label>
+                <input class="dfa-in" id="fLat" type="number" inputmode="decimal" min="-90" max="90" step="any" required />
+                <div class="field-error-msg" data-error-for="fLat"><i class="fas fa-circle-exclamation"></i><span>সঠিক অক্ষাংশ লিখুন</span></div>
+              </div>
+              <div>
+                <label class="dfa-lbl" for="fLng">দ্রাঘিমাংশ (lng)<span class="required-mark">*</span></label>
+                <input class="dfa-in" id="fLng" type="number" inputmode="decimal" min="-180" max="180" step="any" required />
+                <div class="field-error-msg" data-error-for="fLng"><i class="fas fa-circle-exclamation"></i><span>সঠিক দ্রাঘিমাংশ লিখুন</span></div>
+              </div>
+            </div>
+            <div class="dfa-btnrow">
+              <button type="button" class="dfa-ghost" id="zeroDefaultBtn">ফেনী সদরের ডিফল্ট</button>
+              <button type="button" class="dfa-ghost" id="zeroHereBtn">আমার বর্তমান লোকেশন</button>
+            </div>
+          </div>
+
+          <!-- ===== টেস্ট ===== -->
+          <div class="dfa-card">
+            <div class="dfa-h">চার্জ টেস্ট</div>
+            <label class="dfa-lbl" for="fTestKm">সরলরেখায় দূরত্ব (কিমি)</label>
+            <input class="dfa-in" id="fTestKm" type="number" inputmode="decimal" min="0" step="any" placeholder="যেমন: 4" />
+            <p class="dfa-test" id="testOut">দূরত্ব লিখলে চার্জ দেখাবে (এখনকার ফর্মের সংখ্যা দিয়ে, সেভ না করেও)</p>
+          </div>
+
+          <p class="dfa-err" id="formErr" style="display:none;"></p>
+          <button class="dfa-cta" id="saveBtn" type="button">সেভ করুন</button>
+        </form>
+
+        <!-- ===== এলাকাভিত্তিক নির্ধারিত চার্জ ===== -->
+        <div class="dfa-card" id="ovCard" hidden>
+          <div class="dfa-h">ইউনিয়নের নির্ধারিত চার্জ</div>
+          <p class="dfa-hint">এখানে যোগ করা ইউনিয়নে ড্রপ হলে কিমি হিসাব বাদ, এই চার্জই সাজেস্ট হবে (যেমন ঘুরে যেতে হয় এমন এলাকা)।</p>
+          <div id="ovList"></div>
+          <div class="dfa-two" style="margin-top:10px;">
+            <div>
+              <label class="dfa-lbl" for="ovUpazila">উপজেলা</label>
+              <select class="dfa-in" id="ovUpazila"></select>
+            </div>
+            <div>
+              <label class="dfa-lbl" for="ovUnion">ইউনিয়ন</label>
+              <select class="dfa-in" id="ovUnion"></select>
+            </div>
+            <div>
+              <label class="dfa-lbl" for="ovFare">চার্জ (৳)</label>
+              <input class="dfa-in" id="ovFare" type="number" inputmode="decimal" min="1" max="10000" step="any" placeholder="যেমন: 150" />
+            </div>
+            <div>
+              <label class="dfa-lbl" for="ovNote">নোট (ঐচ্ছিক)</label>
+              <input class="dfa-in" id="ovNote" maxlength="120" placeholder="যেমন: ব্রিজ ঘুরে যেতে হয়" />
+            </div>
+          </div>
+          <p class="dfa-err" id="ovErr" style="display:none;"></p>
+          <button class="dfa-add" id="ovAddBtn" type="button">+ নির্ধারিত চার্জ যোগ করুন</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <style is:global>
+    .dfa-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; min-height: 60vh; padding-bottom: 90px; overflow-x: hidden; background: #F8FAFC; }
+    .dfa-page * { box-sizing: border-box; }
+    .dfa-page button, .dfa-page input, .dfa-page select { font-family: inherit; }
+    .dfa-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5B6B86; font-weight: 600; }
+    .dfa-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: dfaSpin 0.8s linear infinite; }
+    @keyframes dfaSpin { to { transform: rotate(360deg); } }
+
+    .dfa-head { position: relative; left: 50%; width: 100vw; margin-left: -50vw; background: #1B2A4A; color: #fff; }
+    .dfa-head-in { max-width: 520px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 8px; min-height: 68px; }
+    .dfa-title { flex: 1; min-width: 0; margin: 0; font-size: 19px; font-weight: 700; color: #fff; }
+    .dfa-round { width: 44px; height: 44px; border-radius: 22px; background: rgba(255, 255, 255, 0.14); color: #fff; display: flex; align-items: center; justify-content: center; text-decoration: none; font-size: 17px; flex: none; }
+    .dfa-body { max-width: 520px; margin: 0 auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+    .dfa-body form { display: flex; flex-direction: column; gap: 12px; }
+    .dfa-body form[hidden], .dfa-card[hidden] { display: none; }
+    .dfa-muted { font-size: 14px; color: #5B6B86; padding: 8px 2px; margin: 0; }
+
+    .dfa-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27, 42, 74, 0.08); padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+    .dfa-h { font-size: 17px; font-weight: 700; margin-bottom: 2px; }
+    .dfa-lbl { display: block; margin: 8px 0 4px; font-size: 12.5px; font-weight: 600; color: #5B6B86; }
+    .dfa-in { width: 100%; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; padding: 10px 14px; font-size: 15px; min-height: 48px; color: #1B2A4A; }
+    .dfa-in:focus { outline: 0; border-color: #FF6B35; }
+    .dfa-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .dfa-hint { margin: 6px 2px 0; font-size: 12.5px; line-height: 1.55; color: #5B6B86; }
+    .dfa-err { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: #B3261E; }
+    .dfa-test { margin: 8px 0 0; padding: 10px 14px; border-radius: 14px; background: #F1F5F9; font-size: 15px; font-weight: 600; }
+    .dfa-btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+    .dfa-cta { height: 52px; border: 0; border-radius: 16px; background: #FF6B35; color: #1B2A4A; font-weight: 700; font-size: 17px; width: 100%; cursor: pointer; }
+    .dfa-cta:disabled, .dfa-ghost:disabled, .dfa-add:disabled { opacity: 0.55; cursor: not-allowed; }
+    .dfa-ghost { height: 46px; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; color: #1B2A4A; font-weight: 600; font-size: 14.5px; padding: 0 14px; cursor: pointer; }
+    .dfa-add { height: 46px; border: 1.5px dashed #FF6B35; border-radius: 14px; background: #FFF6F1; font-weight: 700; font-size: 15px; color: #1B2A4A; cursor: pointer; margin-top: 10px; }
+    .dfa-red { color: #B3261E; }
+
+    .dfa-swrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 52px; font-size: 15px; font-weight: 600; }
+    .dfa-swrow small { display: block; font-size: 12.5px; font-weight: 500; color: #5B6B86; margin-top: 2px; }
+    .dfa-sw { width: 52px; height: 44px; border: 0; background: none; display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; flex: none; }
+    .dfa-sw i { width: 44px; height: 26px; border-radius: 13px; background: #B7C2D8; display: block; position: relative; transition: background 0.15s; }
+    .dfa-sw i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 10px; background: #fff; transition: transform 0.15s; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+    .dfa-sw[aria-checked='true'] i { background: #14A44D; }
+    .dfa-sw[aria-checked='true'] i::after { transform: translateX(18px); }
+    .dfa-sw:focus-visible i { outline: 2px solid #1B2A4A; outline-offset: 2px; }
+
+    .dfa-ov { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #EEF2F8; }
+    .dfa-ov-main { flex: 1; min-width: 0; }
+    .dfa-ov-name { font-size: 15px; font-weight: 600; }
+    .dfa-ov-sub { font-size: 12.5px; color: #5B6B86; }
+    .dfa-ov-fare { font-weight: 700; font-size: 16px; flex: none; }
+    .dfa-ov-del { width: 44px; height: 44px; border-radius: 12px; border: 0; background: #FDECEA; color: #B3261E; cursor: pointer; flex: none; font-size: 15px; }
+
+    @media (max-width: 380px) { .dfa-two { grid-template-columns: 1fr; } }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { UPAZILAS, getUnionsOfUpazilaName } from '../../data/feniAreas.js';
+
+    const CATEGORY = 'delivery';
+    const $ = (id) => document.getElementById(id);
+    const BN = '০১২৩৪৫৬৭৮৯';
+    const bn = (n) => String(n).replace(/\d/g, (d) => BN[d]);
+
+    function toast(msg, type) { if (window.showToast) window.showToast(msg, type); }
+
+    function showFieldErr(id, on) {
+      const el = document.querySelector('.field-error-msg[data-error-for="' + id + '"]');
+      if (el) el.classList.toggle('show', !!on);
+    }
+
+    function setSwitch(btn, on) { btn.setAttribute('aria-checked', on ? 'true' : 'false'); }
+    function getSwitch(btn) { return btn.getAttribute('aria-checked') === 'true'; }
+
+    const swEnabled = $('swEnabled');
+    const swFloor = $('swFloor');
+    [swEnabled, swFloor].forEach((b) => b.addEventListener('click', () => setSwitch(b, !getSwitch(b))));
+
+    // ফর্ম ফিল্ড ↔ কলাম
+    const FIELDS = [
+      { id: 'fBase', col: 'base_fare', min: 0, max: 5000 },
+      { id: 'fPerKm', col: 'per_km', min: 0, max: 1000 },
+      { id: 'fMin', col: 'min_fare', min: 0, max: 5000 },
+      { id: 'fRoad', col: 'road_factor', min: 1, max: 3 },
+      { id: 'fTown', col: 'town_radius_km', min: 0, max: 50 },
+      { id: 'fRound', col: 'round_to', min: 1, max: 100, int: true },
+      { id: 'fLat', col: 'zero_lat', min: -90, max: 90 },
+      { id: 'fLng', col: 'zero_lng', min: -180, max: 180 },
+    ];
+
+    function fillForm(s) {
+      setSwitch(swEnabled, s.is_enabled);
+      setSwitch(swFloor, s.enforce_floor);
+      FIELDS.forEach((f) => { $(f.id).value = String(s[f.col]); });
+      updateTest();
+    }
+
+    // টেস্ট বক্স: সার্ভারের একই সূত্র (ফর্মের বর্তমান সংখ্যা দিয়ে)
+    function updateTest() {
+      const out = $('testOut');
+      const km = Number($('fTestKm').value);
+      const base = Number($('fBase').value);
+      const per = Number($('fPerKm').value);
+      const min = Number($('fMin').value);
+      const road = Number($('fRoad').value);
+      const round = Number($('fRound').value);
+      if (!$('fTestKm').value || ![km, base, per, min, road, round].every(Number.isFinite) || round < 1) {
+        out.textContent = 'দূরত্ব লিখলে চার্জ দেখাবে (এখনকার ফর্মের সংখ্যা দিয়ে, সেভ না করেও)';
+        return;
+      }
+      const roadKm = km * road;
+      const raw = Math.max(min, base + roadKm * per);
+      const fare = Math.ceil(raw / round) * round;
+      out.textContent = bn(km) + ' কিমি সরলরেখা → রাস্তায় প্রায় ' + bn(Math.round(roadKm * 10) / 10) + ' কিমি → চার্জ ৳' + bn(fare);
+    }
+    ['fTestKm', 'fBase', 'fPerKm', 'fMin', 'fRoad', 'fRound'].forEach((id) => $(id).addEventListener('input', updateTest));
+
+    $('zeroDefaultBtn').addEventListener('click', () => {
+      $('fLat').value = '23.0159';
+      $('fLng').value = '91.3976';
+      showFieldErr('fLat', false);
+      showFieldErr('fLng', false);
+    });
+
+    $('zeroHereBtn').addEventListener('click', () => {
+      if (!navigator.geolocation) { toast('এই ডিভাইসে লোকেশন পাওয়া যায় না', 'error'); return; }
+      const btn = $('zeroHereBtn');
+      btn.disabled = true;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          $('fLat').value = String(Math.round(pos.coords.latitude * 1e6) / 1e6);
+          $('fLng').value = String(Math.round(pos.coords.longitude * 1e6) / 1e6);
+          showFieldErr('fLat', false);
+          showFieldErr('fLng', false);
+          btn.disabled = false;
+        },
+        () => { toast('লোকেশন পাওয়া যায়নি। পারমিশন দিন।', 'error'); btn.disabled = false; },
+        { enableHighAccuracy: true, timeout: 12000 }
+      );
+    });
+
+    // ===== সেভ =====
+    let saving = false;
+    $('saveBtn').addEventListener('click', async () => {
+      if (saving) return;
+      const errEl = $('formErr');
+      errEl.style.display = 'none';
+
+      if (typeof window.SFValidateForm === 'function') window.SFValidateForm($('fareForm'));
+
+      const payload = { is_enabled: getSwitch(swEnabled), enforce_floor: getSwitch(swFloor) };
+      let ok = true;
+      FIELDS.forEach((f) => {
+        const raw = $(f.id).value;
+        const n = Number(raw);
+        const bad = raw === '' || !Number.isFinite(n) || n < f.min || n > f.max || (f.int && !Number.isInteger(n));
+        showFieldErr(f.id, bad);
+        if (bad) ok = false;
+        payload[f.col] = n;
+      });
+      if (!ok) return;
+
+      saving = true;
+      const btn = $('saveBtn');
+      btn.disabled = true;
+      btn.textContent = 'সেভ হচ্ছে...';
+      const { error } = await supabase.from('delivery_fare_settings').update(payload).eq('category', CATEGORY);
+      saving = false;
+      btn.disabled = false;
+      btn.textContent = 'সেভ করুন';
+      if (error) {
+        errEl.textContent = 'সেভ হয়নি: ' + error.message;
+        errEl.style.display = '';
+        return;
+      }
+      toast('চার্জ সেটিং সেভ হয়েছে ✓', 'success');
+    });
+
+    // ===== ইউনিয়নের নির্ধারিত চার্জ =====
+    const ovUp = $('ovUpazila');
+    const ovUnion = $('ovUnion');
+
+    function fillOvUnions() {
+      ovUnion.textContent = '';
+      getUnionsOfUpazilaName(ovUp.value).forEach((u) => {
+        const o = document.createElement('option');
+        o.value = u;
+        o.textContent = u;
+        ovUnion.appendChild(o);
+      });
+    }
+
+    function initOvSelects() {
+      ovUp.textContent = '';
+      UPAZILAS.forEach((u) => {
+        const o = document.createElement('option');
+        o.value = u.name;
+        o.textContent = u.name;
+        ovUp.appendChild(o);
+      });
+      fillOvUnions();
+      ovUp.addEventListener('change', fillOvUnions);
+    }
+
+    async function loadOverrides() {
+      const list = $('ovList');
+      const { data, error } = await supabase
+        .from('delivery_fare_overrides')
+        .select('id, drop_union, fixed_fare, note')
+        .eq('category', CATEGORY)
+        .order('drop_union');
+      list.textContent = '';
+      if (error) {
+        const p = document.createElement('p');
+        p.className = 'dfa-muted';
+        p.textContent = 'তালিকা লোড করা যায়নি';
+        list.appendChild(p);
+        return;
+      }
+      if (!data.length) {
+        const p = document.createElement('p');
+        p.className = 'dfa-muted';
+        p.textContent = 'এখনো কোনো নির্ধারিত চার্জ নেই';
+        list.appendChild(p);
+        return;
+      }
+      data.forEach((row) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'dfa-ov';
+        const main = document.createElement('div');
+        main.className = 'dfa-ov-main';
+        const name = document.createElement('div');
+        name.className = 'dfa-ov-name';
+        name.textContent = row.drop_union;
+        main.appendChild(name);
+        if (row.note) {
+          const sub = document.createElement('div');
+          sub.className = 'dfa-ov-sub';
+          sub.textContent = row.note;
+          main.appendChild(sub);
+        }
+        const fare = document.createElement('div');
+        fare.className = 'dfa-ov-fare';
+        fare.textContent = '৳' + bn(Math.round(Number(row.fixed_fare)));
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'dfa-ov-del';
+        del.setAttribute('aria-label', row.drop_union + ' এর নির্ধারিত চার্জ মুছুন');
+        const ic = document.createElement('i');
+        ic.className = 'fas fa-trash';
+        del.appendChild(ic);
+        del.addEventListener('click', async () => {
+          if (!window.confirm(row.drop_union + ' এর নির্ধারিত চার্জ মুছবেন?')) return;
+          del.disabled = true;
+          const { error: e } = await supabase.from('delivery_fare_overrides').delete().eq('id', row.id);
+          if (e) { toast('মোছা যায়নি: ' + e.message, 'error'); del.disabled = false; return; }
+          loadOverrides();
+        });
+        wrap.appendChild(main);
+        wrap.appendChild(fare);
+        wrap.appendChild(del);
+        list.appendChild(wrap);
+      });
+    }
+
+    let addingOv = false;
+    $('ovAddBtn').addEventListener('click', async () => {
+      if (addingOv) return;
+      const err = $('ovErr');
+      err.style.display = 'none';
+      const union = ovUnion.value;
+      const fare = Number($('ovFare').value);
+      const note = $('ovNote').value.trim().slice(0, 120);
+      if (!union || !Number.isFinite(fare) || fare < 1 || fare > 10000) {
+        err.textContent = 'ইউনিয়ন বেছে ১–১০০০০ এর মধ্যে চার্জ লিখুন';
+        err.style.display = '';
+        return;
+      }
+      addingOv = true;
+      const btn = $('ovAddBtn');
+      btn.disabled = true;
+      const { error } = await supabase
+        .from('delivery_fare_overrides')
+        .upsert({ category: CATEGORY, drop_union: union, fixed_fare: fare, note: note || null }, { onConflict: 'category,drop_union' });
+      addingOv = false;
+      btn.disabled = false;
+      if (error) {
+        err.textContent = 'যোগ হয়নি: ' + error.message;
+        err.style.display = '';
+        return;
+      }
+      $('ovFare').value = '';
+      $('ovNote').value = '';
+      toast('নির্ধারিত চার্জ সেভ হয়েছে ✓', 'success');
+      loadOverrides();
+    });
+
+    // ===== শুরু =====
+    async function init() {
+      const { data, error } = await supabase
+        .from('delivery_fare_settings')
+        .select('*')
+        .eq('category', CATEGORY)
+        .maybeSingle();
+      const msg = $('loadMsg');
+      if (error || !data) {
+        msg.textContent = error ? 'সেটিং লোড করা যায়নি: ' + error.message : 'সেটিং সারি পাওয়া যায়নি';
+        return;
+      }
+      msg.hidden = true;
+      fillForm(data);
+      $('fareForm').hidden = false;
+      $('ovCard').hidden = false;
+      initOvSelects();
+      loadOverrides();
+    }
+
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      // শুধু অ্যাডমিন (RLS-ও একই)
+      if (e.detail && e.detail.role !== 'admin') {
+        window.location.href = '/admin';
+        return;
+      }
+      init();
+    });
+    initAdminGuard();
+  </script>
+</BaseLayout>

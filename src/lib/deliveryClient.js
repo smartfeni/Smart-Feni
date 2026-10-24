@@ -89,6 +89,11 @@ export function createServiceRequest({
   dropLocSource,
   pickupLocSource,
   orderItems,
+  // অটো চার্জ যাচাইয়ের কোঅর্ডিনেট (ঐচ্ছিক)
+  fareDropLat,
+  fareDropLng,
+  farePickupLat,
+  farePickupLng,
 }) {
   return callDeliveryApi('create-request', {
     category,
@@ -111,6 +116,10 @@ export function createServiceRequest({
     dropLocSource,
     pickupLocSource,
     orderItems,
+    fareDropLat,
+    fareDropLng,
+    farePickupLat,
+    farePickupLng,
   });
 }
 
