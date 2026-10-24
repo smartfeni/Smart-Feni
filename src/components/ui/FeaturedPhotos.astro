@@ -2,8 +2,9 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: ফিচার্ড ফটো স্লাইডশো
-// featured_photos টেবিল থেকে ক্রমানুসারে ছবি এনে প্রতি ১০ সেকেন্ডে
-// crossfade করে বদলায়। কোনো ছবি না থাকলে fallback static ছবি দেখায়।
+// featured_photos টেবিল থেকে ক্রমানুসারে ছবি এনে প্রতিটা ছবির নিজস্ব সময়ে (display_seconds, অ্যাডমিন ঠিক করে)
+// ডান দিক থেকে স্লাইড করে বদলায়; ইউজার বাঁ/ডানে সোয়াইপও করতে পারে।
+// কোনো ছবি না থাকলে fallback static ছবি দেখায়।
 // বাগফিক্স: আগে define:vars + dynamic import ব্যবহার হচ্ছিল যা Astro/Vite
 // bundle করে না, ফলে import silently fail করছিল — এখন static import
 //
@@ -82,6 +83,7 @@ try {
     box-shadow: 0 16px 40px rgba(27, 42, 74, 0.14), 0 0 0 1px rgba(255, 107, 53, 0.08);
     text-decoration: none;
     -webkit-tap-highlight-color: transparent;
+    touch-action: pan-y;
     transition: transform 0.18s ease, box-shadow 0.18s ease;
   }
 
@@ -123,11 +125,8 @@ try {
     position: absolute;
     inset: 0;
     opacity: 0;
-    transition: opacity 0.6s ease;
-  }
-
-  .photo-slide.visible {
-    opacity: 1;
+    transform: translate3d(100%, 0, 0);
+    will-change: transform;
   }
 
   @media (max-width: 480px) {
@@ -198,18 +197,24 @@ try {
 
     const { data: photos, error } = await supabase
       .from('featured_photos')
-      .select('storage_path, link_type, link_url')
+      .select('storage_path, link_type, link_url, display_seconds')
       .order('sort_order', { ascending: true });
 
     if (error || !photos || photos.length === 0) return; // fallback ছবিই থাকবে
 
     const urls = photos.map((p) => supabase.storage.from(BUCKET).getPublicUrl(p.storage_path).data.publicUrl);
     const links = photos.map((p) => normalizeLink(p.link_type, p.link_url));
+    // প্রতিটা ছবি কত মিলিসেকেন্ড দেখাবে (অ্যাডমিন ঠিক করে, ৩–৬০ সেকেন্ড; ভুল হলে ডিফল্ট)
+    const durations = photos.map((p) => {
+      const s = Number(p.display_seconds);
+      return (Number.isFinite(s) && s >= 3 && s <= 60 ? s : SLIDE_INTERVAL_MS / 1000) * 1000;
+    });
 
     let currentIndex = 0;
     let activeLayer = layerA;
     let inactiveLayer = layerB;
     let currentLink = null;
+    let suppressClick = false; // সোয়াইপের পর ভুলে লিংক খুলে যাওয়া ঠেকাতে
 
     // কার্ডের বর্তমান লিংক সেট — লিংক থাকলে পুরো কার্ডই ট্যাপযোগ্য
     function applyLink(link) {
@@ -259,6 +264,10 @@ try {
     }
 
     card.addEventListener('click', (e) => {
+      if (suppressClick) {
+        e.preventDefault();
+        return;
+      }
       if (!currentLink) {
         e.preventDefault();
         return;
@@ -289,27 +298,183 @@ try {
     // প্রথম ছবি সরাসরি দেখানো
     await preload(urls[0]);
     activeLayer.src = urls[0];
-    activeLayer.classList.add('visible');
+    activeLayer.style.opacity = '1';
+    activeLayer.style.transform = 'translate3d(0, 0, 0)';
     applyLink(links[0]);
 
     if (urls.length <= 1) return; // একটাই ছবি হলে স্লাইডশো লাগবে না
 
-    async function showNext() {
-      currentIndex = (currentIndex + 1) % urls.length;
-      const nextUrl = urls[currentIndex];
+    // ===== স্লাইড + সোয়াইপ =====
+    // অটো বদল: পরের ছবি ডান দিক থেকে ঢোকে। আঙুল বাঁয়ে টানলে পরের, ডানে টানলে আগের ছবি।
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const SLIDE_MS = reduceMotion ? 0 : 450;
+    const SWIPE_MIN_PX = 50;
+    const SWIPE_MIN_RATIO = 0.2;
+    let animating = false;
+    let timer = null;
+    let drag = null;
 
-      await preload(nextUrl);
-      inactiveLayer.src = nextUrl;
-      inactiveLayer.classList.add('visible');
-      activeLayer.classList.remove('visible');
-      applyLink(links[currentIndex]);
-
-      const temp = activeLayer;
-      activeLayer = inactiveLayer;
-      inactiveLayer = temp;
+    function setPos(layer, px, withTransition) {
+      layer.style.transition = withTransition
+        ? `transform ${SLIDE_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1)`
+        : 'none';
+      layer.style.transform = `translate3d(${px}px, 0, 0)`;
     }
 
-    setInterval(showNext, SLIDE_INTERVAL_MS);
+    function warmNeighbors() {
+      preload(urls[(currentIndex + 1) % urls.length]);
+      preload(urls[(currentIndex - 1 + urls.length) % urls.length]);
+    }
+
+    function clearTimer() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    }
+
+    // বর্তমান ছবির নিজস্ব সময় পার হলে পরের ছবি
+    function schedule() {
+      clearTimer();
+      if (urls.length <= 1 || document.hidden) return;
+      timer = setTimeout(() => {
+        timer = null;
+        if (drag && drag.locked) {
+          schedule();
+          return;
+        }
+        slideTo(1);
+      }, durations[currentIndex]);
+    }
+
+    async function slideTo(dir, dragDx = 0) {
+      if (animating) return;
+      animating = true;
+      clearTimer();
+
+      const nextIndex = (currentIndex + dir + urls.length) % urls.length;
+      await preload(urls[nextIndex]);
+
+      const w = card.clientWidth || 1;
+      const incoming = inactiveLayer;
+      const outgoing = activeLayer;
+
+      if (incoming.getAttribute('src') !== urls[nextIndex]) incoming.src = urls[nextIndex];
+      incoming.style.opacity = '1';
+      setPos(outgoing, dragDx, false);
+      setPos(incoming, dir * w + dragDx, false);
+      void incoming.offsetWidth; // শুরুর অবস্থান বসিয়ে তারপর অ্যানিমেশন
+      setPos(outgoing, -dir * w, true);
+      setPos(incoming, 0, true);
+
+      currentIndex = nextIndex;
+      activeLayer = incoming;
+      inactiveLayer = outgoing;
+      applyLink(links[currentIndex]);
+      warmNeighbors();
+
+      setTimeout(() => {
+        outgoing.style.opacity = '0';
+        setPos(outgoing, w, false);
+        animating = false;
+        schedule();
+      }, SLIDE_MS + 30);
+    }
+
+    // টানার সময় পাশের ছবি তৈরি রাখা (দিক বদলালে আবার)
+    function prepNeighbor(dir) {
+      if (drag.dir === dir) return;
+      drag.dir = dir;
+      const idx = (currentIndex + dir + urls.length) % urls.length;
+      inactiveLayer.src = urls[idx];
+      inactiveLayer.style.opacity = '1';
+    }
+
+    // যথেষ্ট টানা হয়নি — ছবি আগের জায়গায় ফিরে যায়
+    function snapBack(dir) {
+      animating = true;
+      const w = card.clientWidth || 1;
+      const neighbor = inactiveLayer;
+      setPos(activeLayer, 0, true);
+      setPos(neighbor, dir * w, true);
+      setTimeout(() => {
+        neighbor.style.opacity = '0';
+        setPos(neighbor, w, false);
+        animating = false;
+        schedule();
+      }, SLIDE_MS + 30);
+    }
+
+    function endDrag(e, cancelled) {
+      if (!drag || e.pointerId !== drag.id) return;
+      const d = drag;
+      drag = null;
+      card.classList.remove('dragging');
+      if (!d.locked) return; // সাধারণ ট্যাপ — লিংক নিজের মতো কাজ করবে
+
+      try { card.releasePointerCapture(e.pointerId); } catch (_) {}
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 350);
+
+      const w = card.clientWidth || 1;
+      const passed = !cancelled && Math.abs(d.dx) > Math.max(SWIPE_MIN_PX, w * SWIPE_MIN_RATIO);
+      if (passed) {
+        slideTo(d.dx < 0 ? 1 : -1, d.dx);
+      } else {
+        snapBack(d.dir || (d.dx < 0 ? 1 : -1));
+      }
+    }
+
+    card.addEventListener('pointerdown', (e) => {
+      if (animating) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dir: 0, locked: false };
+    });
+
+    card.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (animating) {
+        drag = null;
+        return;
+      }
+      const dx = e.clientX - drag.x;
+      const dy = e.clientY - drag.y;
+
+      if (!drag.locked) {
+        // উপর-নিচ টান হলে পেজ স্ক্রল করুক, আমরা ছেড়ে দিই
+        if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+          drag = null;
+          return;
+        }
+        if (Math.abs(dx) < 8) return;
+        drag.locked = true;
+        clearTimer();
+        try { card.setPointerCapture(e.pointerId); } catch (_) {}
+        card.classList.add('dragging');
+      }
+
+      drag.dx = dx;
+      const dir = dx < 0 ? 1 : -1;
+      prepNeighbor(dir);
+      const w = card.clientWidth || 1;
+      setPos(activeLayer, dx, false);
+      setPos(inactiveLayer, dir * w + dx, false);
+    });
+
+    card.addEventListener('pointerup', (e) => endDrag(e, false));
+    card.addEventListener('pointercancel', (e) => endDrag(e, true));
+    card.addEventListener('dragstart', (e) => e.preventDefault());
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        clearTimer();
+      } else if (!animating && !(drag && drag.locked)) {
+        schedule();
+      }
+    });
+
+    warmNeighbors();
+    schedule();
   }
 
   initSlideshow();
