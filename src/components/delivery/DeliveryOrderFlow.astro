@@ -311,6 +311,7 @@ const guideReview = [
     getDistrictBorder,
     getLabelPoints,
     getUnionsOfUpazilaName,
+    getUnionBn,
   } from '../../data/feniAreas.js';
   import {
     bn,
@@ -443,10 +444,36 @@ const guideReview = [
       maxZoom: 19,
     }).addTo(map);
     if (geo) {
+      // সব ইউনিয়নের পাতলা বর্ডার + নাম (জুম ১২+); ট্যাপ/ড্র্যাগে বাধা দেয় না
+      L.geoJSON(geo, {
+        interactive: false,
+        style: () => ({ color: '#1B2A4A', weight: 1, opacity: 0.35, fill: false }),
+      }).addTo(map);
+      const unionPts = getLabelPoints(geo).unions || {};
+      const unionLabels = L.layerGroup();
+      Object.keys(unionPts).forEach((en) => {
+        const chip = document.createElement('div');
+        chip.className = 'sfo-mapchip';
+        chip.textContent = getUnionBn(en) || en;
+        L.marker(unionPts[en], {
+          interactive: false,
+          keyboard: false,
+          icon: L.divIcon({ className: '', html: chip, iconSize: [0, 0], iconAnchor: [0, 0] }),
+        }).addTo(unionLabels);
+      });
+      const syncUnionLabels = () => {
+        if (map.getZoom() >= 12) {
+          if (!map.hasLayer(unionLabels)) unionLabels.addTo(map);
+        } else if (map.hasLayer(unionLabels)) {
+          map.removeLayer(unionLabels);
+        }
+      };
+      map.on('zoomend', syncUnionLabels);
       L.polyline(getDistrictBorder(geo), { color: '#FF6B35', weight: 3, opacity: 0.9, interactive: false }).addTo(map);
       map.fitBounds(getFeniBounds(geo, 0.02));
       map.setMaxBounds(getFeniBounds(geo, 0.06));
       map.setMinZoom(9);
+      syncUnionLabels();
     }
     const m = { kind, map, hl: L.layerGroup().addTo(map), pin: null, dot: null };
     map.on('click', (e) => onMapTap(kind, e.latlng.lat, e.latlng.lng));
