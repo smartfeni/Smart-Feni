@@ -43,6 +43,10 @@
 //   ট্যাবে থাকে, যাতে রোগী খুলেই সিরিয়াল নম্বর দেখতে পান
 // - ?serial=<id> দিয়ে এলে (নোটিফিকেশন থেকে) সংশ্লিষ্ট কার্ডে স্ক্রল ও হাইলাইট
 // - পেজের শিরোনাম: "আমার অর্ডার ও সিরিয়াল"
+//
+// আপডেট (শপ অর্ডার ক্যান্সেল): দোকান নিশ্চিত করার আগে (status = pending) কাস্টমার
+// "অর্ডার বাতিল করুন" চাপতে পারে (customer_cancel_shop_order RPC); দোকান মালিক
+// নোটিফিকেশন পায়। confirmed হয়ে গেলে বাটন থাকে না — দোকানে কল করতে হয়।
 // ============================================================
 
 export const prerender = false;
@@ -1313,7 +1317,27 @@ const ordersGuide = [
         ${renderStepper(order.status)}
         <div class="order-items-list">${itemsHtml}</div>
         ${contactHtml}
+        ${order.status === 'pending' ? `<button type="button" class="btn-cancel-request" data-shop-cancel="${esc(order.id)}"><i class="fas fa-ban"></i> অর্ডার বাতিল করুন</button>` : ''}
       `;
+
+      card.querySelector('[data-shop-cancel]')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const ok = await askConfirm({
+          title: 'অর্ডারটি বাতিল করবেন?',
+          text: 'দোকান নিশ্চিত করার আগে পর্যন্ত বাতিল করা যায়। বাতিল করলে দোকানকে জানানো হবে।',
+          okLabel: 'হ্যাঁ, বাতিল করুন',
+        });
+        if (!ok) return;
+        btn.disabled = true;
+        const { error } = await supabase.rpc('customer_cancel_shop_order', { p_order_id: order.id });
+        if (error) {
+          alert(error.message.includes('invalid_status')
+            ? 'দোকান ইতিমধ্যে অর্ডারটি নিশ্চিত করেছে। বাতিল করতে দোকানে কল করুন।'
+            : 'বাতিল করা যায়নি: ' + error.message);
+          btn.disabled = false;
+        }
+        refreshOrders();
+      });
 
       return card;
     }
