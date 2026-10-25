@@ -655,8 +655,16 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
       linkLabel.style.cssText = `font-size:0.78rem;font-weight:700;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${hasLink ? '#FF6B35' : '#B0BCCB'};`;
       linkLabel.textContent = (hasLink ? '🔗 ' : '') + describeLink(photo.link_type, photo.link_url);
 
+      const stats = clickStats[photo.id] || { total: 0, week: 0, today: 0 };
+      const clickLabel = document.createElement('div');
+      clickLabel.style.cssText = 'font-size:0.78rem;font-weight:700;margin-top:3px;color:#1B2A4A;';
+      clickLabel.textContent = hasLink
+        ? `👆 ক্লিক: আজ ${stats.today} · ৭ দিনে ${stats.week} · মোট ${stats.total}`
+        : '👆 লিংক নেই — ক্লিক গোনা হয় না';
+
       info.appendChild(orderLabel);
       info.appendChild(linkLabel);
+      info.appendChild(clickLabel);
 
       const controls = document.createElement('div');
       controls.style.cssText = 'display:flex;gap:6px;flex-shrink:0;';
@@ -849,6 +857,35 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
       loadPhotos();
     }
 
+    // প্রতি ছবির ক্লিক (events.event_name = 'featured_click', meta.photo_id) — সঠিক গণনা (count)
+    let clickStats = {};
+
+    async function countClicks(photoId, sinceIso) {
+      let q = supabase
+        .from('events')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_name', 'featured_click')
+        .contains('meta', { photo_id: photoId });
+      if (sinceIso) q = q.gte('created_at', sinceIso);
+      const { count, error } = await q;
+      return error ? 0 : (count || 0);
+    }
+
+    async function loadClickStats() {
+      clickStats = {};
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+      const startToday = new Date();
+      startToday.setHours(0, 0, 0, 0);
+      await Promise.all(photos.map(async (p) => {
+        const [total, week, today] = await Promise.all([
+          countClicks(p.id, null),
+          countClicks(p.id, weekAgo),
+          countClicks(p.id, startToday.toISOString()),
+        ]);
+        clickStats[p.id] = { total, week, today };
+      }));
+    }
+
     async function loadPhotos() {
       photosContainer.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:20px 0;">লোড হচ্ছে...</p>';
 
@@ -867,6 +904,7 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
       }
 
       photos = data || [];
+      await loadClickStats();
       photosContainer.innerHTML = '';
 
       if (photos.length === 0) {

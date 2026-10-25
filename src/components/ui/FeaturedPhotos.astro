@@ -145,6 +145,7 @@ try {
 
 <script>
   import { supabase } from '../../lib/supabase.js';
+  import { trackEvent } from '../../lib/analytics.js';
 
   const SLIDE_INTERVAL_MS = 10000;
   const ALLOWED_ACTIONS = ['post-flow', 'category-drawer', 'auth-login', 'auth-signup'];
@@ -167,6 +168,35 @@ try {
     }
 
     return null;
+  }
+
+  // ফিচার্ড ছবিতে ক্লিক গোনা: events টেবিলে 'featured_click' (meta: photo_id, link_type, link_url)।
+  // পেজ বদলে গেলেও রিকোয়েস্ট যাতে বাতিল না হয় তাই keepalive fetch; ব্যর্থ হলে সাধারণ trackEvent।
+  function trackFeaturedClick(photoId, link) {
+    if (!photoId || !link) return;
+    const params = { photo_id: photoId, link_type: link.type, link_url: link.url };
+    try {
+      if (typeof window.gtag === 'function') window.gtag('event', 'featured_click', params);
+    } catch (_) {}
+    try {
+      const base = supabase.supabaseUrl;
+      const key = supabase.supabaseKey;
+      if (base && key) {
+        fetch(base + '/rest/v1/events', {
+          method: 'POST',
+          keepalive: true,
+          headers: {
+            apikey: key,
+            Authorization: 'Bearer ' + key,
+            'Content-Type': 'application/json',
+            Prefer: 'return=minimal',
+          },
+          body: JSON.stringify({ event_name: 'featured_click', upazila: null, category: null, meta: params }),
+        }).catch(() => {});
+        return;
+      }
+    } catch (_) {}
+    trackEvent('featured_click', params);
   }
 
   async function runAction(action) {
@@ -197,13 +227,14 @@ try {
 
     const { data: photos, error } = await supabase
       .from('featured_photos')
-      .select('storage_path, link_type, link_url, display_seconds')
+      .select('id, storage_path, link_type, link_url, display_seconds')
       .order('sort_order', { ascending: true });
 
     if (error || !photos || photos.length === 0) return; // fallback ছবিই থাকবে
 
     const urls = photos.map((p) => supabase.storage.from(BUCKET).getPublicUrl(p.storage_path).data.publicUrl);
     const links = photos.map((p) => normalizeLink(p.link_type, p.link_url));
+    const ids = photos.map((p) => p.id);
     // প্রতিটা ছবি কত মিলিসেকেন্ড দেখাবে (অ্যাডমিন ঠিক করে, ৩–৬০ সেকেন্ড; ভুল হলে ডিফল্ট)
     const durations = photos.map((p) => {
       const s = Number(p.display_seconds);
@@ -272,6 +303,7 @@ try {
         e.preventDefault();
         return;
       }
+      trackFeaturedClick(ids[currentIndex], currentLink);
       if (currentLink.type === 'action') {
         e.preventDefault();
         runAction(currentLink.url);
@@ -282,6 +314,7 @@ try {
     card.addEventListener('keydown', (e) => {
       if (currentLink?.type === 'action' && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
+        trackFeaturedClick(ids[currentIndex], currentLink);
         runAction(currentLink.url);
       }
     });
