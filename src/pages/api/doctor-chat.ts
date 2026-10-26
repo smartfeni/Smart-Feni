@@ -29,7 +29,7 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
-import { geminiUrl } from '../../lib/geminiConfig.js';
+import { geminiUrl, GEMINI_FALLBACK_MODEL } from '../../lib/geminiConfig.js';
 import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 // ===== কনফিগ (পরে সংখ্যা বদলাতে শুধু এখানে হাত দিন) =====
@@ -356,7 +356,8 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     for (let attempt = 1; attempt <= 2 && !parsed; attempt++) {
       let geminiRes: Response;
       try {
-        geminiRes = await fetch(geminiUrl(apiKey), {
+        // ২য় চেষ্টায় (মূল মডেল 503/টাইমআউট দিলে) ব্যাকআপ মডেল, সেট না থাকলে একই মডেল
+        geminiRes = await fetch(geminiUrl(apiKey, attempt === 1 ? undefined : GEMINI_FALLBACK_MODEL), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),

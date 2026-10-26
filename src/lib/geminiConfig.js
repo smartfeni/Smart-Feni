@@ -5,6 +5,11 @@
 
 export const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 
-export function geminiUrl(apiKey) {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+// ব্যাকআপ মডেল (ঐচ্ছিক): মূল মডেল 503/টাইমআউট দিলে ২য় চেষ্টায় এটা ব্যবহার হয়।
+// Vercel env GEMINI_FALLBACK_MODEL বসালে সেই মডেল; না বসালে ২য় চেষ্টা একই মডেলেই হয়।
+export const GEMINI_FALLBACK_MODEL = (import.meta.env.GEMINI_FALLBACK_MODEL || '').trim() || undefined;
+
+// model না দিলে মূল মডেল
+export function geminiUrl(apiKey, model) {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model || GEMINI_MODEL}:generateContent?key=${apiKey}`;
 }

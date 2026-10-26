@@ -267,12 +267,17 @@
 </style>
 
 <script>
+  import { supabase } from "../lib/supabase.js";
+
   type Sender = "bot" | "user";
   interface StoredMsg {
     sender: Sender;
     text: string;
     time: number;
     feedback?: "up" | "down" | null;
+    // AI-র তৈরি ম্যানুয়াল অর্ডারের ড্রাফট (ইউজার কনফার্ম বাটনে জমা দেয়)
+    draft?: any;
+    draftState?: "pending" | "done" | "cancelled";
   }
 
   // সাইটের মূল ব্যবহার শেখানোর জন্য প্রাসঙ্গিক quick reply (আইকন + লেবেল)
@@ -281,6 +286,7 @@
     { icon: "🩸", label: "ব্লাড ডোনার", query: "ব্লাড ডোনার কীভাবে খুঁজব?" },
     { icon: "📍", label: "আমার উপজেলা", query: "আমার উপজেলায় কী সার্ভিস আছে?" },
     { icon: "👤", label: "অ্যাকাউন্ট", query: "অ্যাকাউন্ট কীভাবে খুলব?" },
+    { icon: "🛵", label: "অর্ডার দিন", query: "আমি একটা ডেলিভারি অর্ডার দিতে চাই" },
     { icon: "☎️", label: "যোগাযোগ", query: "যোগাযোগ নম্বর কী?" },
   ];
 
@@ -312,6 +318,12 @@
     quickBtn:
       "flex:0 0 auto;scroll-snap-align:start;display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;white-space:nowrap;background:#F6FAF7;color:#14532D;border:1px solid #d7ecdc;border-radius:20px;padding:8px 13px;cursor:pointer;",
     quickIcon: "font-size:14px;line-height:1;",
+    draftRow: "display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;",
+    draftPrimary:
+      "background:#1F9254;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;",
+    draftGhost:
+      "background:#fff;color:#14532D;border:1px solid #BFE6CC;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;",
+    draftNote: "font-size:12px;color:#9aa0aa;margin-top:6px;",
   };
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -368,6 +380,89 @@
       return { clean, label: match[1].trim(), href: match[2].trim() };
     }
 
+    async function getToken(): Promise<string> {
+      try {
+        const { data } = await supabase.auth.getSession();
+        return data?.session?.access_token || "";
+      } catch {
+        return "";
+      }
+    }
+
+    // অর্ডার ড্রাফটের কনফার্ম / বদলাব বাটন
+    function renderDraftActions(row: HTMLElement, msg: StoredMsg, index: number) {
+      if (!msg.draft) return;
+
+      if (msg.draftState !== "pending") {
+        const note = document.createElement("div");
+        note.setAttribute("style", STYLE.draftNote);
+        note.textContent = msg.draftState === "done" ? "অর্ডার জমা হয়েছে" : "এই ড্রাফট বাতিল করা হয়েছে";
+        row.appendChild(note);
+        return;
+      }
+
+      const wrap = document.createElement("div");
+      wrap.setAttribute("style", STYLE.draftRow);
+
+      const okBtn = document.createElement("button");
+      okBtn.type = "button";
+      okBtn.setAttribute("style", STYLE.draftPrimary);
+      okBtn.textContent = "✅ অর্ডার কনফার্ম করুন";
+
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.setAttribute("style", STYLE.draftGhost);
+      editBtn.textContent = "✏️ বদলাতে চাই";
+
+      okBtn.addEventListener("click", async () => {
+        if (okBtn.disabled) return;
+        okBtn.disabled = true;
+        editBtn.disabled = true;
+        okBtn.textContent = "জমা হচ্ছে...";
+        try {
+          const token = await getToken();
+          const res = await fetch("/api/chat-order", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ draft: msg.draft }),
+          });
+          const data = await res.json();
+          if (data?.ok) {
+            msg.draftState = "done";
+            store[index] = msg;
+            saveStore();
+            renderAll();
+            addMessage(data.message, "bot");
+          } else {
+            okBtn.disabled = false;
+            editBtn.disabled = false;
+            okBtn.textContent = "✅ অর্ডার কনফার্ম করুন";
+            addMessage(data?.message || "দুঃখিত, অর্ডারটি জমা দেওয়া যায়নি। আবার চেষ্টা করুন।", "bot");
+          }
+        } catch {
+          okBtn.disabled = false;
+          editBtn.disabled = false;
+          okBtn.textContent = "✅ অর্ডার কনফার্ম করুন";
+          addMessage("দুঃখিত, ইন্টারনেট সংযোগে সমস্যা হচ্ছে। আবার চেষ্টা করুন।", "bot");
+        }
+      });
+
+      editBtn.addEventListener("click", () => {
+        msg.draftState = "cancelled";
+        store[index] = msg;
+        saveStore();
+        renderAll();
+        addMessage("ঠিক আছে, কোন তথ্যটা বদলাতে চান বলুন।", "bot");
+      });
+
+      wrap.appendChild(okBtn);
+      wrap.appendChild(editBtn);
+      row.appendChild(wrap);
+    }
+
     function renderMessage(msg: StoredMsg, index: number) {
       const row = document.createElement("div");
       row.setAttribute("style", msg.sender === "user" ? STYLE.rowUser : STYLE.rowBot);
@@ -382,6 +477,7 @@
         const { clean, label, href } = extractLink(msg.text);
         bubble.textContent = clean;
         row.appendChild(bubble);
+        renderDraftActions(row, msg, index);
 
         if (label && href) {
           const card = document.createElement("a");
@@ -465,8 +561,14 @@
       messages.scrollTop = messages.scrollHeight;
     }
 
-    function addMessage(text: string, sender: Sender) {
-      const msg: StoredMsg = { sender, text, time: Date.now(), feedback: null };
+    function addMessage(text: string, sender: Sender, draft?: any) {
+      const msg: StoredMsg = {
+        sender,
+        text,
+        time: Date.now(),
+        feedback: null,
+        ...(draft ? { draft, draftState: "pending" as const } : {}),
+      };
       store.push(msg);
       saveStore();
       renderMessage(msg, store.length - 1);
@@ -528,16 +630,22 @@
       showTyping();
 
       try {
+        // লগইন থাকলে টোকেন পাঠানো হয় — সার্ভার যাচাই করে অর্ডার-সুবিধা চালু করে
+        const token = await getToken();
         const res = await fetch("/api/chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({ message: text, history: historyPayload }),
         });
         const data = await res.json();
         hideTyping();
         addMessage(
           data?.reply || "দুঃখিত, উত্তর দিতে সমস্যা হয়েছে। আবার চেষ্টা করুন।",
-          "bot"
+          "bot",
+          data?.order_draft
         );
       } catch (err) {
         hideTyping();
