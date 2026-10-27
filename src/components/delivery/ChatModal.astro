@@ -45,6 +45,7 @@
     </div>
 
     <div class="cm-legend" id="cmLegend" style="display:none;"></div>
+    <div class="cm-deal" id="cmDeal" style="display:none;"></div>
 
     <div class="cm-messages" id="cmMessages">
       <p class="cm-loading" id="cmLoading">লোড হচ্ছে...</p>
@@ -111,6 +112,128 @@
   // এডমিন রিভিউ মোডের রোল তথ্য (না থাকলে null)
   let roleInfo = null;
 
+  // ডিল চ্যাট (channel = 'admin'): deal = 'customer' | 'admin' | null
+  let dealMode = null;
+  let activeChannelName = 'rider';
+  const dealEl = document.getElementById('cmDeal');
+  const toBnNum = (n) => Number(n).toLocaleString('bn-BD');
+
+  function dealNote(text) {
+    const p = document.createElement('p');
+    p.className = 'cm-deal-note';
+    p.textContent = text;
+    dealEl.appendChild(p);
+  }
+
+  function dealButton(label, cls, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cm-deal-btn ' + cls;
+    b.textContent = label;
+    b.addEventListener('click', async () => {
+      if (b.disabled) return;
+      b.disabled = true;
+      try { await onClick(); } finally { b.disabled = false; }
+    });
+    return b;
+  }
+
+  async function respondToOffer(accept) {
+    const { data, error } = await supabase.rpc('customer_respond_admin_offer', {
+      p_request_id: activeRequestId,
+      p_accept: accept,
+    });
+    if (error || !data?.ok) window.showToast?.('এখন সাড়া দেওয়া যাচ্ছে না', 'error');
+    await renderDealBar();
+  }
+
+  async function sendOffer(priceInput) {
+    const price = Number(priceInput.value);
+    if (!price || price <= 0) {
+      window.showToast?.('সঠিক চার্জ লিখুন', 'error');
+      return;
+    }
+    const { data, error } = await supabase.rpc('admin_send_deal_offer', {
+      p_request_id: activeRequestId,
+      p_price: price,
+    });
+    if (error || !data?.ok) {
+      window.showToast?.('প্রস্তাব পাঠানো যায়নি', 'error');
+    } else {
+      priceInput.value = '';
+    }
+    await renderDealBar();
+  }
+
+  async function renderDealBar() {
+    if (!dealEl) return;
+    if (!dealMode || !activeRequestId) {
+      dealEl.style.display = 'none';
+      dealEl.innerHTML = '';
+      return;
+    }
+    const reqId = activeRequestId;
+    const { data: r } = await supabase
+      .from('delivery_requests')
+      .select('status, publish_status, admin_offer_price, admin_offer_status')
+      .eq('id', reqId)
+      .maybeSingle();
+    if (reqId !== activeRequestId) return;
+
+    dealEl.innerHTML = '';
+    if (!r) {
+      dealEl.style.display = 'none';
+      return;
+    }
+
+    const live = r.status === 'open' && (r.publish_status === 'pending' || r.publish_status === 'hold');
+    inputRowEl.style.display = live ? 'flex' : 'none';
+    const price = r.admin_offer_price ? toBnNum(r.admin_offer_price) : '';
+
+    if (!live) {
+      dealNote('এই অর্ডারের ডিল চ্যাট শেষ হয়েছে');
+      dealEl.style.display = 'flex';
+      return;
+    }
+
+    if (dealMode === 'customer') {
+      if (r.admin_offer_status === 'offered') {
+        dealNote('💰 অ্যাডমিনের ডেলিভারি চার্জ প্রস্তাব: ৳' + price);
+        const row = document.createElement('div');
+        row.className = 'cm-deal-row';
+        row.appendChild(dealButton('নিলাম', 'ok', () => respondToOffer(true)));
+        row.appendChild(dealButton('নিলাম না', 'no', () => respondToOffer(false)));
+        dealEl.appendChild(row);
+      } else if (r.admin_offer_status === 'accepted') {
+        dealNote('✅ আপনি ৳' + price + ' মেনে নিয়েছেন। অ্যাডমিন রাইডার ঠিক করবেন।');
+      } else {
+        dealEl.style.display = 'none';
+        return;
+      }
+    } else {
+      if (r.admin_offer_status === 'offered') {
+        dealNote('চলমান প্রস্তাব ৳' + price + ' (কাস্টমারের উত্তরের অপেক্ষায়)');
+      } else if (r.admin_offer_status === 'accepted') {
+        dealNote('✅ কাস্টমার ৳' + price + ' মেনেছেন। এবার রাইডার ঠিক করুন।');
+      } else if (r.admin_offer_status === 'declined') {
+        dealNote('কাস্টমার প্রস্তাব নাকচ করেছেন');
+      }
+      if (r.admin_offer_status !== 'accepted') {
+        const row = document.createElement('div');
+        row.className = 'cm-deal-row';
+        const priceInput = document.createElement('input');
+        priceInput.type = 'number';
+        priceInput.min = '1';
+        priceInput.inputMode = 'numeric';
+        priceInput.placeholder = 'ডেলিভারি চার্জ ৳';
+        row.appendChild(priceInput);
+        row.appendChild(dealButton('প্রস্তাব পাঠান', 'go', () => sendOffer(priceInput)));
+        dealEl.appendChild(row);
+      }
+    }
+    dealEl.style.display = 'flex';
+  }
+
   function formatTime(iso) {
     return new Date(iso).toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' });
   }
@@ -151,6 +274,7 @@
     if (!roleInfo) return null;
     if (roleInfo.customerId && msg.sender_id === roleInfo.customerId) return 'customer';
     if (roleInfo.riderId && msg.sender_id === roleInfo.riderId) return 'rider';
+    if (msg.channel === 'admin') return 'admin';
     return null;
   }
 
@@ -160,13 +284,15 @@
 
     if (roleInfo) {
       // এডমিন রিভিউ: কাস্টমার বাঁয়ে (সাদা), রাইডার ডানে (কমলা)
-      bubble.className = `cm-msg ${role === 'rider' ? 'cm-msg-mine cm-role-rider' : 'cm-msg-theirs cm-role-customer'}`;
+      bubble.className = `cm-msg ${role === 'rider' ? 'cm-msg-mine cm-role-rider' : role === 'admin' ? 'cm-msg-theirs cm-role-admin' : 'cm-msg-theirs cm-role-customer'}`;
       const roleEl = document.createElement('span');
       roleEl.className = 'cm-msg-role';
       if (role === 'rider') {
         roleEl.textContent = `রাইডার${roleInfo.riderName ? ' · ' + roleInfo.riderName : ''}`;
       } else if (role === 'customer') {
         roleEl.textContent = `কাস্টমার${roleInfo.customerName ? ' · ' + roleInfo.customerName : ''}`;
+      } else if (role === 'admin') {
+        roleEl.textContent = 'অ্যাডমিন';
       } else {
         roleEl.textContent = 'অজানা';
       }
@@ -231,6 +357,14 @@
     cleanupChannel();
     activeRequestId = null;
     roleInfo = null;
+    dealMode = null;
+    activeChannelName = 'rider';
+    if (dealEl) {
+      dealEl.style.display = 'none';
+      dealEl.innerHTML = '';
+    }
+    cameraBtn.style.display = '';
+    galleryBtn.style.display = '';
   }
 
   function renderLegend() {
@@ -259,13 +393,20 @@
     customerName = '',
     riderId = null,
     riderName = '',
+    channel = 'rider',
+    deal = null,
   }) {
     if (!requestId) return;
 
     activeRequestId = requestId;
+    // এডমিন রিভিউ (readOnly) সব চ্যানেল দেখে; ডিল চ্যাটে শুধু টেক্সট (ছবি বাটন লুকানো)
+    activeChannelName = readOnly ? 'all' : channel;
+    dealMode = !readOnly && channel === 'admin' ? deal : null;
+    cameraBtn.style.display = channel === 'admin' ? 'none' : '';
+    galleryBtn.style.display = channel === 'admin' ? 'none' : '';
     otherNameEl.textContent = otherPartyName || 'চ্যাট';
     inputRowEl.style.display = readOnly ? 'none' : 'flex';
-    headerSubEl.textContent = readOnly ? 'এডমিন রিভিউ (শুধু দেখা)' : 'সরাসরি মেসেজ';
+    headerSubEl.textContent = readOnly ? 'এডমিন রিভিউ (শুধু দেখা)' : (channel === 'admin' ? 'অ্যাডমিনের সাথে ডিল' : 'সরাসরি মেসেজ');
 
     // রোল লেবেল শুধু readOnly মোডে এবং অন্তত একজনের id থাকলে
     roleInfo = readOnly && (customerId || riderId)
@@ -282,7 +423,7 @@
     const { data: { user } } = await supabase.auth.getUser();
     currentUserId = user?.id || null;
 
-    const { data: messages, error } = await getChatMessages(requestId);
+    const { data: messages, error } = await getChatMessages(requestId, activeChannelName);
     loadingEl.style.display = 'none';
     messagesEl.innerHTML = '';
 
@@ -298,14 +439,16 @@
     // readOnly (এডমিন রিভিউ) মোডে মার্ক-রিড বা রিয়েলটাইম সাবস্ক্রিপশন
     // দরকার নাই — এডমিন শুধু ডিসপিউটের সময় একবার হিস্ট্রি দেখবে
     cleanupChannel();
+    renderDealBar();
     if (!readOnly) {
-      markMessagesRead(requestId);
+      markMessagesRead(requestId, activeChannelName);
       activeChannel = subscribeToChatMessages(requestId, (newMsg) => {
         appendMessage(newMsg);
+        if (dealMode) renderDealBar();
         if (newMsg.sender_id !== currentUserId) {
-          markMessagesRead(requestId);
+          markMessagesRead(requestId, activeChannelName);
         }
-      });
+      }, activeChannelName);
     }
 
     inputEl.value = '';
@@ -324,7 +467,7 @@
     inputEl.value = '';
     sendBtn.disabled = true;
 
-    const { error } = await sendChatMessage(activeRequestId, text);
+    const { error } = await sendChatMessage(activeRequestId, text, null, activeChannelName);
 
     sendBtn.disabled = false;
     if (error) {
@@ -382,7 +525,7 @@
       return;
     }
 
-    const { error: sendError } = await sendChatMessage(activeRequestId, '', url);
+    const { error: sendError } = await sendChatMessage(activeRequestId, '', url, activeChannelName);
     cameraBtn.disabled = false;
     galleryBtn.disabled = false;
 
@@ -497,6 +640,60 @@
     cursor: pointer;
     font-size: 0.95rem;
     flex-shrink: 0;
+  }
+
+  /* ডিল চ্যাট বার (অ্যাডমিন প্রস্তাব / কাস্টমার উত্তর) */
+  .cm-deal {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 14px;
+    background: #FFF7ED;
+    border-bottom: 1.5px solid #FED7AA;
+    flex-shrink: 0;
+  }
+
+  .cm-deal-note {
+    margin: 0;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #7C2D12;
+  }
+
+  .cm-deal-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .cm-deal-row input {
+    flex: 1;
+    min-width: 0;
+    border: 1.5px solid #E5EAF0;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    color: #1B2A4A;
+  }
+
+  .cm-deal-btn {
+    min-height: 42px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 12px;
+    font-weight: 800;
+    font-size: 0.85rem;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .cm-deal-btn.ok { background: #16A34A; color: #fff; flex: 1; }
+  .cm-deal-btn.no { background: #fff; color: #B3261E; border: 1.5px solid #E5EAF0; flex: 1; }
+  .cm-deal-btn.go { background: #FF6B35; color: #fff; }
+  .cm-deal-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .cm-role-admin .cm-msg-role {
+    color: #B45309;
   }
 
   /* এডমিন রিভিউ: কে কাস্টমার, কে রাইডার — হেডারের নিচের লেজেন্ড */

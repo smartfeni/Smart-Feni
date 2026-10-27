@@ -30,12 +30,14 @@ async function withSignedImage(row) {
 }
 
 // একটা রিকোয়েস্টের সব মেসেজ আনা (পুরনো থেকে নতুন, সময়ক্রমে)
-export async function getChatMessages(requestId) {
-  const { data, error } = await supabase
+export async function getChatMessages(requestId, channel = 'rider') {
+  let query = supabase
     .from('delivery_chat_messages')
-    .select('id, request_id, sender_id, message, image_url, is_read, created_at')
-    .eq('request_id', requestId)
-    .order('created_at', { ascending: true });
+    .select('id, request_id, sender_id, message, image_url, is_read, created_at, channel')
+    .eq('request_id', requestId);
+  // channel: 'rider' (ডিফল্ট, হিরো চ্যাট) | 'admin' (অ্যাডমিন ডিল চ্যাট) | 'all' (এডমিন রিভিউ)
+  if (channel !== 'all') query = query.eq('channel', channel);
+  const { data, error } = await query.order('created_at', { ascending: true });
 
   if (error) {
     return { data: [], error: error.message };
@@ -47,7 +49,7 @@ export async function getChatMessages(requestId) {
 
 // নতুন মেসেজ পাঠানো — টেক্সট, ছবি, বা দুটোই একসাথে হতে পারে
 // (কমপক্ষে একটা থাকতে হবে — DB constraint দিয়ে নিশ্চিত করা)
-export async function sendChatMessage(requestId, message, imageUrl = null) {
+export async function sendChatMessage(requestId, message, imageUrl = null, channel = 'rider') {
   const trimmed = (message || '').trim();
   if (!trimmed && !imageUrl) {
     return { error: 'মেসেজ বা ছবি — অন্তত একটা দিতে হবে' };
@@ -63,6 +65,7 @@ export async function sendChatMessage(requestId, message, imageUrl = null) {
     sender_id: user.id,
     message: trimmed || null,
     image_url: imageUrl,
+    channel,
   });
 
   if (error) {
@@ -96,7 +99,7 @@ export async function uploadChatImage(requestId, file) {
 }
 
 // অন্য পক্ষের পাঠানো মেসেজগুলো "পড়া হয়েছে" মার্ক করা (চ্যাট খোলার সময় কল হবে)
-export async function markMessagesRead(requestId) {
+export async function markMessagesRead(requestId, channel = 'rider') {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: 'লগইন করা নেই' };
 
@@ -104,6 +107,7 @@ export async function markMessagesRead(requestId) {
     .from('delivery_chat_messages')
     .update({ is_read: true })
     .eq('request_id', requestId)
+    .eq('channel', channel)
     .neq('sender_id', user.id)
     .eq('is_read', false);
 
@@ -134,9 +138,9 @@ export async function getUnreadCount(requestId) {
 // onInsert(row) কল হবে (row.image_url আগে থেকেই signed করা)। রিটার্ন হওয়া
 // channel টা caller-কেই পরে supabase.removeChannel(channel) দিয়ে ক্লিন-আপ
 // করতে হবে (মডাল বন্ধ হওয়ার সময়), নাহলে মেমরি লিক হবে।
-export function subscribeToChatMessages(requestId, onInsert) {
+export function subscribeToChatMessages(requestId, onInsert, msgChannel = 'rider') {
   const channel = supabase
-    .channel(`delivery-chat-${requestId}`)
+    .channel(`delivery-chat-${requestId}-${msgChannel}`)
     .on(
       'postgres_changes',
       {
@@ -146,6 +150,8 @@ export function subscribeToChatMessages(requestId, onInsert) {
         filter: `request_id=eq.${requestId}`,
       },
       async (payload) => {
+        // শুধু এই চ্যানেলের মেসেজ (rider / admin) দেখাবে
+        if (msgChannel !== 'all' && (payload.new?.channel || 'rider') !== msgChannel) return;
         const row = await withSignedImage(payload.new);
         onInsert(row);
       }

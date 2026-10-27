@@ -1465,6 +1465,26 @@ const ordersGuide = [
       `;
     }
 
+    // অ্যাডমিন ডিল বক্স (পাবলিশের অপেক্ষায়/হোল্ড অর্ডারে) — চ্যাট বাটন + অফার থাকলে নিলাম/নিলাম না
+    function dealBlockHtml(req) {
+      const price = req.admin_offer_price ? toBn(Number(req.admin_offer_price)) : '';
+      const noteStyle = 'margin:0 0 8px;font-weight:800;color:#7C2D12;font-size:0.9rem;';
+      const chatBtn = `<button type="button" class="order-contact-btn order-deal-chat-btn" data-chat-request-id="${req.id}"><i class="fas fa-comment-dots"></i> অ্যাডমিনের সাথে কথা বলুন</button>`;
+      let inner = '';
+      if (req.admin_offer_status === 'offered') {
+        inner = `<p style="${noteStyle}">💰 অ্যাডমিনের ডেলিভারি চার্জ প্রস্তাব: ৳${price}</p>
+          <div style="display:flex;gap:8px;margin-bottom:8px;">
+            <button type="button" data-action="deal-accept" style="flex:1;min-height:44px;border:0;border-radius:12px;background:#16A34A;color:#fff;font-weight:800;font-family:inherit;cursor:pointer;">নিলাম</button>
+            <button type="button" data-action="deal-decline" style="flex:1;min-height:44px;border:1.5px solid #E5EAF0;border-radius:12px;background:#fff;color:#B3261E;font-weight:800;font-family:inherit;cursor:pointer;">নিলাম না</button>
+          </div>`;
+      } else if (req.admin_offer_status === 'accepted') {
+        inner = `<p style="${noteStyle}">✅ আপনি ৳${price} মেনে নিয়েছেন। অ্যাডমিন রাইডার ঠিক করছেন।</p>`;
+      } else {
+        inner = `<p style="${noteStyle}">অ্যাডমিন চার্জ নিয়ে আপনার সাথে কথা বলতে পারেন। আপনিও চাইলে লিখতে পারেন।</p>`;
+      }
+      return `<div class="deal-box" style="background:#FFF7ED;border:1.5px solid #FED7AA;border-radius:16px;padding:12px;margin:10px 0;">${inner}${chatBtn}</div>`;
+    }
+
     function renderDeliveryCard(req) {
       const card = document.createElement('div');
       card.className = 'order-card';
@@ -1496,6 +1516,10 @@ const ordersGuide = [
           <div class="hu-trip-stop">${esc(dropText) || '—'}<small>${req.category === 'ride' ? 'গন্তব্য' : 'ডেলিভারি'}</small></div>
         </div>
       `;
+
+      if ((req.status === 'open' || req.status === 'negotiating') && (req.publish_status === 'pending' || req.publish_status === 'hold')) {
+        bodyHtml += dealBlockHtml(req);
+      }
 
       if (req.status === 'open' || req.status === 'negotiating') {
         const minutesLeft = formatMinutesLeft(req.expires_at);
@@ -1747,6 +1771,41 @@ const ordersGuide = [
         window.openDisputeModal({ requestId: req.id, onSuccess: refreshOrders });
       });
 
+      // অ্যাডমিন ডিল চ্যাট
+      card.querySelector('.order-deal-chat-btn')?.addEventListener('click', (e) => {
+        window.openChatModal({
+          requestId: e.currentTarget.dataset.chatRequestId,
+          otherPartyName: 'অ্যাডমিন',
+          channel: 'admin',
+          deal: 'customer',
+        });
+      });
+
+      ['deal-accept', 'deal-decline'].forEach((act) => {
+        card.querySelector(`[data-action="${act}"]`)?.addEventListener('click', async (e) => {
+          const accept = act === 'deal-accept';
+          const btn = e.currentTarget;
+          if (btn.disabled) return;
+          const ok = await askConfirm({
+            title: accept ? 'প্রস্তাবে রাজি?' : 'প্রস্তাব নাকচ করবেন?',
+            text: accept
+              ? 'রাজি হলে অ্যাডমিন একজন রাইডার ঠিক করে দেবেন।'
+              : 'নাকচ করলে অর্ডারটি কিছুক্ষণ পর সাধারণ মার্কেটে যাবে, রাইডাররা অফার দিতে পারবে।',
+            okLabel: accept ? 'হ্যাঁ, রাজি' : 'হ্যাঁ, নাকচ',
+          });
+          if (!ok) return;
+          btn.disabled = true;
+          const { data, error } = await supabase.rpc('customer_respond_admin_offer', {
+            p_request_id: req.id,
+            p_accept: accept,
+          });
+          if (error || !data?.ok) {
+            alert('এখন সাড়া দেওয়া যায়নি, পেজ রিফ্রেশ হচ্ছে');
+          }
+          refreshOrders();
+        });
+      });
+
       // চ্যাট
       card.querySelector('.order-chat-btn')?.addEventListener('click', (e) => {
         const btn = e.currentTarget;
@@ -1960,6 +2019,18 @@ const ordersGuide = [
 
       await expireRequests();
       await loadOrders(currentUserId);
+
+      // নোটিফিকেশন ডিপলিংক: /my-orders?req=<id> → অ্যাডমিন ডিল চ্যাট খুলে দেয়
+      try {
+        const reqParam = new URLSearchParams(location.search).get('req');
+        if (reqParam) {
+          const dealBtn = document.querySelector(`.order-deal-chat-btn[data-chat-request-id="${CSS.escape(reqParam)}"]`);
+          if (dealBtn) {
+            dealBtn.scrollIntoView({ block: 'center' });
+            dealBtn.click();
+          }
+        }
+      } catch (_) { /* ডিপলিংক ব্যর্থ হলে চুপচাপ ইগনোর */ }
 
       refreshTimer = setInterval(() => {
         loadOrders(currentUserId, { silent: true });
