@@ -1405,6 +1405,7 @@ const riderGuideSteps = [
           ` : ''}
           ${(req.status === 'delivered' || (req.status === 'confirmed' && isPickupDone)) ? `<button class="btn-confirm-delivery" data-request-id="${huEsc(req.id)}"><i class="fas fa-check"></i> ডেলিভারি সম্পন্ন করুন</button>` : ''}
           <button class="dispute-link" data-request-id="${huEsc(req.id)}">সমস্যা হয়েছে? রিপোর্ট করুন</button>
+          ${(req.status === 'confirmed' && !isPickupDone) ? `<button type="button" class="btn-release-order" data-request-id="${huEsc(req.id)}" style="display:block;width:100%;margin-top:8px;min-height:44px;background:#fff;border:1.5px solid #E5EAF0;border-radius:12px;color:#B3261E;font-weight:800;font-family:inherit;cursor:pointer;"><i class="fas fa-rotate-left"></i> এই অর্ডার ছেড়ে দিন</button>` : ''}
         `;
 
         // ঠিকানা/নির্দেশনায় ম্যাপ লিংক থাকলে "নেভিগেট করুন" বাটন
@@ -1439,6 +1440,37 @@ const riderGuideSteps = [
 
         card.querySelector('.dispute-link')?.addEventListener('click', () => {
           window.openDisputeModal({ requestId: req.id, onSuccess: loadRiderSection });
+        });
+
+        // অর্ডার ছেড়ে দেওয়া: শুধু পিকআপের আগে; অর্ডার আবার মার্কেটে যায়, কাস্টমার ও অ্যাডমিন জানতে পারে
+        card.querySelector('.btn-release-order')?.addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          if (btn.disabled) return;
+          const reason = (window.prompt('কেন অর্ডারটি ছেড়ে দিচ্ছেন? (কমপক্ষে ৩ অক্ষর লিখুন)') || '').trim().slice(0, 300);
+          if (!reason) return;
+          if (reason.length < 3) {
+            alert('কারণ কমপক্ষে ৩ অক্ষর লিখুন।');
+            return;
+          }
+          if (!window.confirm('অর্ডারটি ছেড়ে দিলে এটা আবার মার্কেটে যাবে এবং আপনি আর এটা করতে পারবেন না। নিশ্চিত?')) return;
+          btn.disabled = true;
+          const { data, error } = await supabase.rpc('rider_release_order', {
+            p_request_id: req.id,
+            p_reason: reason,
+          });
+          if (error || !data?.ok) {
+            const msgs = {
+              already_picked_up: 'পিকআপ হয়ে গেছে, এখন আর ছাড়া যাবে না।',
+              not_releasable: 'অর্ডারটি এখন ছাড়ার মতো অবস্থায় নেই।',
+              reason_required: 'কারণ কমপক্ষে ৩ অক্ষর লিখুন।',
+            };
+            alert(msgs[data?.reason] || 'এখন ছাড়া যাচ্ছে না, আবার চেষ্টা করুন।');
+            btn.disabled = false;
+            loadRiderSection();
+            return;
+          }
+          alert('অর্ডারটি ছেড়ে দেওয়া হয়েছে, আবার মার্কেটে ফিরেছে।');
+          loadRiderSection();
         });
 
         // নতুন ফ্লো: কাস্টমারের "রিসিভড" ধাপ নেই — পিকআপের পর হিরো নিজেই সম্পন্ন করে।
