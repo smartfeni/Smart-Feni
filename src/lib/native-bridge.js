@@ -316,7 +316,7 @@ export async function initBackButtonHandler() {
   // Deep link (অ্যাপ চালু থাকা অবস্থায়): WhatsApp/SMS/Facebook থেকে লিংকে ট্যাপ
   App.addListener('appUrlOpen', (data) => {
     handleDeepLink(data);
-  });
+  })?.catch?.(() => {});
 
   App.addListener('backButton', ({ canGoBack }) => {
     if (closeTopOverlay()) return;
@@ -326,7 +326,7 @@ export async function initBackButtonHandler() {
     } else {
       App.minimizeApp();
     }
-  });
+  })?.catch?.(() => {});
 }
 
 // ---------------- Dashboard Redirect on App Open ----------------
@@ -517,7 +517,7 @@ async function initNotificationHandlers() {
 
     // ১) ট্যাপ হ্যান্ডলার — অ্যাপ বন্ধ থাকা অবস্থায় ট্যাপ করে খুললেও ইভেন্টটা
     //    listener বসার সাথে সাথে পৌঁছায়
-    PushNotifications.addListener('pushNotificationActionPerformed', handleNotificationTap);
+    PushNotifications.addListener('pushNotificationActionPerformed', handleNotificationTap)?.catch?.(() => {});
 
     // ১.৫) লগইন/লগআউটে টোকেন সিঙ্ক (আলাদা try — এটা ফেইল করলে চ্যানেল তৈরি আটকাবে না)
     try {
