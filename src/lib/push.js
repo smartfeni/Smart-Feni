@@ -185,10 +185,16 @@ async function subscribeWeb() {
 
 // ------------------ মূল এন্ট্রি পয়েন্ট ------------------
 export async function subscribeToPush() {
-  if (isNativeApp()) {
-    return subscribeNative();
+  // কলার (যেমন NotificationPermissionPrompt) await ছাড়া ডাকে — তাই এখানে কোনো এরর
+  // বাইরে যেতে দেওয়া হয় না। পুরনো নেটিভ বিল্ডে প্লাগিন না থাকলেও unhandled rejection হবে না।
+  try {
+    if (isNativeApp()) {
+      return await subscribeNative();
+    }
+    return await subscribeWeb();
+  } catch (err) {
+    return { success: false, error: String((err && err.message) || err) };
   }
-  return subscribeWeb();
 }
 
 // ------------------ Native লাইফসাইকেল (লগইন / লগআউট / টোকেন রিফ্রেশ) ------------------
