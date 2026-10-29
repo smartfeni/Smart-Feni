@@ -26,6 +26,7 @@ const refreshTimers = new Map();
 
 let started = false;
 let channel = null;
+let channelPromise = null; // চ্যানেল তৈরি ঠিক একবার হওয়ার গার্ড (একসাথে অনেক বাটন decorate হলেও)
 let myUserId = null;
 
 const BADGE_STYLE = [
@@ -85,8 +86,19 @@ function scheduleRefresh(requestId, delay) {
   refreshTimers.set(requestId, setTimeout(() => refresh(requestId), delay));
 }
 
-async function ensureChannel() {
-  if (channel) return;
+function ensureChannel() {
+  // channel পরে বসে (await-এর পর), তাই আগে promise ধরে রাখি — না হলে একই
+  // 'sf-chat-badges' চ্যানেলে subscribe()-এর পর আবার .on() জুড়ে এরর হয়।
+  if (!channelPromise) {
+    channelPromise = createChannel().catch(() => {
+      channelPromise = null; // ফেইল করলে পরের decorate-এ আবার চেষ্টা
+      channel = null;
+    });
+  }
+  return channelPromise;
+}
+
+async function createChannel() {
   const { data: { user } } = await supabase.auth.getUser();
   myUserId = user?.id || null;
 

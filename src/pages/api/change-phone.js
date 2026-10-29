@@ -108,10 +108,28 @@ export async function POST({ request }) {
     });
 
     if (updateError) {
-      const message = updateError.message.includes('already been registered')
+      // নম্বর আগে থেকে অন্য অ্যাকাউন্টে থাকলে auth কখনো স্পষ্ট বার্তা দেয়, কখনো জেনেরিক
+      // "Error updating user" — তাই কোড + profiles-এ অন্য ইউজারের একই নম্বর, দুটোই দেখি।
+      let isDuplicate =
+        updateError.code === 'email_exists' ||
+        /already been registered|email_exists/i.test(String(updateError.message || ''));
+      if (!isDuplicate) {
+        try {
+          const { data: other } = await supabaseAdmin
+            .from('profiles')
+            .select('id')
+            .eq('phone', newPhone)
+            .neq('id', callerUser.id)
+            .limit(1);
+          isDuplicate = !!(other && other.length);
+        } catch (_) {
+          // চেক ফেইল করলে আগের মতোই জেনেরিক পথে যাবে
+        }
+      }
+      const message = isDuplicate
         ? 'এই ফোন নম্বরে আগে থেকেই অ্যাকাউন্ট আছে'
         : 'নম্বর বদলাতে সমস্যা হয়েছে: ' + updateError.message;
-      if (!updateError.message.includes('already been registered')) {
+      if (!isDuplicate) {
         await reportServerError(reportDb, {
           route: '/api/change-phone',
           action: 'change_phone_auth_update',
