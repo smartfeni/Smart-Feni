@@ -36,6 +36,8 @@ export const prerender = false;
 const VALID_VEHICLE_TYPES = ['bike', 'cycle', 'cng', 'any'];
 const VALID_CATEGORIES = ['delivery', 'ride'];
 const EXPIRY_HOURS = 1;
+const MIN_SCHEDULE_MIN = 30; // শিডিউল অর্ডার অন্তত ৩০ মিনিট পরের
+const MAX_SCHEDULE_MIN = 24 * 60; // সর্বোচ্চ ২৪ ঘণ্টার মধ্যে
 const ROUTE = '/api/delivery/create-request';
 const WHATSAPP_NOTE = 'জরুরি প্রয়োজনে WhatsApp করুন: +8801816355833';
 
@@ -92,9 +94,36 @@ export async function POST({ request }) {
       fareDropLng,
       farePickupLat,
       farePickupLng,
+      // কখন লাগবে: এখনই (isAsap=true) / পরে (isAsap=false + scheduledAt) — বাধ্যতামূলক
+      isAsap,
+      scheduledAt,
     } = await request.json();
 
     const finalCategory = VALID_CATEGORIES.includes(category) ? category : 'delivery';
+
+    // ===== কখন লাগবে: এখনই / পরে (বাধ্যতামূলক) =====
+    const timeError = (error, code) =>
+      new Response(JSON.stringify({ error, code }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    if (typeof isAsap !== 'boolean') {
+      return timeError('কখন লাগবে — এখনই নাকি পরে — বাছাই করুন', 'TIME_REQUIRED');
+    }
+    let scheduledDate = null;
+    if (isAsap === false) {
+      scheduledDate = scheduledAt ? new Date(scheduledAt) : null;
+      if (!scheduledDate || Number.isNaN(scheduledDate.getTime())) {
+        return timeError('পরে লাগলে কখন লাগবে সেই সময় বাছাই করুন', 'TIME_REQUIRED');
+      }
+      const diffMin = (scheduledDate.getTime() - Date.now()) / 60000;
+      if (diffMin < MIN_SCHEDULE_MIN - 2) {
+        return timeError('সময় অন্তত ৩০ মিনিট পরের হতে হবে', 'SCHEDULE_TOO_SOON');
+      }
+      if (diffMin > MAX_SCHEDULE_MIN + 5) {
+        return timeError('সময় ২৪ ঘণ্টার মধ্যে হতে হবে', 'SCHEDULE_TOO_FAR');
+      }
+    }
 
     // ===== কুলডাউন (আপাতত বন্ধ) =====
     // বারবার ক্যান্সেল করা কাস্টমারদের জন্য সাময়িক ব্লক লজিক ছিল এখানে,
@@ -253,7 +282,10 @@ export async function POST({ request }) {
       );
     }
 
-    const expiresAt = new Date(Date.now() + EXPIRY_HOURS * 60 * 60 * 1000).toISOString();
+    // এখনই অর্ডার: ১ ঘণ্টা মেয়াদ। শিডিউল অর্ডার: মেয়াদ = শিডিউল সময় (রাইডার না পেলে তখন বাতিল)
+    const expiresAt = (scheduledDate
+      ? scheduledDate
+      : new Date(Date.now() + EXPIRY_HOURS * 60 * 60 * 1000)).toISOString();
 
     const { data, error: insertError } = await client
       .from('delivery_requests')
@@ -280,6 +312,8 @@ export async function POST({ request }) {
         customer_asking_price: price,
         status: 'open',
         expires_at: expiresAt,
+        is_asap: isAsap,
+        scheduled_at: scheduledDate ? scheduledDate.toISOString() : null,
         ...extraColumns,
       })
       .select()
@@ -354,9 +388,14 @@ export async function POST({ request }) {
       .filter(Boolean);
 
     const categoryLabel = finalCategory === 'ride' ? 'রাইড' : 'ডেলিভারি';
+    const whenText = scheduledDate
+      ? '🕐 ' + scheduledDate.toLocaleString('bn-BD', {
+          timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+        })
+      : '⚡ এখনই';
     await sendTelegramBroadcast(
       chatIds,
-      `🔔 নতুন ${categoryLabel} রিকোয়েস্ট!\n📍 ${upazila}\n💰 প্রস্তাবিত মূল্য: ৳${price}\n\nঅ্যাপে গিয়ে অফার দিন।`
+      `🔔 নতুন ${categoryLabel} রিকোয়েস্ট!\n📍 ${upazila}\n💰 প্রস্তাবিত মূল্য: ৳${price}\n${whenText}\n\nঅ্যাপে গিয়ে অফার দিন।`
     );
 
     // একই ম্যাচিং হিরোদের in-app + push নোটিফিকেশন (Telegram লিংক করা
@@ -366,7 +405,7 @@ export async function POST({ request }) {
     const { client: adminClient } = getAdminClient();
     if (adminClient && matchingHeroProfileIds.length > 0) {
       await sendBulkNotifications(adminClient, matchingHeroProfileIds, () => ({
-        message: `নতুন ${categoryLabel} রিকোয়েস্ট এসেছে — ${upazila}, প্রস্তাবিত মূল্য ৳${price}`,
+        message: `নতুন ${categoryLabel} রিকোয়েস্ট এসেছে — ${upazila}, প্রস্তাবিত মূল্য ৳${price} · ${whenText}`,
         category: 'rider_offer',
         actionUrl: finalCategory === 'ride' ? '/ride-hero' : '/delivery-hero',
         relatedEntityType: 'delivery_request',

@@ -94,6 +94,9 @@ export function createServiceRequest({
   fareDropLng,
   farePickupLat,
   farePickupLng,
+  // কখন লাগবে (বাধ্যতামূলক): এখনই (isAsap=true) / পরে (isAsap=false + scheduledAt ISO)
+  isAsap,
+  scheduledAt,
 }) {
   return callDeliveryApi('create-request', {
     category,
@@ -120,6 +123,8 @@ export function createServiceRequest({
     fareDropLng,
     farePickupLat,
     farePickupLng,
+    isAsap,
+    scheduledAt,
   });
 }
 

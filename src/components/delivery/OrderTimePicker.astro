@@ -1,0 +1,151 @@
+---
+// path: src/components/delivery/OrderTimePicker.astro
+//
+// "কখন লাগবে?" — এখনই / পরে (বাধ্যতামূলক, আগে থেকে কিছু সিলেক্ট থাকে না)।
+// "পরে" বাছলে আজ/কাল + সময়। সময় অন্তত ৩০ মিনিট পরের ও সর্বোচ্চ ২৪ ঘণ্টার মধ্যে।
+// ব্যবহার: <OrderTimePicker id="sfo" /> তারপর JS-এ window.SFOrderTime.get('sfo')
+//   → { ok, isAsap, scheduledAt, msg } (ok=false হলে এরর নিজেই দেখায়), reset('sfo')।
+const { id = 'sfot' } = Astro.props;
+---
+
+<div class="sfot" data-sfot={id}>
+  <div class="sfot-label">কখন লাগবে?<span class="required-mark">*</span></div>
+  <div class="sfot-opts" role="group" aria-label="কখন লাগবে">
+    <button type="button" class="sfot-opt" data-when="now" aria-pressed="false">
+      <b>⚡ এখনই</b><small>এখনই রাইডার খুঁজুন</small>
+    </button>
+    <button type="button" class="sfot-opt" data-when="later" aria-pressed="false">
+      <b>🕐 পরে</b><small>সময় ঠিক করুন</small>
+    </button>
+  </div>
+  <div class="sfot-later" hidden>
+    <div class="sfot-days">
+      <button type="button" class="sfot-day active" data-day="0">আজ</button>
+      <button type="button" class="sfot-day" data-day="1">কাল</button>
+    </div>
+    <input type="time" class="sfot-time" aria-label="কখন লাগবে সেই সময়" />
+    <p class="sfot-hint">অন্তত ৩০ মিনিট পরের সময় দিন (সর্বোচ্চ ২৪ ঘণ্টার মধ্যে)।</p>
+  </div>
+  <p class="sfot-err" hidden></p>
+</div>
+
+<style is:global>
+  .sfot [hidden] { display: none !important; }
+  .sfot-label { font-weight: 800; color: #1B2A4A; margin-bottom: 8px; font-size: 0.95rem; }
+  .sfot-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sfot-opt {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    padding: 12px; min-height: 56px; background: #fff; border: 1.5px solid #E5EAF0;
+    border-radius: 14px; font-family: inherit; color: #1B2A4A; cursor: pointer; text-align: left;
+  }
+  .sfot-opt b { font-size: 0.95rem; }
+  .sfot-opt small { font-size: 0.74rem; color: #6B7A90; }
+  .sfot-opt.active { border-color: #FF6B35; background: #FFF6F1; }
+  .sfot-later { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .sfot-days { display: flex; gap: 8px; }
+  .sfot-day {
+    flex: 1; min-height: 42px; background: #fff; border: 1.5px solid #E5EAF0; border-radius: 12px;
+    font-family: inherit; font-weight: 700; color: #1B2A4A; cursor: pointer;
+  }
+  .sfot-day.active { border-color: #FF6B35; background: #FFF6F1; }
+  .sfot-time {
+    width: 100%; min-height: 46px; padding: 0 12px; border: 1.5px solid #E5EAF0; border-radius: 12px;
+    font-family: inherit; font-size: 1rem; color: #1B2A4A; background: #fff; box-sizing: border-box;
+  }
+  .sfot-hint { margin: 0; font-size: 0.78rem; color: #6B7A90; }
+  .sfot-err { margin: 8px 0 0; font-size: 0.82rem; font-weight: 700; color: #B3261E; }
+</style>
+
+<script>
+  (function () {
+    if (window.SFOrderTime) return;
+    const MIN_MIN = 30;
+    const MAX_MIN = 24 * 60;
+
+    function rootOf(el) {
+      if (!el) return null;
+      if (typeof el === 'string') return document.querySelector('[data-sfot="' + el + '"]');
+      return el;
+    }
+
+    function showErr(r, msg) {
+      const e = r.querySelector('.sfot-err');
+      if (!e) return;
+      if (msg) { e.textContent = msg; e.hidden = false; } else { e.hidden = true; }
+    }
+
+    function compute(r) {
+      const when = r.dataset.when || '';
+      if (!when) return { ok: false, msg: 'কখন লাগবে — এখনই নাকি পরে — বাছাই করুন' };
+      if (when === 'now') return { ok: true, isAsap: true, scheduledAt: null };
+      const t = r.querySelector('.sfot-time').value;
+      if (!t) return { ok: false, msg: 'কখন লাগবে সেই সময় বাছাই করুন' };
+      const parts = t.split(':');
+      const d = new Date();
+      d.setDate(d.getDate() + Number(r.dataset.day || 0));
+      d.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+      const diff = (d.getTime() - Date.now()) / 60000;
+      if (diff < MIN_MIN) return { ok: false, msg: 'সময় অন্তত ৩০ মিনিট পরের হতে হবে' };
+      if (diff > MAX_MIN) return { ok: false, msg: 'সময় ২৪ ঘণ্টার মধ্যে হতে হবে' };
+      return { ok: true, isAsap: false, scheduledAt: d.toISOString() };
+    }
+
+    document.addEventListener('click', function (e) {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      const opt = t.closest('.sfot-opt');
+      const day = t.closest('.sfot-day');
+      if (opt) {
+        const r = opt.closest('.sfot');
+        r.dataset.when = opt.dataset.when;
+        r.querySelectorAll('.sfot-opt').forEach(function (b) {
+          b.classList.toggle('active', b === opt);
+          b.setAttribute('aria-pressed', b === opt ? 'true' : 'false');
+        });
+        r.querySelector('.sfot-later').hidden = opt.dataset.when !== 'later';
+        if (opt.dataset.when === 'later' && r.dataset.day === undefined) r.dataset.day = '0';
+        showErr(r, '');
+        return;
+      }
+      if (day) {
+        const r = day.closest('.sfot');
+        r.dataset.day = day.dataset.day;
+        r.querySelectorAll('.sfot-day').forEach(function (b) { b.classList.toggle('active', b === day); });
+        showErr(r, '');
+      }
+    });
+
+    document.addEventListener('input', function (e) {
+      const t = e.target;
+      if (t && t.classList && t.classList.contains('sfot-time')) {
+        const r = t.closest('.sfot');
+        if (r) showErr(r, '');
+      }
+    });
+
+    window.SFOrderTime = {
+      get: function (el) {
+        const r = rootOf(el);
+        if (!r) return { ok: false, msg: 'সময়ের অপশন পাওয়া যায়নি' };
+        const v = compute(r);
+        showErr(r, v.ok ? '' : v.msg);
+        if (!v.ok && r.scrollIntoView) r.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return v;
+      },
+      reset: function (el) {
+        const r = rootOf(el);
+        if (!r) return;
+        delete r.dataset.when;
+        r.dataset.day = '0';
+        r.querySelector('.sfot-time').value = '';
+        r.querySelector('.sfot-later').hidden = true;
+        r.querySelectorAll('.sfot-opt').forEach(function (b) {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        });
+        r.querySelectorAll('.sfot-day').forEach(function (b) { b.classList.toggle('active', b.dataset.day === '0'); });
+        showErr(r, '');
+      },
+    };
+  })();
+</script>

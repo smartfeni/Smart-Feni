@@ -75,7 +75,7 @@ export async function POST({ request }) {
     // জেতা হিরোকে জানানো + যারা হেরেছে তাদেরও জানানো
     const { data: reqRow, error: reqRowError } = await client
       .from('delivery_requests')
-      .select('final_price, category, accepted_rider_id, delivery_riders!delivery_requests_accepted_rider_id_fkey(profile_id, profiles!delivery_riders_profile_id_fkey(telegram_chat_id))')
+      .select('final_price, category, is_asap, scheduled_at, accepted_rider_id, delivery_riders!delivery_requests_accepted_rider_id_fkey(profile_id, profiles!delivery_riders_profile_id_fkey(telegram_chat_id))')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -93,11 +93,16 @@ export async function POST({ request }) {
 
     const winnerProfileId = reqRow?.delivery_riders?.profile_id;
     const winnerChatId = reqRow?.delivery_riders?.profiles?.telegram_chat_id;
+    const whenText = reqRow && reqRow.is_asap === false && reqRow.scheduled_at
+      ? '🕐 ' + new Date(reqRow.scheduled_at).toLocaleString('bn-BD', {
+          timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+        })
+      : '⚡ এখনই';
 
     if (winnerChatId) {
       await sendTelegramMessage(
         winnerChatId,
-        `🎉 কাস্টমার আপনার প্রস্তাব নিশ্চিত করেছে! মূল্য: ৳${reqRow.final_price}\n\nঅ্যাপে গিয়ে বিস্তারিত দেখুন।`
+        `🎉 কাস্টমার আপনার প্রস্তাব নিশ্চিত করেছে! মূল্য: ৳${reqRow.final_price}\n${whenText}\n\nঅ্যাপে গিয়ে বিস্তারিত দেখুন।`
       );
     }
 
@@ -126,7 +131,7 @@ export async function POST({ request }) {
 
     await sendTelegramBroadcast(
       losingChatIds,
-      `দুঃখিত, কাস্টমার আরেকজন হিরোর প্রস্তাব নিশ্চিত করেছে। পরের বার আরেকটু কম দাম দিয়ে চেষ্টা করুন!`
+      `দুঃখিত, কাস্টমার আরেকজন হিরোর প্রস্তাব নিশ্চিত করেছে। পরের অর্ডারে আবার চেষ্টা করুন!`
     );
 
     // জেতা হিরো + হারা হিরোদের in-app/push নোটিফিকেশন — best-effort
@@ -138,7 +143,7 @@ export async function POST({ request }) {
       if (winnerProfileId) {
         await sendNotification(adminClient, {
           userId: winnerProfileId,
-          message: `🎉 কাস্টমার আপনার প্রস্তাব নিশ্চিত করেছে! মূল্য: ৳${reqRow.final_price}`,
+          message: `🎉 কাস্টমার আপনার প্রস্তাব নিশ্চিত করেছে! মূল্য: ৳${reqRow.final_price} · ${whenText}`,
           category: 'rider_offer',
           actionUrl,
           relatedEntityType: 'delivery_request',
@@ -154,7 +159,7 @@ export async function POST({ request }) {
         .filter(Boolean);
 
       await sendBulkNotifications(adminClient, losingRiderProfileIds, () => ({
-        message: `দুঃখিত, কাস্টমার আরেকজন হিরোর প্রস্তাব নিশ্চিত করেছেন — পরের বার আরেকটু কম দাম দিয়ে চেষ্টা করুন!`,
+        message: `দুঃখিত, কাস্টমার আরেকজন হিরোর প্রস্তাব নিশ্চিত করেছেন — পরের অর্ডারে আবার চেষ্টা করুন!`,
         category: 'rider_offer',
         actionUrl,
         relatedEntityType: 'delivery_request',
