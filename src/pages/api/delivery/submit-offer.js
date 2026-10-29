@@ -12,7 +12,8 @@
 //
 // শর্ত:
 // - প্রথম অফার (এখনো কোনো হিরো অফার নাই) — কাস্টমারের প্রস্তাবিত দামের চেয়ে বেশি হতে হবে
-// - পরবর্তী অফার — বর্তমান সর্বনিম্ন হিরো অফারের চেয়ে কমপক্ষে ৳১ কম হতে হবে (আন্ডারকাট)
+// - এক হিরো = এক অফার: এই রিকোয়েস্টে আগে অফার দিয়ে থাকলে (withdraw করা ছাড়া) আর দেওয়া যাবে না
+//   (কাস্টমার বারবার দাম বদলাতে পারে, হিরো শুধু ১টাই অফার দেয়; আন্ডারকাট নিয়ম আর নেই)
 // একই হিরো একই রিকোয়েস্টে আগে অফার দিয়ে থাকলে upsert (নতুন রো না বানিয়ে
 // পুরনোটাই আপডেট হয়, created_at রিসেট হয় — withdraw উইন্ডো নতুন করে শুরু)।
 // ============================================================
@@ -143,47 +144,39 @@ export async function POST({ request }) {
       );
     }
 
-    // বর্তমান সর্বনিম্ন রাইডার অফার বের করা
-    const { data: activeOffers, error: activeOffersError } = await client
+    // এক হিরো = এক অফার: নিজের আগের অফার থাকলে (withdraw করা ছাড়া) নতুন অফার ব্লক।
+    // (হিরো শুধু নিজের অফার দেখতে পারে — RLS — তাই নিজের রো-ই যাচাই হচ্ছে, অন্যের নয়)
+    const { data: myExisting, error: myExistingError } = await client
       .from('delivery_offers')
-      .select('offer_price')
+      .select('id, status')
       .eq('request_id', requestId)
-      .eq('status', 'active');
+      .eq('rider_profile_id', user.id)
+      .maybeSingle();
 
-    if (activeOffersError) {
-      // শুধু রিপোর্ট — আচরণ অপরিবর্তিত (ফেইল হলে লিস্ট ফাঁকা ধরা হয়, মানে আন্ডারকাট চেক এড়িয়ে যায়)
+    if (myExistingError) {
       await reportServerError(reportClient, {
         route: ROUTE,
-        action: 'delivery_offer_active_query',
-        title: 'হিরো অফার: বর্তমান অফার তালিকা পড়া ব্যর্থ',
-        message: activeOffersError.message,
-        code: activeOffersError.code,
+        action: 'delivery_offer_own_lookup',
+        title: 'হিরো অফার: নিজের আগের অফার পড়া ব্যর্থ',
+        message: myExistingError.message,
+        code: myExistingError.code,
         status: 200,
       });
     }
 
-    const lowestOffer = (activeOffers || []).reduce(
-      (min, o) => (o.offer_price < min ? o.offer_price : min),
-      Infinity
-    );
-
-    if (lowestOffer === Infinity) {
-      // এখনো কোনো হিরো অফার দেয়নি — এটাই প্রথম কাউন্টার-অফার, যেটা
-      // অবশ্যই কাস্টমারের প্রস্তাবিত দামের চেয়ে বেশি হতে হবে (কাস্টমারের
-      // দাম যথেষ্ট মনে না হলে হিরো বেশি দাম চাইতে পারে, এরপর অন্য হিরোরা
-      // একে অপরকে আন্ডারকাট করে কমাতে থাকবে)
-      const customerAsking = Number(reqRow.customer_asking_price);
-      if (price <= customerAsking) {
-        return new Response(
-          JSON.stringify({ error: `প্রথম অফার অবশ্যই কাস্টমারের প্রস্তাবিত দামের (৳${customerAsking}) চেয়ে বেশি হতে হবে` }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-    } else if (price > lowestOffer - 1) {
-      // অন্তত একটা হিরো অফার আগে থেকেই আছে — নতুন অফার অবশ্যই তার
-      // চেয়ে কমপক্ষে ৳১ কম হতে হবে (হিরোরা একে অপরকে আন্ডারকাট করবে)
+    if (myExisting && myExisting.status !== 'withdrawn') {
       return new Response(
-        JSON.stringify({ error: `বর্তমান সর্বনিম্ন রাইডার অফারের (৳${lowestOffer}) চেয়ে কমপক্ষে ৳১ কম দিতে হবে` }),
+        JSON.stringify({ error: 'তুমি এই রিকোয়েস্টে আগেই অফার দিয়েছ। হিরো একটা রিকোয়েস্টে শুধু ১টা অফার দিতে পারে।' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // অফার অবশ্যই কাস্টমারের প্রস্তাবিত দামের চেয়ে বেশি হতে হবে
+    // (কম বা সমান দামে হিরো "৳X-এ নিন" বাটনে সরাসরি নিতে পারে)
+    const customerAsking = Number(reqRow.customer_asking_price);
+    if (price <= customerAsking) {
+      return new Response(
+        JSON.stringify({ error: `অফার অবশ্যই কাস্টমারের প্রস্তাবিত দামের (৳${customerAsking}) চেয়ে বেশি হতে হবে` }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
