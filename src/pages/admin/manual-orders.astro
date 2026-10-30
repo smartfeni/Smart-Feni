@@ -51,6 +51,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <input id="searchIn" type="search" placeholder="নাম, ফোন, অর্ডার নম্বর বা ঠিকানা" autocomplete="off" aria-label="অর্ডার খুঁজুন" />
         </label>
         <div class="mo-chips" id="viewChips"></div>
+        <div id="counterBox"></div>
         <div id="orderList"><p class="mo-muted">লোড হচ্ছে...</p></div>
       </div>
 
@@ -162,8 +163,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <p class="mo-err" id="advErr" style="display:none;"></p>
 
           <div class="mo-sec">রাইডার ও দোকানের টাকা</div>
-          <label class="mo-lbl" for="f_rider">রাইডার</label>
-          <select class="mo-in" id="f_rider"></select>
+          <label class="mo-lbl">রাইডার</label>
+          <p class="mo-muted" id="riderInfoBox" style="margin:0 0 6px;">রাইডার ঠিক হয়নি। সেভ করার পর কার্ডের "রাইডার ঠিক করুন" বাটন চাপুন।</p>
+          <select class="mo-in" id="f_rider" style="display:none;"></select>
 
           <label class="mo-lbl" for="f_pay">রাইডারকে পে (৳)</label>
           <input class="mo-in" id="f_pay" type="number" inputmode="decimal" min="0" step="any" placeholder="0" />
@@ -240,6 +242,26 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         </div>
       </div>
 
+      <!-- ===== রাইডার ঠিক করুন শিট (রেজিস্টার্ড রাইডারের লিস্ট) ===== -->
+      <div class="mo-overlay" id="asOverlay">
+        <div class="mo-sheet" role="dialog" aria-label="রাইডার ঠিক করুন" id="asSheet">
+          <div class="mo-grip"></div>
+          <div class="mo-sheet-h">
+            <h2>রাইডার ঠিক করুন</h2>
+            <button type="button" class="mo-x" id="asClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+          </div>
+          <p class="mo-muted" id="asInfo"></p>
+          <input class="mo-in" id="asSearch" type="search" placeholder="নাম বা ফোন দিয়ে খুঁজুন" autocomplete="off" aria-label="রাইডার খুঁজুন" />
+          <div class="mo-as-list" id="asList"></div>
+          <label class="mo-lbl" for="as_pay">রাইডারের ডেলিভারি চার্জ (৳)<span class="required-mark">*</span></label>
+          <input class="mo-in" id="as_pay" type="number" inputmode="decimal" min="0" step="any" />
+          <p class="mo-err" id="asErr" style="display:none;"></p>
+          <div class="mo-actions">
+            <button class="mo-cta" id="asSave" type="button">রাইডার ঠিক করুন</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ===== রাইডার যোগ শিট ===== -->
       <div class="mo-overlay mo-top" id="rdOverlay">
         <div class="mo-sheet" role="dialog" aria-label="নতুন রাইডার" id="rdSheet">
@@ -297,6 +319,16 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   </div>
 
   <style is:global>
+    .mo-as-list { max-height: 38vh; overflow-y: auto; margin: 8px 0 4px; }
+    .mo-as-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 8px; min-height: 56px; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; cursor: pointer; font-family: inherit; }
+    .mo-as-row.sel { border-color: #FF6B35; background: #FFF6F1; }
+    .mo-as-name { font-weight: 700; font-size: 15px; color: #1B2A4A; }
+    .mo-as-sub { font-size: 12.5px; color: #5B6B86; }
+    .mo-ctr-box { background: #FFF6F1; border: 1.5px solid #FFD9C7; border-radius: 18px; padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .mo-ctr-h { font-weight: 700; color: #C2410C; }
+    .mo-ctr { background: #fff; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .mo-ctr-t { font-weight: 700; font-size: 14.5px; color: #1B2A4A; }
+    .mo-ctr-p { font-size: 17px; font-weight: 700; color: #14693A; }
     .mo-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; min-height: 60vh; padding-bottom: 90px; overflow-x: hidden; background: #F8FAFC; }
     .mo-page * { box-sizing: border-box; }
     .mo-page button, .mo-page input, .mo-page select, .mo-page textarea { font-family: inherit; }
@@ -599,6 +631,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         } catch (e) { /* নাম না পেলেও চলবে */ }
       }
       renderOrders();
+      loadCounters();
     }
 
     function matches(o) {
@@ -745,7 +778,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const btns = el('div', 'mo-btns');
       if (o.status === 'new') {
         const b = el('button', 'mo-cta', 'রাইডার ঠিক করুন'); b.type = 'button';
-        b.addEventListener('click', () => openOrderForm(o, 'f_rider'));
+        b.addEventListener('click', () => openAssign(o));
         btns.appendChild(b);
       } else if (o.status === 'rider_assigned') {
         const b = el('button', 'mo-cta', 'পিকআপ হয়েছে'); b.type = 'button';
@@ -770,6 +803,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const rd = el('button', 'mo-cta', 'রেডি ✓'); rd.type = 'button';
         rd.addEventListener('click', () => markReady(o));
         btns.appendChild(rd);
+      }
+      if (o.status === 'rider_assigned') {
+        const chg = el('button', 'mo-ghost', 'রাইডার বদলান'); chg.type = 'button';
+        chg.addEventListener('click', () => openAssign(o));
+        btns.appendChild(chg);
       }
       const edit = el('button', 'mo-ghost', 'এডিট'); edit.type = 'button';
       edit.addEventListener('click', () => openOrderForm(o));
@@ -882,6 +920,112 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       await loadOrders();
     }
 
+    // ---------- রাইডার ঠিক করুন (শুধু রেজিস্টার্ড রাইডারের লিস্ট থেকে) ----------
+    let asOrder = null;
+    let asRiders = [];
+    let asSel = null;
+    const AS_REASONS = {
+      rider_not_found: 'রাইডার পাওয়া যায়নি বা অ্যাপ্রুভড নন।',
+      not_found: 'অর্ডার পাওয়া যায়নি।',
+      bad_status: 'অর্ডারটা আর বদলানো যায় না (পিকআপ/ডেলিভারড/বাতিল)।',
+      pay_required: 'রাইডারের ডেলিভারি চার্জ লিখুন (০-এর বেশি)।',
+    };
+    async function openAssign(o) {
+      asOrder = o;
+      asSel = null;
+      const when = new Date(o.scheduled_at);
+      $('asInfo').textContent = o.order_no + ' · ' + o.customer_name + ' · ' + (o.is_asap ? 'এখনই' : dayLabel(when) + ' ' + timeBn(when));
+      $('as_pay').value = Number(o.rider_pay) > 0 ? o.rider_pay : '';
+      $('asSearch').value = '';
+      showErr('asErr', '');
+      $('asList').replaceChildren(el('p', 'mo-muted', 'রাইডারের লিস্ট লোড হচ্ছে...'));
+      openSheet('asOverlay');
+      const res = await supabase.rpc('admin_assignable_riders', { p_category: 'delivery' });
+      if (res.error || !Array.isArray(res.data)) {
+        $('asList').replaceChildren(el('p', 'mo-muted', 'লিস্ট লোড করা যায়নি, আবার চেষ্টা করুন।'));
+        return;
+      }
+      asRiders = res.data;
+      renderAssignList();
+    }
+    function renderAssignList() {
+      const box = $('asList');
+      const s = $('asSearch').value.trim().toLowerCase();
+      const list = asRiders.filter((r) => !s || String(r.name || '').toLowerCase().includes(s) || String(r.phone || '').includes(s));
+      box.replaceChildren();
+      if (!list.length) { box.appendChild(el('p', 'mo-muted', 'কোনো রাইডার পাওয়া যায়নি।')); return; }
+      list.forEach((r) => {
+        const row = el('button', 'mo-as-row' + (asSel === r.rider_id ? ' sel' : ''));
+        row.type = 'button';
+        row.appendChild(el('div', 'mo-as-name', (r.online ? '🟢 ' : '⚪ ') + (r.name || 'নাম নেই')));
+        row.appendChild(el('div', 'mo-as-sub', (r.phone || 'ফোন নেই') + (r.vehicle_type ? ' · ' + r.vehicle_type : '') + (r.upazila ? ' · ' + r.upazila : '')));
+        row.addEventListener('click', () => { asSel = r.rider_id; renderAssignList(); });
+        box.appendChild(row);
+      });
+    }
+    async function saveAssign() {
+      if (busy || !asOrder) return;
+      if (!asSel) return showErr('asErr', 'তালিকা থেকে একজন রাইডার বাছুন।');
+      const pay = num($('as_pay').value);
+      if (pay <= 0) return showErr('asErr', AS_REASONS.pay_required);
+      busy = true;
+      $('asSave').disabled = true;
+      const res = await supabase.rpc('admin_assign_manual_order', { p_order_id: asOrder.id, p_delivery_rider_id: asSel, p_rider_pay: pay });
+      busy = false;
+      $('asSave').disabled = false;
+      if (res.error) return showErr('asErr', 'হয়নি, আবার চেষ্টা করুন।');
+      const out = res.data;
+      if (!out || !out.ok) return showErr('asErr', AS_REASONS[out && out.reason] || 'হয়নি, আবার চেষ্টা করুন।');
+      closeSheet('asOverlay');
+      toast('রাইডার ঠিক হয়েছে, রাইডারকে নোটিফিকেশন গেছে', 'success');
+      await loadOrders();
+    }
+
+    // ---------- রাইডারের দাম বাড়ানোর অনুরোধ (অ্যাডমিন রিভিউ) ----------
+    async function loadCounters() {
+      const box = $('counterBox');
+      if (!box) return;
+      const res = await supabase.rpc('admin_pending_manual_counters');
+      box.replaceChildren();
+      if (res.error || !Array.isArray(res.data) || !res.data.length) return;
+      const wrap = el('div', 'mo-ctr-box');
+      wrap.appendChild(el('div', 'mo-ctr-h', '💬 রাইডারের দাম বাড়ানোর অনুরোধ (' + bn(res.data.length) + ')'));
+      res.data.forEach((c) => {
+        const card = el('div', 'mo-ctr');
+        card.appendChild(el('div', 'mo-ctr-t', c.order_no + ' · ' + (c.rider_name || 'রাইডার') + (c.rider_phone ? ' (' + c.rider_phone + ')' : '')));
+        card.appendChild(el('div', 'mo-ctr-p', money(c.original_pay) + ' → ' + money(c.proposed_pay)));
+        card.appendChild(el('div', 'mo-line', (c.pickup_name ? c.pickup_name + ' → ' : '') + (c.drop_address || '')));
+        const btns = el('div', 'mo-btns');
+        const ok = el('button', 'mo-cta', 'অনুমোদন দিন (এই রাইডারকে দিন)'); ok.type = 'button';
+        ok.addEventListener('click', () => reviewCounter(c, true));
+        const no = el('button', 'mo-ghost mo-red', 'বাতিল'); no.type = 'button';
+        no.addEventListener('click', () => reviewCounter(c, false));
+        btns.appendChild(ok);
+        btns.appendChild(no);
+        card.appendChild(btns);
+        wrap.appendChild(card);
+      });
+      box.appendChild(wrap);
+    }
+    async function reviewCounter(c, approve) {
+      if (busy) return;
+      const msg = approve
+        ? c.order_no + ' অর্ডার ' + (c.rider_name || 'এই রাইডার') + '-কে ' + money(c.proposed_pay) + '-এ দেবেন? অন্য রাইডারদের অনুরোধ বন্ধ হয়ে যাবে।'
+        : (c.rider_name || 'রাইডার') + '-এর ' + money(c.proposed_pay) + ' চাওয়াটা বাতিল করবেন?';
+      if (!confirm(msg)) return;
+      busy = true;
+      const res = await supabase.rpc('admin_review_manual_counter', { p_counter_id: c.id, p_approve: approve, p_note: null });
+      busy = false;
+      if (res.error) { toast('হয়নি, আবার চেষ্টা করুন', 'error'); return; }
+      const out = res.data;
+      if (!out || !out.ok) {
+        toast(out && out.reason === 'taken' ? 'অর্ডারটা আর খোলা নেই (অন্য রাইডার পেয়েছেন)' : out && out.reason === 'already_reviewed' ? 'এটা আগেই রিভিউ হয়ে গেছে' : 'হয়নি, আবার চেষ্টা করুন', 'error');
+      } else {
+        toast(approve ? 'অনুমোদন হয়েছে, রাইডারকে জানানো হয়েছে' : 'বাতিল করা হয়েছে, রাইডারকে জানানো হয়েছে', 'success');
+      }
+      await loadOrders();
+    }
+
     // ---------- অর্ডার ফর্ম ----------
     function fillRiderSelect(selected) {
       const s = $('f_rider');
@@ -960,6 +1104,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('f_cancel').value = o ? o.cancel_reason || '' : '';
       $('cancelGroup').style.display = $('f_status').value === 'cancelled' ? '' : 'none';
       fillRiderSelect(o ? o.manual_rider_id : '');
+      const curRider = o ? riderOf(o) : null;
+      $('riderInfoBox').textContent = curRider
+        ? 'রাইডার: ' + curRider.name + (curRider.phone ? ' (' + curRider.phone + ')' : '') + '। বদলাতে কার্ডের "রাইডার বদলান" বাটন চাপুন।'
+        : 'রাইডার ঠিক হয়নি। সেভ করার পর কার্ডের "রাইডার ঠিক করুন" বাটন চাপুন।';
       syncAsap();
       updateCalc();
       openSheet('orderOverlay');
@@ -1053,7 +1201,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       else when = new Date($('f_date').value + 'T' + $('f_time').value + ':00+06:00');
       if (isNaN(when.getTime())) return showErr('formErr', 'তারিখ ও সময় ঠিকভাবে দিন।');
 
-      const riderId = $('f_rider').value || null;
+      const riderId = editing ? (editing.manual_rider_id || null) : null; // রাইডার বদলায় শুধু "রাইডার ঠিক করুন" থেকে
       let status = editing ? $('f_status').value : (riderId ? 'rider_assigned' : 'new');
       if (editing) {
         if (status === 'new' && riderId) status = 'rider_assigned';
@@ -1078,7 +1226,6 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         advance_method: adv > 0 ? ($('f_advm').value || 'other') : null,
         advance_trx_id: adv > 0 ? ($('f_trx').value.trim() || null) : null,
         shop_paid_by: $('f_shop').value,
-        manual_rider_id: riderId,
         rider_pay: num($('f_pay').value),
         note: $('f_note').value.trim() || null,
         status,
@@ -1339,6 +1486,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('hiClose').addEventListener('click', () => closeSheet('hiOverlay'));
       $('pbClose').addEventListener('click', () => closeSheet('pbOverlay'));
       $('pbSave').addEventListener('click', savePublish);
+      $('asClose').addEventListener('click', () => closeSheet('asOverlay'));
+      $('asSave').addEventListener('click', saveAssign);
+      $('asSearch').addEventListener('input', renderAssignList);
       $('addRiderBtn').addEventListener('click', () => openRiderSheet(null));
       $('csvBtn').addEventListener('click', downloadCsv);
       ['f_price', 'f_fee', 'f_adv', 'f_pay'].forEach((id) => $(id).addEventListener('input', updateCalc));

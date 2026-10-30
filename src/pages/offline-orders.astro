@@ -78,9 +78,28 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         </div>
       </div>
     </div>
+
+    <!-- ===== দাম বাড়ানোর অফার শিট (১ বার) ===== -->
+    <div class="oo-overlay" id="ctOverlay">
+      <div class="oo-sheet" role="dialog" aria-label="দাম বাড়ানোর অফার" id="ctSheet">
+        <div class="oo-grip"></div>
+        <div class="oo-sheet-h">
+          <h2>দাম বাড়ানোর অফার</h2>
+          <button type="button" class="oo-x" id="ctClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+        </div>
+        <p class="oo-muted" id="ctInfo"></p>
+        <label class="oo-lbl" for="ctPay">আপনি কত ডেলিভারি চার্জ চান (৳)<span class="required-mark">*</span></label>
+        <input class="oo-in" id="ctPay" type="number" inputmode="decimal" min="1" step="any" />
+        <p class="oo-err" id="ctErr" style="display:none;"></p>
+        <div class="oo-actions">
+          <button class="oo-cta" id="ctSave" type="button">অফার পাঠান</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <style is:global>
+    .oo-ghost { height: 46px; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; color: #1B2A4A; font-weight: 700; font-size: 15px; padding: 0 16px; cursor: pointer; flex: 1; min-width: 140px; }
     .oo-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; min-height: 60vh; padding-bottom: 90px; overflow-x: hidden; background: #F8FAFC; }
     .oo-page * { box-sizing: border-box; }
     .oo-page button, .oo-page input, .oo-page textarea { font-family: inherit; }
@@ -168,6 +187,9 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       not_yours: 'এই অর্ডার আপনার নয়',
       bad_status: 'অর্ডারের অবস্থা বদলে গেছে, লিস্ট নতুন করে লোড হচ্ছে',
       cash_required: 'ক্যাশের পরিমাণ লিখুন (না পেলে ০)',
+      must_be_higher: 'নতুন চার্জ এখনকার চেয়ে বেশি হতে হবে',
+      too_high: 'এত বেশি চার্জ চাওয়া যায় না',
+      already_countered: 'আপনি এই অর্ডারে আগেই দাম বাড়ানোর অফার দিয়েছেন',
     };
 
     let state = { open: [], mine: [] };
@@ -289,6 +311,16 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       b.type = 'button';
       b.addEventListener('click', () => acceptOrder(o));
       btns.appendChild(b);
+      const mc = o.my_counter;
+      if (mc) {
+        const st = mc.status === 'pending' ? 'অ্যাডমিনের রিভিউয়ের অপেক্ষায়' : (mc.status === 'rejected' ? 'অনুমোদন হয়নি (আগের চার্জে নিতে পারেন)' : 'রিভিউ শেষ');
+        card.appendChild(el('div', 'oo-note', 'আপনার চাওয়া ' + money(mc.proposed_pay) + ' — ' + st));
+      } else {
+        const cb = el('button', 'oo-ghost', 'দাম বাড়ানোর অফার');
+        cb.type = 'button';
+        cb.addEventListener('click', () => openCounter(o));
+        btns.appendChild(cb);
+      }
       card.appendChild(btns);
       return card;
     }
@@ -426,6 +458,32 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       if (ok) { tab = 'mine'; render(); }
     }
 
+    // ---------- দাম বাড়ানোর অফার (প্রতি অর্ডারে ১ বার) ----------
+    let ctOrder = null;
+    function showCtErr(t) {
+      const e = $('ctErr');
+      e.textContent = t || '';
+      e.style.display = t ? 'block' : 'none';
+    }
+    function openCounter(o) {
+      ctOrder = o;
+      $('ctInfo').textContent = o.order_no + ' · এখনকার ডেলিভারি চার্জ ' + money(o.rider_pay) + '। বেশি চাইলে অ্যাডমিন দেখে অনুমোদন দেবেন। এটা শুধু ১ বার করা যায়।';
+      $('ctPay').value = '';
+      showCtErr('');
+      $('ctOverlay').classList.add('active');
+    }
+    async function saveCounter() {
+      if (busy || !ctOrder) return;
+      const cur = Number(ctOrder.rider_pay);
+      const v = num($('ctPay').value);
+      if (v <= cur) return showCtErr('নতুন চার্জ এখনকার ' + money(cur) + '-এর চেয়ে বেশি হতে হবে।');
+      if (v > cur * 3) return showCtErr('এত বেশি চার্জ চাওয়া যায় না।');
+      $('ctSave').disabled = true;
+      const ok = await act('rider_counter_manual_order', { p_order_id: ctOrder.id, p_new_pay: v }, 'অফার পাঠানো হয়েছে, অ্যাডমিন দেখবেন');
+      $('ctSave').disabled = false;
+      if (ok) $('ctOverlay').classList.remove('active');
+    }
+
     async function pickUpOrder(o) {
       if (!confirm('দোকান/পিকআপ জায়গা থেকে অর্ডার নিয়েছেন?')) return;
       await act('rider_pick_up_manual_order', { p_order_id: o.id }, 'পিক-আপ হয়েছে');
@@ -491,6 +549,9 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       $('dvSave').addEventListener('click', saveDeliver);
       $('dvCash').addEventListener('input', updateMismatch);
       $('dvOverlay').addEventListener('click', (e) => { if (e.target === $('dvOverlay')) $('dvOverlay').classList.remove('active'); });
+      $('ctClose').addEventListener('click', () => $('ctOverlay').classList.remove('active'));
+      $('ctSave').addEventListener('click', saveCounter);
+      $('ctOverlay').addEventListener('click', (e) => { if (e.target === $('ctOverlay')) $('ctOverlay').classList.remove('active'); });
 
       await load(false);
 

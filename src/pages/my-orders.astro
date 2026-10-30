@@ -1288,6 +1288,51 @@ const ordersGuide = [
       return `<p class="hu-steplabel">${huLabels[filled - 1]}</p><div class="hu-progress">${bars}</div>`;
     }
 
+    // ============ ম্যানুয়াল (অফলাইন) অর্ডার কার্ড ============
+    function renderManualOrderCard(m) {
+      const card = document.createElement('div');
+      card.className = 'order-card';
+      card.dataset.manualId = m.id;
+      const total = Number(m.product_price || 0) + Number(m.delivery_fee || 0);
+      const cod = Number(m.cod_amount || 0);
+      const labels = ['অর্ডার নেওয়া হয়েছে', 'রাইডার ঠিক হয়েছে', 'ডেলিভারি পথে', 'ডেলিভারি সম্পন্ন'];
+      let filled = 1;
+      if (m.status === 'rider_assigned') filled = 2;
+      else if (m.status === 'picked_up') filled = 3;
+      else if (m.status === 'delivered' || m.status === 'completed') filled = 4;
+      const bars = [1, 2, 3, 4].map((n) => `<i class="${n <= filled ? 'f' : ''}"></i>`).join('');
+      const progress = m.status === 'cancelled'
+        ? `<div class="cancelled-note"><i class="fas fa-xmark"></i> অর্ডারটি বাতিল হয়েছে</div>`
+        : `<p class="hu-steplabel">${labels[filled - 1]}</p><div class="hu-progress">${bars}</div>`;
+      const riderHtml = m.rider_name
+        ? `<div class="order-items-list"><div class="order-item-line"><span>🛵 রাইডার</span><span>${esc(m.rider_name)}</span></div></div>`
+        : '';
+      const callHtml = m.rider_phone
+        ? `<div class="order-contact-row"><a href="tel:${esc(m.rider_phone)}" class="order-contact-btn order-call-btn"><i class="fas fa-phone"></i> রাইডারকে কল করুন</a></div>`
+        : '';
+      card.innerHTML = `
+        <div class="order-top-row">
+          <div>
+            <p class="order-shop-name"><span class="shop-icon-badge"><i class="fas fa-motorcycle"></i></span> ডেলিভারি অর্ডার #${esc(m.order_no)}</p>
+            <p class="order-date">${formatDate(m.created_at)}</p>
+          </div>
+        </div>
+        ${orderTimeChip({ is_asap: m.is_asap, scheduled_at: m.scheduled_at })}
+        ${progress}
+        <div class="order-items-list">
+          ${m.pickup_name ? `<div class="order-item-line"><span>পিকআপ</span><span>${esc(m.pickup_name)}</span></div>` : ''}
+          <div class="order-item-line"><span>ড্রপ</span><span>${esc(m.drop_address || '')}</span></div>
+          <div class="order-item-line"><span>অর্ডার</span><span>${esc(m.details || '')}</span></div>
+          <div class="order-item-line"><span>মোট</span><span>৳${total}</span></div>
+          ${Number(m.advance_amount) > 0 ? `<div class="order-item-line"><span>অ্যাডভান্স দিয়েছেন</span><span>৳${Number(m.advance_amount)}</span></div>` : ''}
+          <div class="order-item-line"><span>ডেলিভারিতে দিতে হবে</span><span>৳${cod}</span></div>
+        </div>
+        ${riderHtml}
+        ${callHtml}
+      `;
+      return card;
+    }
+
     // ============ SHOP ORDER কার্ড (অপরিবর্তিত) ============
     function renderShopOrderCard(order) {
       const card = document.createElement('div');
@@ -1849,6 +1894,7 @@ const ordersGuide = [
 
     // ============ মার্জ ও রেন্ডার ============
     function isOngoingItem(item) {
+      if (item.__type === 'manual_order') return ['new', 'rider_assigned', 'picked_up'].includes(item.status);
       if (item.__type === 'shop_order') return item.status === 'pending' || item.status === 'confirmed';
       if (item.__type === 'serial') {
         if (item.status === 'pending' || item.status === 'processing') return true;
@@ -1897,6 +1943,7 @@ const ordersGuide = [
         ...shopOrders.map((o) => ({ ...o, __type: 'shop_order' })),
         ...deliveryRequests.map((d) => ({ ...d, __type: 'delivery', __hasReview: reviewedRequestIds.has(d.id) })),
         ...serialRequests.map((s) => ({ ...s, __type: 'serial' })),
+        ...(lastData.manualOrders || []).map((m) => ({ ...m, __type: 'manual_order' })),
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       if (combined.length === 0) {
@@ -1929,6 +1976,7 @@ const ordersGuide = [
       visible.forEach((item) => {
         let card;
         if (item.__type === 'shop_order') card = renderShopOrderCard(item);
+        else if (item.__type === 'manual_order') card = renderManualOrderCard(item);
         else if (item.__type === 'serial') card = renderSerialCard(item);
         else card = renderDeliveryCard(item);
         ordersContainer.appendChild(card);
@@ -1937,8 +1985,8 @@ const ordersGuide = [
       if (deepTarget) setTimeout(() => scrollToDeepLinkCard(deepTarget), 80);
     }
 
-    function renderAll(shopOrders, deliveryRequests, serialRequests, reviewedRequestIds) {
-      lastData = { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds };
+    function renderAll(shopOrders, deliveryRequests, serialRequests, reviewedRequestIds, manualOrders = []) {
+      lastData = { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds, manualOrders };
       paint();
     }
 
@@ -1991,6 +2039,13 @@ const ordersGuide = [
       if (serialRes.error) console.error('সিরিয়াল লোড এরর:', serialRes.error.message);
       const serialRequests = serialRes.error ? [] : (serialRes.data || []);
 
+      // ম্যানুয়াল (অফলাইন) অর্ডার: কাস্টমার ফোন রেজিস্টার্ড ইউজারের সাথে মিললে এখানে ট্র্যাক হয়
+      let manualOrders = [];
+      try {
+        const mo = await supabase.rpc('my_manual_orders');
+        if (!mo.error && Array.isArray(mo.data)) manualOrders = mo.data;
+      } catch (_) { /* ম্যানুয়াল অর্ডার লোড না হলেও বাকি অর্ডার দেখাবে */ }
+
       const reviewedRequestIds = new Set((reviewsRes.data || []).map((r) => r.request_id));
 
       const deliveryRequests = (deliveryRes.data || []).map((req) => ({
@@ -2001,7 +2056,7 @@ const ordersGuide = [
       // ইউজার কিছু টাইপ করছে বা কনফার্ম শিট খোলা থাকলে অটো-রিফ্রেশে কার্ড নতুন করে আঁকব না
       if (silent && isUserInteracting()) return;
 
-      renderAll(ordersRes.data || [], deliveryRequests, serialRequests, reviewedRequestIds);
+      renderAll(ordersRes.data || [], deliveryRequests, serialRequests, reviewedRequestIds, manualOrders);
     }
 
     function refreshOrders() {
