@@ -1,0 +1,86 @@
+<!-- path: src/pages/pro/index.astro -->
+---
+// ============================================================
+// পেজ: Smart Feni Pro (/pro) — রোল রাউটার
+// লগইন না থাকলে হোমে; ১টা রোল হলে সরাসরি সেই ড্যাশবোর্ডে; একাধিক হলে রোল বাছাই;
+// ০টা হলে "Pro অ্যাকাউন্ট নেই" বার্তা। ?pick=1 দিলে রিডাইরেক্ট না করে তালিকা দেখায়।
+// রোল ডেটা: get_my_pro_roles() (src/lib/proRoles.js)
+// ============================================================
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="Smart Feni Pro | স্মার্ট ফেনী">
+  <div class="pro-page">
+    <div id="proLoading" class="pro-state"><div class="pro-spinner"></div><p>লোড হচ্ছে...</p></div>
+
+    <div id="proPick" style="display:none;">
+      <h1 class="pro-h1">Smart Feni Pro</h1>
+      <p class="pro-sub">কোন কাজে যাবেন বাছুন</p>
+      <div id="proList" class="pro-list"></div>
+    </div>
+
+    <div id="proNone" class="pro-state" style="display:none;">
+      <i class="fas fa-lock" style="font-size:2rem;color:#B7C2D8;"></i>
+      <p>এই অ্যাকাউন্টে এখনো কোনো Pro ভূমিকা নেই।</p>
+      <small>দোকান, রাইডার বা ক্লাবের জন্য অ্যাডমিনের সাথে যোগাযোগ করুন।</small>
+      <a href="/" class="pro-btn">হোমে যান</a>
+    </div>
+
+    <div id="proErr" class="pro-state" style="display:none;"><p id="proErrText"></p><button type="button" class="pro-btn" id="proRetry">আবার চেষ্টা করুন</button></div>
+  </div>
+
+  <style is:global>
+    .pro-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F8FAFC; min-height: 70vh; padding: 20px 14px 90px; max-width: 520px; margin: 0 auto; }
+    .pro-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 90px 10px; text-align: center; color: #5B6B86; font-weight: 600; }
+    .pro-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: proSpin .8s linear infinite; }
+    @keyframes proSpin { to { transform: rotate(360deg); } }
+    .pro-h1 { font-size: 22px; font-weight: 700; margin: 8px 0 2px; }
+    .pro-sub { color: #5B6B86; font-size: 14px; margin: 0 0 14px; }
+    .pro-list { display: flex; flex-direction: column; gap: 12px; }
+    .pro-card { display: flex; align-items: center; gap: 14px; background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27,42,74,.08); padding: 14px 16px; text-decoration: none; color: #1B2A4A; min-height: 68px; }
+    .pro-ic { width: 48px; height: 48px; border-radius: 14px; background: #FFF6F1; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 20px; flex: none; }
+    .pro-card b { display: block; font-size: 17px; }
+    .pro-card span { font-size: 13px; color: #5B6B86; }
+    .pro-btn { height: 46px; border: 0; border-radius: 14px; background: #FF6B35; color: #1B2A4A; font-weight: 700; font-size: 15px; padding: 0 20px; display: inline-flex; align-items: center; text-decoration: none; cursor: pointer; font-family: inherit; }
+  </style>
+
+  <script>
+    import { getMyProRoles, ROLE_META, rememberRole, lastRole, esc } from '../../lib/proRoles.js';
+
+    const $ = (id) => document.getElementById(id);
+    function show(id) { ['proLoading', 'proPick', 'proNone', 'proErr'].forEach((x) => { $(x).style.display = x === id ? '' : 'none'; }); }
+
+    async function init() {
+      show('proLoading');
+      let res;
+      try { res = await getMyProRoles(); } catch (e) { res = { loggedIn: true, roles: [], error: (e && e.message) || 'সমস্যা হয়েছে' }; }
+      if (!res.loggedIn) { window.location.replace('/'); return; }
+      if (res.error) { $('proErrText').textContent = 'লোড করা যায়নি: ' + res.error; show('proErr'); return; }
+      const roles = res.roles;
+      if (!roles.length) { show('proNone'); return; }
+
+      const forcePick = new URLSearchParams(window.location.search).get('pick') === '1';
+      if (!forcePick) {
+        if (roles.length === 1) { rememberRole(roles[0].role); window.location.replace(ROLE_META[roles[0].role].href); return; }
+        const last = lastRole();
+        const hit = roles.find((r) => r.role === last);
+        if (hit) { window.location.replace(ROLE_META[hit.role].href); return; }
+      }
+
+      $('proList').innerHTML = roles.map((r) => {
+        const m = ROLE_META[r.role];
+        return '<a class="pro-card" data-role="' + esc(r.role) + '" href="' + esc(m.href) + '"><span class="pro-ic"><i class="fas ' + esc(m.icon) + '"></i></span><div><b>' + esc(m.label) + '</b><span>' + esc(m.sub) + '</span></div></a>';
+      }).join('');
+      $('proList').addEventListener('click', (e) => {
+        const a = e.target.closest('a[data-role]');
+        if (a) rememberRole(a.dataset.role);
+      });
+      show('proPick');
+    }
+
+    $('proRetry').addEventListener('click', init);
+    init();
+  </script>
+</BaseLayout>
