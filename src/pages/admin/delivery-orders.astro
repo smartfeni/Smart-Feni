@@ -715,7 +715,10 @@ const guideSteps = [
       unhold: { icon: '▶️', text: 'হোল্ড ছাড়া হয়েছে' },
       assigned: { icon: '🛵', text: 'অ্যাডমিন রাইডারকে দিয়েছেন' },
       transferred: { icon: '🔄', text: 'অর্ডার অন্য রাইডারকে দেওয়া হয়েছে' },
-      rider_released: { icon: '🔁', text: 'রাইডার অর্ডার ছেড়ে দিয়েছেন, মার্কেটে ফিরেছে' },
+      rider_released: { icon: '🔁', text: 'রাইডার অর্ডার ছেড়েছেন (অনুমোদিত), মার্কেটে ফিরেছে' },
+      release_requested: { icon: '🙋', text: 'রাইডার অর্ডার ছাড়তে চেয়েছেন (অনুমোদনের অপেক্ষায়)' },
+      release_rejected: { icon: '✖️', text: 'ছাড়ার অনুরোধ অনুমোদন হয়নি, রাইডারই থাকছেন' },
+      release_withdrawn: { icon: '↩️', text: 'রাইডার ছাড়ার অনুরোধ তুলে নিয়েছেন' },
       reopened: { icon: '↩️', text: 'অ্যাডমিন অর্ডার মার্কেটে ফেরত দিয়েছেন' },
       deal_started: { icon: '💬', text: 'অ্যাডমিন ডিল চ্যাট শুরু করেছেন' },
       deal_offer: { icon: '💰', text: 'অ্যাডমিন চার্জ প্রস্তাব দিয়েছেন' },
@@ -1243,11 +1246,22 @@ const guideSteps = [
         <div class="do-sec">
           <h5>ডিসপিউট</h5>
           <div class="do-reason">${esc(o.dispute_reason || 'কারণ উল্লেখ নেই')}</div>
-          ${o.dispute_resolution ? `<p class="do-text" style="margin-top:8px;"><b>সিদ্ধান্ত:</b> ${o.dispute_resolution === 'resolve_completed' ? 'রাইডারের পক্ষে (সম্পন্ন)' : o.dispute_resolution === 'resolve_cancelled' ? 'ডিল বাতিল' : esc(o.dispute_resolution)}</p>` : ''}
+          ${o.dispute_resolution ? `<p class="do-text" style="margin-top:8px;"><b>সিদ্ধান্ত:</b> ${o.dispute_resolution === 'resolve_completed' ? 'রাইডারের পক্ষে (সম্পন্ন)' : o.dispute_resolution === 'resolve_cancelled' ? 'ডিল বাতিল' : o.dispute_resolution === 'reassigned' ? 'নতুন রাইডারকে দেওয়া হয়েছে' : o.dispute_resolution === 'reopened' ? 'মার্কেটে ফেরত দেওয়া হয়েছে' : o.dispute_resolution === 'admin_cancelled' ? 'অ্যাডমিন বাতিল করেছেন' : esc(o.dispute_resolution)}</p>` : ''}
           ${eff === 'disputed' ? `<a class="do-btn blue" style="margin-top:8px;text-decoration:none;" href="/admin/delivery-disputes?q=${encodeURIComponent(o.order_no)}"><i class="fas fa-scale-balanced"></i> ডিসপিউট পেজে রিজলভ করুন</a>` : ''}
         </div>` : '';
 
-      const canCancel = ['open', 'confirmed', 'delivered'].includes(eff);
+      const releaseHtml = (eff === 'confirmed' && o.release_requested_at) ? `
+        <div class="do-sec">
+          <h5>🙋 রাইডার ছাড়তে চান</h5>
+          <div class="do-reason">${esc(o.release_reason || 'কারণ উল্লেখ নেই')}</div>
+          <p class="do-text" style="margin-top:6px;color:#8FA0BC;font-size:0.76rem;">অনুরোধ: ${fullDate(o.release_requested_at)}। অনুমোদনের আগে অর্ডারটা এই রাইডারেরই দায়িত্বে। চাইলে নিচের "রাইডার বদলান" দিয়ে সরাসরি অন্য রাইডারও দিতে পারেন।</p>
+          <div class="do-actions" style="margin-top:8px;">
+            <button type="button" class="do-btn primary-sm" id="relApproveBtn">✅ অনুমোদন (মার্কেটে ফেরান)</button>
+            <button type="button" class="do-btn ghost" id="relRejectBtn">✖ না, রাইডারই করবেন</button>
+          </div>
+        </div>` : '';
+
+      const canCancel = ['open', 'confirmed', 'delivered', 'disputed'].includes(eff);
 
       const cancelInfoHtml = (eff === 'cancelled' && o.cancel_reason) ? `
         <div class="do-sec">
@@ -1299,6 +1313,7 @@ const guideSteps = [
 
         <div class="do-sec"><h5>অফার (${bn((data.offers || []).length)})</h5>${offersHtml}</div>
         ${disputeHtml}
+        ${releaseHtml}
         ${cancelInfoHtml}
         ${proofsHtml}
 
@@ -1309,7 +1324,8 @@ const guideSteps = [
           ${unpub ? `<button type="button" class="do-btn primary-sm" id="detailPublishBtn">🚀 পাবলিশ করুন</button>` : ''}
           ${unpub ? `<button type="button" class="do-btn blue" id="detailDealBtn">💬 ডিল চ্যাট</button>` : ''}
           ${o.status === 'open' ? `<button type="button" class="do-btn blue" id="detailAssignBtn">🛵 রাইডারকে দিন</button>` : ''}
-          ${eff === 'confirmed' ? `<button type="button" class="do-btn blue" id="detailTransferBtn">🔄 রাইডার বদলান</button>` : ''}
+          ${eff === 'disputed' ? `<button type="button" class="do-btn ghost" id="detailCancelBtn2" style="color:#B3261E;">❌ বাতিল করুন</button>` : ''}
+          ${['confirmed', 'disputed'].includes(eff) ? `<button type="button" class="do-btn blue" id="detailTransferBtn">🔄 রাইডার বদলান</button>` : ''}
           ${eff === 'open' && !unpub ? `<button type="button" class="do-btn alert" id="detailAlertBtn"><i class="fas fa-bell"></i> রাইডারদের এলার্ট দিন</button>` : ''}
           <button type="button" class="do-btn ghost do-more-btn" id="detailMoreBtn" aria-label="আরও অপশন">⋯</button>
         </div>
@@ -1320,14 +1336,38 @@ const guideSteps = [
           ${r && r.phone ? `<a class="do-menu-item" href="tel:${esc(r.phone)}">📞 রাইডারকে কল</a>` : ''}
           ${data.chat_count > 0 ? `<button type="button" class="do-menu-item" id="detailChatBtn">💬 চ্যাট দেখুন (${bn(data.chat_count)})</button>` : ''}
           <a class="do-menu-item" href="/admin/delivery-disputes?q=${encodeURIComponent(o.order_no)}">⚖️ ডিসপিউট</a>
-          ${eff === 'confirmed' ? `<button type="button" class="do-menu-item" id="detailReopenBtn">↩️ মার্কেটে ফেরত দিন</button>` : ''}
+          ${['confirmed', 'disputed'].includes(eff) ? `<button type="button" class="do-menu-item" id="detailReopenBtn">↩️ মার্কেটে ফেরত দিন</button>` : ''}
           ${canCancel ? `<button type="button" class="do-menu-item danger" id="detailCancelBtn">❌ অর্ডার বাতিল করুন</button>` : ''}
         </div>
         </div>
         <p class="do-cooldown" id="detailCooldown" style="display:none;"></p>`;
 
+      const reviewRelease = async (ord, approve) => {
+        let note = null;
+        if (approve) {
+          if (!window.confirm('ছাড়ার অনুরোধ অনুমোদন করলে অর্ডারটা আবার মার্কেটে যাবে। নিশ্চিত?')) return;
+        } else {
+          note = (window.prompt('রাইডারকে কী জানাতে চান? (ঐচ্ছিক)') || '').trim().slice(0, 300) || null;
+        }
+        const { data: res, error } = await supabase.rpc('admin_review_release', { p_request_id: ord.id, p_approve: approve, p_note: note });
+        if (error || !res?.ok) {
+          const msgs = {
+            no_request: 'এই অনুরোধ আর খোলা নেই।',
+            already_picked_up: 'রাইডার ইতিমধ্যে পিকআপ করেছেন, এখন আর ফেরানো যাবে না।',
+          };
+          window.showToast?.(msgs[res?.reason] || 'হয়নি, আবার চেষ্টা করুন', 'error');
+          return;
+        }
+        window.showToast?.(approve ? 'অনুমোদন হয়েছে, অর্ডার মার্কেটে ফিরেছে' : 'অনুরোধ প্রত্যাখ্যান করা হয়েছে, রাইডারকে জানানো হয়েছে', 'success');
+        closeDetail();
+        location.reload();
+      };
+
       $('detailAlertBtn')?.addEventListener('click', () => openAlert(data));
       $('detailCancelBtn')?.addEventListener('click', () => openCancel(data));
+      $('detailCancelBtn2')?.addEventListener('click', () => openCancel(data));
+      $('relApproveBtn')?.addEventListener('click', () => reviewRelease(o, true));
+      $('relRejectBtn')?.addEventListener('click', () => reviewRelease(o, false));
       $('detailReopenBtn')?.addEventListener('click', () => openCancel({ order: o, mode: 'reopen' }));
       $('detailTransferBtn')?.addEventListener('click', () => openAssign({
         order: { id: o.id, order_no: o.order_no, category: o.category, upazila: o.upazila, price, transfer: true },

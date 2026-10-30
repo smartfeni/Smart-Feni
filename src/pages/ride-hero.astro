@@ -1288,7 +1288,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
     async function loadActiveDeliveries(riderId) {
       const { data: rawRequests } = await supabase
         .from('delivery_requests')
-        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, updated_at, is_asap, scheduled_at, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, updated_at, is_asap, scheduled_at, release_requested_at, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
         .eq('accepted_rider_id', riderId)
         .in('status', ['confirmed', 'delivered', 'completed'])
         .order('created_at', { ascending: false });
@@ -1375,7 +1375,9 @@ import ChatModal from '../components/delivery/ChatModal.astro';
           ` : ''}
           ${(req.status === 'delivered' || (req.status === 'confirmed' && isPickupDone)) ? `<button class="btn-confirm-delivery" data-request-id="${huEsc(req.id)}"><i class="fas fa-check"></i> রাইড সম্পন্ন করুন</button>` : ''}
           <button class="dispute-link" data-request-id="${huEsc(req.id)}">সমস্যা হয়েছে? রিপোর্ট করুন</button>
-          ${(req.status === 'confirmed' && !isPickupDone) ? `<button type="button" class="btn-release-order" data-request-id="${huEsc(req.id)}" style="display:block;width:100%;margin-top:8px;min-height:44px;background:#fff;border:1.5px solid #E5EAF0;border-radius:12px;color:#B3261E;font-weight:800;font-family:inherit;cursor:pointer;"><i class="fas fa-rotate-left"></i> এই অর্ডার ছেড়ে দিন</button>` : ''}
+          ${(req.status === 'confirmed' && !isPickupDone) ? (req.release_requested_at
+            ? `<div style="margin-top:8px;padding:10px 12px;background:#FFF4E5;border:1.5px solid #FFD9A8;border-radius:12px;color:#7A3E00;font-weight:700;font-size:0.85rem;">⏳ ছাড়ার অনুরোধ অ্যাডমিনের কাছে আছে। অনুমোদন না হওয়া পর্যন্ত অর্ডারটা আপনার দায়িত্বে।</div><button type="button" class="btn-release-withdraw" data-request-id="${huEsc(req.id)}" style="display:block;width:100%;margin-top:8px;min-height:44px;background:#fff;border:1.5px solid #E5EAF0;border-radius:12px;color:#1B2A4A;font-weight:800;font-family:inherit;cursor:pointer;">অনুরোধ তুলে নিন</button>`
+            : `<button type="button" class="btn-release-order" data-request-id="${huEsc(req.id)}" style="display:block;width:100%;margin-top:8px;min-height:44px;background:#fff;border:1.5px solid #E5EAF0;border-radius:12px;color:#B3261E;font-weight:800;font-family:inherit;cursor:pointer;"><i class="fas fa-rotate-left"></i> ছাড়ার অনুরোধ করুন</button>`) : ''}
         `;
 
         // ঠিকানা/নির্দেশনায় ম্যাপ লিংক থাকলে "নেভিগেট করুন" বাটন
@@ -1422,7 +1424,7 @@ import ChatModal from '../components/delivery/ChatModal.astro';
             alert('কারণ কমপক্ষে ৩ অক্ষর লিখুন।');
             return;
           }
-          if (!window.confirm('অর্ডারটি ছেড়ে দিলে এটা আবার মার্কেটে যাবে এবং আপনি আর এটা করতে পারবেন না। নিশ্চিত?')) return;
+          if (!window.confirm('অ্যাডমিনের কাছে ছাড়ার অনুরোধ যাবে। অনুমোদন না হওয়া পর্যন্ত অর্ডারটা আপনার দায়িত্বে থাকবে। অনুরোধ পাঠাবেন?')) return;
           btn.disabled = true;
           const { data, error } = await supabase.rpc('rider_release_order', {
             p_request_id: req.id,
@@ -1433,13 +1435,30 @@ import ChatModal from '../components/delivery/ChatModal.astro';
               already_picked_up: 'পিকআপ হয়ে গেছে, এখন আর ছাড়া যাবে না।',
               not_releasable: 'অর্ডারটি এখন ছাড়ার মতো অবস্থায় নেই।',
               reason_required: 'কারণ কমপক্ষে ৩ অক্ষর লিখুন।',
+              already_requested: 'আপনার ছাড়ার অনুরোধ আগেই অ্যাডমিনের কাছে গেছে।',
             };
             alert(msgs[data?.reason] || 'এখন ছাড়া যাচ্ছে না, আবার চেষ্টা করুন।');
             btn.disabled = false;
             loadRiderSection();
             return;
           }
-          alert('অর্ডারটি ছেড়ে দেওয়া হয়েছে, আবার মার্কেটে ফিরেছে।');
+          alert('ছাড়ার অনুরোধ অ্যাডমিনের কাছে পাঠানো হয়েছে। অনুমোদন না হওয়া পর্যন্ত অর্ডারটা আপনারই।');
+          loadRiderSection();
+        });
+
+        // ছাড়ার অনুরোধ তুলে নেওয়া (অ্যাডমিন সিদ্ধান্ত দেওয়ার আগে)
+        card.querySelector('.btn-release-withdraw')?.addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          if (btn.disabled) return;
+          btn.disabled = true;
+          const { data, error } = await supabase.rpc('rider_withdraw_release_request', { p_request_id: req.id });
+          if (error || !data?.ok) {
+            alert('এখন তুলে নেওয়া যাচ্ছে না, আবার চেষ্টা করুন।');
+            btn.disabled = false;
+            loadRiderSection();
+            return;
+          }
+          alert('ছাড়ার অনুরোধ তুলে নেওয়া হয়েছে।');
           loadRiderSection();
         });
 
