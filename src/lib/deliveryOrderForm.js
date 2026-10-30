@@ -49,16 +49,20 @@ export const UNION_EN_BY_BN = (() => {
 // রিটার্ন: { shops: [{ ...shop, items: [...] }], error }
 // শুধু যেসব দোকানে অন্তত ১টা পাওয়া-যাওয়া আইটেম আছে সেগুলো ফেরত আসে
 export async function fetchDeliveryShops() {
-  const { data: shops, error } = await supabase
+  const { data: shopsRaw, error } = await supabase
     .from('delivery_shops')
-    .select('id, name, image_url, upazila, union_name, address, lat, lng, is_popular, is_active, sort_order')
+    .select('id, name, image_url, upazila, union_name, address, lat, lng, is_popular, is_active, sort_order, is_open, busy_until')
     .eq('is_active', true)
+    .or('is_open.is.null,is_open.eq.true')
     .order('is_popular', { ascending: false })
     .order('sort_order', { ascending: true })
     .order('name', { ascending: true });
 
   if (error) return { shops: [], error: error.message || 'দোকান লোড করা যায়নি' };
-  if (!shops || shops.length === 0) return { shops: [], error: null };
+  // মালিক "ব্যস্ত" মোডে দিলে সেই সময় পর্যন্ত দোকান তালিকায় আসে না (সার্ভারেও আটকানো আছে)
+  const nowMs = Date.now();
+  const shops = (shopsRaw || []).filter((s) => !s.busy_until || new Date(s.busy_until).getTime() <= nowMs);
+  if (shops.length === 0) return { shops: [], error: null };
 
   const ids = shops.map((s) => s.id);
   const { data: items, error: itemsError } = await supabase

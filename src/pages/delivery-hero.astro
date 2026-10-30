@@ -1314,6 +1314,42 @@ const riderGuideSteps = [
       }
     });
 
+    // ===== পিকআপ স্ট্যাটাস ব্যাজ (দোকান রেডি দিলে রাইডার জানে) =====
+    async function refreshPickupBadges() {
+      try {
+        if (document.hidden) return;
+        const els = Array.from(document.querySelectorAll('.dh-pk-badge[data-pk-for]'));
+        if (!els.length) return;
+        const ids = els.map((e) => e.dataset.pkFor);
+        const { data, error } = await supabase.rpc('rider_pickup_status', { p_request_ids: ids });
+        if (error || !Array.isArray(data)) return;
+        const by = {};
+        data.forEach((r) => { by[r.request_id] = r; });
+        els.forEach((el) => {
+          const r = by[el.dataset.pkFor];
+          if (!r || r.state === 'none') { el.style.display = 'none'; return; }
+          let txt = '';
+          let bg = '#FFF4E5'; let fg = '#5E3000';
+          if (r.state === 'ready') { txt = '✅ খাবার রেডি — এখনই পিকআপ করুন'; bg = '#E8F7EE'; fg = '#14693A'; }
+          else if (r.state === 'preparing') {
+            const m = r.eta_at ? Math.ceil((new Date(r.eta_at).getTime() - Date.now()) / 60000) : null;
+            txt = '👨‍🍳 দোকান প্রস্তুত করছে' + (m !== null ? (m > 0 ? ' — আনুমানিক ' + String(m).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]) + ' মিনিট বাকি' : ' — প্রায় রেডি') : '');
+            bg = '#DCE8FB'; fg = '#1B2A4A';
+          } else { txt = '⏳ দোকান এখনো অর্ডার গ্রহণ করেনি'; }
+          el.textContent = txt;
+          el.style.cssText = 'display:block;margin:8px 0;padding:10px 12px;border-radius:12px;font-weight:700;font-size:14px;background:' + bg + ';color:' + fg + ';';
+        });
+      } catch (_) { /* উপেক্ষা */ }
+    }
+    let pkDebounce = null;
+    new MutationObserver(() => {
+      if (!document.querySelector('.dh-pk-badge[data-pk-for]')) return;
+      clearTimeout(pkDebounce);
+      pkDebounce = setTimeout(refreshPickupBadges, 400);
+    }).observe(document.body, { childList: true, subtree: true });
+    setInterval(refreshPickupBadges, 15000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshPickupBadges(); });
+
     // ===== চলমান ডেলিভারি (এখন কাস্টমারের তথ্য সহ) =====
     async function loadActiveDeliveries(riderId) {
       const { data: rawRequests } = await supabase
@@ -1394,6 +1430,7 @@ const riderGuideSteps = [
             <div class="hu-trip-stop">${huEsc(req.drop_address || '') || '—'}<small>ডেলিভারি</small></div>
           </div>
           ${stageHtml}
+          ${(req.status === 'confirmed' && !isPickupDone) ? `<div class="dh-pk-badge" data-pk-for="${huEsc(req.id)}" style="display:none;"></div>` : ''}
           <p class="dh-active-price">৳${Number(req.final_price) || 0}</p>
           <div class="dh-customer-info">
             <span class="dh-customer-avatar"><i class="fas fa-user"></i></span>
