@@ -2,6 +2,18 @@
 ---
 ---
 
+<div class="dash-card">
+  <h3><i class="fas fa-eye"></i> ক্লাব পেজে ডোনার লিস্ট</h3>
+  <label class="donor-share-toggle" for="donorPublicToggle">
+    <span class="donor-share-text">
+      পাবলিকে ব্লাড ডোনার লিস্ট দেখান
+      <small>চালু থাকলে ক্লাব পেজে সবাই নাম, গ্রুপ ও উপজেলা দেখবে। লগইন করা ইউজার ফোন নম্বর দেখবে ও কল করতে পারবে।</small>
+    </span>
+    <input type="checkbox" id="donorPublicToggle" />
+    <span class="donor-switch"></span>
+  </label>
+</div>
+
 <div class="dash-card" id="donorFormCard">
   <h3><i class="fas fa-droplet"></i> নতুন ডোনার যোগ করুন</h3>
   <p class="form-msg" id="donorMsg"></p>
@@ -65,6 +77,15 @@
   let clubId = null;
   let clubUpazilaLabel = null;
   let allDonors = [];
+
+  function esc(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   const UPAZILA_LABELS = {
     'feni-sadar': 'ফেনী সদর',
@@ -146,8 +167,8 @@
       card.innerHTML = `
         <div class="item-photo-placeholder"><i class="fas fa-droplet"></i></div>
         <div class="item-body">
-          <p class="item-title">${d.name} — ${d.blood_group}</p>
-          <p class="item-sub">${d.phone} ${d.upazila ? '· ' + d.upazila : ''}</p>
+          <p class="item-title">${esc(d.name)} — ${esc(d.blood_group)}</p>
+          <p class="item-sub">${esc(d.phone)} ${d.upazila ? '· ' + esc(d.upazila) : ''}</p>
         </div>
         <div class="item-actions">
           <button class="icon-btn delete"><i class="fas fa-trash"></i></button>
@@ -205,10 +226,94 @@
     });
   });
 
+  // পাবলিকে ডোনার লিস্ট দেখানোর টগল
+  async function loadShareToggle() {
+    const el = document.getElementById('donorPublicToggle');
+    if (!el || !clubId) return;
+    const { data } = await supabase.from('clubs').select('show_blood_donors').eq('id', clubId).maybeSingle();
+    el.checked = !!data?.show_blood_donors;
+  }
+
+  document.getElementById('donorPublicToggle')?.addEventListener('change', async (ev) => {
+    const el = ev.target;
+    const want = el.checked;
+    if (!clubId) { el.checked = !want; return; }
+    if (want && !confirm('চালু করলে ক্লাব পেজে সবাই ডোনারদের নাম, গ্রুপ ও উপজেলা দেখবে, আর লগইন করা ইউজার ফোন নম্বরও দেখবে। চালু করবেন?')) {
+      el.checked = false;
+      return;
+    }
+    el.disabled = true;
+    const { data, error } = await supabase
+      .from('clubs')
+      .update({ show_blood_donors: want })
+      .eq('id', clubId)
+      .select('id');
+    el.disabled = false;
+    if (error || !data || data.length === 0) {
+      el.checked = !want;
+      window.showToast('বদলাতে ব্যর্থ: ' + (error?.message || 'অনুমতি নেই'), 'error');
+      return;
+    }
+    window.showToast(want ? 'ক্লাব পেজে ডোনার লিস্ট এখন চালু ✓' : 'ক্লাব পেজে ডোনার লিস্ট বন্ধ করা হয়েছে ✓', 'success');
+  });
+
   window.addEventListener('smartfeni:club-ready', (e) => {
     clubId = e.detail.clubId;
     clubName = e.detail.club?.name || '';
     clubUpazilaLabel = UPAZILA_LABELS[e.detail.club.upajila] || null;
     loadDonors();
+    loadShareToggle();
   });
 </script>
+
+<style>
+  .donor-share-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    cursor: pointer;
+  }
+  .donor-share-text {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    line-height: 1.4;
+  }
+  .donor-share-text small {
+    display: block;
+    font-weight: 500;
+    font-size: 0.76rem;
+    color: #5A6E85;
+    margin-top: 4px;
+  }
+  .donor-share-toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .donor-switch {
+    position: relative;
+    width: 50px;
+    height: 28px;
+    border-radius: 28px;
+    background: #CBD5E1;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+  .donor-switch::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25);
+    transition: transform 0.2s;
+  }
+  .donor-share-toggle input:checked + .donor-switch { background: #16A34A; }
+  .donor-share-toggle input:checked + .donor-switch::after { transform: translateX(22px); }
+  .donor-share-toggle input:disabled + .donor-switch { opacity: 0.6; }
+</style>

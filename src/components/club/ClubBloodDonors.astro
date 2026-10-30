@@ -1,0 +1,194 @@
+---
+// ============================================================
+// ক্লাব পাবলিক পেজে "ব্লাড ডোনার" সেকশন
+// দেখায় শুধু যখন ক্লাব অ্যাডমিন টগল চালু করেছে (clubs.show_blood_donors)।
+// ডেটা আসে RPC get_club_blood_donors থেকে (টগল বন্ধ থাকলে খালি ফেরত দেয়):
+//   • সবাই: নাম, ব্লাড গ্রুপ, উপজেলা
+//   • লগইন করা ইউজার: ফোন নম্বর + কল বাটনও
+// ক্লায়েন্টে ফেচ করা হয়, কারণ সার্ভার anon দিয়ে চলে (ফোন লুকানো থাকত)।
+// ============================================================
+const { clubId } = Astro.props;
+---
+
+<div class="cbd-card" id="cbdCard" data-club-id={clubId} style="display:none;">
+  <h3><i class="fas fa-droplet"></i> ব্লাড ডোনার <span class="cbd-count" id="cbdCount"></span></h3>
+  <div class="cbd-filter" id="cbdFilter"></div>
+  <div id="cbdList"></div>
+  <p class="cbd-login-note" id="cbdLoginNote" style="display:none;">
+    <i class="fas fa-lock"></i> ফোন নম্বর দেখতে
+    <button type="button" id="cbdLoginBtn">লগইন করুন</button>
+  </p>
+</div>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const card = document.getElementById('cbdCard');
+  const clubId = card?.getAttribute('data-club-id');
+  const GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+  let donors = [];
+  let activeGroup = 'all';
+  let loggedIn = false;
+
+  function esc(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function renderFilter() {
+    const wrap = document.getElementById('cbdFilter');
+    const present = GROUPS.filter((g) => donors.some((d) => d.blood_group === g));
+    wrap.innerHTML = '';
+    ['all', ...present].forEach((g) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cbd-chip' + (g === activeGroup ? ' active' : '');
+      b.textContent = g === 'all' ? 'সব' : g;
+      b.addEventListener('click', () => {
+        activeGroup = g;
+        renderFilter();
+        renderList();
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function renderList() {
+    const list = document.getElementById('cbdList');
+    const rows = donors.filter((d) => activeGroup === 'all' || d.blood_group === activeGroup);
+    list.innerHTML = '';
+    rows.forEach((d) => {
+      const row = document.createElement('div');
+      row.className = 'cbd-row';
+      const call =
+        loggedIn && d.phone
+          ? `<a class="cbd-call" href="tel:${esc(d.phone)}" aria-label="কল করুন"><i class="fas fa-phone"></i></a>`
+          : '';
+      const phoneLine = loggedIn && d.phone ? `<span class="cbd-phone">${esc(d.phone)}</span>` : '';
+      row.innerHTML = `
+        <span class="cbd-group">${esc(d.blood_group)}</span>
+        <div class="cbd-info">
+          <p class="cbd-name">${esc(d.name)}</p>
+          <p class="cbd-sub">${esc(d.upazila || '')}${d.upazila && phoneLine ? ' · ' : ''}${phoneLine}</p>
+        </div>
+        ${call}
+      `;
+      list.appendChild(row);
+    });
+  }
+
+  async function init() {
+    if (!card || !clubId) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      loggedIn = !!sessionData?.session;
+      const { data, error } = await supabase.rpc('get_club_blood_donors', { p_club_id: clubId });
+      if (error || !data || data.length === 0) return; // টগল বন্ধ বা ডোনার নেই: সেকশন লুকানোই থাকবে
+      donors = data;
+      document.getElementById('cbdCount').textContent = `(${donors.length})`;
+      card.style.display = 'block';
+      if (!loggedIn) {
+        document.getElementById('cbdLoginNote').style.display = 'block';
+        document.getElementById('cbdLoginBtn')?.addEventListener('click', () => {
+          window.dispatchEvent(new CustomEvent('smartfeni:open-hamburger-menu'));
+        });
+      }
+      renderFilter();
+      renderList();
+    } catch (err) {
+      // নীরবে ব্যর্থ: পাবলিক পেজ ভাঙবে না
+    }
+  }
+
+  init();
+</script>
+
+<style is:global>
+  .cbd-card {
+    background: #fff;
+    border-radius: 20px;
+    padding: 20px;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+    margin-bottom: 20px;
+  }
+  .cbd-card h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cbd-card h3 i { color: #D14343; }
+  .cbd-count { font-size: 0.82rem; font-weight: 600; color: #5A6E85; }
+  .cbd-filter {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+  }
+  .cbd-chip {
+    flex-shrink: 0;
+    border: 1px solid #E5EAF0;
+    background: #F8FAFC;
+    color: #5A6E85;
+    padding: 6px 14px;
+    border-radius: 40px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .cbd-chip.active { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+  .cbd-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid #F0F3F7;
+  }
+  .cbd-row:first-child { border-top: none; }
+  .cbd-group {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: #FDECEC;
+    color: #D14343;
+    font-weight: 800;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .cbd-info { flex: 1; min-width: 0; }
+  .cbd-name { font-size: 0.92rem; font-weight: 700; color: #1B2A4A; margin: 0; }
+  .cbd-sub { font-size: 0.78rem; color: #5A6E85; margin: 2px 0 0; }
+  .cbd-call {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #16A34A;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+  .cbd-login-note { font-size: 0.8rem; color: #5A6E85; margin-top: 12px; }
+  .cbd-login-note button {
+    background: none;
+    border: none;
+    color: #FF6B35;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0;
+    font-size: inherit;
+  }
+</style>
