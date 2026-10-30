@@ -1,0 +1,608 @@
+<!-- path: src/pages/pro/shop.astro -->
+---
+// ============================================================
+// পেজ: Pro — ইনস্ট্যান্ট শপ ড্যাশবোর্ড (/pro/shop)
+// কে: delivery_shops-এর মালিক/স্টাফ (get_my_pro_roles → role 'instant_shop')
+// কাজ: নতুন অর্ডার গ্রহণ (প্রস্তুতির সময় সহ) / বাতিল (কারণ সহ) → রেডি; রিসিপ্ট ভিউ/প্রিন্ট;
+//      মেনুর আইটেম অন/অফ; দোকান খোলা/বন্ধ/ব্যস্ত।
+// ডেটা: RPC shop_get_orders / shop_accept_order / shop_mark_ready / shop_reject_order /
+//       shop_set_item_available / shop_set_open (সব সার্ভার-সাইড auth.uid() + সদস্য চেক)
+// নতুন অর্ডার এলে (পেজ খোলা থাকলে) ৪ সেকেন্ড পরপর বিপ + ভাইব্রেট, গ্রহণ না হওয়া পর্যন্ত।
+// ডিপ-লিংক: /pro/shop?o=<request_id> (নোটিফিকেশন থেকে), ?shop=<shop_id>
+// ইউজারের লেখা সব textContent দিয়ে (innerHTML নয়)।
+// ============================================================
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import GuideSheet from '../../components/delivery/GuideSheet.astro';
+
+const guideSteps = [
+  {
+    caption: 'নতুন অর্ডার এলে প্রস্তুতির সময় বেছে "গ্রহণ" করুন',
+    blocks: [
+      { kind: 'card', title: 'অর্ডার #SFD-1042', lines: ['২ × কাচ্চি বিরিয়ানি', 'মোট ৳৭০০'], badge: 'নতুন' },
+      { kind: 'row', cols: [{ kind: 'button', text: '১০ মিনিট' }, { kind: 'button', text: '২০ মিনিট', primary: true, tap: true }, { kind: 'button', text: '৩০ মিনিট' }] },
+    ],
+  },
+  {
+    caption: 'খাবার তৈরি হলে "রেডি" চাপুন, রাইডার জেনে যাবে',
+    blocks: [
+      { kind: 'card', title: 'অর্ডার #SFD-1042', lines: ['প্রস্তুতি চলছে'], badge: 'গ্রহণ করা হয়েছে' },
+      { kind: 'cta', text: 'রেডি', tap: true },
+    ],
+  },
+  {
+    caption: 'আইটেম শেষ হলে মেনুতে "পাওয়া যাচ্ছে" সুইচ বন্ধ করুন',
+    blocks: [
+      { kind: 'item', name: 'কাচ্চি বিরিয়ানি', price: '৳৩৫০' },
+      { kind: 'item', name: 'চিকেন রোস্ট', price: '৳১৮০', tap: 'বন্ধ করুন' },
+      { kind: 'notice', text: 'বন্ধ আইটেম কাস্টমার অর্ডারে নিতে পারবে না।' },
+    ],
+  },
+];
+---
+
+<BaseLayout title="ইনস্ট্যান্ট শপ | Smart Feni Pro">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="ps-page" id="psPage">
+
+    <div id="psLoading" class="ps-state"><div class="ps-spinner"></div><p>লোড হচ্ছে...</p></div>
+    <div id="psNoAccess" class="ps-state" style="display:none;">
+      <i class="fas fa-lock" style="font-size:2rem;color:#B7C2D8;"></i>
+      <p>এই অ্যাকাউন্টে কোনো ইনস্ট্যান্ট শপ যুক্ত নেই।</p>
+      <a href="/pro" class="ps-cta" style="text-decoration:none;display:inline-flex;align-items:center;">Pro হোমে যান</a>
+    </div>
+
+    <div id="psMain" style="display:none;">
+      <div class="ps-head">
+        <div class="ps-head-in">
+          <a href="/pro?pick=1" class="ps-round" aria-label="ভূমিকা বদলান"><i class="fas fa-arrow-left"></i></a>
+          <div class="ps-ttl">
+            <h1 id="psShopName">দোকান</h1>
+            <select id="psShopSel" class="ps-sel" style="display:none;" aria-label="দোকান বাছুন"></select>
+          </div>
+          <GuideSheet id="pro-shop" title="অর্ডার ও মেনুর নিয়ম" subtitle="Pro · ইনস্ট্যান্ট শপ" showButton buttonTone="dark" steps={guideSteps} />
+        </div>
+        <div class="ps-tabs" id="psTabs" role="tablist">
+          <button type="button" class="ps-tab active" data-tab="orders" role="tab">অর্ডার <span class="ps-bdg" id="psBdgNew" style="display:none;"></span></button>
+          <button type="button" class="ps-tab" data-tab="done" role="tab">সম্পন্ন</button>
+          <button type="button" class="ps-tab" data-tab="menu" role="tab">মেনু</button>
+        </div>
+      </div>
+
+      <div class="ps-body">
+        <!-- খোলা/বন্ধ -->
+        <div class="ps-card ps-openrow">
+          <div>
+            <b id="psOpenTxt">দোকান খোলা</b>
+            <small id="psOpenSub"></small>
+          </div>
+          <button type="button" class="ps-sw" id="psOpenSw" role="switch" aria-checked="true" aria-label="দোকান খোলা"><i></i></button>
+        </div>
+        <div class="ps-busy" id="psBusyRow">
+          <span>ব্যস্ত?</span>
+          <button type="button" class="ps-ghost ps-sm" data-busy="15">১৫ মি</button>
+          <button type="button" class="ps-ghost ps-sm" data-busy="30">৩০ মি</button>
+          <button type="button" class="ps-ghost ps-sm" data-busy="60">১ ঘণ্টা</button>
+          <button type="button" class="ps-ghost ps-sm" data-busy="0" id="psBusyClear" style="display:none;">ব্যস্ত বন্ধ</button>
+        </div>
+
+        <button type="button" class="ps-sound" id="psSoundBtn"><i class="fas fa-bell-slash"></i> সাউন্ড চালু করুন (নতুন অর্ডারে বাজবে)</button>
+
+        <div id="psPane"></div>
+      </div>
+
+      <!-- বাতিলের শিট -->
+      <div class="ps-overlay" id="psRejOv">
+        <div class="ps-sheet" role="dialog" aria-label="অর্ডার বাতিল">
+          <div class="ps-grip"></div>
+          <h2 class="ps-sh">অর্ডার বাতিলের কারণ</h2>
+          <div class="ps-reasons" id="psReasons"></div>
+          <input class="ps-in" id="psRejOther" maxlength="120" placeholder="অন্য কারণ লিখুন" style="display:none;" />
+          <p class="ps-err" id="psRejErr" style="display:none;"></p>
+          <div class="ps-acts">
+            <button type="button" class="ps-cta ps-danger" id="psRejGo">বাতিল নিশ্চিত করুন</button>
+            <button type="button" class="ps-ghost" id="psRejClose">ফিরে যান</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- রিসিপ্ট -->
+      <div class="ps-overlay" id="psRcOv">
+        <div class="ps-sheet" role="dialog" aria-label="রিসিপ্ট">
+          <div class="ps-grip"></div>
+          <div id="psReceipt" class="ps-receipt"></div>
+          <div class="ps-acts">
+            <button type="button" class="ps-cta" id="psRcPrint"><i class="fas fa-print"></i> প্রিন্ট</button>
+            <button type="button" class="ps-ghost" id="psRcClose">বন্ধ করুন</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .ps-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F8FAFC; min-height: 70vh; padding-bottom: 90px; overflow-x: hidden; }
+    .ps-page * { box-sizing: border-box; }
+    .ps-page button, .ps-page input, .ps-page select { font-family: inherit; }
+    .ps-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 100px 14px; text-align: center; color: #5B6B86; font-weight: 600; }
+    .ps-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: psSpin .8s linear infinite; }
+    @keyframes psSpin { to { transform: rotate(360deg); } }
+
+    .ps-head { position: relative; left: 50%; width: 100vw; margin-left: -50vw; background: #1B2A4A; color: #fff; }
+    .ps-head-in { max-width: 520px; margin: 0 auto; padding: 12px 16px 0; display: flex; align-items: center; gap: 8px; min-height: 68px; }
+    .ps-ttl { flex: 1; min-width: 0; }
+    .ps-ttl h1 { margin: 0; font-size: 19px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ps-sel { margin-top: 2px; max-width: 100%; height: 32px; border-radius: 10px; border: 0; background: rgba(255,255,255,.14); color: #fff; font-size: 13px; padding: 0 8px; }
+    .ps-sel option { color: #1B2A4A; }
+    .ps-round { width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,.14); color: #fff; display: flex; align-items: center; justify-content: center; text-decoration: none; font-size: 17px; flex: none; }
+    .ps-tabs { max-width: 520px; margin: 0 auto; padding: 0 8px; display: flex; }
+    .ps-tab { flex: 1; height: 48px; border: 0; background: none; color: #B7C2D8; font-size: 15px; font-weight: 600; border-bottom: 3px solid transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .ps-tab.active { color: #fff; border-bottom-color: #FF6B35; }
+    .ps-bdg { min-width: 22px; height: 22px; border-radius: 11px; background: #FF6B35; color: #1B2A4A; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; }
+
+    .ps-body { max-width: 520px; margin: 0 auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+    .ps-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27,42,74,.08); padding: 14px 16px; }
+    .ps-muted { color: #5B6B86; font-size: 14px; padding: 8px 2px; }
+    .ps-openrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .ps-openrow b { display: block; font-size: 16px; }
+    .ps-openrow small { color: #5B6B86; font-size: 12.5px; }
+    .ps-busy { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; font-weight: 600; color: #5B6B86; }
+
+    .ps-cta { height: 48px; border: 0; border-radius: 16px; background: #FF6B35; color: #1B2A4A; font-weight: 700; font-size: 16px; padding: 0 16px; cursor: pointer; flex: 1; }
+    .ps-cta:disabled, .ps-ghost:disabled { opacity: .55; cursor: not-allowed; }
+    .ps-danger { background: #B3261E; color: #fff; }
+    .ps-ghost { height: 46px; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; color: #1B2A4A; font-weight: 600; font-size: 15px; padding: 0 14px; cursor: pointer; }
+    .ps-sm { height: 44px; font-size: 13.5px; padding: 0 12px; }
+    .ps-in { width: 100%; border: 1.5px solid #D5DCE8; border-radius: 14px; padding: 10px 14px; font-size: 15px; min-height: 48px; margin-top: 10px; }
+    .ps-sound { height: 44px; border: 1.5px dashed #FF6B35; background: #FFF6F1; border-radius: 14px; font-weight: 600; font-size: 14px; color: #1B2A4A; cursor: pointer; }
+    .ps-sound.on { border-style: solid; border-color: #14A44D; background: #E8F7EE; color: #14693A; }
+
+    .ps-sw { width: 52px; height: 44px; border: 0; background: none; display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; flex: none; }
+    .ps-sw i { width: 44px; height: 26px; border-radius: 13px; background: #B7C2D8; display: block; position: relative; transition: background .15s; }
+    .ps-sw i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 10px; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+    .ps-sw[aria-checked='true'] i { background: #14A44D; }
+    .ps-sw[aria-checked='true'] i::after { transform: translateX(18px); }
+    .ps-sw:disabled { opacity: .5; }
+
+    .ps-ord { display: flex; flex-direction: column; gap: 10px; }
+    .ps-ord.hl { outline: 3px solid #FF6B35; }
+    .ps-ord.fresh { animation: psPulse 1.2s infinite; }
+    @keyframes psPulse { 0%,100% { box-shadow: 0 2px 12px rgba(27,42,74,.08); } 50% { box-shadow: 0 0 0 4px rgba(255,107,53,.35); } }
+    .ps-ohead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .ps-ono { font-size: 17px; font-weight: 700; }
+    .ps-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 10px; font-size: 12.5px; font-weight: 600; background: #EEF2F8; color: #1B2A4A; }
+    .ps-chip.new { background: #FFF1C9; color: #6B4A00; }
+    .ps-chip.acc { background: #DCE8FB; color: #1B2A4A; }
+    .ps-chip.rdy, .ps-chip.ok { background: #E8F7EE; color: #14693A; }
+    .ps-chip.rej { background: #FDECEA; color: #B3261E; }
+    .ps-line { display: flex; justify-content: space-between; gap: 10px; font-size: 15px; }
+    .ps-line span:first-child { font-weight: 600; }
+    .ps-tot { border-top: 1.5px solid #EEF2F8; padding-top: 8px; font-weight: 700; font-size: 16px; }
+    .ps-note { background: #FFF4E5; border: 1px solid #FFD8A8; color: #5E3000; border-radius: 12px; padding: 8px 10px; font-size: 13.5px; font-weight: 600; }
+    .ps-meta { font-size: 13px; color: #5B6B86; }
+    .ps-acts { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+    .ps-acts .ps-ghost { flex: 0 0 auto; }
+    .ps-prep { display: flex; gap: 8px; }
+    .ps-prep .ps-cta { height: 52px; font-size: 15.5px; }
+
+    .ps-it { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #EEF2F8; }
+    .ps-it.off .ps-itn { opacity: .5; }
+    .ps-tile { width: 48px; height: 48px; border-radius: 12px; overflow: hidden; background: #FFE4D6; display: flex; align-items: center; justify-content: center; font-weight: 700; flex: none; }
+    .ps-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ps-itn { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; }
+    .ps-itp { font-size: 14px; color: #5B6B86; font-weight: 600; }
+
+    .ps-overlay { position: fixed; inset: 0; z-index: 1050; background: rgba(27,42,74,.5); display: none; align-items: flex-end; justify-content: center; }
+    .ps-overlay.active { display: flex; }
+    .ps-sheet { width: 100%; max-width: 520px; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 28px 28px 0 0; padding: 10px 20px calc(24px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -6px 24px rgba(27,42,74,.12); }
+    .ps-grip { width: 44px; height: 5px; border-radius: 3px; background: #D5DCE8; margin: 2px auto 10px; }
+    .ps-sh { margin: 0 0 10px; font-size: 20px; font-weight: 700; }
+    .ps-reasons { display: flex; flex-wrap: wrap; gap: 8px; }
+    .ps-rs { height: 44px; border: 1.5px solid #D5DCE8; border-radius: 22px; background: #fff; padding: 0 16px; font-weight: 600; font-size: 14.5px; cursor: pointer; }
+    .ps-rs.sel { border-color: #FF6B35; background: #FFF6F1; }
+    .ps-err { color: #B3261E; font-weight: 600; font-size: 14px; margin: 10px 0 0; }
+
+    .ps-receipt { font-size: 14.5px; }
+    .ps-receipt h3 { margin: 0; text-align: center; font-size: 18px; }
+    .ps-receipt .ps-c { text-align: center; color: #5B6B86; font-size: 13px; margin-bottom: 8px; }
+    .ps-receipt hr { border: 0; border-top: 1.5px dashed #B7C2D8; margin: 8px 0; }
+
+    @media print {
+      body * { visibility: hidden !important; }
+      #psReceipt, #psReceipt * { visibility: visible !important; }
+      #psReceipt { position: fixed; left: 0; top: 0; width: 100%; padding: 8px; }
+    }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { getMyProRoles, rememberRole } from '../../lib/proRoles.js';
+
+    const $ = (id) => document.getElementById(id);
+    const POLL_MS = 8000;
+    const BEEP_MS = 4000;
+    const REASONS = ['আইটেম শেষ', 'দোকান বন্ধ', 'এখন সম্ভব না', 'অন্য কারণ'];
+
+    let shops = [];
+    let shop = null;       // { id, name, is_open, busy_until }
+    let tab = 'orders';
+    let orders = [];
+    let menu = [];
+    let audioCtx = null;
+    let soundOn = false;
+    let beepTimer = null;
+    let pollTimer = null;
+    let busy = false;
+    let rejReq = null;
+    let rejReason = '';
+    let hlId = new URLSearchParams(window.location.search).get('o');
+    let knownNew = new Set();
+
+    function toast(m, t) { if (window.showToast) window.showToast(m, t); }
+    const bn = (n) => String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
+    const money = (n) => '৳' + bn(Number.isInteger(Number(n)) ? Number(n) : Number(n).toFixed(2));
+
+    function h(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined && text !== null) e.textContent = text;
+      return e;
+    }
+
+    function ago(iso) {
+      const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+      return m < 1 ? 'এইমাত্র' : bn(m) + ' মিনিট আগে';
+    }
+
+    // ---------- সাউন্ড ----------
+    function beep() {
+      if (!audioCtx) return;
+      try {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = 'square';
+        o.frequency.value = 880;
+        g.gain.value = 0.25;
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start();
+        o.stop(audioCtx.currentTime + 0.35);
+      } catch (_) { /* উপেক্ষা */ }
+      try { if (navigator.vibrate) navigator.vibrate([250, 120, 250]); } catch (_) { /* উপেক্ষা */ }
+    }
+
+    function syncBeeper() {
+      const hasNew = orders.some((o) => o.status === 'new');
+      if (hasNew && soundOn && !beepTimer) { beep(); beepTimer = setInterval(beep, BEEP_MS); }
+      if ((!hasNew || !soundOn) && beepTimer) { clearInterval(beepTimer); beepTimer = null; }
+    }
+
+    $('psSoundBtn').addEventListener('click', () => {
+      if (!soundOn) {
+        try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch (_) { /* উপেক্ষা */ }
+        soundOn = true;
+        beep();
+        $('psSoundBtn').classList.add('on');
+        $('psSoundBtn').innerHTML = '<i class="fas fa-bell"></i> সাউন্ড চালু আছে';
+      } else {
+        soundOn = false;
+        $('psSoundBtn').classList.remove('on');
+        $('psSoundBtn').innerHTML = '<i class="fas fa-bell-slash"></i> সাউন্ড চালু করুন (নতুন অর্ডারে বাজবে)';
+      }
+      syncBeeper();
+    });
+
+    // ---------- দোকান খোলা/বন্ধ ----------
+    function setSw(el, on) { el.setAttribute('aria-checked', on ? 'true' : 'false'); }
+    function paintOpen() {
+      if (!shop) return;
+      const busyNow = shop.busy_until && new Date(shop.busy_until).getTime() > Date.now();
+      setSw($('psOpenSw'), !!shop.is_open);
+      $('psOpenTxt').textContent = shop.is_open ? 'দোকান খোলা' : 'দোকান বন্ধ';
+      let sub = shop.is_open ? 'কাস্টমার অর্ডার দিতে পারবে' : 'কাস্টমার অর্ডার দিতে পারবে না';
+      if (shop.is_open && busyNow) sub = 'ব্যস্ত মোড — ' + new Date(shop.busy_until).toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' }) + ' পর্যন্ত';
+      $('psOpenSub').textContent = sub;
+      $('psBusyClear').style.display = busyNow ? '' : 'none';
+    }
+
+    async function setOpen(open, busyMin) {
+      const { data, error } = await supabase.rpc('shop_set_open', { p_shop_id: shop.id, p_open: open, p_busy_minutes: busyMin || null });
+      if (error || !data || !data.ok) { toast('বদলানো যায়নি' + (error ? ': ' + error.message : ''), 'error'); return; }
+      shop.is_open = open;
+      shop.busy_until = busyMin ? new Date(Date.now() + busyMin * 60000).toISOString() : null;
+      paintOpen();
+    }
+
+    $('psOpenSw').addEventListener('click', () => setOpen($('psOpenSw').getAttribute('aria-checked') !== 'true', 0));
+    $('psBusyRow').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-busy]');
+      if (!b) return;
+      setOpen(true, parseInt(b.dataset.busy, 10) || 0);
+    });
+
+    // ---------- অর্ডার ----------
+    async function loadOrders(scope) {
+      const { data, error } = await supabase.rpc('shop_get_orders', { p_shop_id: shop.id, p_scope: scope });
+      if (error) { toast('অর্ডার লোড হয়নি: ' + error.message, 'error'); return null; }
+      return Array.isArray(data) ? data : [];
+    }
+
+    async function refresh(quiet) {
+      if (!shop || (document.hidden && quiet)) return;
+      // অ্যালার্টের জন্য চলমান অর্ডার সবসময় আপডেট (যে ট্যাবেই থাকুক)
+      let list = null;
+      if (tab === 'done') {
+        list = await loadOrders('done');
+        const act = await loadOrders('active');
+        if (act) setActive(act);
+      } else {
+        const act = await loadOrders('active');
+        if (act === null) return;
+        setActive(act);
+        list = act;
+      }
+      if (list === null) return;
+      if (tab === 'menu') { if (!quiet || !menu.length) await loadMenu(); return; }
+      renderOrders(list);
+    }
+
+    function setActive(list) {
+      orders = list;
+      const newOnes = list.filter((o) => o.status === 'new');
+      $('psBdgNew').style.display = newOnes.length ? '' : 'none';
+      $('psBdgNew').textContent = bn(newOnes.length);
+      syncBeeper();
+    }
+
+    function orderCard(o, done) {
+      const c = h('div', 'ps-card ps-ord' + (o.status === 'new' && !done ? ' fresh' : '') + (hlId === o.request_id ? ' hl' : ''));
+      c.dataset.id = o.request_id;
+      const hd = h('div', 'ps-ohead');
+      hd.appendChild(h('span', 'ps-ono', '#' + (o.order_no || '')));
+      const st = { new: ['নতুন', 'new'], accepted: ['প্রস্তুতি চলছে', 'acc'], ready: ['রেডি', 'rdy'], rejected: ['বাতিল', 'rej'] }[o.status] || [o.status, ''];
+      let label = st[0];
+      if (done && o.request_status === 'completed' && o.status !== 'rejected') label = 'ডেলিভারি সম্পন্ন';
+      if (done && o.request_status === 'cancelled' && o.status !== 'rejected') label = 'অর্ডার বাতিল';
+      hd.appendChild(h('span', 'ps-chip ' + st[1], label));
+      c.appendChild(hd);
+      c.appendChild(h('div', 'ps-meta', ago(o.created_at)));
+
+      (o.items || []).forEach((i) => {
+        const l = h('div', 'ps-line');
+        l.appendChild(h('span', '', bn(i.qty) + ' × ' + i.name));
+        l.appendChild(h('span', '', money(Number(i.price) * Number(i.qty))));
+        c.appendChild(l);
+      });
+      const t = h('div', 'ps-line ps-tot');
+      t.appendChild(h('span', '', 'আপনার দোকানের মোট'));
+      t.appendChild(h('span', '', money(o.shop_total)));
+      c.appendChild(t);
+      if (o.note) c.appendChild(h('div', 'ps-note', 'কাস্টমারের নোট: ' + o.note));
+      if (o.status === 'accepted' && o.prep_minutes) c.appendChild(h('div', 'ps-meta', 'প্রস্তুতির সময়: ' + bn(o.prep_minutes) + ' মিনিট (গ্রহণ: ' + ago(o.accepted_at) + ')'));
+      if (o.status === 'rejected' && o.reject_reason) c.appendChild(h('div', 'ps-meta', 'কারণ: ' + o.reject_reason));
+      if (o.rider_name && o.status !== 'rejected') c.appendChild(h('div', 'ps-meta', 'রাইডার: ' + o.rider_name));
+
+      if (!done) {
+        if (o.status === 'new') {
+          c.appendChild(h('div', 'ps-meta', 'প্রস্তুতির সময় বেছে গ্রহণ করুন:'));
+          const row = h('div', 'ps-prep');
+          [10, 20, 30].forEach((m) => {
+            const b = h('button', 'ps-cta', bn(m) + ' মিনিট');
+            b.type = 'button';
+            b.addEventListener('click', () => accept(o, m, b));
+            row.appendChild(b);
+          });
+          c.appendChild(row);
+          const rj = h('button', 'ps-ghost', 'বাতিল করুন');
+          rj.type = 'button';
+          rj.style.color = '#B3261E';
+          rj.addEventListener('click', () => openReject(o));
+          c.appendChild(rj);
+        } else if (o.status === 'accepted') {
+          const row = h('div', 'ps-acts');
+          row.style.marginTop = '0';
+          const b = h('button', 'ps-cta', 'রেডি');
+          b.type = 'button';
+          b.addEventListener('click', () => ready(o, b));
+          row.appendChild(b);
+          c.appendChild(row);
+        } else if (o.status === 'ready') {
+          c.appendChild(h('div', 'ps-meta', 'রেডি দেওয়া হয়েছে ' + ago(o.ready_at) + ' — রাইডার নিয়ে যাবে'));
+        }
+      }
+      if (o.status !== 'rejected') {
+        const rc = h('button', 'ps-ghost', 'রিসিপ্ট');
+        rc.type = 'button';
+        rc.addEventListener('click', () => openReceipt(o));
+        c.appendChild(rc);
+      }
+      return c;
+    }
+
+    function renderOrders(list) {
+      const pane = $('psPane');
+      pane.innerHTML = '';
+      const done = tab === 'done';
+      if (!list.length) {
+        pane.appendChild(h('p', 'ps-muted', done ? 'এখনো কোনো সম্পন্ন অর্ডার নেই।' : 'এখন কোনো চলমান অর্ডার নেই। নতুন অর্ডার এলে এখানে দেখাবে।'));
+        return;
+      }
+      const box = h('div');
+      box.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+      list.forEach((o) => box.appendChild(orderCard(o, done)));
+      pane.appendChild(box);
+      if (hlId) {
+        const el = pane.querySelector('[data-id="' + hlId + '"]');
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); hlId = null; }
+      }
+    }
+
+    async function accept(o, mins, btn) {
+      if (busy) return;
+      busy = true; btn.disabled = true;
+      const { data, error } = await supabase.rpc('shop_accept_order', { p_request_id: o.request_id, p_prep_minutes: mins });
+      busy = false;
+      if (error || !data || !data.ok) { btn.disabled = false; toast(data && data.reason === 'closed' ? 'অর্ডারটি আর চালু নেই।' : 'গ্রহণ করা যায়নি' + (error ? ': ' + error.message : ''), 'error'); await refresh(); return; }
+      toast('অর্ডার গ্রহণ করা হয়েছে ✓', 'success');
+      await refresh();
+    }
+
+    async function ready(o, btn) {
+      if (busy) return;
+      busy = true; btn.disabled = true;
+      const { data, error } = await supabase.rpc('shop_mark_ready', { p_request_id: o.request_id });
+      busy = false;
+      if (error || !data || !data.ok) { btn.disabled = false; toast('রেডি দেওয়া যায়নি' + (error ? ': ' + error.message : ''), 'error'); await refresh(); return; }
+      toast('রেডি! রাইডারকে জানানো হয়েছে ✓', 'success');
+      await refresh();
+    }
+
+    // ---------- বাতিল ----------
+    function openReject(o) {
+      rejReq = o; rejReason = '';
+      $('psRejOther').value = ''; $('psRejOther').style.display = 'none';
+      $('psRejErr').style.display = 'none';
+      const box = $('psReasons');
+      box.innerHTML = '';
+      REASONS.forEach((r) => {
+        const b = h('button', 'ps-rs', r);
+        b.type = 'button';
+        b.addEventListener('click', () => {
+          rejReason = r;
+          box.querySelectorAll('.ps-rs').forEach((x) => x.classList.toggle('sel', x === b));
+          $('psRejOther').style.display = r === 'অন্য কারণ' ? '' : 'none';
+        });
+        box.appendChild(b);
+      });
+      $('psRejOv').classList.add('active');
+    }
+    $('psRejClose').addEventListener('click', () => $('psRejOv').classList.remove('active'));
+    $('psRejOv').addEventListener('click', (e) => { if (e.target === $('psRejOv')) $('psRejOv').classList.remove('active'); });
+    $('psRejGo').addEventListener('click', async () => {
+      let reason = rejReason === 'অন্য কারণ' ? $('psRejOther').value.trim() : rejReason;
+      if (!reason || reason.length < 2) { $('psRejErr').textContent = 'বাতিলের কারণ বাছুন বা লিখুন।'; $('psRejErr').style.display = 'block'; return; }
+      if (busy || !rejReq) return;
+      busy = true;
+      const { data, error } = await supabase.rpc('shop_reject_order', { p_request_id: rejReq.request_id, p_reason: reason });
+      busy = false;
+      if (error || !data || !data.ok) { $('psRejErr').textContent = 'বাতিল হয়নি' + (error ? ': ' + error.message : ''); $('psRejErr').style.display = 'block'; return; }
+      $('psRejOv').classList.remove('active');
+      toast('অর্ডার বাতিল করা হয়েছে, অ্যাডমিনকে জানানো হয়েছে।', 'success');
+      await refresh();
+    });
+
+    // ---------- রিসিপ্ট ----------
+    function openReceipt(o) {
+      const r = $('psReceipt');
+      r.innerHTML = '';
+      r.appendChild(h('h3', '', shop.name));
+      r.appendChild(h('div', 'ps-c', 'অর্ডার #' + (o.order_no || '') + ' · ' + new Date(o.created_at).toLocaleString('bn-BD', { dateStyle: 'medium', timeStyle: 'short' })));
+      r.appendChild(h('hr'));
+      (o.items || []).forEach((i) => {
+        const l = h('div', 'ps-line');
+        l.appendChild(h('span', '', bn(i.qty) + ' × ' + i.name));
+        l.appendChild(h('span', '', money(Number(i.price) * Number(i.qty))));
+        r.appendChild(l);
+      });
+      r.appendChild(h('hr'));
+      const t = h('div', 'ps-line ps-tot');
+      t.style.border = '0';
+      t.appendChild(h('span', '', 'মোট'));
+      t.appendChild(h('span', '', money(o.shop_total)));
+      r.appendChild(t);
+      if (o.note) r.appendChild(h('div', 'ps-meta', 'নোট: ' + o.note));
+      r.appendChild(h('div', 'ps-c', 'Smart Feni — ধন্যবাদ'));
+      $('psRcOv').classList.add('active');
+    }
+    $('psRcClose').addEventListener('click', () => $('psRcOv').classList.remove('active'));
+    $('psRcOv').addEventListener('click', (e) => { if (e.target === $('psRcOv')) $('psRcOv').classList.remove('active'); });
+    $('psRcPrint').addEventListener('click', () => window.print());
+
+    // ---------- মেনু ----------
+    async function loadMenu() {
+      const { data, error } = await supabase.from('delivery_shop_items').select('id, name, price, image_url, is_available, sort_order').eq('shop_id', shop.id).order('sort_order', { ascending: true }).order('name', { ascending: true });
+      if (error) { toast('মেনু লোড হয়নি: ' + error.message, 'error'); return; }
+      menu = data || [];
+      renderMenu();
+    }
+
+    function renderMenu() {
+      const pane = $('psPane');
+      pane.innerHTML = '';
+      const card = h('div', 'ps-card');
+      if (!menu.length) card.appendChild(h('p', 'ps-muted', 'মেনুতে কোনো আইটেম নেই। নতুন আইটেম যোগ করতে অ্যাডমিনকে জানান।'));
+      menu.forEach((it) => {
+        const row = h('div', 'ps-it' + (it.is_available ? '' : ' off'));
+        const tile = h('div', 'ps-tile');
+        if (it.image_url) { const im = document.createElement('img'); im.alt = ''; im.loading = 'lazy'; im.src = it.image_url; tile.appendChild(im); }
+        else tile.textContent = (it.name || '?').charAt(0);
+        row.appendChild(tile);
+        row.appendChild(h('div', 'ps-itn', it.name));
+        row.appendChild(h('div', 'ps-itp', money(it.price)));
+        const sw = h('button', 'ps-sw');
+        sw.type = 'button';
+        sw.setAttribute('role', 'switch');
+        sw.setAttribute('aria-label', it.name + ' পাওয়া যাচ্ছে');
+        setSw(sw, !!it.is_available);
+        sw.appendChild(document.createElement('i'));
+        sw.addEventListener('click', async () => {
+          const want = sw.getAttribute('aria-checked') !== 'true';
+          sw.disabled = true; setSw(sw, want);
+          const { data, error } = await supabase.rpc('shop_set_item_available', { p_item_id: it.id, p_available: want });
+          sw.disabled = false;
+          if (error || !data || !data.ok) { setSw(sw, !want); toast('বদলানো যায়নি' + (error ? ': ' + error.message : ''), 'error'); return; }
+          it.is_available = want; row.classList.toggle('off', !want);
+        });
+        row.appendChild(sw);
+        card.appendChild(row);
+      });
+      pane.appendChild(card);
+    }
+
+    // ---------- ট্যাব ও দোকান ----------
+    $('psTabs').addEventListener('click', (e) => {
+      const b = e.target.closest('.ps-tab');
+      if (!b) return;
+      tab = b.dataset.tab;
+      document.querySelectorAll('.ps-tab').forEach((x) => x.classList.toggle('active', x === b));
+      $('psPane').innerHTML = '';
+      refresh();
+    });
+
+    async function pickShop(id) {
+      const { data, error } = await supabase.from('delivery_shops').select('id, name, is_open, busy_until').eq('id', id).single();
+      if (error || !data) { toast('দোকান লোড হয়নি', 'error'); return; }
+      shop = data;
+      $('psShopName').textContent = shop.name;
+      paintOpen();
+      orders = []; knownNew = new Set();
+      await refresh();
+    }
+
+    async function init() {
+      let res;
+      try { res = await getMyProRoles(); } catch (_) { res = { loggedIn: true, roles: [] }; }
+      if (!res.loggedIn) { window.location.replace('/'); return; }
+      const role = res.roles.find((r) => r.role === 'instant_shop');
+      $('psLoading').style.display = 'none';
+      if (!role || !role.shops || !role.shops.length) { $('psNoAccess').style.display = 'flex'; return; }
+      rememberRole('instant_shop');
+      shops = role.shops;
+      $('psMain').style.display = '';
+      if (shops.length > 1) {
+        const sel = $('psShopSel');
+        sel.style.display = '';
+        shops.forEach((s) => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; sel.appendChild(o); });
+        sel.addEventListener('change', () => pickShop(sel.value));
+      }
+      const wanted = new URLSearchParams(window.location.search).get('shop');
+      const start = shops.find((s) => s.id === wanted) || shops[0];
+      if (shops.length > 1) $('psShopSel').value = start.id;
+      await pickShop(start.id);
+      pollTimer = setInterval(() => refresh(true), POLL_MS);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+    }
+
+    init();
+  </script>
+</BaseLayout>

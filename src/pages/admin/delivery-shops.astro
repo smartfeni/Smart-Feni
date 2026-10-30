@@ -140,6 +140,16 @@ const guideSteps = [
             <button type="button" class="dsa-sw" id="sActive" role="switch" aria-checked="true" aria-label="কাস্টমারকে দেখান"><i></i></button>
           </div>
 
+          <div id="teamWrap" style="display:none;">
+            <label class="dsa-lbl">মালিক ও স্টাফ (Pro অ্যাপে অর্ডার ধরবে)</label>
+            <div id="teamBox" class="dsa-team"></div>
+            <div class="dsa-teamsearch">
+              <input class="dsa-in" id="teamPhone" type="tel" inputmode="numeric" maxlength="15" placeholder="ফোন নম্বর (01XXXXXXXXX)" aria-label="ফোন নম্বর" />
+              <button type="button" class="dsa-ghost" id="teamFind">খুঁজুন</button>
+            </div>
+            <div id="teamFound" class="dsa-team"></div>
+          </div>
+
           <label class="dsa-lbl" for="sSort">ক্রম (ছোট নম্বর আগে দেখাবে)</label>
           <input class="dsa-in" id="sSort" type="number" inputmode="numeric" value="100" />
 
@@ -289,6 +299,15 @@ const guideSteps = [
     .dsa-imgbox img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .dsa-imgbtns { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
     .dsa-imgbtns .dsa-ghost { height: 44px; font-size: 14px; }
+
+    .dsa-team { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+    .dsa-teamrow { display: flex; align-items: center; gap: 8px; background: #F1F5F9; border-radius: 14px; padding: 6px 10px; min-height: 52px; }
+    .dsa-teamrow .dsa-info { font-size: 14.5px; font-weight: 600; }
+    .dsa-teamrow .dsa-info small { display: block; font-size: 12.5px; color: #5B6B86; font-weight: 400; }
+    .dsa-teamrow .dsa-ghost { height: 44px; font-size: 13.5px; padding: 0 12px; }
+    .dsa-teamsearch { display: flex; gap: 8px; margin-top: 8px; }
+    .dsa-teamsearch .dsa-in { flex: 1; }
+    .dsa-teamsearch .dsa-ghost { height: 48px; flex: none; }
 
     @media (max-width: 380px) {
       .dsa-two { grid-template-columns: 1fr; }
@@ -824,6 +843,7 @@ const guideSteps = [
 
       $('delShopBtn').style.display = shop ? '' : 'none';
       openSheet('shopOverlay');
+      loadTeam();
     }
 
     async function saveShop() {
@@ -933,6 +953,117 @@ const guideSteps = [
         btn.disabled = false;
       }
     }
+
+    // ---------- মালিক ও স্টাফ (Pro অ্যাপের জন্য) ----------
+    function teamRow(p, roleLabel, btnText, onClick) {
+      const row = document.createElement('div');
+      row.className = 'dsa-teamrow';
+      const info = document.createElement('div');
+      info.className = 'dsa-info';
+      info.textContent = (p && p.full_name) || 'নামহীন';
+      const sm = document.createElement('small');
+      sm.textContent = ((p && p.phone) || '') + (roleLabel ? ' · ' + roleLabel : '');
+      info.appendChild(sm);
+      row.appendChild(info);
+      if (btnText) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dsa-ghost dsa-red';
+        b.textContent = btnText;
+        b.addEventListener('click', onClick);
+        row.appendChild(b);
+      }
+      return row;
+    }
+
+    async function loadTeam() {
+      const wrap = $('teamWrap');
+      $('teamFound').innerHTML = '';
+      if (!editing) { wrap.style.display = 'none'; return; }
+      wrap.style.display = '';
+      const box = $('teamBox');
+      box.textContent = 'লোড হচ্ছে...';
+      const shopId = editing.id;
+      const [st, sh] = await Promise.all([
+        supabase.from('delivery_shop_staff').select('id, profile_id').eq('shop_id', shopId),
+        supabase.from('delivery_shops').select('owner_id').eq('id', shopId).single(),
+      ]);
+      if (!editing || editing.id !== shopId) return;
+      const ownerId = sh.data ? sh.data.owner_id : null;
+      const staff = st.data || [];
+      const ids = [];
+      if (ownerId) ids.push(ownerId);
+      staff.forEach((r) => ids.push(r.profile_id));
+      const prof = {};
+      if (ids.length) {
+        const pr = await supabase.from('profiles').select('id, full_name, phone').in('id', ids);
+        (pr.data || []).forEach((p) => { prof[p.id] = p; });
+      }
+      box.innerHTML = '';
+      if (!ownerId && !staff.length) {
+        const p = document.createElement('p');
+        p.className = 'dsa-hint';
+        p.textContent = 'এখনো কেউ যুক্ত নেই। নিচে ফোন নম্বর দিয়ে খুঁজে মালিক বা স্টাফ বানান।';
+        box.appendChild(p);
+      }
+      if (ownerId) box.appendChild(teamRow(prof[ownerId], 'মালিক', 'সরান', async () => {
+        const { error } = await supabase.from('delivery_shops').update({ owner_id: null }).eq('id', shopId);
+        if (error) { toast('সরানো যায়নি: ' + error.message, 'error'); return; }
+        loadTeam();
+      }));
+      staff.forEach((r) => box.appendChild(teamRow(prof[r.profile_id], 'স্টাফ', 'সরান', async () => {
+        const { error } = await supabase.from('delivery_shop_staff').delete().eq('id', r.id);
+        if (error) { toast('সরানো যায়নি: ' + error.message, 'error'); return; }
+        loadTeam();
+      })));
+    }
+
+    async function findTeamUser() {
+      if (!editing) return;
+      const digits = ($('teamPhone').value || '').replace(/\D/g, '');
+      const out = $('teamFound');
+      out.innerHTML = '';
+      if (digits.length < 10) { toast('সঠিক ফোন নম্বর দিন (কমপক্ষে ১০ সংখ্যা)।', 'error'); return; }
+      const tail = digits.slice(-10);
+      const { data, error } = await supabase.from('profiles').select('id, full_name, phone').ilike('phone', '%' + tail).limit(5);
+      if (error) { toast('খোঁজা যায়নি: ' + error.message, 'error'); return; }
+      if (!data || !data.length) {
+        const p = document.createElement('p');
+        p.className = 'dsa-hint';
+        p.textContent = 'এই নম্বরে কোনো অ্যাকাউন্ট নেই। আগে অ্যাপে রেজিস্টার করতে বলুন।';
+        out.appendChild(p);
+        return;
+      }
+      const shopId = editing.id;
+      data.forEach((u) => {
+        const row = teamRow(u, '', null, null);
+        const mk = (text, fn) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'dsa-ghost';
+          b.textContent = text;
+          b.addEventListener('click', fn);
+          row.appendChild(b);
+        };
+        mk('মালিক', async () => {
+          const { error: e1 } = await supabase.from('delivery_shops').update({ owner_id: u.id }).eq('id', shopId);
+          if (e1) { toast('সেট হয়নি: ' + e1.message, 'error'); return; }
+          toast('মালিক সেট হয়েছে ✓', 'success');
+          $('teamPhone').value = '';
+          loadTeam();
+        });
+        mk('স্টাফ', async () => {
+          const { error: e2 } = await supabase.from('delivery_shop_staff').insert({ shop_id: shopId, profile_id: u.id, added_by: userId });
+          if (e2) { toast(e2.code === '23505' ? 'ইনি আগেই স্টাফ।' : 'যোগ হয়নি: ' + e2.message, 'error'); return; }
+          toast('স্টাফ যোগ হয়েছে ✓', 'success');
+          $('teamPhone').value = '';
+          loadTeam();
+        });
+        out.appendChild(row);
+      });
+    }
+
+    $('teamFind').addEventListener('click', findTeamUser);
 
     // ---------- আইটেমের ফর্ম ----------
     function nextItemSort(shopId) {
