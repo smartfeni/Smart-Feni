@@ -121,6 +121,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <b>ইউজার ম্যানেজমেন্ট</b>
           <small>প্রোফাইল দেখুন, ব্লক/আনব্লক করুন</small>
         </a>
+        <a href="/admin/roles" class="adm-card" id="rolesNavCard" data-admin-only="1" style="--c:#7C3AED;display:none;" data-search="রোল পারমিশন অনুমতি স্টাফ অ্যাডমিন কে কী করতে পারবে">
+          <span class="adm-ic"><i class="fas fa-user-lock"></i></span>
+          <b>রোল ও পারমিশন</b>
+          <small>কে কী করতে পারবে ঠিক করুন, স্টাফ যোগ করুন</small>
+        </a>
         <a href="/admin/moderators" class="adm-card" id="moderatorNavCard" data-admin-only="1" style="--c:#6366F1;display:none;" data-search="মডারেটর ম্যানেজমেন্ট নতুন মডারেটর যোগ করুন বা সরান">
           <span class="adm-ic"><i class="fas fa-user-shield"></i></span>
           <b>মডারেটর ম্যানেজমেন্ট</b>
@@ -296,10 +301,19 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   </style>
 
   <script>
-    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { initAdminGuard, adminAreaOfPath } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
 
     let isAdmin = false;
+    let access = null; // adminGuard থেকে: রোলওয়ালা স্টাফ হলে রোলের permission
+
+    function areaOfCard(card) { return adminAreaOfPath(card.getAttribute('href') || ''); }
+    function staffCan(area) { return !!area && access.can(area + '.view'); }
+    function cardAllowed(card) {
+      // রোলওয়ালা স্টাফ: শুধু রোলে অনুমতি পাওয়া কার্ড
+      if (access && access.isStaff) return staffCan(areaOfCard(card));
+      return !card.hasAttribute('data-admin-only') || isAdmin;
+    }
 
     // কার্ড দেখানো/লুকানো: রোল (data-admin-only) + সার্চ — দুটো একসাথে হিসাব করে
     function applyVisibility() {
@@ -309,7 +323,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       document.querySelectorAll('.adm-group').forEach((group) => {
         let shown = 0;
         group.querySelectorAll('.adm-card').forEach((card) => {
-          const roleOk = !card.hasAttribute('data-admin-only') || isAdmin;
+          const roleOk = cardAllowed(card);
           const match = !q || (card.getAttribute('data-search') || '').toLowerCase().includes(q);
           const visible = roleOk && match;
           card.style.display = visible ? '' : 'none';
@@ -340,7 +354,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       if (!strip) return;
       strip.innerHTML = '';
 
-      const active = items.filter((i) => i.count && i.count > 0);
+      const active = items.filter((i) => i.count && i.count > 0 && (!access || !access.isStaff || staffCan(adminAreaOfPath(i.href))));
       if (!active.length) {
         const none = document.createElement('span');
         none.className = 'adm-none';
@@ -427,11 +441,12 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     document.getElementById('adminSearch')?.addEventListener('input', applyVisibility);
 
     window.addEventListener('smartfeni:admin-ready', (e) => {
-      const { role } = e.detail;
+      const { role, access: guardAccess } = e.detail;
+      access = guardAccess || null;
       isAdmin = role === 'admin';
 
       const roleBadge = document.getElementById('roleBadge');
-      if (roleBadge) roleBadge.textContent = isAdmin ? 'অ্যাডমিন' : 'মডারেটর';
+      if (roleBadge) roleBadge.textContent = isAdmin ? 'অ্যাডমিন' : (access && access.isStaff && access.roleName ? access.roleName : 'মডারেটর');
 
       applyVisibility();
       loadStats();
