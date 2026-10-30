@@ -48,13 +48,20 @@
 
 <div class="dash-card">
   <h3><i class="fas fa-list"></i> আমার ডোনার লিস্ট</h3>
+  <div id="donorExportRow" style="display:none; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+    <button type="button" class="secondary-btn" id="donorDlPdf"><i class="fas fa-file-pdf"></i> PDF</button>
+    <button type="button" class="secondary-btn" id="donorDlPng"><i class="fas fa-image"></i> ছবি</button>
+    <button type="button" class="secondary-btn" id="donorDlXlsx"><i class="fas fa-file-excel"></i> Excel</button>
+  </div>
   <div id="donorsList"></div>
   <p class="empty-note" id="donorsEmpty" style="display:none;">কোনো ডোনার যোগ করা হয়নি</p>
 </div>
 
 <script>
   import { supabase } from '../../lib/supabase.js';
+  import { downloadDonorList } from '../../lib/donorExport.js';
 
+  let clubName = '';
   let clubId = null;
   let clubUpazilaLabel = null;
   let allDonors = [];
@@ -169,10 +176,38 @@
       .order('created_at', { ascending: false });
     allDonors = data || [];
     renderDonors();
+    const exportRow = document.getElementById('donorExportRow');
+    if (exportRow) exportRow.style.display = allDonors.length ? 'flex' : 'none';
   }
+
+  // ডাউনলোড বাটন (PDF / ছবি / Excel)
+  [['donorDlPdf', 'pdf'], ['donorDlPng', 'png'], ['donorDlXlsx', 'xlsx']].forEach(([id, format]) => {
+    const btn = document.getElementById(id);
+    btn?.addEventListener('click', async () => {
+      if (!allDonors.length) return;
+      const original = btn.innerHTML;
+      btn.disabled = true;
+      btn.textContent = 'তৈরি হচ্ছে...';
+      try {
+        const result = await downloadDonorList(format, allDonors, clubName);
+        window.showToast(
+          result.where === 'native'
+            ? 'ফাইল সেভ হয়েছে: Documents/SmartFeni/' + result.filename
+            : 'ডাউনলোড শুরু হয়েছে ✓',
+          'success'
+        );
+      } catch (err) {
+        window.showToast('ডাউনলোড ব্যর্থ: ' + (err?.message || 'আবার চেষ্টা করুন'), 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
+    });
+  });
 
   window.addEventListener('smartfeni:club-ready', (e) => {
     clubId = e.detail.clubId;
+    clubName = e.detail.club?.name || '';
     clubUpazilaLabel = UPAZILA_LABELS[e.detail.club.upajila] || null;
     loadDonors();
   });
