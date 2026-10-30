@@ -1,0 +1,513 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — রোল ও পারমিশন (/admin/roles)
+// শুধু role='admin' এই পেজ দেখতে পাবে (মডারেটর/স্টাফরা না)
+// - রোল তৈরি/এডিট/ডিলিট (permission টগল)
+// - স্টাফ অ্যাসাইন / রোল বদল / সরানো (সরানো = অ্যাডমিন অ্যাক্সেস পুরো বন্ধ)
+// - সাম্প্রতিক পরিবর্তনের লগ
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="রোল ও পারমিশন | অ্যাডমিন">
+  <div class="admin-page rl-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="admin-loading">
+        <div class="admin-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="admin-content" style="display:none;">
+
+        <a href="/admin" class="back-link"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+
+        <div class="admin-header">
+          <h1>রোল ও পারমিশন</h1>
+          <p class="admin-subtitle">কে কী করতে পারবে আপনি ঠিক করুন। রোল না পাওয়া পুরনো মডারেটররা আগের মতো পুরো অ্যাক্সেসে থাকবেন।</p>
+        </div>
+
+        <!-- ===== রোল ===== -->
+        <div class="rl-block">
+          <div class="rl-head">
+            <p class="rl-title">রোল</p>
+            <button type="button" id="newRoleBtn" class="rl-btn rl-btn-primary"><i class="fas fa-plus"></i> নতুন রোল</button>
+          </div>
+          <div id="rolesList" class="rl-list"></div>
+        </div>
+
+        <!-- ===== স্টাফ ===== -->
+        <div class="rl-block">
+          <p class="rl-title">স্টাফ (অ্যাডমিন প্যানেলে ঢোকার অনুমতি পাওয়া ব্যক্তি)</p>
+          <div id="staffList" class="rl-list"></div>
+
+          <p class="rl-sub">নতুন স্টাফ যোগ করুন</p>
+          <div class="rl-search">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="text" id="staffSearch" placeholder="নাম বা ফোন নম্বর দিয়ে খুঁজুন" autocomplete="off" />
+          </div>
+          <div id="staffSearchResults" class="rl-list"></div>
+        </div>
+
+        <!-- ===== লগ ===== -->
+        <div class="rl-block">
+          <p class="rl-title">সাম্প্রতিক পরিবর্তন</p>
+          <div id="logList" class="rl-list"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ===== রোল এডিটর (বটম শিট) ===== -->
+    <div id="roleSheet" class="rl-sheet" style="display:none;">
+      <div class="rl-sheet-card" id="roleForm">
+        <div class="rl-sheet-head">
+          <h2 id="roleSheetTitle">নতুন রোল</h2>
+          <button type="button" id="roleSheetClose" class="rl-x" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+        </div>
+
+        <label class="rl-label" for="roleName">রোলের নাম <span class="required-mark">*</span></label>
+        <input type="text" id="roleName" class="rl-input" required maxlength="40" placeholder="যেমন: লিস্টিং মডারেটর" />
+        <div class="field-error-msg" data-error-for="roleName"></div>
+
+        <label class="rl-label" for="roleDesc">বিবরণ (ঐচ্ছিক)</label>
+        <input type="text" id="roleDesc" class="rl-input" maxlength="120" placeholder="এই রোল কী কাজ করবে" />
+
+        <p class="rl-hint">"পরিচালনা" দিলে "দেখা" নিজে থেকেই যুক্ত হয়। <span class="rl-pending-tag">DB বাকি</span> চিহ্নিতগুলো এখনো রোলে দেওয়া যায় না (ডাটাবেস শুধু অ্যাডমিনের জন্য খোলা)।</p>
+
+        <div id="permGroups"></div>
+
+        <div class="rl-actions">
+          <button type="button" id="roleCancel" class="rl-btn">বাতিল</button>
+          <button type="button" id="roleSave" class="rl-btn rl-btn-primary">সেভ করুন</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</BaseLayout>
+
+<style is:global>
+  .rl-page { padding: 16px 0 90px; }
+  .rl-page .admin-loading { text-align: center; padding: 60px 0; color: #64748b; }
+  .rl-page .admin-spinner { width: 34px; height: 34px; margin: 0 auto 12px; border: 3px solid #e2e8f0; border-top-color: #FF6B35; border-radius: 50%; animation: rlspin .8s linear infinite; }
+  @keyframes rlspin { to { transform: rotate(360deg); } }
+  .rl-page .back-link { display: inline-flex; align-items: center; gap: 6px; color: #1B2A4A; font-weight: 600; font-size: 14px; text-decoration: none; margin-bottom: 10px; }
+  .rl-page .admin-header h1 { font-size: 22px; color: #1B2A4A; margin: 0 0 4px; }
+  .rl-page .admin-subtitle { color: #64748b; font-size: 13px; margin: 0 0 14px; line-height: 1.5; }
+
+  .rl-block { background: #fff; border-radius: 16px; box-shadow: 0 2px 10px rgba(27,42,74,.07); padding: 14px; margin-bottom: 14px; }
+  .rl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .rl-title { font-weight: 700; color: #1B2A4A; font-size: 15px; margin: 0 0 8px; }
+  .rl-head .rl-title { margin: 0; }
+  .rl-sub { font-weight: 600; color: #475569; font-size: 13px; margin: 14px 0 6px; }
+  .rl-list { display: flex; flex-direction: column; gap: 8px; }
+  .rl-empty { color: #94a3b8; font-size: 13px; padding: 8px 0; }
+
+  .rl-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; background: #F8FAFC; }
+  .rl-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .rl-name { font-weight: 700; color: #1B2A4A; font-size: 14px; word-break: break-word; }
+  .rl-meta { color: #64748b; font-size: 12px; margin-top: 2px; line-height: 1.4; word-break: break-word; }
+  .rl-tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #FFF1EA; color: #C2410C; margin-top: 4px; }
+  .rl-tag-blue { background: #E0ECFF; color: #1D4ED8; }
+  .rl-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+
+  .rl-btn { border: 1px solid #cbd5e1; background: #fff; color: #1B2A4A; border-radius: 10px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .rl-btn-primary { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+  .rl-btn-danger { color: #B91C1C; border-color: #FECACA; background: #FEF2F2; }
+  .rl-btn[disabled] { opacity: .55; cursor: default; }
+  .rl-select { flex: 1; min-width: 140px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; font-size: 13px; color: #1B2A4A; }
+
+  .rl-search { display: flex; align-items: center; gap: 8px; border: 1px solid #cbd5e1; border-radius: 12px; padding: 0 12px; background: #fff; margin-bottom: 8px; }
+  .rl-search input { flex: 1; border: 0; outline: 0; padding: 11px 0; font-size: 14px; background: transparent; }
+
+  .rl-sheet { position: fixed; inset: 0; z-index: 2000; background: rgba(15,23,42,.5); display: flex; align-items: flex-end; justify-content: center; }
+  .rl-sheet-card { width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 20px 20px 0 0; padding: 16px 16px 28px; }
+  .rl-sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .rl-sheet-head h2 { font-size: 18px; color: #1B2A4A; margin: 0; }
+  .rl-x { border: 0; background: #f1f5f9; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; color: #475569; }
+  .rl-label { display: block; font-size: 13px; font-weight: 600; color: #334155; margin: 10px 0 4px; }
+  .rl-input { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+  .rl-hint { font-size: 12px; color: #64748b; margin: 12px 0 4px; line-height: 1.5; }
+
+  .rl-group-title { font-weight: 700; font-size: 13px; color: #1B2A4A; margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid #e2e8f0; }
+  .rl-area { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 7px 0; border-bottom: 1px dashed #eef2f7; }
+  .rl-area-name { flex: 1 1 100%; font-size: 13px; color: #334155; font-weight: 600; }
+  .rl-perm { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #334155; cursor: pointer; }
+  .rl-perm input { width: 18px; height: 18px; accent-color: #FF6B35; }
+  .rl-perm.rl-off { opacity: .45; cursor: not-allowed; }
+  .rl-sens { color: #B45309; font-size: 11px; font-weight: 700; }
+  .rl-pending-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: #E2E8F0; color: #475569; }
+  .rl-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+  .rl-log { font-size: 12.5px; color: #475569; line-height: 1.5; padding: 6px 0; border-bottom: 1px dashed #eef2f7; }
+  .rl-log small { color: #94a3b8; }
+</style>
+
+<script>
+  import { initAdminGuard } from '../../lib/adminGuard.js';
+  import { supabase } from '../../lib/supabase.js';
+
+  // ডাটাবেস এখনো শুধু অ্যাডমিনের জন্য খোলা — এগুলো রোলে দেওয়া যাবে না (ব্যাচ ৩-এ RLS বদলালে চালু হবে)
+  const DB_PENDING_AREAS = new Set(['clubs', 'clinics', 'referrals', 'errors', 'devices']);
+  const DB_PENDING_KEYS = new Set(['users.manage']);
+  const isPending = (p) => DB_PENDING_AREAS.has(p.area) || DB_PENDING_KEYS.has(p.key);
+
+  const ACTION_LABEL = {
+    role_created: 'রোল বানানো হয়েছে',
+    role_updated: 'রোল বদলানো হয়েছে',
+    role_deleted: 'রোল মুছে ফেলা হয়েছে',
+    staff_assigned: 'স্টাফকে রোল দেওয়া হয়েছে',
+    staff_removed: 'স্টাফ সরানো হয়েছে',
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const toast = (msg, type) => { if (window.showToast) window.showToast(msg, type); };
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  let perms = [];
+  let roles = [];
+  let staff = [];
+  let editingId = null;
+  let selected = new Set();
+
+  function friendlyError(err) {
+    const m = (err && err.message) || '';
+    if (m.includes('staff assigned')) return 'এই রোলে স্টাফ আছে। আগে তাদের সরান বা অন্য রোল দিন।';
+    if (m.includes('not allowed')) return 'অনুমতি নেই';
+    if (m.includes('super admin')) return 'সুপার অ্যাডমিনের রোল লাগে না';
+    return 'কাজটি সম্পন্ন হয়নি, আবার চেষ্টা করুন';
+  }
+
+  // ---------- ডেটা লোড ----------
+  async function loadAll() {
+    const [p, r, s] = await Promise.all([
+      supabase.from('admin_permissions').select('key, area, level, label, group_label, sensitive, sort').order('sort'),
+      supabase.from('admin_roles').select('id, name, description, permissions').order('created_at'),
+      supabase.rpc('admin_list_staff'),
+    ]);
+    if (p.error || r.error || s.error) toast('ডেটা লোড করতে সমস্যা হয়েছে', 'error');
+    perms = p.data || [];
+    roles = r.data || [];
+    staff = s.data || [];
+    renderRoles();
+    renderStaff();
+    loadLog();
+  }
+
+  // ---------- রোল লিস্ট ----------
+  function renderRoles() {
+    const box = $('rolesList');
+    box.replaceChildren();
+    if (!roles.length) {
+      box.appendChild(el('p', 'rl-empty', 'এখনো কোনো রোল নেই। "নতুন রোল" চেপে প্রথমটা বানান।'));
+      return;
+    }
+    roles.forEach((role) => {
+      const count = staff.filter((s) => s.role_id === role.id).length;
+      const card = el('div', 'rl-card');
+      const top = el('div', 'rl-card-top');
+      const info = el('div');
+      info.appendChild(el('div', 'rl-name', role.name));
+      if (role.description) info.appendChild(el('div', 'rl-meta', role.description));
+      info.appendChild(el('span', 'rl-tag rl-tag-blue', (role.permissions || []).length + 'টা permission · ' + count + ' জন স্টাফ'));
+      top.appendChild(info);
+      card.appendChild(top);
+
+      const row = el('div', 'rl-row');
+      const edit = el('button', 'rl-btn', 'এডিট');
+      edit.type = 'button';
+      edit.addEventListener('click', () => openSheet(role));
+      const del = el('button', 'rl-btn rl-btn-danger', 'ডিলিট');
+      del.type = 'button';
+      del.addEventListener('click', () => deleteRole(role));
+      row.append(edit, del);
+      card.appendChild(row);
+      box.appendChild(card);
+    });
+  }
+
+  async function deleteRole(role) {
+    if (!confirm('"' + role.name + '" রোলটি মুছে ফেলবেন?')) return;
+    const { error } = await supabase.rpc('admin_delete_role', { p_id: role.id });
+    if (error) { toast(friendlyError(error), 'error'); return; }
+    toast('রোল মুছে ফেলা হয়েছে', 'success');
+    loadAll();
+  }
+
+  // ---------- রোল এডিটর ----------
+  function openSheet(role) {
+    editingId = role ? role.id : null;
+    selected = new Set(role ? (role.permissions || []) : []);
+    $('roleSheetTitle').textContent = role ? 'রোল এডিট' : 'নতুন রোল';
+    $('roleName').value = role ? role.name : '';
+    $('roleDesc').value = role ? (role.description || '') : '';
+    renderPerms();
+    $('roleSheet').style.display = 'flex';
+  }
+
+  function closeSheet() {
+    $('roleSheet').style.display = 'none';
+  }
+
+  function renderPerms() {
+    const wrap = $('permGroups');
+    wrap.replaceChildren();
+
+    // গ্রুপ → এলাকা → [view, manage]
+    const groups = new Map();
+    perms.forEach((p) => {
+      const g = p.group_label || 'অন্যান্য';
+      if (!groups.has(g)) groups.set(g, new Map());
+      const areas = groups.get(g);
+      if (!areas.has(p.area)) areas.set(p.area, []);
+      areas.get(p.area).push(p);
+    });
+
+    groups.forEach((areas, groupName) => {
+      wrap.appendChild(el('div', 'rl-group-title', groupName));
+      areas.forEach((items, area) => {
+        const row = el('div', 'rl-area');
+        const first = items[0];
+        row.appendChild(el('div', 'rl-area-name', (first.label || area).split(' — ')[0]));
+
+        // view আগে, manage পরে
+        items.sort((a, b) => (a.key.endsWith('.view') ? -1 : 1) - (b.key.endsWith('.view') ? -1 : 1));
+        items.forEach((p) => {
+          const pending = isPending(p);
+          const lab = el('label', 'rl-perm' + (pending ? ' rl-off' : ''));
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.dataset.key = p.key;
+          cb.dataset.area = area;
+          cb.checked = selected.has(p.key) && !pending;
+          cb.disabled = pending;
+          cb.addEventListener('change', () => onToggle(p, cb));
+          lab.appendChild(cb);
+          lab.appendChild(document.createTextNode(p.key.endsWith('.manage') ? 'পরিচালনা' : 'দেখা'));
+          if (p.sensitive) lab.appendChild(el('span', 'rl-sens', ' ⚠ সংবেদনশীল'));
+          if (pending) lab.appendChild(el('span', 'rl-pending-tag', 'DB বাকি'));
+          row.appendChild(lab);
+        });
+        wrap.appendChild(row);
+      });
+    });
+  }
+
+  function cbFor(key) {
+    return document.querySelector('#permGroups input[data-key="' + key + '"]');
+  }
+
+  function onToggle(p, cb) {
+    const area = p.area;
+    if (cb.checked) {
+      selected.add(p.key);
+      if (p.key.endsWith('.manage')) {
+        const viewKey = area + '.view';
+        const vcb = cbFor(viewKey);
+        if (vcb && !vcb.disabled) { vcb.checked = true; selected.add(viewKey); }
+      }
+    } else {
+      selected.delete(p.key);
+      if (p.key.endsWith('.view')) {
+        const manageKey = area + '.manage';
+        const mcb = cbFor(manageKey);
+        if (mcb) { mcb.checked = false; }
+        selected.delete(manageKey);
+      }
+    }
+  }
+
+  async function saveRole() {
+    const form = $('roleForm');
+    if (window.SFValidateForm && !window.SFValidateForm(form)) return;
+    const name = $('roleName').value.trim();
+    if (!name) return;
+    const desc = $('roleDesc').value.trim();
+    const pendingKeys = new Set(perms.filter(isPending).map((p) => p.key));
+    const list = [...selected].filter((k) => !pendingKeys.has(k));
+
+    const btn = $('roleSave');
+    btn.disabled = true;
+    const { error } = await supabase.rpc('admin_save_role', {
+      p_id: editingId,
+      p_name: name,
+      p_description: desc || null,
+      p_permissions: list,
+    });
+    btn.disabled = false;
+    if (error) { toast(friendlyError(error), 'error'); return; }
+    toast('রোল সেভ হয়েছে', 'success');
+    closeSheet();
+    loadAll();
+  }
+
+  // ---------- স্টাফ ----------
+  function roleSelect(currentId) {
+    const sel = el('select', 'rl-select');
+    const ph = el('option', null, 'রোল বাছুন');
+    ph.value = '';
+    sel.appendChild(ph);
+    roles.forEach((r) => {
+      const o = el('option', null, r.name);
+      o.value = r.id;
+      if (r.id === currentId) o.selected = true;
+      sel.appendChild(o);
+    });
+    return sel;
+  }
+
+  async function assign(profileId, roleId) {
+    if (!roleId) { toast('আগে একটা রোল বাছুন', 'error'); return; }
+    const { error } = await supabase.rpc('admin_assign_staff', { p_profile: profileId, p_role: roleId });
+    if (error) { toast(friendlyError(error), 'error'); return; }
+    toast('রোল দেওয়া হয়েছে', 'success');
+    $('staffSearchResults').replaceChildren();
+    $('staffSearch').value = '';
+    loadAll();
+  }
+
+  async function removeStaff(s) {
+    const who = s.full_name || 'এই ব্যক্তি';
+    if (!confirm(who + '-কে সরালে অ্যাডমিন প্যানেলে ঢোকার অনুমতি পুরোপুরি বন্ধ হবে। সরাবেন?')) return;
+    const { error } = await supabase.rpc('admin_remove_staff', { p_profile: s.profile_id });
+    if (error) { toast(friendlyError(error), 'error'); return; }
+    toast('স্টাফ সরানো হয়েছে', 'success');
+    loadAll();
+  }
+
+  function renderStaff() {
+    const box = $('staffList');
+    box.replaceChildren();
+    if (!staff.length) {
+      box.appendChild(el('p', 'rl-empty', 'কোনো স্টাফ নেই।'));
+      return;
+    }
+    staff.forEach((s) => {
+      const card = el('div', 'rl-card');
+      card.appendChild(el('div', 'rl-name', s.full_name || 'নামহীন'));
+      if (s.phone) card.appendChild(el('div', 'rl-meta', s.phone));
+      if (s.is_legacy) {
+        card.appendChild(el('span', 'rl-tag', 'পুরনো মডারেটর · রোল নেই, পুরো অ্যাক্সেস'));
+      } else {
+        card.appendChild(el('span', 'rl-tag rl-tag-blue', s.role_name || 'রোল'));
+      }
+
+      const row = el('div', 'rl-row');
+      const sel = roleSelect(s.role_id);
+      const go = el('button', 'rl-btn rl-btn-primary', s.is_legacy ? 'রোল দিন' : 'রোল বদলান');
+      go.type = 'button';
+      go.addEventListener('click', () => assign(s.profile_id, sel.value));
+      const rm = el('button', 'rl-btn rl-btn-danger', 'সরান');
+      rm.type = 'button';
+      rm.addEventListener('click', () => removeStaff(s));
+      row.append(sel, go, rm);
+      card.appendChild(row);
+      box.appendChild(card);
+    });
+  }
+
+  // ---------- নতুন স্টাফ খোঁজা ----------
+  let searchTimer = null;
+  async function searchUsers() {
+    const box = $('staffSearchResults');
+    const raw = ($('staffSearch').value || '').normalize('NFC').trim();
+    box.replaceChildren();
+    if (raw.length < 2) return;
+    if (!roles.length) {
+      box.appendChild(el('p', 'rl-empty', 'আগে অন্তত একটা রোল বানান।'));
+      return;
+    }
+    const q = raw.replace(/[%,()*\\"']/g, '');
+    if (!q) return;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, phone, role')
+      .eq('role', 'user')
+      .or('full_name.ilike.%' + q + '%,phone.ilike.%' + q + '%')
+      .limit(10);
+    if (error) { toast('খুঁজতে সমস্যা হয়েছে', 'error'); return; }
+    if (!data || !data.length) {
+      box.appendChild(el('p', 'rl-empty', 'কাউকে পাওয়া যায়নি।'));
+      return;
+    }
+    data.forEach((u) => {
+      const card = el('div', 'rl-card');
+      card.appendChild(el('div', 'rl-name', u.full_name || 'নামহীন'));
+      if (u.phone) card.appendChild(el('div', 'rl-meta', u.phone));
+      const row = el('div', 'rl-row');
+      const sel = roleSelect(null);
+      const add = el('button', 'rl-btn rl-btn-primary', 'স্টাফ করুন');
+      add.type = 'button';
+      add.addEventListener('click', () => assign(u.id, sel.value));
+      row.append(sel, add);
+      card.appendChild(row);
+      box.appendChild(card);
+    });
+  }
+
+  // ---------- লগ ----------
+  function fmtDate(iso) {
+    try {
+      return new Date(iso).toLocaleString('bn-BD', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    } catch (_) { return ''; }
+  }
+
+  async function loadLog() {
+    const box = $('logList');
+    box.replaceChildren();
+    const { data, error } = await supabase
+      .from('admin_role_log')
+      .select('id, actor_id, action, target_profile_id, role_id, details, created_at')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error || !data || !data.length) {
+      box.appendChild(el('p', 'rl-empty', 'এখনো কোনো পরিবর্তন নেই।'));
+      return;
+    }
+    const ids = [...new Set(data.flatMap((l) => [l.actor_id, l.target_profile_id]).filter(Boolean))];
+    const names = {};
+    if (ids.length) {
+      const { data: ps } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+      (ps || []).forEach((p) => { names[p.id] = p.full_name || 'নামহীন'; });
+    }
+    const roleName = (id) => (roles.find((r) => r.id === id) || {}).name;
+    data.forEach((l) => {
+      const row = el('div', 'rl-log');
+      const parts = [ACTION_LABEL[l.action] || l.action];
+      if (l.target_profile_id) parts.push(names[l.target_profile_id] || 'ব্যবহারকারী');
+      const rn = roleName(l.role_id);
+      if (rn) parts.push('(' + rn + ')');
+      row.appendChild(document.createTextNode(parts.join(' — ')));
+      row.appendChild(document.createElement('br'));
+      row.appendChild(el('small', null, (names[l.actor_id] || 'অ্যাডমিন') + ' · ' + fmtDate(l.created_at)));
+      box.appendChild(row);
+    });
+  }
+
+  // ---------- ইভেন্ট ----------
+  $('newRoleBtn').addEventListener('click', () => openSheet(null));
+  $('roleSheetClose').addEventListener('click', closeSheet);
+  $('roleCancel').addEventListener('click', closeSheet);
+  $('roleSave').addEventListener('click', saveRole);
+  $('roleSheet').addEventListener('click', (e) => { if (e.target === $('roleSheet')) closeSheet(); });
+  $('staffSearch').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(searchUsers, 350);
+  });
+
+  initAdminGuard();
+  window.addEventListener('smartfeni:admin-ready', (e) => {
+    // শুধু সুপার অ্যাডমিন
+    if (e.detail.role !== 'admin') { window.location.href = '/admin'; return; }
+    loadAll();
+  });
+</script>
