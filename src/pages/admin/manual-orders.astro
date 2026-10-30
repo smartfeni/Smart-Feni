@@ -811,6 +811,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const rm = el('button', 'mo-ghost mo-red', 'রাইডার সরান'); rm.type = 'button';
         rm.addEventListener('click', () => removeRider(o));
         btns.appendChild(rm);
+        const rm = el('button', 'mo-ghost mo-red', 'রাইডার সরান'); rm.type = 'button';
+        rm.addEventListener('click', () => removeRider(o));
+        btns.appendChild(rm);
       }
       const edit = el('button', 'mo-ghost', 'এডিট'); edit.type = 'button';
       edit.addEventListener('click', () => openOrderForm(o));
@@ -981,6 +984,26 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       if (!out || !out.ok) return showErr('asErr', AS_REASONS[out && out.reason] || 'হয়নি, আবার চেষ্টা করুন।');
       closeSheet('asOverlay');
       toast('রাইডার ঠিক হয়েছে, রাইডারকে নোটিফিকেশন গেছে', 'success');
+      await loadOrders();
+    }
+
+    // ---------- রাইডার সরান (অর্ডার রাইডার-বিহীন থাকে, পরে আবার পাবলিশ/অ্যাসাইন) ----------
+    async function removeRider(o) {
+      if (busy) return;
+      const r = riderOf(o);
+      const who = r && r.name ? r.name : 'রাইডার';
+      if (!confirm(o.order_no + ' অর্ডার থেকে ' + who + '-কে সরাবেন? অর্ডারটা রাইডার-বিহীন (পাবলিশ ছাড়া) থাকবে, পরে আবার পাবলিশ বা রাইডার ঠিক করতে পারবেন।')) return;
+      busy = true;
+      const res = await supabase.rpc('admin_unassign_manual_order', { p_order_id: o.id, p_note: null });
+      busy = false;
+      if (res.error) { toast('হয়নি, আবার চেষ্টা করুন', 'error'); return; }
+      const out = res.data;
+      if (!out || !out.ok) {
+        toast(out && out.reason === 'bad_status' ? 'পিকআপ হয়ে গেলে রাইডার সরানো যায় না' : 'হয়নি, আবার চেষ্টা করুন', 'error');
+        await loadOrders();
+        return;
+      }
+      toast('রাইডার সরানো হয়েছে। অর্ডারটা এখন রাইডার-বিহীন।', 'success');
       await loadOrders();
     }
 
