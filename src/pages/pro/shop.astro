@@ -61,6 +61,7 @@ const guideSteps = [
             <h1 id="psShopName">দোকান</h1>
             <select id="psShopSel" class="ps-sel" style="display:none;" aria-label="দোকান বাছুন"></select>
           </div>
+          <button type="button" class="ps-round" id="psSwBtn" aria-label="রোল বা দোকান বদলান" style="display:none;"><i class="fas fa-repeat"></i></button>
           <GuideSheet id="pro-shop" title="অর্ডার ও মেনুর নিয়ম" subtitle="Pro · ইনস্ট্যান্ট শপ" showButton buttonTone="dark" steps={guideSteps} />
         </div>
         <div class="ps-tabs" id="psTabs" role="tablist">
@@ -134,6 +135,16 @@ const guideSteps = [
             <button type="button" class="ps-ghost" id="psItClose">বন্ধ করুন</button>
           </div>
           <button type="button" class="ps-ghost ps-delbtn" id="psItDel" style="display:none;">আইটেম মুছুন</button>
+        </div>
+      </div>
+
+      <!-- রোল/দোকান বদল -->
+      <div class="ps-overlay" id="psSwOv">
+        <div class="ps-sheet" role="dialog" aria-label="রোল ও দোকান বদলান">
+          <div class="ps-grip"></div>
+          <h2 class="ps-sh">রোল ও দোকান বদলান</h2>
+          <div class="ps-swlist" id="psSwList"></div>
+          <div class="ps-acts"><button type="button" class="ps-ghost" id="psSwClose">বন্ধ করুন</button></div>
         </div>
       </div>
 
@@ -249,6 +260,16 @@ const guideSteps = [
     .ps-swrow { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-weight: 600; font-size: 15px; }
     .ps-delbtn { width: 100%; margin-top: 10px; color: #B3261E; border-color: #F3C4C0; }
 
+    .ps-swlist { display: flex; flex-direction: column; gap: 8px; }
+    .ps-swgrp { font-size: 12.5px; font-weight: 600; color: #5B6B86; margin: 6px 2px 0; }
+    .ps-opt { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; border: 1.5px solid #D5DCE8; border-radius: 16px; background: #fff; padding: 8px 12px; text-align: left; color: #1B2A4A; text-decoration: none; cursor: pointer; font-family: inherit; }
+    .ps-opt.cur { border-color: #FF6B35; background: #FFF6F1; }
+    .ps-swic { width: 40px; height: 40px; border-radius: 12px; background: #FFF6F1; color: #FF6B35; display: flex; align-items: center; justify-content: center; flex: none; }
+    .ps-swtx { flex: 1; min-width: 0; }
+    .ps-swtx b { display: block; font-size: 15.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ps-swtx span { font-size: 12.5px; color: #5B6B86; }
+    .ps-swck { color: #14A44D; }
+
     @media print {
       body * { visibility: hidden !important; }
       #psReceipt, #psReceipt * { visibility: visible !important; }
@@ -258,7 +279,7 @@ const guideSteps = [
 
   <script>
     import { supabase } from '../../lib/supabase.js';
-    import { getMyProRoles, rememberRole, proLoginUrl } from '../../lib/proRoles.js';
+    import { getMyProRoles, rememberRole, proLoginUrl, ROLE_META } from '../../lib/proRoles.js';
 
     const $ = (id) => document.getElementById(id);
     const POLL_MS = 8000;
@@ -266,6 +287,7 @@ const guideSteps = [
     const REASONS = ['আইটেম শেষ', 'দোকান বন্ধ', 'এখন সম্ভব না', 'অন্য কারণ'];
 
     let shops = [];
+    let proRolesList = [];
     let shop = null;       // { id, name, is_open, busy_until }
     let tab = 'orders';
     let orders = [];
@@ -777,6 +799,57 @@ const guideSteps = [
       await refresh();
     }
 
+    // ---------- রোল/দোকান বদল ----------
+    function swRow(tag, icon, title, sub, cur) {
+      const el = h(tag, 'ps-opt' + (cur ? ' cur' : ''));
+      if (tag === 'button') el.type = 'button';
+      const ic = h('span', 'ps-swic');
+      ic.appendChild(h('i', 'fas ' + icon));
+      const tx = h('span', 'ps-swtx');
+      tx.appendChild(h('b', '', title));
+      tx.appendChild(h('span', '', sub));
+      el.appendChild(ic);
+      el.appendChild(tx);
+      if (cur) el.appendChild(h('i', 'fas fa-check ps-swck'));
+      return el;
+    }
+
+    function closeSwitch() { $('psSwOv').classList.remove('active'); }
+
+    function openSwitch() {
+      const list = $('psSwList');
+      list.textContent = '';
+      proRolesList.forEach((r) => {
+        const m = ROLE_META[r.role];
+        if (!m) return;
+        if (r.role === 'instant_shop') {
+          list.appendChild(h('div', 'ps-swgrp', 'ইনস্ট্যান্ট শপ'));
+          (r.shops || []).forEach((s) => {
+            const cur = !!(shop && shop.id === s.id);
+            const row = swRow('button', 'fa-utensils', s.name, cur ? 'এখন এখানে আছেন' : 'এই দোকানে যান', cur);
+            row.addEventListener('click', async () => {
+              closeSwitch();
+              if (cur) return;
+              const sel = $('psShopSel');
+              if (sel) sel.value = s.id;
+              await pickShop(s.id);
+            });
+            list.appendChild(row);
+          });
+        } else {
+          const row = swRow('a', m.icon, m.label, m.sub, false);
+          row.href = m.href;
+          row.addEventListener('click', () => rememberRole(r.role));
+          list.appendChild(row);
+        }
+      });
+      $('psSwOv').classList.add('active');
+    }
+
+    $('psSwBtn').addEventListener('click', openSwitch);
+    $('psSwClose').addEventListener('click', closeSwitch);
+    $('psSwOv').addEventListener('click', (e) => { if (e.target === $('psSwOv')) closeSwitch(); });
+
     async function init() {
       let res;
       try { res = await getMyProRoles(); } catch (_) { res = { loggedIn: true, roles: [] }; }
@@ -786,6 +859,8 @@ const guideSteps = [
       if (!role || !role.shops || !role.shops.length) { $('psNoAccess').style.display = 'flex'; return; }
       rememberRole('instant_shop');
       shops = role.shops;
+      proRolesList = res.roles;
+      if (res.roles.length > 1 || shops.length > 1) $('psSwBtn').style.display = '';
       $('psMain').style.display = '';
       if (shops.length > 1) {
         const sel = $('psShopSel');
