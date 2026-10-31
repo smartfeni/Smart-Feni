@@ -293,6 +293,58 @@
       // Splash সরাও (Capacitor bridge তৈরি হতে দেরি হলে ০.৩ সেকেন্ড পরে আবার চেষ্টা)
       hideSplash();
       setTimeout(hideSplash, 300);
+
+      // অটো-রিট্রাই: নিজে থেকেই কানেকশন যাচাই করে ফিরে যায় (৩, ৫, ৮, ১২, ২০ সেকেন্ড পর পর)।
+      // মোট ১৫ বার (প্রায় ৩–৪ মিনিট), এরপর থামে — বাটন তখনও কাজ করে।
+      var AUTO_DELAYS = [3000, 5000, 8000, 12000, 20000];
+      var AUTO_MAX = 15;
+      var autoAttempt = 0;
+      var autoTimer = null;
+
+      // সাইট পর্যন্ত পৌঁছানো যায় কিনা (no-cors: উত্তর পেলেই চলবে)
+      function probe() {
+        return new Promise(function (resolve) {
+          if (navigator.onLine === false) { resolve(false); return; }
+          var done = false;
+          function finish(v) {
+            if (!done) { done = true; resolve(v); }
+          }
+          setTimeout(function () { finish(false); }, 4000);
+          try {
+            fetch(HOME + 'favicon.ico?_=' + Date.now(), { mode: 'no-cors', cache: 'no-store' })
+              .then(function () { finish(true); })
+              .catch(function () { finish(false); });
+          } catch (e) {
+            finish(false);
+          }
+        });
+      }
+
+      function autoRetry() {
+        clearTimeout(autoTimer);
+        if (going || autoAttempt >= AUTO_MAX) return;
+        var wait = AUTO_DELAYS[Math.min(autoAttempt, AUTO_DELAYS.length - 1)];
+        autoAttempt++;
+        autoTimer = setTimeout(function () {
+          if (going) return;
+          if (document.hidden) { autoAttempt--; autoRetry(); return; }
+          probe().then(function (ok) {
+            if (going) return;
+            if (ok) {
+              show('back');
+              getLastUrl().then(go);
+            } else {
+              autoRetry();
+            }
+          });
+        }, wait);
+      }
+
+      window.addEventListener('pageshow', function () {
+        autoAttempt = 0;
+        autoRetry();
+      });
+      autoRetry();
     })();
   </script>
 </body>
