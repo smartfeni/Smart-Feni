@@ -37,6 +37,7 @@ import { categories } from '../../data/services.js';
 import { chatFeatures } from '../../data/chatFeatures.js';
 import { geminiUrl, GEMINI_FALLBACK_MODEL } from '../../lib/geminiConfig.js';
 import { reportServerError } from '../../lib/serverErrorReporter.js';
+import { groqEnabled, groqChat } from '../../lib/groqFallback.js';
 
 interface HistoryTurn {
   role: 'user' | 'model';
@@ -143,7 +144,11 @@ const ORDER_TOOL = {
   },
 };
 
-function buildOrderRules(mode: 'on' | 'login'): string {
+function buildOrderRules(mode: 'on' | 'login' | 'off'): string {
+  if (mode === 'off') {
+    return `
+ম্যানুয়াল ডেলিভারি অর্ডার: এই মুহূর্তে চ্যাটে অর্ডার নেওয়া সাময়িকভাবে বন্ধ আছে। কেউ অর্ডার দিতে চাইলে বলবে একটু পরে আবার চেষ্টা করতে। নিজে অর্ডারের তথ্য নেবে না, কোনো অর্ডার নিশ্চিত করবে না।`;
+  }
   if (mode !== 'on') {
     return `
 ম্যানুয়াল ডেলিভারি অর্ডার: কেউ অর্ডার দিতে চাইলে বলবে অর্ডার দিতে আগে লগইন করতে হবে (মেনু থেকে লগইন/সাইনআপ), তারপর আবার চ্যাটে জানাতে। নিজে অর্ডার নেবে না।`;
@@ -207,7 +212,7 @@ function orderDraftResponse(a: any): Response {
   });
 }
 
-function buildSystemContext(liveStatsText: string, orderMode: 'on' | 'login' = 'login'): string {
+function buildSystemContext(liveStatsText: string, orderMode: 'on' | 'login' | 'off' = 'login'): string {
   return `
 তুমি "স্মার্ট ফেনী সহায়ক" — স্মার্ট ফেনী (Smart Feni) ওয়েবসাইটের জন্য একটা সহায়ক AI।
 
@@ -444,6 +449,24 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       }
       if (geminiRes && (geminiRes.ok || geminiRes.status < 500)) break;
       if (attempt === 1) await new Promise((r) => setTimeout(r, 600));
+    }
+
+    // ৩য় চেষ্টা: Gemini ৫xx/টাইমআউট/কোটায় ব্যর্থ হলে Groq (শুধু সাধারণ উত্তর, অর্ডার-টুল ছাড়া)
+    const geminiFailed = !geminiRes || !geminiRes.ok;
+    const geminiTransient = !geminiRes || geminiRes.status >= 500 || geminiRes.status === 429;
+    if (geminiFailed && geminiTransient && groqEnabled()) {
+      const g = await groqChat({
+        system: buildSystemContext(liveStatsText, 'off'),
+        messages: [
+          ...tidy.map((h) => ({ role: h.role === 'model' ? 'assistant' : 'user', content: h.text })),
+          { role: 'user', content: userMessage },
+        ],
+        maxTokens: MAX_OUTPUT_TOKENS,
+        temperature: 0.4,
+        timeoutMs: GEMINI_TIMEOUT_MS,
+      });
+      if (g.ok && g.text) return jsonReply(sanitizeReply(g.text));
+      console.error('Chat API: Groq fallback failed', g.status, g.error);
     }
 
     if (!geminiRes) {

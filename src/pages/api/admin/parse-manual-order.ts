@@ -21,6 +21,7 @@ import { createClient } from '@supabase/supabase-js';
 import { callerCan } from '../../../lib/serverPermission.js';
 import { geminiUrl } from '../../../lib/geminiConfig.js';
 import { reportServerError } from '../../../lib/serverErrorReporter.js';
+import { groqEnabled, groqChat } from '../../../lib/groqFallback.js';
 
 const MAX_BODY_CHARS = 8000;
 const MAX_TEXT_CHARS = 4000;
@@ -276,6 +277,26 @@ export const POST: APIRoute = async ({ request }) => {
         failTitle = 'অটো-ফিল: Gemini-র উত্তর বোঝা যায়নি (JSON)';
         failMsg = `finishReason=${String(data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason || 'none')}`;
         failCode = undefined;
+      }
+    }
+
+    // ৩য় চেষ্টা: Gemini ব্যর্থ হলে Groq (JSON মোড)। ফিল্ড নিচে sanitize() দিয়ে যাচাই হয়, আর মানুষ মিলিয়ে সেভ করে।
+    if (!parsed && groqEnabled() && (typeof failCode !== 'number' || failCode >= 500 || failCode === 429)) {
+      const g = await groqChat({
+        system:
+          buildSystemPrompt() +
+          '\n\nউত্তর শুধু একটা JSON অবজেক্ট। JSON-এর কী (key) হুবহু উপরের ফিল্ডের নামে হবে। is_asap অবশ্যই true বা false।',
+        messages: [{ role: 'user', content: text }],
+        json: true,
+        maxTokens: MAX_OUTPUT_TOKENS,
+        temperature: 0.1,
+        timeoutMs: GEMINI_TIMEOUT_MS,
+      });
+      if (g.ok) {
+        try {
+          const obj = JSON.parse(g.text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim());
+          if (obj && typeof obj === 'object' && !Array.isArray(obj)) parsed = obj;
+        } catch { /* উপেক্ষা */ }
       }
     }
 

@@ -31,6 +31,7 @@ import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import { geminiUrl, GEMINI_FALLBACK_MODEL } from '../../lib/geminiConfig.js';
 import { reportServerError } from '../../lib/serverErrorReporter.js';
+import { groqEnabled, groqChat } from '../../lib/groqFallback.js';
 
 // ===== কনফিগ (পরে সংখ্যা বদলাতে শুধু এখানে হাত দিন) =====
 const MAX_OUTPUT_TOKENS = 1200;
@@ -392,6 +393,36 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
         failTitle = 'ডাক্তার AI চ্যাট: Gemini-র উত্তর বোঝা যায়নি (JSON)';
         failMsg = `finishReason=${finishReasonOf(data)}`;
         failCode = undefined;
+      }
+    }
+
+    // ৩য় চেষ্টা: Gemini ব্যর্থ হলে Groq (JSON মোড)। নিচের ভ্যালিডেশন ও নিরাপত্তা ছাঁকনি একই থাকে।
+    if (!parsed && groqEnabled() && (typeof failCode !== 'number' || failCode >= 500 || failCode === 429)) {
+      const g = await groqChat({
+        system:
+          buildSystemPrompt(specs) +
+          '\n\nউত্তর শুধু একটা JSON অবজেক্ট: {"type":"...","specialties":["স্লাগ"],"reply":"..."}। type শুধু recommend, clarify, emergency বা out_of_scope হবে।',
+        messages: [
+          ...history.map((h: any) => ({
+            role: h.role === 'model' ? 'assistant' : 'user',
+            content: String(h?.parts?.[0]?.text || ''),
+          })),
+          { role: 'user', content: message },
+        ],
+        json: true,
+        maxTokens: MAX_OUTPUT_TOKENS,
+        temperature: 0.2,
+        timeoutMs: GEMINI_TIMEOUT_MS,
+      });
+      if (g.ok) {
+        try {
+          const obj = JSON.parse(g.text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim());
+          parsed = {
+            type: String(obj?.type || ''),
+            specialties: Array.isArray(obj?.specialties) ? obj.specialties.map((x: any) => String(x)) : [],
+            reply: typeof obj?.reply === 'string' ? obj.reply : '',
+          };
+        } catch { /* উপেক্ষা — নিচে এরর হিসেবেই যাবে */ }
       }
     }
 
