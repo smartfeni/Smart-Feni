@@ -27,6 +27,7 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+import { callerCan } from '../../lib/serverPermission.js';
 // এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
 import { reportServerError } from '../../lib/serverErrorReporter.js';
 
@@ -101,7 +102,7 @@ export async function POST({ request }) {
       .eq('id', callerData.user.id)
       .single();
 
-    if (!callerProfile || !['admin', 'moderator'].includes(callerProfile.role)) {
+    if (!callerProfile || !(await callerCan(supabaseAdmin, callerData.user.id, 'shops.manage'))) {
       return new Response(JSON.stringify({ error: 'শুধু admin/moderator এই অ্যাকশন নিতে পারবেন' }), {
         status: 403, headers: { 'Content-Type': 'application/json' },
       });

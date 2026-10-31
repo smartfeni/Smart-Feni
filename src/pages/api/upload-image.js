@@ -32,6 +32,7 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+import { callerCan } from '../../lib/serverPermission.js';
 // এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
 import { reportServerError } from '../../lib/serverErrorReporter.js';
 
@@ -107,7 +108,7 @@ export async function POST({ request }) {
         .eq('id', userId)
         .single();
 
-      if (!profile || !['admin', 'moderator'].includes(profile.role)) {
+      if (!(await callerCan(supabaseAdmin, userId, 'images.manage'))) {
         return json({ error: 'এই ফোল্ডারে আপলোড করার অনুমতি নেই' }, 403);
       }
     }

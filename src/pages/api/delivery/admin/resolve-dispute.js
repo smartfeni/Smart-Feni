@@ -14,7 +14,7 @@
 //   - "resolve_cancelled": ডিল বাতিল — status cancelled, কারো স্ট্যাটে কিছু যোগ হবে না
 // ============================================================
 
-import { requireAdmin, getAdminClient } from '../../../../lib/deliverySupabase.js';
+import { requirePermission, getAdminClient } from '../../../../lib/deliverySupabase.js';
 import { reportServerError } from '../../../../lib/serverErrorReporter.js';
 
 export const prerender = false;
@@ -26,7 +26,7 @@ export async function POST({ request }) {
   let reportClient = null;
 
   try {
-    const { isAdmin, adminUserId, error: adminCheckError } = await requireAdmin(request);
+    const { isAdmin, adminUserId, error: adminCheckError } = await requirePermission(request, 'disputes.manage');
     if (!isAdmin) {
       return new Response(JSON.stringify({ error: adminCheckError || 'এডমিন পারমিশন নেই' }), {
         status: 403,

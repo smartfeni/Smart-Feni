@@ -19,6 +19,7 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+import { callerCan } from '../../../lib/serverPermission.js';
 import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { reportServerError } from '../../../lib/serverErrorReporter.js';
@@ -95,7 +96,7 @@ export async function POST({ request }) {
       .eq('id', userData.user.id)
       .maybeSingle();
 
-    if (profile?.role !== 'admin') return json({ error: 'শুধু অ্যাডমিন পাঠাতে পারবেন' }, 403);
+    if (!(await callerCan(supabaseAdmin, userData.user.id, 'notifications.manage'))) return json({ error: 'এই কাজের অনুমতি নেই' }, 403);
 
     // ---------- ইনপুট যাচাই ----------
     const body = await request.json();

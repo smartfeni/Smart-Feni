@@ -18,6 +18,7 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+import { callerCan } from '../../lib/serverPermission.js';
 
 export const prerender = false;
 
@@ -84,7 +85,7 @@ export async function POST({ request }) {
         .select('role')
         .eq('id', callerData.user.id)
         .single();
-      authorized = !!callerProfile && ['admin', 'moderator'].includes(callerProfile.role);
+      authorized = await callerCan(supabaseAdmin, callerData.user.id, 'shops.manage');
     }
 
     if (!authorized) {
