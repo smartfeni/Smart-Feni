@@ -1,0 +1,216 @@
+---
+// ============================================================
+// কম্পোনেন্ট: InfoButton (ⓘ ইনফো বাটন + টিউটোরিয়াল ভিডিও)
+// ব্যবহার:
+//   import InfoButton from '../../components/ui/InfoButton.astro';
+//   <InfoButton topic="delivery-hero" />
+//   <InfoButton topic="blood-request" text="কীভাবে কাজ করে?" />
+// topic = tutorial_videos.topic_key (অ্যাডমিন /admin/tutorials থেকে লেখা ও ভিডিও বদলায়)
+// ট্যাপ করলে নিচ থেকে একটা শিট খোলে: ছোট ব্যাখ্যা + (থাকলে) ভিডিও।
+// ভিডিও ট্যাপ করার আগে লোড হয় না, তাই স্লো নেটওয়ার্কে পেজ ভারী হয় না।
+// একই পেজে যতগুলো বাটনই থাকুক, মডাল ও লজিক একবারই বসে (ইভেন্ট ডেলিগেশন)।
+// ============================================================
+interface Props {
+  topic: string;
+  text?: string;
+  class?: string;
+}
+const { topic, text = '', class: extra = '' } = Astro.props;
+---
+
+<button
+  type="button"
+  class={`sfinfo-btn ${text ? 'sfinfo-pill' : ''} ${extra}`.trim()}
+  data-sfinfo-topic={topic}
+  aria-label={text || 'কীভাবে কাজ করে? জানুন'}
+>
+  <i class="fas fa-circle-info" aria-hidden="true"></i>
+  {text && <span>{text}</span>}
+</button>
+
+<style is:global>
+  .sfinfo-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    width: 30px; height: 30px; padding: 0; flex: none;
+    border: 1.5px solid #FFD9CB; border-radius: 50%;
+    background: #FFF3EE; color: #FF6B35; font-size: 0.95rem; line-height: 1;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s ease, background 0.12s ease;
+  }
+  .sfinfo-btn:active { transform: scale(0.92); background: #FFE6DB; }
+  .sfinfo-btn:focus-visible { outline: 2px solid #FF6B35; outline-offset: 2px; }
+  .sfinfo-btn.sfinfo-pill { width: auto; height: auto; padding: 6px 12px 6px 9px; border-radius: 999px; font-size: 0.8rem; font-weight: 700; }
+  .sfinfo-btn.sfinfo-pill span { color: #1B2A4A; }
+
+  .sfinfo-ov { position: fixed; inset: 0; z-index: 10050; display: flex; align-items: flex-end; justify-content: center; background: rgba(15, 23, 42, 0.55); opacity: 0; transition: opacity 0.18s ease; }
+  .sfinfo-ov.on { opacity: 1; }
+  .sfinfo-sheet { width: 100%; max-width: 520px; max-height: 88vh; overflow-y: auto; background: #fff; border-radius: 24px 24px 0 0; padding: 18px 18px calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateY(24px); transition: transform 0.2s ease; }
+  .sfinfo-ov.on .sfinfo-sheet { transform: translateY(0); }
+  @media (min-width: 700px) {
+    .sfinfo-ov { align-items: center; }
+    .sfinfo-sheet { border-radius: 24px; padding-bottom: 22px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sfinfo-ov, .sfinfo-sheet { transition: none; }
+  }
+
+  .sfinfo-head { display: flex; align-items: flex-start; gap: 10px; }
+  .sfinfo-ttl { flex: 1; margin: 0; font-size: 1.05rem; font-weight: 800; color: #1B2A4A; line-height: 1.35; }
+  .sfinfo-x { flex: none; width: 34px; height: 34px; border: 0; border-radius: 50%; background: #F1F5F9; color: #1B2A4A; font-size: 0.95rem; cursor: pointer; }
+  .sfinfo-txt { margin: 10px 0 0; font-size: 0.92rem; line-height: 1.7; color: #334155; white-space: pre-line; }
+  .sfinfo-note { margin: 12px 0 0; font-size: 0.86rem; color: #64748B; }
+
+  .sfinfo-vid { margin-top: 14px; position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: #1B2A4A; }
+  .sfinfo-play { position: absolute; inset: 0; width: 100%; border: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #1B2A4A; color: #fff; font: inherit; font-size: 0.9rem; font-weight: 700; cursor: pointer; }
+  .sfinfo-play i { font-size: 2.2rem; color: #FF6B35; }
+  .sfinfo-play small { font-weight: 500; font-size: 0.75rem; opacity: 0.75; }
+  .sfinfo-vid iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  if (!window.__sfInfoInit) {
+    window.__sfInfoInit = true;
+
+    const cache = new Map();
+    let ov = null;
+    let sheet = null;
+    let lastFocus = null;
+
+    // YouTube লিংক → ভিডিও আইডি (watch, youtu.be, shorts, embed, live)। না মিললে null
+    function ytId(url) {
+      try {
+        const u = new URL(String(url || '').trim());
+        const h = u.hostname.replace(/^(www\.|m\.)/, '');
+        let id = null;
+        if (h === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+        else if (h === 'youtube.com' || h === 'youtube-nocookie.com') {
+          if (u.pathname === '/watch') id = u.searchParams.get('v');
+          else {
+            const m = u.pathname.match(/^\/(shorts|embed|live)\/([^/?]+)/);
+            if (m) id = m[2];
+          }
+        }
+        return id && /^[A-Za-z0-9_-]{6,20}$/.test(id) ? id : null;
+      } catch (_) { return null; }
+    }
+
+    function build() {
+      ov = document.createElement('div');
+      ov.className = 'sfinfo-ov';
+      ov.setAttribute('role', 'dialog');
+      ov.setAttribute('aria-modal', 'true');
+      ov.style.display = 'none';
+      sheet = document.createElement('div');
+      sheet.className = 'sfinfo-sheet';
+      ov.appendChild(sheet);
+      document.body.appendChild(ov);
+      ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ov.style.display !== 'none') close(); });
+    }
+
+    function close() {
+      if (!ov || ov.style.display === 'none') return;
+      ov.classList.remove('on');
+      sheet.innerHTML = ''; // iframe মুছে গেলে ভিডিও থেমে যায়
+      document.body.style.overflow = '';
+      setTimeout(() => { ov.style.display = 'none'; }, 180);
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+    }
+
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+
+    function render(row) {
+      sheet.innerHTML = '';
+      const head = el('div', 'sfinfo-head');
+      const ttl = el('h3', 'sfinfo-ttl', row ? row.title : 'তথ্য');
+      const x = el('button', 'sfinfo-x');
+      x.type = 'button';
+      x.setAttribute('aria-label', 'বন্ধ করুন');
+      x.innerHTML = '<i class="fas fa-xmark"></i>';
+      x.addEventListener('click', close);
+      head.appendChild(ttl);
+      head.appendChild(x);
+      sheet.appendChild(head);
+
+      if (!row) {
+        sheet.appendChild(el('p', 'sfinfo-note', 'এই বিষয়ে এখনো তথ্য যোগ হয়নি।'));
+        return;
+      }
+      if (row.description) sheet.appendChild(el('p', 'sfinfo-txt', row.description));
+
+      const id = ytId(row.video_url);
+      if (id) {
+        const box = el('div', 'sfinfo-vid');
+        const play = el('button', 'sfinfo-play');
+        play.type = 'button';
+        play.innerHTML = '<i class="fas fa-circle-play"></i><span>ভিডিও দেখুন</span><small>ইন্টারনেট ডেটা খরচ হবে</small>';
+        play.addEventListener('click', () => {
+          const f = document.createElement('iframe');
+          f.src = 'https://www.youtube-nocookie.com/embed/' + id + '?rel=0&playsinline=1&autoplay=1';
+          f.title = row.title;
+          f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+          f.allowFullscreen = true;
+          f.referrerPolicy = 'strict-origin-when-cross-origin';
+          box.innerHTML = '';
+          box.appendChild(f);
+        });
+        box.appendChild(play);
+        sheet.appendChild(box);
+      }
+    }
+
+    async function fetchTopic(topic) {
+      if (cache.has(topic)) return cache.get(topic);
+      const { data, error } = await supabase
+        .from('tutorial_videos')
+        .select('title, description, video_url')
+        .eq('topic_key', topic)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (error) throw error;
+      cache.set(topic, data || null);
+      return data || null;
+    }
+
+    async function open(btn) {
+      const topic = btn.getAttribute('data-sfinfo-topic');
+      if (!topic) return;
+      if (!ov) build();
+      lastFocus = btn;
+      sheet.innerHTML = '';
+      sheet.appendChild(el('p', 'sfinfo-note', 'লোড হচ্ছে...'));
+      ov.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+      requestAnimationFrame(() => ov.classList.add('on'));
+      try {
+        render(await fetchTopic(topic));
+      } catch (_) {
+        sheet.innerHTML = '';
+        const x = el('button', 'sfinfo-x');
+        x.type = 'button';
+        x.setAttribute('aria-label', 'বন্ধ করুন');
+        x.innerHTML = '<i class="fas fa-xmark"></i>';
+        x.addEventListener('click', close);
+        sheet.appendChild(x);
+        sheet.appendChild(el('p', 'sfinfo-note', 'এখন তথ্য লোড করা যাচ্ছে না। ইন্টারনেট দেখে আবার চেষ্টা করুন।'));
+      }
+      const first = sheet.querySelector('.sfinfo-x');
+      if (first) first.focus();
+    }
+
+    document.addEventListener('click', (e) => {
+      const t = e.target instanceof Element ? e.target.closest('.sfinfo-btn') : null;
+      if (!t) return;
+      e.preventDefault();
+      e.stopPropagation();
+      open(t);
+    });
+  }
+</script>
