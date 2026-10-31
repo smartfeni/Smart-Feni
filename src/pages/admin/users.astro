@@ -665,22 +665,45 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         renderList(base);
         return;
       }
-      const filtered = base.filter((u) =>
-        (u.full_name || '').toLowerCase().includes(q) || (u.phone || '').includes(q)
-      );
+      const qDigits = q.replace(/\D/g, '').replace(/^88/, '');
+      const filtered = base.filter((u) => {
+        if ((u.full_name || '').toLowerCase().includes(q)) return true;
+        const phone = u.phone || '';
+        if (phone.includes(q)) return true;
+        // +৮৮ / স্পেস / ড্যাশ ভিন্ন ফরম্যাটেও নম্বর মেলে
+        return qDigits.length >= 5 && phone.replace(/\D/g, '').replace(/^88/, '').includes(qDigits);
+      });
       renderList(filtered);
     }
 
     async function loadUsers() {
       container.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
 
+      // Supabase একবারে সর্বোচ্চ ১০০০ রো দেয়, তাই পেজ ধরে ধরে সব আনা হয় (আগে ১০০০-এর পরের ইউজার লিস্টে আসত না)
+      const PAGE = 1000;
+      async function fetchAllRows(buildQuery) {
+        const rows = [];
+        for (let from = 0; ; from += PAGE) {
+          const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+          if (error) return { data: null, error };
+          rows.push(...(data || []));
+          if (!data || data.length < PAGE) break;
+        }
+        return { data: rows, error: null };
+      }
+
       const [{ data: profiles, error: profileError }, { data: listings, error: listingError }] = await Promise.all([
-        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
-        supabase
-          .from('listings')
-          .select('id, user_id, title, category, status, price, upazila, created_at')
-          .neq('category', 'online-shop') // শপ প্রোডাক্ট এখানে গণনা হবে না — শপ প্রোডাক্ট শপের সাথে (shop_id) লিংকড, ইউজারের "লিস্টিং" না, ম্যানেজ হয় admin/shops থেকে
-          .order('created_at', { ascending: false }),
+        fetchAllRows(() =>
+          supabase.from('profiles').select('*').order('created_at', { ascending: false }).order('id', { ascending: true })
+        ),
+        fetchAllRows(() =>
+          supabase
+            .from('listings')
+            .select('id, user_id, title, category, status, price, upazila, created_at')
+            .neq('category', 'online-shop') // শপ প্রোডাক্ট এখানে গণনা হবে না — ম্যানেজ হয় admin/shops থেকে
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: true })
+        ),
       ]);
 
       if (profileError) {

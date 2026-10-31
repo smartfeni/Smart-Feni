@@ -477,14 +477,21 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
 
     // ===== এলিজিবল প্রোফাইল লিস্ট বের করা (ফিল্টার অনুযায়ী) =====
     async function getEligibleProfileIds() {
-      let query = supabase
-        .from('profiles')
-        .select('id, created_at, role, is_shop_owner, is_club_owner, is_blocked')
-        .eq('is_blocked', false)
-        .order('created_at', { ascending: true });
-
-      const { data: profiles, error } = await query;
-      if (error || !profiles) return [];
+      let profiles = [];
+      // Supabase একবারে সর্বোচ্চ ১০০০ রো দেয়, তাই পেজ ধরে সব এলিজিবল প্রোফাইল আনা হয়
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, created_at, role, is_shop_owner, is_club_owner, is_blocked')
+          .eq('is_blocked', false)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error || !data) return [];
+        profiles = profiles.concat(data);
+        if (data.length < PAGE) break;
+      }
 
       let filtered = profiles.filter((p) => {
         if (excludeAdmin.checked && p.role === 'admin') return false;
