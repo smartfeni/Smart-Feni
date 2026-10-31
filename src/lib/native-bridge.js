@@ -313,6 +313,7 @@ export async function initBackButtonHandler() {
   initOfflineBanner();
   initOfflineWriteGuard();
   initSafeLinkNavigation();
+  scheduleAppUpdateCheck();
 
   // Deep link (অ্যাপ চালু থাকা অবস্থায়): WhatsApp/SMS/Facebook থেকে লিংকে ট্যাপ
   App.addListener('appUrlOpen', (data) => {
@@ -426,6 +427,130 @@ function initSafeLinkNavigation() {
     });
   } catch (err) {
     // ফেইল করলে লিংক আগের মতোই কাজ করবে
+  }
+}
+
+// ---------------- Play Store In-App Update (ঐচ্ছিক / Flexible) ----------------
+// Play Store-এ নতুন ভার্সন এলে Google-এর নিজস্ব আপডেট ডায়ালগ দেখায় ("আপডেট" / "না, থাক")।
+// ডাউনলোড ব্যাকগ্রাউন্ডে হয়; শেষ হলে নিচে "রিস্টার্ট করুন" বার আসে।
+// নিয়ম: অ্যাপ চালুর ৬ সেকেন্ড পর চেক (splash/ড্যাশবোর্ড রিডাইরেক্ট আটকায় না); ২৪ ঘণ্টায় একবারের
+// বেশি ডায়ালগ নয়; শুধু Play Store থেকে ইনস্টল করা অ্যাপে কাজ করে। প্লাগিন না থাকলে
+// (পুরোনো অ্যাপ ভার্সন) বা ওয়েবে চুপচাপ বাদ।
+const UPDATE_PROMPT_AT_KEY = 'sf_update_prompt_at';
+const UPDATE_PROMPT_GAP_MS = 24 * 60 * 60 * 1000;
+const UPDATE_CHECK_DELAY_MS = 6000;
+const UPDATE_BAR_ID = 'sf-update-ready-bar';
+let appUpdateChecked = false;
+
+function showUpdateReadyBar(AppUpdate) {
+  try {
+    if (document.getElementById(UPDATE_BAR_ID)) return;
+
+    const bar = document.createElement('div');
+    bar.id = UPDATE_BAR_ID;
+    bar.setAttribute('role', 'status');
+    Object.assign(bar.style, {
+      position: 'fixed',
+      left: '12px',
+      right: '12px',
+      bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
+      zIndex: '4000',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '12px',
+      padding: '12px 14px',
+      background: '#1B2A4A',
+      color: '#fff',
+      borderRadius: '14px',
+      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.25)',
+      fontSize: '0.88rem',
+      fontWeight: '600',
+    });
+
+    const text = document.createElement('span');
+    text.textContent = 'নতুন আপডেট ডাউনলোড হয়েছে';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'রিস্টার্ট করুন';
+    Object.assign(btn.style, {
+      background: '#FF6B35',
+      color: '#fff',
+      border: 'none',
+      borderRadius: '10px',
+      padding: '8px 14px',
+      fontSize: '0.85rem',
+      fontWeight: '700',
+      fontFamily: 'inherit',
+      cursor: 'pointer',
+      flexShrink: '0',
+    });
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      AppUpdate.completeFlexibleUpdate().catch(() => {
+        btn.disabled = false;
+      });
+    });
+
+    bar.appendChild(text);
+    bar.appendChild(btn);
+    document.body.appendChild(bar);
+  } catch (err) {
+    // বার দেখানো না গেলে Play নিজেই পরে ইনস্টল করে নেবে
+  }
+}
+
+async function checkForAppUpdate() {
+  try {
+    if (!isNativeApp() || appUpdateChecked) return;
+    appUpdateChecked = true;
+
+    const { AppUpdate, AppUpdateAvailability, FlexibleUpdateInstallStatus } = await import('@capawesome/capacitor-app-update');
+
+    // ডাউনলোড শেষ হলে "রিস্টার্ট করুন" বার
+    AppUpdate.addListener('onFlexibleUpdateStateChange', (state) => {
+      if (state.installStatus === FlexibleUpdateInstallStatus.DOWNLOADED) showUpdateReadyBar(AppUpdate);
+    })?.catch?.(() => {});
+
+    const info = await AppUpdate.getAppUpdateInfo();
+
+    // আগের সেশনে ডাউনলোড শেষ হয়ে ইনস্টল বাকি থাকলে
+    if (info.installStatus === FlexibleUpdateInstallStatus.DOWNLOADED) {
+      showUpdateReadyBar(AppUpdate);
+      return;
+    }
+
+    if (info.updateAvailability !== AppUpdateAvailability.UPDATE_AVAILABLE || !info.flexibleUpdateAllowed) return;
+
+    // একই দিনে বারবার বিরক্ত নয়
+    let last = 0;
+    try {
+      last = Number(localStorage.getItem(UPDATE_PROMPT_AT_KEY)) || 0;
+    } catch (err) {
+      // স্টোরেজ না পেলে প্রতি সেশনে একবার
+    }
+    if (Date.now() - last < UPDATE_PROMPT_GAP_MS) return;
+    try {
+      localStorage.setItem(UPDATE_PROMPT_AT_KEY, String(Date.now()));
+    } catch (err) {
+      // সেভ না হলেও সমস্যা নেই
+    }
+
+    await AppUpdate.startFlexibleUpdate();
+  } catch (err) {
+    // প্লাগিন নেই (পুরোনো অ্যাপ) / Play Store ছাড়া ইনস্টল / নেট নেই — চুপচাপ বাদ
+  }
+}
+
+function scheduleAppUpdateCheck() {
+  try {
+    if (!isNativeApp()) return;
+    setTimeout(() => {
+      checkForAppUpdate();
+    }, UPDATE_CHECK_DELAY_MS);
+  } catch (err) {
+    // ফেইল করলে অ্যাপ স্বাভাবিক চলবে
   }
 }
 
