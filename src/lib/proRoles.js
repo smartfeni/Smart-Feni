@@ -31,6 +31,11 @@ export function rememberRole(role) {
   try { localStorage.setItem(LAST_KEY, role); } catch (_) { /* উপেক্ষা */ }
 }
 
+// Pro লগইন পেজের লিংক (next শুধু /pro দিয়ে শুরু হলে লগইন পেজ মানবে)
+export function proLoginUrl(next) {
+  return '/pro/login' + (next ? '?next=' + encodeURIComponent(next) : '');
+}
+
 export function lastRole() {
   try { return localStorage.getItem(LAST_KEY); } catch (_) { return null; }
 }
