@@ -35,6 +35,8 @@
 // "বন্ধ" লেখা close বাটন) মেনে নিজে থেকেই শিট বন্ধ করে।
 // ============================================================
 
+import { supabase } from './supabase.js';
+
 const registry = new Map(); // id -> { title, subtitle, steps, firstVisit }
 let root = null;            // একটাই শিট DOM, সব গাইড এটাই ব্যবহার করে
 let state = null;           // { id, step, opener, prevOverflow }
@@ -278,6 +280,23 @@ function buildRoot() {
   head.appendChild(close);
   sheet.appendChild(head);
 
+  // ঐচ্ছিক টিউটোরিয়াল ভিডিও: videoTopic-এর ভিডিও থাকলে তবেই বাটনটা দেখায়
+  const vidBtn = el('button', 'sfg-vidbtn', '▶ ভিডিওতে দেখুন');
+  vidBtn.type = 'button';
+  vidBtn.id = 'sfg-vidbtn';
+  vidBtn.hidden = true;
+  sheet.appendChild(vidBtn);
+
+  const vidPane = el('div', 'sfg-vidpane');
+  const vidBox = el('div', 'sfg-vidbox');
+  vidBox.id = 'sfg-vidbox';
+  vidPane.appendChild(vidBox);
+  const vidBack = el('button', 'sfg-btn sfg-prev sfg-vidback', 'ধাপে ধাপে দেখুন');
+  vidBack.type = 'button';
+  vidBack.addEventListener('click', hideVideo);
+  vidPane.appendChild(vidBack);
+  sheet.appendChild(vidPane);
+
   const caption = el('div', 'sfg-caption');
   caption.id = 'sfg-caption';
   caption.setAttribute('aria-live', 'polite');
@@ -356,6 +375,88 @@ function go(n) {
   renderStep();
 }
 
+// ---------------- টিউটোরিয়াল ভিডিও (ঐচ্ছিক) ----------------
+// cfg.videoTopic থাকলে tutorial_videos টেবিল থেকে ওই টপিকের YouTube লিংক আনে।
+// লিংক থাকলে শিটে "ভিডিওতে দেখুন" বাটন আসে; না থাকলে গাইড আগের মতোই চলে।
+// ভিডিও বাটনে ট্যাপ করার আগে কোনো ভিডিও ডেটা লোড হয় না। লিংক বদলায় /admin/tutorials থেকে।
+
+const videoCache = new Map(); // topic -> { id, title } | null
+
+function ytId(url) {
+  try {
+    const u = new URL(String(url || '').trim());
+    const h = u.hostname.replace(/^(www\.|m\.)/, '');
+    let id = null;
+    if (h === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+    else if (h === 'youtube.com' || h === 'youtube-nocookie.com') {
+      if (u.pathname === '/watch') id = u.searchParams.get('v');
+      else {
+        const m = u.pathname.match(/^\/(shorts|embed|live)\/([^/?]+)/);
+        if (m) id = m[2];
+      }
+    }
+    return id && /^[A-Za-z0-9_-]{6,20}$/.test(id) ? id : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function loadVideo(topic) {
+  if (videoCache.has(topic)) return videoCache.get(topic);
+  try {
+    const { data, error } = await supabase
+      .from('tutorial_videos')
+      .select('title, video_url')
+      .eq('topic_key', topic)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (error) return null;
+    const id = data ? ytId(data.video_url) : null;
+    const out = id ? { id, title: data.title || '' } : null;
+    videoCache.set(topic, out);
+    return out;
+  } catch (err) {
+    return null;
+  }
+}
+
+function hideVideo() {
+  if (!root) return;
+  root.querySelector('.sfg-sheet').classList.remove('sfg-vmode');
+  root.querySelector('#sfg-vidbox').textContent = ''; // iframe মুছলে ভিডিও থামে
+}
+
+function resetVideo() {
+  if (!root) return;
+  hideVideo();
+  root.querySelector('#sfg-vidbtn').hidden = true;
+}
+
+function showVideo(v) {
+  const box = root.querySelector('#sfg-vidbox');
+  box.textContent = '';
+  const f = document.createElement('iframe');
+  f.src = 'https://www.youtube-nocookie.com/embed/' + v.id + '?rel=0&playsinline=1&autoplay=1';
+  f.title = v.title || 'টিউটোরিয়াল ভিডিও';
+  f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+  f.allowFullscreen = true;
+  f.referrerPolicy = 'strict-origin-when-cross-origin';
+  box.appendChild(f);
+  root.querySelector('.sfg-sheet').classList.add('sfg-vmode');
+}
+
+function setupVideo(cfg) {
+  resetVideo();
+  if (!cfg.videoTopic) return;
+  const gid = state.id;
+  loadVideo(cfg.videoTopic).then((v) => {
+    if (!v || !state || state.id !== gid) return;
+    const btn = root.querySelector('#sfg-vidbtn');
+    btn.onclick = () => showVideo(v);
+    btn.hidden = false;
+  });
+}
+
 // ---------------- খোলা / বন্ধ ----------------
 
 function focusables() {
@@ -404,6 +505,7 @@ export function openGuide(id, opener) {
   sub.textContent = cfg.subtitle || '';
   sub.hidden = !cfg.subtitle;
   renderStep();
+  setupVideo(cfg);
 
   document.body.style.overflow = 'hidden';
   root.classList.add('open');
@@ -420,6 +522,7 @@ export function openGuide(id, opener) {
 
 export function closeGuide() {
   if (!state || !root) return;
+  resetVideo();
   root.classList.remove('open');
   document.body.style.overflow = state.prevOverflow || '';
   document.removeEventListener('keydown', onKeydown);
@@ -450,6 +553,7 @@ function sanitizeConfig(raw) {
     title: typeof raw.title === 'string' && raw.title ? raw.title : 'ব্যবহারের নিয়ম',
     subtitle: typeof raw.subtitle === 'string' ? raw.subtitle : '',
     firstVisit: raw.firstVisit === true,
+    videoTopic: typeof raw.videoTopic === 'string' ? raw.videoTopic.slice(0, 40) : '',
     steps,
   };
 }
