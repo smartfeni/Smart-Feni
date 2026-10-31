@@ -312,6 +312,7 @@ export async function initBackButtonHandler() {
   initNotificationHandlers();
   initOfflineBanner();
   initOfflineWriteGuard();
+  initSafeLinkNavigation();
 
   // Deep link (অ্যাপ চালু থাকা অবস্থায়): WhatsApp/SMS/Facebook থেকে লিংকে ট্যাপ
   App.addListener('appUrlOpen', (data) => {
@@ -327,6 +328,105 @@ export async function initBackButtonHandler() {
       App.minimizeApp();
     }
   })?.catch?.(() => {});
+}
+
+// ---------------- Safe Navigation (দুর্বল মোবাইল ডেটায় এরর পেজ এড়াতে) ----------------
+// অ্যাপ server.url মোডে চলে, তাই প্রতিটা পেজ বদল একটা পুরো নেটওয়ার্ক লোড।
+// নেটওয়ার্ক ক্ষণিক গেলে (টাওয়ার বদল / দুর্বল সিগনাল) সেই লোড ফেইল করে সরাসরি
+// error.html আসে। তাই যাওয়ার আগে ছোট একটা কানেকশন চেক করি; ফেইল করলে কয়েকবার
+// আবার চেষ্টা করি, তারপরও না হলে পেজে থেকে বার্তা দেখাই (এরর পেজে পাঠাই না)।
+// ৫ সেকেন্ডের মধ্যে একবার চেক পাস করলে আবার চেক করি না (প্রতি ট্যাপে দেরি এড়াতে)।
+const NAV_CHECK_TIMEOUT_MS = 4000;
+const NAV_CHECK_GAP_MS = 1500;
+const NAV_RECENT_OK_MS = 5000;
+let navLastOkAt = 0;
+let navCheckBusy = false;
+
+async function connectionOk() {
+  if (navigator.onLine === false) return false;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), NAV_CHECK_TIMEOUT_MS);
+  try {
+    const res = await fetch('/favicon.ico?_=' + Date.now(), { cache: 'no-store', signal: ctrl.signal });
+    return res.status < 500;
+  } catch (err) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForConnection(retries) {
+  if (Date.now() - navLastOkAt < NAV_RECENT_OK_MS) return true;
+  for (let i = 0; i <= retries; i++) {
+    if (await connectionOk()) {
+      navLastOkAt = Date.now();
+      return true;
+    }
+    if (i === 0) {
+      try {
+        window.showToast?.('নেটওয়ার্ক ধরছে, একটু অপেক্ষা করুন…', 'error');
+      } catch (err) {
+        // টোস্ট না দেখালেও চেক চলবে
+      }
+    }
+    if (i < retries) await new Promise((resolve) => setTimeout(resolve, NAV_CHECK_GAP_MS));
+  }
+  return false;
+}
+
+// retries: নোটিফিকেশন/ডিপ লিংকে বেশি (৬), সাধারণ লিংকে ২
+async function safeNavigate(target, { retries = 2 } = {}) {
+  if (navCheckBusy) return;
+  navCheckBusy = true;
+  let ok = false;
+  try {
+    ok = await waitForConnection(retries);
+  } catch (err) {
+    ok = true; // চেক নিজে ভাঙলে আগের মতোই যাও
+  } finally {
+    navCheckBusy = false;
+  }
+
+  if (!ok) {
+    navigatingAway = false;
+    try {
+      window.showToast?.('নেটওয়ার্ক দুর্বল — একটু পরে আবার চেষ্টা করুন', 'error');
+    } catch (err) {
+      // টোস্ট না দেখালেও পেজ অক্ষত থাকবে
+    }
+    return;
+  }
+  window.location.href = target;
+}
+
+// অ্যাপের ভেতরে নিজের সাইটের সাধারণ লিংকে ট্যাপ করলেও একই চেক।
+// bubble ফেজে বসানো — পেজের নিজের হ্যান্ডলার preventDefault করলে আমরা কিছু করি না।
+function initSafeLinkNavigation() {
+  try {
+    if (!isNativeApp()) return;
+    document.addEventListener('click', (e) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a || (a.target && a.target !== '_self') || a.hasAttribute('download')) return;
+
+      let url;
+      try {
+        url = new URL(a.href, window.location.href);
+      } catch (err) {
+        return;
+      }
+      if (url.origin !== window.location.origin) return;
+      if (url.pathname.startsWith('/api/')) return;
+      // শুধু # বদলালে (একই পেজ) কিছু করার নেই
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+
+      e.preventDefault();
+      safeNavigate(url.pathname + url.search + url.hash, { retries: 2 });
+    });
+  } catch (err) {
+    // ফেইল করলে লিংক আগের মতোই কাজ করবে
+  }
 }
 
 // ---------------- Dashboard Redirect on App Open ----------------
@@ -386,7 +486,7 @@ function handleDeepLink(data) {
     if (target === window.location.pathname + window.location.search) return; // একই পেজ, কিছু করার নেই
 
     navigatingAway = true; // ড্যাশবোর্ড রিডাইরেক্ট যেন লিংকের পেজ নষ্ট না করে
-    window.location.href = target;
+    safeNavigate(target, { retries: 6 });
   } catch (err) {
     // ভুল/অসম্পূর্ণ লিংক হলে অ্যাপ স্বাভাবিক (হোমপেজ) খুলবে
   }
@@ -499,7 +599,7 @@ function handleNotificationTap(event) {
       target = url.pathname + url.search;
     }
 
-    window.location.href = target;
+    safeNavigate(target, { retries: 6 });
   } catch (err) {
     // ট্যাপ হ্যান্ডলিং ফেইল করলে অ্যাপ যেমন খুলেছে তেমনই থাকবে
   }
@@ -563,7 +663,7 @@ function ensureOfflineBannerEl() {
   el = document.createElement('div');
   el.id = OFFLINE_BANNER_ID;
   el.setAttribute('role', 'status');
-  el.textContent = '📡 আপনি অফলাইনে আছেন — সংরক্ষিত তথ্য দেখানো হচ্ছে';
+  el.textContent = '📡 ইন্টারনেট নেই — সংযোগ ফিরলে আবার চেষ্টা করুন';
   Object.assign(el.style, {
     position: 'fixed',
     top: '0',
