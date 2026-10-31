@@ -18,6 +18,7 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
+import { callerCan } from '../../../lib/serverPermission.js';
 import { geminiUrl } from '../../../lib/geminiConfig.js';
 import { reportServerError } from '../../../lib/serverErrorReporter.js';
 
@@ -187,7 +188,7 @@ export const POST: APIRoute = async ({ request }) => {
     const { data: callerData, error: callerErr } = await db.auth.getUser(token);
     if (callerErr || !callerData?.user) return json({ error: 'অনুমতি নেই' }, 401);
     const { data: profile } = await db.from('profiles').select('role, is_blocked').eq('id', callerData.user.id).single();
-    if (!profile || profile.is_blocked || (profile.role !== 'admin' && profile.role !== 'moderator')) {
+    if (!profile || profile.is_blocked || !(await callerCan(db, callerData.user.id, 'manual_orders.manage'))) {
       return json({ error: 'অনুমতি নেই' }, 403);
     }
     if (overLimit(callerData.user.id)) {

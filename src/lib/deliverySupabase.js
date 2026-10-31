@@ -89,26 +89,25 @@ export async function requireAdmin(request) {
   return { isAdmin: true, adminUserId: user.id, error: null };
 }
 
-// অ্যাডমিন বা মডারেটর (ব্লক না হলে) — রাইডার approve/reject এর জন্য।
-// রিটার্নে isAdmin = true মানে "অনুমোদিত" (admin বা moderator), role আলাদা দেওয়া আছে।
-export async function requireAdminOrMod(request) {
+// রোল-সচেতন অনুমতি: caller-এর DB has_permission(key) (সুপার অ্যাডমিন সবসময় পাস;
+// স্টাফ শুধু নিজের রোলের permission পায়; ব্লকড/অন্য সবাই ব্যর্থ)।
+// রিটার্নে isAdmin = true মানে "অনুমোদিত", নাম আগের মতোই রাখা (বিদ্যমান রুটের সাথে মিল)।
+export async function requirePermission(request, permissionKey) {
   const { client: userClient, user, error } = await getAuthedUser(request);
   if (error) return { isAdmin: false, adminUserId: null, role: null, error };
 
-  const { data: profile, error: profileError } = await userClient
-    .from('profiles')
-    .select('role, is_blocked')
-    .eq('id', user.id)
-    .single();
+  const { data: allowed, error: permError } = await userClient.rpc('has_permission', {
+    p_key: permissionKey,
+  });
 
-  if (
-    profileError ||
-    !profile ||
-    profile.is_blocked ||
-    (profile.role !== 'admin' && profile.role !== 'moderator')
-  ) {
-    return { isAdmin: false, adminUserId: null, role: null, error: 'এডমিন/মডারেটর পারমিশন নেই' };
+  if (permError || allowed !== true) {
+    return { isAdmin: false, adminUserId: null, role: null, error: 'এই কাজের অনুমতি নেই' };
   }
 
-  return { isAdmin: true, adminUserId: user.id, role: profile.role, error: null };
+  return { isAdmin: true, adminUserId: user.id, role: null, error: null };
+}
+
+// রাইডার approve/reject এর জন্য (পুরনো নাম বহাল) — এখন riders.manage permission লাগে
+export async function requireAdminOrMod(request) {
+  return requirePermission(request, 'riders.manage');
 }

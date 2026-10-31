@@ -14,6 +14,7 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+import { callerCan } from '../../../lib/serverPermission.js';
 
 export const prerender = false;
 
@@ -71,7 +72,7 @@ async function verifyAdmin(request, supabaseAdmin) {
     .eq('id', callerData.user.id)
     .single();
 
-  if (!profile || profile.role !== 'admin') return null;
+  if (!(await callerCan(supabaseAdmin, callerData.user.id, 'images.manage'))) return null;
   return callerData.user;
 }
 
