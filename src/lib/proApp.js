@@ -12,6 +12,7 @@ import { Capacitor } from '@capacitor/core';
 
 export const PRO_APP_ID = 'com.smartfeni.pro';
 export const PRO_HOME = '/pro';
+export const PRO_FLAG_KEY = 'sf_pro_app';
 
 let proPromise = null;
 
@@ -27,6 +28,13 @@ export function isProApp() {
       ]);
       const pro = !!info && info.id === PRO_APP_ID;
       if (pro) document.documentElement.setAttribute('data-pro-app', '1');
+      else document.documentElement.removeAttribute('data-pro-app');
+      // ফ্ল্যাগ মনে রাখা, যাতে পরের পেজ লোডে (head স্ক্রিপ্টে) আঁকার আগেই Pro মোড চালু হয়;
+      // নেটিভ কিন্তু Pro নয় (মেইন অ্যাপ) হলে ফ্ল্যাগ মুছে যায়। ব্রাউজারে এই লাইনে আসেই না।
+      try {
+        if (pro) localStorage.setItem(PRO_FLAG_KEY, '1');
+        else localStorage.removeItem(PRO_FLAG_KEY);
+      } catch (_) { /* উপেক্ষা */ }
       return pro;
     } catch (_) {
       return false;
