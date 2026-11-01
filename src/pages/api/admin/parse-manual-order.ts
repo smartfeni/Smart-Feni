@@ -280,6 +280,7 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
+    let groqNote = groqEnabled() ? 'groq=not_tried' : 'groq=disabled';
     // ৩য় চেষ্টা: Gemini ব্যর্থ হলে Groq (JSON মোড)। ফিল্ড নিচে sanitize() দিয়ে যাচাই হয়, আর মানুষ মিলিয়ে সেভ করে।
     if (!parsed && groqEnabled() && (typeof failCode !== 'number' || failCode >= 500 || failCode === 429)) {
       const g = await groqChat({
@@ -292,6 +293,7 @@ export const POST: APIRoute = async ({ request }) => {
         temperature: 0.1,
         timeoutMs: GEMINI_TIMEOUT_MS,
       });
+      groqNote = 'groq=' + (g.ok ? 'bad_json' : g.error || 'failed');
       if (g.ok) {
         try {
           const obj = JSON.parse(g.text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim());
@@ -301,7 +303,7 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     if (!parsed) {
-      await report(failAction || 'parse_manual_order_failed', failTitle || 'অটো-ফিল ব্যর্থ', failMsg || 'unknown', failCode, typeof failCode === 'number' ? failCode : undefined);
+      await report(failAction || 'parse_manual_order_failed', failTitle || 'অটো-ফিল ব্যর্থ', (failMsg || 'unknown') + ' | ' + groqNote, failCode, typeof failCode === 'number' ? failCode : undefined);
       return json({ error: 'অটো-ফিল এই মুহূর্তে কাজ করছে না, হাতে লিখুন।' }, 502);
     }
 

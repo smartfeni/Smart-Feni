@@ -102,11 +102,11 @@ async function pingTable(supabaseAdmin, messaging, table: string, tokens: string
   }
 
   const nowIso = new Date().toISOString();
-  for (let i = 0; i < uninstalled.length; i += 200) {
+  for (let i = 0; i < uninstalled.length; i += 20) {
     const { error: markError } = await supabaseAdmin
       .from(table)
       .update({ uninstalled_at: nowIso })
-      .in('fcm_token', uninstalled.slice(i, i + 200))
+      .in('fcm_token', uninstalled.slice(i, i + 20))
       .is('uninstalled_at', null);
     if (markError && !updateError) updateError = markError.message;
   }

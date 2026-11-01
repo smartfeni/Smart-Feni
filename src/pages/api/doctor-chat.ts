@@ -396,6 +396,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       }
     }
 
+    let groqNote = groqEnabled() ? 'groq=not_tried' : 'groq=disabled';
     // ৩য় চেষ্টা: Gemini ব্যর্থ হলে Groq (JSON মোড)। নিচের ভ্যালিডেশন ও নিরাপত্তা ছাঁকনি একই থাকে।
     if (!parsed && groqEnabled() && (typeof failCode !== 'number' || failCode >= 500 || failCode === 429)) {
       const g = await groqChat({
@@ -414,6 +415,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
         temperature: 0.2,
         timeoutMs: GEMINI_TIMEOUT_MS,
       });
+      groqNote = 'groq=' + (g.ok ? 'bad_json' : g.error || 'failed');
       if (g.ok) {
         try {
           const obj = JSON.parse(g.text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim());
@@ -427,7 +429,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     }
 
     if (!parsed) {
-      await report(failAction || 'doctor_chat_gemini_error', failTitle || 'ডাক্তার AI চ্যাট: Gemini ব্যর্থ', failMsg || 'unknown', failCode, typeof failCode === 'number' ? failCode : undefined);
+      await report(failAction || 'doctor_chat_gemini_error', failTitle || 'ডাক্তার AI চ্যাট: Gemini ব্যর্থ', (failMsg || 'unknown') + ' | ' + groqNote, failCode, typeof failCode === 'number' ? failCode : undefined);
       await stat('error');
       return json({ type: 'error', reply: ERROR_REPLY, specialties: [], phone: CONTACT_PHONE });
     }

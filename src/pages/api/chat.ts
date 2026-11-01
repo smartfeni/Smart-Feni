@@ -452,6 +452,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     }
 
     // ৩য় চেষ্টা: Gemini ৫xx/টাইমআউট/কোটায় ব্যর্থ হলে Groq (শুধু সাধারণ উত্তর, অর্ডার-টুল ছাড়া)
+    let groqNote = groqEnabled() ? 'groq=not_tried' : 'groq=disabled';
     const geminiFailed = !geminiRes || !geminiRes.ok;
     const geminiTransient = !geminiRes || geminiRes.status >= 500 || geminiRes.status === 429;
     if (geminiFailed && geminiTransient && groqEnabled()) {
@@ -467,10 +468,11 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       });
       if (g.ok && g.text) return jsonReply(sanitizeReply(g.text));
       console.error('Chat API: Groq fallback failed', g.status, g.error);
+      groqNote = 'groq=' + (g.error || 'failed');
     }
 
     if (!geminiRes) {
-      await report('chat_gemini_network', 'AI চ্যাট: Gemini-তে পৌঁছানো যায়নি (টাইমআউট)', netErr || 'network error');
+      await report('chat_gemini_network', 'AI চ্যাট: Gemini-তে পৌঁছানো যায়নি (টাইমআউট)', (netErr || 'network error') + ' | ' + groqNote);
       return jsonReply(REPLY_BUSY, 200, true);
     }
 
@@ -483,7 +485,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       await report(
         quota ? 'chat_gemini_quota' : 'chat_gemini_error',
         quota ? 'AI চ্যাট: Gemini কোটা শেষ / রেট লিমিট' : 'AI চ্যাট: Gemini API ব্যর্থ',
-        errStatus || 'Gemini API non-OK response',
+        (errStatus || 'Gemini API non-OK response') + ' | ' + groqNote,
         geminiRes.status,
         geminiRes.status
       );
