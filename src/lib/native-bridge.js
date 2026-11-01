@@ -700,6 +700,17 @@ const ADMIN_CHANNEL = {
 const CHANNELS_FLAG = 'sf_notif_channels_v1';
 const ADMIN_CHANNEL_FLAG = 'sf_notif_admin_channel_v1';
 
+// Pro অ্যাপ (com.smartfeni.pro) চ্যানেল — আইডি send.ts-এর PRO_CHANNEL_BY_CATEGORY/PRO_DEFAULT_CHANNEL-এর সাথে মিলতে হবে।
+// (অর্ডার চ্যানেলে পরে রিংটোন বসবে: নতুন আইডি _v2 দিয়ে, কারণ চ্যানেলের শব্দ পরে বদলানো যায় না)
+const PRO_CHANNELS = [
+  { id: 'sf_pro_orders_v1', name: '🔔 নতুন অর্ডার ও রিকোয়েস্ট', description: 'শপের নতুন অর্ডার ও হিরো রিকোয়েস্ট', importance: 5, visibility: 1, vibration: true },
+  { id: 'sf_pro_message_v1', name: '💬 মেসেজ', description: 'কাস্টমার ও রাইডারের মেসেজ', importance: 4, visibility: 1, vibration: true },
+  { id: 'sf_pro_updates_v1', name: '📋 আপডেট', description: 'আবেদন, অ্যাকাউন্ট ও অন্যান্য আপডেট', importance: 3, visibility: 1, vibration: true },
+];
+const PRO_CHANNELS_FLAG = 'sf_pro_channels_v1';
+
+import { isProApp, proPath } from './proApp.js';
+
 // পুশে ট্যাপ → সঠিক পেজ (ওয়েবের sw.js এর মতো: action_url এর পাথ + ?notif=<id>,
 // যাতে নোটিফিকেশন ড্রয়ার ওই পেজে গিয়ে নোটিফিকেশনটা খুলে দেখায়)
 function handleNotificationTap(event) {
@@ -715,7 +726,14 @@ function handleNotificationTap(event) {
     const notifId = data.notification_id;
     const guestPromoId = data.guest_promo_id; // লগইন ছাড়া ডিভাইসের প্রমো (guest-broadcast)
     let target;
-    if (notifId) {
+    // Pro অ্যাপে (<html data-pro-app>): মেইনের লিংক Pro পেজে বদলায় (proPath), মেইনের নোটিফিকেশন
+    // ড্রয়ার না খুলে ?pn=<id> বসে (Pro পেজ এটা দেখে পড়া মার্ক করবে)। মেইন অ্যাপে কিছুই বদলায় না।
+    if (document.documentElement.hasAttribute('data-pro-app')) {
+      const q = new URLSearchParams(url.search);
+      if (notifId) q.set('pn', notifId);
+      const qs = q.toString();
+      target = proPath(url.pathname) + (qs ? '?' + qs : '');
+    } else if (notifId) {
       target = `${url.pathname}?notif=${encodeURIComponent(notifId)}`;
     } else if (guestPromoId && !data.action_url) {
       // লিংক ছাড়া গেস্ট প্রমো — হোমে গিয়ে "অফার ও খবর" তালিকা খোলে
@@ -758,6 +776,18 @@ async function initNotificationHandlers() {
         await createChannelOnce(PushNotifications, channel);
       }
       localStorage.setItem(CHANNELS_FLAG, 'done');
+    }
+
+    // ২.৫) Pro অ্যাপে অর্ডার/মেসেজ/আপডেট চ্যানেল (একবার; ফেইল করলে সাধারণ চ্যানেলে আসবে)
+    try {
+      if ((await isProApp()) && localStorage.getItem(PRO_CHANNELS_FLAG) !== 'done') {
+        for (const channel of PRO_CHANNELS) {
+          await createChannelOnce(PushNotifications, channel);
+        }
+        localStorage.setItem(PRO_CHANNELS_FLAG, 'done');
+      }
+    } catch (err) {
+      // ফেইল করলে Pro নোটিফিকেশন সাধারণ চ্যানেলে আসবে — ভাঙবে না
     }
 
     // ৩) অ্যাডমিন চ্যানেল — শুধু অ্যাডমিন/মডারেটর যখন অ্যাডমিন পেজ খোলে
