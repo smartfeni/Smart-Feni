@@ -1,0 +1,46 @@
+---
+// path: src/components/pro/HeroTabs.astro
+// ============================================================
+// Pro হিরো ট্যাব বার (/pro/hero/delivery | offline | ride)
+// ট্যাব ঠিক হয় রাইডারের offers_delivery / offers_ride দেখে (src/lib/proHero.js)।
+// ২টার কম ট্যাব হলে বার লুকানো থাকে। অনুমতি নেই এমন ট্যাবে এলে প্রথম অনুমোদিত ট্যাবে পাঠায়।
+// লগইন না থাকলে Pro লগইন পেজে।
+// এই কম্পোনেন্ট যে পেজে আছে সেখানে মেইনের "প্রোফাইলে ফিরুন"/Telegram বক্স লুকানো থাকে।
+// ব্যবহার: <HeroTabs active="delivery" />
+// ============================================================
+const { active = 'delivery' } = Astro.props;
+---
+
+<nav class="ht-bar" id="heroTabs" data-active={active} style="display:none;" aria-label="হিরো ট্যাব"></nav>
+
+<style is:global>
+  .ht-bar { background: #1B2A4A; padding: 10px 12px; gap: 8px; overflow-x: auto; font-family: 'Hind Siliguri', system-ui, sans-serif; }
+  .ht-tab { flex: 1; min-width: 0; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.1); color: #fff; font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; white-space: nowrap; padding: 0 10px; }
+  .ht-tab.active { background: #FF6B35; color: #1B2A4A; }
+  /* Pro অ্যাপে মেইনের প্রোফাইল-ফেরা লিংক ও Telegram বক্স লাগে না */
+  .back-link, .oo-round, .dh-telegram-box { display: none !important; }
+</style>
+
+<script>
+  import { getHeroTabs, HERO_TABS, rememberHeroTab } from '../../lib/proHero.js';
+  import { proLoginUrl } from '../../lib/proRoles.js';
+
+  async function run() {
+    const nav = document.getElementById('heroTabs');
+    if (!nav) return;
+    const active = nav.dataset.active;
+    let res;
+    try { res = await getHeroTabs(); } catch (_) { return; }
+    if (!res.loggedIn) { window.location.replace(proLoginUrl(window.location.pathname + window.location.search)); return; }
+    if (!res.tabs.length) return; // রাইডার নয় — পেজের নিজের গেট বার্তা দেখাবে
+    if (res.tabs.indexOf(active) === -1) { window.location.replace(HERO_TABS[res.tabs[0]].href); return; }
+    rememberHeroTab(active);
+    if (res.tabs.length < 2) return;
+    nav.innerHTML = res.tabs.map((k) => {
+      const t = HERO_TABS[k];
+      return '<a class="ht-tab' + (k === active ? ' active' : '') + '" href="' + t.href + '"><i class="fas ' + t.icon + '"></i><span>' + t.label + '</span></a>';
+    }).join('');
+    nav.style.display = 'flex';
+  }
+  run();
+</script>
