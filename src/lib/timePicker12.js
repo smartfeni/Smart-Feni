@@ -2,7 +2,7 @@
 //
 // সব <input type="time"> অটোমেটিক ১২ ঘণ্টার পিকারে বদলে দেয়:
 //   [ঘণ্টা ▾] : [মিনিট ▾]
-//   [সকাল] [দুপুর] [বিকেল] [রাত]
+//   [বেলা ▾]  (সকাল / দুপুর / বিকেল / সন্ধ্যা / রাত)
 //
 // আসল input থাকে (লুকানো), তার .value সবসময় "HH:MM" (২৪ ঘণ্টা) — তাই
 // যেসব কোড input.value পড়ে বা লেখে সেগুলো অপরিবর্তিত কাজ করবে।
@@ -19,6 +19,7 @@ const PERIODS = [
   ['s', 'সকাল'],
   ['d', 'দুপুর'],
   ['b', 'বিকেল'],
+  ['e', 'সন্ধ্যা'],
   ['r', 'রাত'],
 ];
 
@@ -29,7 +30,7 @@ function to24(h, p) {
     if (h === 12) return 0; // রাত ১২ = মাঝরাত
     return h <= 5 ? h : h + 12; // রাত ১–৫ = মাঝরাতের পর, ৬–১১ = সন্ধ্যা/রাত
   }
-  // দুপুর, বিকেল
+  // দুপুর, বিকেল, সন্ধ্যা
   return h === 12 ? 12 : h + 12;
 }
 
@@ -40,7 +41,8 @@ function from24(H) {
   if (H < 12) return { h: H, p: 's' };
   if (H === 12) return { h: 12, p: 'd' };
   if (H <= 15) return { h: H - 12, p: 'd' };
-  if (H <= 18) return { h: H - 12, p: 'b' };
+  if (H <= 17) return { h: H - 12, p: 'b' };
+  if (H <= 19) return { h: H - 12, p: 'e' };
   return { h: H - 12, p: 'r' };
 }
 
@@ -61,13 +63,12 @@ function injectStyle() {
       color: #1B2A4A; font-family: inherit; font-size: 16px; font-weight: 600; text-align: center;
     }
     .sf-t12-top select:focus { outline: none; border-color: #FF6B35; background: #fff; }
-    .sf-t12-per { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-    .sf-t12-per button {
-      min-height: 38px; padding: 0 1px; border: 1.5px solid #E5EAF0; border-radius: 10px;
-      background: #fff; color: #1B2A4A; font-family: inherit; font-size: 0.72rem; font-weight: 700;
-      cursor: pointer; white-space: nowrap;
+    .sf-t12-per select {
+      width: 100%; min-width: 0; height: 44px; padding: 0 8px; box-sizing: border-box;
+      border: 1.5px solid #E5EAF0; border-radius: 12px; background: #FBFCFE;
+      color: #1B2A4A; font-family: inherit; font-size: 16px; font-weight: 600; text-align: center;
     }
-    .sf-t12-per button.on { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+    .sf-t12-per select:focus { outline: none; border-color: #FF6B35; background: #fff; }
     .sf-t12-src {
       position: absolute !important; width: 1px !important; height: 1px !important; opacity: 0 !important;
       pointer-events: none !important; padding: 0 !important; margin: 0 !important; border: 0 !important;
@@ -82,8 +83,6 @@ function injectStyle() {
 function enhance(input) {
   if (input._sft12) return;
   input._sft12 = true;
-
-  const state = { p: '' };
 
   const wrap = document.createElement('div');
   wrap.className = 'sf-t12';
@@ -122,29 +121,12 @@ function enhance(input) {
 
   const per = document.createElement('div');
   per.className = 'sf-t12-per';
-  const chips = {};
-  PERIODS.forEach(([key, label]) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = label;
-    b.setAttribute('aria-pressed', 'false');
-    b.addEventListener('click', () => {
-      state.p = key;
-      paintChips();
-      commit();
-    });
-    chips[key] = b;
-    per.appendChild(b);
-  });
+  const pSel = document.createElement('select');
+  pSel.setAttribute('aria-label', 'বেলা');
+  pSel.appendChild(new Option('বেলা', ''));
+  PERIODS.forEach(([key, label]) => pSel.appendChild(new Option(label, key)));
+  per.appendChild(pSel);
   wrap.appendChild(per);
-
-  function paintChips() {
-    Object.keys(chips).forEach((k) => {
-      const on = state.p === k;
-      chips[k].classList.toggle('on', on);
-      chips[k].setAttribute('aria-pressed', on ? 'true' : 'false');
-    });
-  }
 
   function ensureMinuteOption(m) {
     const v = String(m);
@@ -160,24 +142,23 @@ function enhance(input) {
     if (!mt) {
       hSel.value = '';
       mSel.value = '';
-      state.p = '';
+      pSel.value = '';
     } else {
       const f = from24(Number(mt[1]));
       const M = Number(mt[2]);
       ensureMinuteOption(M);
       hSel.value = String(f.h);
       mSel.value = String(M);
-      state.p = f.p;
+      pSel.value = f.p;
     }
-    paintChips();
   }
 
   // UI থেকে আসল ভ্যালু (HH:MM) বানানো
   function commit() {
-    if ((hSel.value !== '' || state.p) && mSel.value === '') mSel.value = '0';
+    if ((hSel.value !== '' || pSel.value !== '') && mSel.value === '') mSel.value = '0';
     let v = '';
-    if (hSel.value !== '' && state.p) {
-      v = pad(to24(Number(hSel.value), state.p)) + ':' + pad(Number(mSel.value || 0));
+    if (hSel.value !== '' && pSel.value !== '') {
+      v = pad(to24(Number(hSel.value), pSel.value)) + ':' + pad(Number(mSel.value || 0));
     }
     nativeValue.set.call(input, v);
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -186,6 +167,7 @@ function enhance(input) {
 
   hSel.addEventListener('change', commit);
   mSel.addEventListener('change', commit);
+  pSel.addEventListener('change', commit);
 
   // অন্য কোড input.value = '...' লিখলে UI-ও মিলিয়ে নেবে
   Object.defineProperty(input, 'value', {
