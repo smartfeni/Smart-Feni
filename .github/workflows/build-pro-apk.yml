@@ -1,0 +1,139 @@
+name: Build Pro APK and AAB
+
+# শুধু ম্যানুয়ালি চলবে (GitHub → Actions → Build Pro APK and AAB → Run workflow)।
+# Smart Feni Pro = com.smartfeni.pro, অ্যাপ খুললে শুরু হয় https://smartfeni.com/pro।
+# রিপোর কোনো ফাইল বদলায় না: সব বদল শুধু এই বিল্ডের অস্থায়ী কপিতে (আসল অ্যাপ অক্ষত)।
+# নেটিভ কিছু (AndroidManifest, প্লাগিন, আইকন, সাউন্ড) বদলালে তবেই আবার চালান;
+# src/ এর ওয়েব বদল Vercel ডেপ্লয়েই অ্যাপে পৌঁছে যায়।
+# লাগে (GitHub Secrets): KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD,
+# GOOGLE_SERVICES_PRO_JSON_BASE64 (Firebase-এর com.smartfeni.pro অ্যাপের google-services.json, Base64)
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Check required secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          GS_B64: ${{ secrets.GOOGLE_SERVICES_PRO_JSON_BASE64 }}
+        run: |
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD GS_B64; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Secret মিসিং: $v (GS_B64 = GOOGLE_SERVICES_PRO_JSON_BASE64)"
+              exit 1
+            fi
+          done
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Switch Capacitor config to Pro
+        run: |
+          jq '.appId = "com.smartfeni.pro" | .appName = "Smart Feni Pro" | .server.url = "https://smartfeni.com/pro"' capacitor.config.json > capacitor.config.pro.json
+          mv capacitor.config.pro.json capacitor.config.json
+          jq -e '.appId == "com.smartfeni.pro" and .server.url == "https://smartfeni.com/pro"' capacitor.config.json > /dev/null
+
+      - name: Ensure Android assets directory exists
+        run: mkdir -p android/app/src/main/assets
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Write Pro google-services.json
+        env:
+          GS_B64: ${{ secrets.GOOGLE_SERVICES_PRO_JSON_BASE64 }}
+        run: |
+          echo "$GS_B64" | base64 -d > android/app/google-services.json
+          if ! jq -e '[.client[].client_info.android_client_info.package_name] | index("com.smartfeni.pro")' android/app/google-services.json > /dev/null; then
+            echo "::error::google-services.json-এ com.smartfeni.pro নেই। Firebase-এ Pro অ্যাপের ফাইল নামিয়ে secret আবার বসান।"
+            exit 1
+          fi
+
+      - name: Switch Android project to Pro (temporary copy only)
+        run: |
+          # build.gradle: applicationId (namespace ও Java প্যাকেজ বদলাবে না), versionCode/versionName
+          sed -i 's/applicationId "com.smartfeni.app"/applicationId "com.smartfeni.pro"/' android/app/build.gradle
+          sed -i 's/versionCode [0-9][0-9]*/versionCode ${{ github.run_number }}/' android/app/build.gradle
+          sed -i 's/versionName "[^"]*"/versionName "pro-1.0.${{ github.run_number }}"/' android/app/build.gradle
+
+          # strings.xml: অ্যাপের নাম ও প্যাকেজ
+          sed -i -e 's|>Smart Feni<|>Smart Feni Pro<|g' -e 's|com\.smartfeni\.app|com.smartfeni.pro|g' android/app/src/main/res/values/strings.xml
+
+          # AndroidManifest: smartfeni.com App Links বাদ (নইলে আসল অ্যাপের সাথে লিংক খোলায় দ্বন্দ্ব)
+          python3 - <<'PY'
+          import re, sys
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          new, n = re.subn(r'<intent-filter android:autoVerify="true">.*?</intent-filter>', '', s, flags=re.S)
+          if n != 1:
+              print('ERROR: autoVerify intent-filter %d বার পাওয়া গেছে (১ বার হওয়ার কথা)' % n)
+              sys.exit(1)
+          open(p, 'w', encoding='utf-8').write(new)
+          PY
+
+          # যাচাই
+          grep -q 'applicationId "com.smartfeni.pro"' android/app/build.gradle
+          grep -q 'versionCode ${{ github.run_number }}' android/app/build.gradle
+          grep -q '>Smart Feni Pro<' android/app/src/main/res/values/strings.xml
+          if grep -q 'autoVerify' android/app/src/main/AndroidManifest.xml; then
+            echo "::error::autoVerify এখনো আছে"
+            exit 1
+          fi
+          grep -n 'applicationId\|versionCode\|versionName' android/app/build.gradle
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$GITHUB_WORKSPACE/android/app/signing.keystore"
+
+      - name: Build signed release APK and AAB
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease bundleRelease \
+            -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/android/app/signing.keystore" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+
+      - name: Upload Pro APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-feni-pro-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload Pro AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-feni-pro-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      - name: Clean up keystore and Firebase file
+        if: always()
+        run: |
+          rm -f "$GITHUB_WORKSPACE/android/app/signing.keystore"
+          rm -f "$GITHUB_WORKSPACE/android/app/google-services.json"
