@@ -14,8 +14,8 @@ export const ROLE_META = {
   instant_shop: { label: 'ইনস্ট্যান্ট শপ', sub: 'অর্ডার গ্রহণ, রেডি, মেনু', icon: 'fa-utensils', href: '/pro/shop' },
   rider: { label: 'রাইডার', sub: 'ডেলিভারি হিরো', icon: 'fa-motorcycle', href: '/pro/hero' },
   shop: { label: 'অনলাইন শপ', sub: 'প্রোডাক্ট ও অর্ডার', icon: 'fa-store', href: '/my-shop' },
-  club: { label: 'ক্লাব', sub: 'ক্লাব ম্যানেজমেন্ট', icon: 'fa-people-group', href: '/my-club' },
-  clinic: { label: 'ক্লিনিক', sub: 'সিরিয়াল ও ডাক্তার', icon: 'fa-hospital', href: '/my-clinic' },
+  club: { label: 'ক্লাব', sub: 'ক্লাব ম্যানেজমেন্ট', icon: 'fa-people-group', href: '/pro/club' },
+  clinic: { label: 'ক্লিনিক', sub: 'সিরিয়াল ও ডাক্তার', icon: 'fa-hospital', href: '/pro/clinic' },
 };
 
 export async function getMyProRoles() {
