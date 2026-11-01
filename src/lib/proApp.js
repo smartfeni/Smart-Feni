@@ -14,6 +14,25 @@ export const PRO_APP_ID = 'com.smartfeni.pro';
 export const PRO_HOME = '/pro';
 export const PRO_FLAG_KEY = 'sf_pro_app';
 
+// মেইন সাইটের পেজ -> Pro অ্যাপের পেজ (নোটিফিকেশনে ট্যাপ ইত্যাদিতে)।
+// পাথের প্রিফিক্স মেলে; বাকি অংশ (/সাব-পাথ) অপরিবর্তিত; query আলাদা, কলারই রাখে।
+const PRO_PATH_MAP = [
+  ['/delivery-hero', '/pro/hero/delivery'],
+  ['/ride-hero', '/pro/hero/ride'],
+  ['/offline-orders', '/pro/hero/offline'],
+  ['/my-club', '/pro/club'],
+  ['/my-clinic', '/pro/clinic'],
+  ['/my-shop', '/pro/online-shop'],
+];
+
+export function proPath(pathname) {
+  const p = String(pathname || '');
+  for (const [from, to] of PRO_PATH_MAP) {
+    if (p === from || p.indexOf(from + '/') === 0) return to + p.slice(from.length);
+  }
+  return p;
+}
+
 let proPromise = null;
 
 export function isProApp() {

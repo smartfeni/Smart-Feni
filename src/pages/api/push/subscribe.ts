@@ -34,6 +34,8 @@ export async function POST({ request }) {
   try {
     const body = await request.json();
     const { accessToken, platform = 'web', device_label } = body;
+    // কোন অ্যাপের টোকেন (main | pro); না থাকলে/ভুল হলে main (পুরোনো অ্যাপ ভার্সনের জন্য)
+    const appId = body.app_id === 'pro' ? 'pro' : 'main';
 
     if (!accessToken) {
       return new Response(
@@ -143,6 +145,7 @@ export async function POST({ request }) {
             device_label: device_label || 'Android App',
             last_used_at: new Date().toISOString(),
             uninstalled_at: null,
+            app_id: appId,
           },
           { onConflict: 'fcm_token' }
         ));

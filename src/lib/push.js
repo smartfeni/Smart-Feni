@@ -32,8 +32,15 @@
 
 import { supabase } from './supabase.js';
 import { isNativeApp } from './native-bridge.js';
+import { isProApp } from './proApp.js';
 
 const NATIVE_PUSH_GRANTED_KEY = 'smartfeni_push_granted';
+
+// কোন অ্যাপ থেকে টোকেন যাচ্ছে: 'pro' (Smart Feni Pro) বা 'main'।
+// সার্ভার (send.ts) এটা দেখে Pro নোটিফিকেশন Pro টোকেনে পাঠায়। ভুল হলেও 'main' (আগের আচরণ)।
+async function getAppId() {
+  try { return (await isProApp()) ? 'pro' : 'main'; } catch (_) { return 'main'; }
+}
 
 // VAPID public key (base64url string) কে Uint8Array এ কনভার্ট করা,
 // pushManager.subscribe() এর applicationServerKey এর জন্য এই ফরম্যাট লাগে
@@ -91,6 +98,7 @@ async function subscribeNative() {
           body: JSON.stringify({
             accessToken: session.access_token,
             platform: 'android',
+            app_id: await getAppId(),
             fcm_token: token.value,
             device_label: 'Android App',
           }),
@@ -234,6 +242,7 @@ async function syncNativeToken(session) {
             body: JSON.stringify({
               accessToken: activeSession.access_token,
               platform: 'android',
+              app_id: await getAppId(),
               fcm_token: token.value,
               device_label: 'Android App',
             }),
@@ -264,6 +273,9 @@ let guestListenerAdded = false;
 export async function registerGuestDevice() {
   try {
     if (!isNativeApp()) return;
+
+    // Pro অ্যাপ গেস্ট/প্রমো ডিভাইস নয় (অ্যাডমিনের অফার মেইন অ্যাপেই যায়)
+    if (await isProApp()) return;
 
     // লগইন থাকলে এটা গেস্ট না — ইউজারের নামের পথ (syncNativeToken) কাজ করবে
     const { data: { session } } = await supabase.auth.getSession();

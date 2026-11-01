@@ -53,6 +53,22 @@ const CHANNEL_BY_CATEGORY = {
 };
 const DEFAULT_CHANNEL = 'sf_updates_v1';
 
+// ---------- Pro অ্যাপ (com.smartfeni.pro) ----------
+// Pro নোটিফিকেশন চেনা হয় action_url দেখে (ক্যাটাগরি দিয়ে নয়, কারণ delivery_hero/message
+// কাস্টমারকেও যায়, তাদের লিংক /my-orders)। চ্যানেল আইডি native-bridge.js PRO_CHANNELS-এর সাথে মিলতে হবে।
+const PRO_URL_RE = /^\/(pro|delivery-hero|ride-hero|offline-orders|my-shop|my-club|my-clinic)(?:[/?#]|$)/;
+function isProNotification(actionUrl) {
+  return typeof actionUrl === 'string' && PRO_URL_RE.test(actionUrl);
+}
+const PRO_CHANNEL_BY_CATEGORY = {
+  shop_order: 'sf_pro_orders_v1',
+  order_status: 'sf_pro_orders_v1',
+  rider_offer: 'sf_pro_orders_v1',
+  delivery_hero: 'sf_pro_orders_v1',
+  message: 'sf_pro_message_v1',
+};
+const PRO_DEFAULT_CHANNEL = 'sf_pro_updates_v1';
+
 // priority → FCM priority ও মেয়াদ (ms)। মেয়াদ পেরিয়ে গেলে ডিভাইস অনলাইনে
 // এলেও পুরোনো নোটিফিকেশন আর আসে না (যেমন ১ ঘণ্টা আগের রক্তের অনুরোধ)।
 const HOUR = 60 * 60 * 1000;
@@ -63,10 +79,12 @@ const PRIORITY_CONFIG = {
 };
 const BRAND_COLOR = '#FF6B35';
 
-function buildAndroidConfig({ category, priority, related_entity_id }) {
+function buildAndroidConfig({ category, priority, related_entity_id, isPro = false }) {
   const cfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.normal;
   const notification = {
-    channelId: CHANNEL_BY_CATEGORY[category] || DEFAULT_CHANNEL,
+    channelId: isPro
+      ? (PRO_CHANNEL_BY_CATEGORY[category] || PRO_DEFAULT_CHANNEL)
+      : (CHANNEL_BY_CATEGORY[category] || DEFAULT_CHANNEL),
     color: BRAND_COLOR,
   };
   // চ্যাট: একই কথোপকথনের নতুন মেসেজ আগেরটার জায়গায় বসে (স্ট্যাক হয় না)
@@ -166,7 +184,7 @@ export async function POST({ request }) {
     // uninstalled_at বসা (আনইনস্টল হয়ে যাওয়া) ডিভাইস স্কিপ
     const { data: subscriptions, error: fetchError } = await supabaseAdmin
       .from('push_subscriptions')
-      .select('id, platform, endpoint, p256dh_key, auth_key, fcm_token')
+      .select('id, platform, endpoint, p256dh_key, auth_key, fcm_token, app_id')
       .eq('user_id', user_id)
       .is('uninstalled_at', null);
 
@@ -193,7 +211,14 @@ export async function POST({ request }) {
     }
 
     const webSubs = subscriptions.filter((s) => s.platform === 'android' ? false : true);
-    const androidSubs = subscriptions.filter((s) => s.platform === 'android');
+    // Android রাউটিং: Pro নোটিফিকেশন -> Pro অ্যাপের টোকেন; বাকি -> মেইন অ্যাপের টোকেন।
+    // কাঙ্ক্ষিত অ্যাপের টোকেন না থাকলে অন্যটিতে যায় (Pro ইনস্টল না থাকলে সব আগের মতো মেইনে)।
+    const proAndroidSubs = subscriptions.filter((s) => s.platform === 'android' && s.app_id === 'pro');
+    const mainAndroidSubs = subscriptions.filter((s) => s.platform === 'android' && s.app_id !== 'pro');
+    const proNotif = isProNotification(action_url);
+    const preferredAndroid = proNotif ? proAndroidSubs : mainAndroidSubs;
+    const fallbackAndroid = proNotif ? mainAndroidSubs : proAndroidSubs;
+    const androidSubs = preferredAndroid.length > 0 ? preferredAndroid : fallbackAndroid;
 
     let sentCount = 0;
     const staleWebIds = [];        // web: ডিলিট হবে
@@ -264,7 +289,7 @@ export async function POST({ request }) {
                 related_entity_id: related_entity_id ? String(related_entity_id) : '',
                 action_url: action_url || '',
               },
-              android: buildAndroidConfig({ category, priority, related_entity_id }),
+              android: buildAndroidConfig({ category, priority, related_entity_id, isPro: sub.app_id === 'pro' }),
             });
             sentCount++;
           } catch (err) {
