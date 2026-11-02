@@ -7,7 +7,7 @@
 //      মেনু শিটে: রোল ও দোকান বদল, আমার প্রোফাইল, লগআউট (দুবার ট্যাপ)
 // কখন: <html data-pro-app="1"> থাকলে। BaseLayout-এর head স্ক্রিপ্ট localStorage ফ্ল্যাগ থেকে বসায়;
 //      ফ্ল্যাগ বসায় src/lib/proApp.js শুধু নেটিভ Pro অ্যাপে। ওয়েব ও মেইন অ্যাপে কিছুই দেখায় না/বদলায় না।
-// নোটিফিকেশন বেল আপাতত মেইনের ইনবক্স-ড্রয়ার খোলে (আলাদা Pro ইনবক্স পরের ধাপে)।
+// নোটিফিকেশন বেল আলাদা Pro ইনবক্স (/pro/notifications) খোলে; ব্যাজে শুধু Pro নোটিফিকেশনের অপঠিত সংখ্যা (src/lib/proInbox.js)।
 // ইউজারের লেখা সব textContent। ক্লাস নাম psh- দিয়ে শুরু।
 // ============================================================
 ---
@@ -92,6 +92,8 @@
   import { isProApp } from '../../lib/proApp.js';
   import { getMyProRoles, ROLE_META, rememberRole } from '../../lib/proRoles.js';
   import { proLogout } from '../../lib/proLogin.js';
+  import { supabase } from '../../lib/supabase.js';
+  import { countProUnread, markRead, subscribeProInbox } from '../../lib/proInbox.js';
 
   // Pro চেনা (ফ্ল্যাগ বসানো/মোছা এখানেই হয়; BottomNav-ও ডাকে, ফল cache করা)
   isProApp();
@@ -107,23 +109,57 @@
 
   // বর্তমান পেজ Pro এলাকায় হলে হোম হাইলাইট
   const here = window.location.pathname;
-  if (here === '/pro' || here.indexOf('/pro/') === 0) $('pshHome')?.classList.add('active');
+  if (here === '/pro/notifications') $('pshBell')?.classList.add('active');
+  else if (here === '/pro' || here.indexOf('/pro/') === 0) $('pshHome')?.classList.add('active');
 
-  // নোটিফিকেশন (আপাতত মেইনের ইনবক্স ড্রয়ার)
+  // নোটিফিকেশন: আলাদা Pro ইনবক্স (/pro/notifications); ব্যাজে শুধু Pro নোটিফিকেশনের অপঠিত সংখ্যা
   $('pshBell')?.addEventListener('click', () => {
-    window.dispatchEvent(new CustomEvent('smartfeni:open-notification-drawer'));
+    if (window.location.pathname !== '/pro/notifications') window.location.href = '/pro/notifications';
   });
-  window.addEventListener('smartfeni:notification-count', (e) => {
+
+  function setBadge(count) {
     const badge = $('pshBadge');
     if (!badge) return;
-    const count = (e.detail && e.detail.count) || 0;
     if (count > 0) {
       badge.textContent = count > 9 ? '৯+' : String(count);
       badge.style.display = 'flex';
     } else {
       badge.style.display = 'none';
     }
-  });
+  }
+
+  let inboxUnsub = null;
+
+  async function refreshBadge() {
+    try { setBadge(await countProUnread()); } catch (_) { /* উপেক্ষা */ }
+  }
+
+  async function startInbox() {
+    try {
+      if (inboxUnsub) { inboxUnsub(); inboxUnsub = null; }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setBadge(0); return; }
+
+      // পুশে ট্যাপ করে এসেছে (?pn=<id>): পড়া মার্ক করে URL পরিষ্কার
+      const qs = new URLSearchParams(window.location.search);
+      const pn = qs.get('pn');
+      if (pn) {
+        qs.delete('pn');
+        const rest = qs.toString();
+        window.history.replaceState({}, '', window.location.pathname + (rest ? '?' + rest : ''));
+        await markRead(pn);
+      }
+
+      await refreshBadge();
+      inboxUnsub = subscribeProInbox(session.user.id, refreshBadge);
+    } catch (_) { /* উপেক্ষা */ }
+  }
+
+  window.addEventListener('smartfeni:pro-notif-changed', refreshBadge);
+  window.addEventListener('smartfeni:auth-changed', startInbox);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshBadge(); });
+  // শুধু Pro অ্যাপে (ওয়েব/মেইন অ্যাপে এই কোয়েরি চলে না)
+  isProApp().then((pro) => { if (pro || document.documentElement.hasAttribute('data-pro-app')) startInbox(); });
   window.addEventListener('smartfeni:logged-out', () => {
     const badge = $('pshBadge');
     if (badge) badge.style.display = 'none';

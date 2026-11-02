@@ -1,0 +1,149 @@
+---
+// path: src/pages/pro/notifications.astro
+// ============================================================
+// পেজ: Pro নোটিফিকেশন (/pro/notifications) — আলাদা Pro ইনবক্স
+// শুধু Pro-সংক্রান্ত নোটিফিকেশন (শপ/হিরো/ক্লাব/ক্লিনিকের কাজ), উৎস src/lib/proInbox.js।
+// ট্যাপ করলে পড়া মার্ক + সংশ্লিষ্ট Pro পেজে। "সব পড়া হয়েছে" বাটন। নতুন এলে সাথে সাথে যোগ (realtime)।
+// ইউজারের লেখা সব textContent দিয়ে।
+// ============================================================
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="নোটিফিকেশন | Smart Feni Pro">
+  <div class="pn-page">
+    <div class="pn-head">
+      <h1 class="pn-h1">নোটিফিকেশন</h1>
+      <button type="button" class="pn-all" id="pnAll" style="display:none;">সব পড়া হয়েছে</button>
+    </div>
+
+    <div id="pnLoading" class="pn-state"><div class="pn-spinner"></div><p>লোড হচ্ছে...</p></div>
+
+    <div id="pnEmpty" class="pn-state" style="display:none;">
+      <i class="fas fa-bell-slash" style="font-size:2rem;color:#B7C2D8;"></i>
+      <p>এখনো কোনো নোটিফিকেশন নেই</p>
+      <small>নতুন অর্ডার, রিকোয়েস্ট ও আপডেট এলে এখানে দেখা যাবে।</small>
+    </div>
+
+    <div id="pnErr" class="pn-state" style="display:none;">
+      <p id="pnErrText"></p>
+      <button type="button" class="pn-btn" id="pnRetry">আবার চেষ্টা করুন</button>
+    </div>
+
+    <div id="pnList" class="pn-list"></div>
+  </div>
+
+  <style is:global>
+    .pn-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F8FAFC; min-height: 70vh; padding: 18px 14px 100px; max-width: 520px; margin: 0 auto; }
+    .pn-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+    .pn-h1 { margin: 0; font-size: 22px; font-weight: 700; }
+    .pn-all { height: 38px; border: 1.5px solid #D5DCE8; border-radius: 12px; background: #fff; color: #1B2A4A; font-weight: 600; font-size: 13.5px; padding: 0 14px; cursor: pointer; font-family: inherit; }
+    .pn-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 80px 10px; text-align: center; color: #5B6B86; font-weight: 600; }
+    .pn-state small { font-weight: 400; }
+    .pn-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: pnSpin .8s linear infinite; }
+    @keyframes pnSpin { to { transform: rotate(360deg); } }
+    .pn-btn { height: 46px; border: 0; border-radius: 14px; background: #FF6B35; color: #1B2A4A; font-weight: 700; font-size: 15px; padding: 0 20px; cursor: pointer; font-family: inherit; }
+    .pn-list { display: flex; flex-direction: column; gap: 10px; }
+    .pn-item { display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left; background: #fff; border: 1.5px solid transparent; border-radius: 18px; padding: 12px 14px; box-shadow: 0 2px 12px rgba(27, 42, 74, .06); cursor: pointer; font-family: inherit; color: #1B2A4A; -webkit-tap-highlight-color: transparent; }
+    .pn-item.unread { border-color: #FFD3BC; background: #FFF8F4; }
+    .pn-ic { width: 42px; height: 42px; border-radius: 13px; background: #FFF0EA; display: flex; align-items: center; justify-content: center; font-size: 20px; flex: none; }
+    .pn-body { flex: 1; min-width: 0; }
+    .pn-top { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+    .pn-title { font-size: 14.5px; font-weight: 700; }
+    .pn-dot { width: 8px; height: 8px; border-radius: 50%; background: #FF6B35; flex: none; }
+    .pn-time { margin-left: auto; font-size: 12px; color: #8A98B0; white-space: nowrap; }
+    .pn-msg { font-size: 14px; line-height: 1.45; color: #33415C; word-break: break-word; }
+    .pn-go { margin-top: 6px; font-size: 12.5px; font-weight: 600; color: #FF6B35; }
+  </style>
+
+  <script>
+    import { proLoginUrl } from '../../lib/proRoles.js';
+    import { fetchProNotifications, markRead, markAllRead, subscribeProInbox, proUrlFor } from '../../lib/proInbox.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const $ = (id) => document.getElementById(id);
+    const EMOJI = { shop_order: '🛍️', order_status: '📦', rider_offer: '🚴', delivery_hero: '📦', message: '💬', account_status: '📋', club_request: '👥', listing_status: '📋' };
+    const LABEL = { shop_order: 'নতুন অর্ডার', order_status: 'অর্ডার আপডেট', rider_offer: 'হিরো রিকোয়েস্ট', delivery_hero: 'ডেলিভারি', message: 'মেসেজ', account_status: 'অ্যাকাউন্ট', club_request: 'ক্লাব', listing_status: 'আপডেট' };
+
+    let items = [];
+    let unsub = null;
+
+    function show(id) { ['pnLoading', 'pnEmpty', 'pnErr'].forEach((x) => { $(x).style.display = x === id ? '' : 'none'; }); }
+    function hideStates() { ['pnLoading', 'pnEmpty', 'pnErr'].forEach((x) => { $(x).style.display = 'none'; }); }
+
+    function relTime(iso) {
+      const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+      const m = Math.floor(diff / 60000);
+      if (m < 1) return 'এইমাত্র';
+      if (m < 60) return m.toLocaleString('bn-BD') + ' মিনিট আগে';
+      const h = Math.floor(m / 60);
+      if (h < 24) return h.toLocaleString('bn-BD') + ' ঘণ্টা আগে';
+      return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function el(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined && text !== null) e.textContent = text;
+      return e;
+    }
+
+    function render() {
+      const list = $('pnList');
+      list.textContent = '';
+      if (!items.length) { show('pnEmpty'); $('pnAll').style.display = 'none'; return; }
+      hideStates();
+      $('pnAll').style.display = items.some((n) => !n.is_read) ? '' : 'none';
+
+      items.forEach((n) => {
+        const row = el('button', 'pn-item' + (n.is_read ? '' : ' unread'));
+        row.type = 'button';
+        row.appendChild(el('span', 'pn-ic', EMOJI[n.category] || '🔔'));
+
+        const body = el('span', 'pn-body');
+        const top = el('span', 'pn-top');
+        top.appendChild(el('span', 'pn-title', LABEL[n.category] || 'নোটিফিকেশন'));
+        if (!n.is_read) top.appendChild(el('span', 'pn-dot'));
+        top.appendChild(el('span', 'pn-time', relTime(n.created_at)));
+        body.appendChild(top);
+        body.appendChild(el('span', 'pn-msg', n.message || ''));
+        const target = proUrlFor(n.action_url);
+        if (target) body.appendChild(el('div', 'pn-go', 'খুলুন ›'));
+        row.appendChild(body);
+
+        row.addEventListener('click', async () => {
+          if (!n.is_read) { n.is_read = true; markRead(n.id); }
+          if (target) { window.location.href = target; return; }
+          render();
+        });
+        list.appendChild(row);
+      });
+    }
+
+    async function load() {
+      show('pnLoading');
+      let res;
+      try { res = await fetchProNotifications(60); } catch (e) { res = { loggedIn: true, items: [], error: (e && e.message) || 'সমস্যা হয়েছে' }; }
+      if (!res.loggedIn) { window.location.replace(proLoginUrl('/pro/notifications')); return; }
+      if (res.error) { $('pnErrText').textContent = 'লোড করা যায়নি: ' + res.error; show('pnErr'); return; }
+      items = res.items;
+      render();
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (unsub) unsub();
+      unsub = subscribeProInbox(session && session.user.id, (row) => {
+        items = [row].concat(items.filter((x) => x.id !== row.id));
+        render();
+      });
+    }
+
+    $('pnRetry').addEventListener('click', load);
+    $('pnAll').addEventListener('click', async () => {
+      items.forEach((n) => { n.is_read = true; });
+      render();
+      await markAllRead();
+    });
+    load();
+  </script>
+</BaseLayout>
