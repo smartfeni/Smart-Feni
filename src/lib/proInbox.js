@@ -94,7 +94,7 @@ export async function markAllRead() {
 export function subscribeProInbox(userId, onChange) {
   if (!userId) return () => {};
   const ch = supabase
-    .channel('pro_inbox_' + userId)
+    .channel('pro_inbox_' + userId + '_' + Math.random().toString(36).slice(2, 8))
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'user_notifications', filter: 'user_id=eq.' + userId },

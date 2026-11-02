@@ -716,12 +716,54 @@ const PRO_SOUND_FLAG = 'sf_pro_sound_channel_v2';
 
 import { isProApp, proPath } from './proApp.js';
 
+// একই নোটিফিকেশনের ট্যাপ বারবার প্রসেস না করার জন্য (শেষ ৭ দিনের হ্যান্ডেল হওয়া আইডি মনে রাখে)
+const TAP_SEEN_KEY = 'sf_notif_tap_seen_v1';
+const TAP_SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function wasTapHandled(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TAP_SEEN_KEY) || '{}') || {};
+    const t = Number(raw[key]);
+    return !!t && Date.now() - t < TAP_SEEN_TTL_MS;
+  } catch (err) {
+    return false;
+  }
+}
+
+function rememberTapHandled(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TAP_SEEN_KEY) || '{}') || {};
+    const now = Date.now();
+    const alive = {};
+    Object.keys(raw).forEach((k) => {
+      if (now - Number(raw[k]) < TAP_SEEN_TTL_MS) alive[k] = Number(raw[k]);
+    });
+    alive[key] = now;
+    const newest = Object.keys(alive).sort((a, b) => alive[b] - alive[a]).slice(0, 50);
+    const trimmed = {};
+    newest.forEach((k) => {
+      trimmed[k] = alive[k];
+    });
+    localStorage.setItem(TAP_SEEN_KEY, JSON.stringify(trimmed));
+  } catch (err) {
+    // সেভ না হলেও ট্যাপ স্বাভাবিক কাজ করবে
+  }
+}
+
 // পুশে ট্যাপ → সঠিক পেজ (ওয়েবের sw.js এর মতো: action_url এর পাথ + ?notif=<id>,
 // যাতে নোটিফিকেশন ড্রয়ার ওই পেজে গিয়ে নোটিফিকেশনটা খুলে দেখায়)
 function handleNotificationTap(event) {
   try {
     const data = event?.notification?.data || {};
     const rawUrl = data.action_url || '/';
+
+    // একই নোটিফিকেশনের ট্যাপ ইভেন্ট ফোন/প্লাগিন আবার দিলেও (অ্যাপ খুললে বা পেজ লোডে)
+    // প্রতিবার ওই পেজে নিয়ে যাওয়া বন্ধ: প্রতিটা নোটিফিকেশন শুধু একবার পেজ বদলায়
+    const tapKey = String(data.notification_id || event?.notification?.id || '');
+    if (tapKey) {
+      if (wasTapHandled(tapKey)) return;
+      rememberTapHandled(tapKey);
+    }
     const url = new URL(rawUrl, window.location.origin);
 
     // শুধু নিজের সাইটের লিংক
