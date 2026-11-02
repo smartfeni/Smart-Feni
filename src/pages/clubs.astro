@@ -32,7 +32,16 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         />
       </div>
 
-      <div id="clubsGrid" class="clubs-grid"></div>
+      <div class="club-toolbar">
+        <span class="club-count" id="clubCount"></span>
+        <div class="view-switch" id="viewSwitch" role="group" aria-label="ভিউ">
+          <button type="button" data-view="list" aria-label="লিস্ট"><i class="fas fa-list"></i></button>
+          <button type="button" data-view="grid" aria-label="গ্রিড"><i class="fas fa-table-cells-large"></i></button>
+          <button type="button" data-view="big" aria-label="বড় কার্ড"><i class="fas fa-square"></i></button>
+        </div>
+      </div>
+
+      <div id="clubsGrid" class="clubs-grid view-grid"></div>
 
       <div id="loadingState" class="state-msg">
         <div class="spinner"></div>
@@ -113,6 +122,44 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
     }
 
+    .club-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .club-count {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #8FA0BC;
+    }
+
+    .view-switch {
+      display: flex;
+      flex-shrink: 0;
+      background: #fff;
+      border: 1.5px solid #E5EAF0;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .view-switch button {
+      border: 0;
+      background: transparent;
+      color: #8FA0BC;
+      width: 34px;
+      height: 34px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .view-switch button.sel {
+      background: #FFF0EA;
+      color: #FF6B35;
+    }
+
     .state-msg {
       display: flex;
       flex-direction: column;
@@ -142,10 +189,57 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
   </style>
 
   <style is:global>
+    /* ---------- ৩ ভিউ (শপ পেজের মতো) ---------- */
     .clubs-grid {
       display: grid;
-      grid-template-columns: 1fr;
-      gap: 16px;
+      gap: 14px;
+    }
+
+    .clubs-grid.view-big { grid-template-columns: 1fr; }
+    .clubs-grid.view-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .clubs-grid.view-list { grid-template-columns: 1fr; gap: 10px; }
+
+    @media (min-width: 720px) {
+      .clubs-grid.view-big { grid-template-columns: repeat(2, 1fr); }
+      .clubs-grid.view-grid { grid-template-columns: repeat(3, 1fr); }
+      .clubs-grid.view-list { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* গ্রিড ভিউ: ছোট কার্ড */
+    .view-grid .club-cover-wrap { aspect-ratio: 16/9; }
+    .view-grid .club-logo-row { margin-top: -22px; padding: 0 12px; }
+    .view-grid .club-logo-img,
+    .view-grid .club-logo-placeholder { width: 46px; height: 46px; font-size: 1.1rem; }
+    .view-grid .club-body { padding: 8px 12px 14px; }
+    .view-grid .club-name { font-size: 0.9rem; }
+    .view-grid .my-club-badge { font-size: 0.6rem; padding: 3px 8px; right: 8px; top: 8px; }
+
+    /* লিস্ট ভিউ: সারি */
+    .view-list .club-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 16px;
+    }
+    .view-list .club-cover-wrap { display: none; }
+    .view-list .club-logo-row { margin-top: 0; padding: 0; flex-shrink: 0; }
+    .view-list .club-logo-img,
+    .view-list .club-logo-placeholder { width: 54px; height: 54px; }
+    .view-list .club-body { padding: 0; min-width: 0; flex: 1; }
+    .view-list .club-name { font-size: 0.95rem; }
+    .view-list .my-club-badge { display: none; }
+
+    .my-club-inline { display: none; }
+    .view-list .my-club-inline {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      background: #1B2A4A;
+      color: #fff;
+      padding: 2px 9px;
+      border-radius: 40px;
+      margin-left: 6px;
     }
 
     .club-card {
@@ -300,6 +394,33 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     let allClubs = [];
     let searchQuery = '';
     let myClubIds = new Set();
+
+    // ইউজারের লেখা টেক্সট innerHTML-এ বসানোর আগে এস্কেপ
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    // ---------- ভিউ মোড (মনে রাখে, শপ পেজের মতো) ----------
+    const viewSwitch = document.getElementById('viewSwitch');
+    const clubCount = document.getElementById('clubCount');
+    let viewMode = 'grid';
+    try {
+      const saved = localStorage.getItem('sf_club_view');
+      if (['list', 'grid', 'big'].includes(saved)) viewMode = saved;
+    } catch (e) { /* ignore */ }
+
+    function applyView() {
+      grid.className = 'clubs-grid view-' + viewMode;
+      viewSwitch.querySelectorAll('button').forEach((b) => {
+        b.classList.toggle('sel', b.dataset.view === viewMode);
+      });
+    }
+
+    viewSwitch.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-view]');
+      if (!btn) return;
+      viewMode = btn.dataset.view;
+      try { localStorage.setItem('sf_club_view', viewMode); } catch (err) { /* ignore */ }
+      applyView();
+    });
     const savedUpazilaLabel = localStorage.getItem('smartfeni_upazila');
     const savedUpazilaSlug = Object.entries(UPAZILA_LABELS).find(([, label]) => label === savedUpazilaLabel)?.[0] || null;
 
@@ -330,6 +451,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     function renderClubs() {
       const filtered = filterClubs(searchQuery);
       const sorted = sortClubs(filtered);
+      clubCount.textContent = sorted.length ? `${sorted.length.toLocaleString('bn-BD')}টা ক্লাব` : '';
 
       grid.innerHTML = '';
 
@@ -346,13 +468,14 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         card.className = 'club-card';
 
         const upazilaLabel = club.upajila ? UPAZILA_LABELS[club.upajila] || club.upajila : '';
+        const safeName = esc(club.name);
 
         const coverHtml = club.cover_image
-          ? `<img class="club-cover-img" src="${club.cover_image}" alt="${club.name}" loading="lazy" decoding="async" />`
+          ? `<img class="club-cover-img" src="${esc(club.cover_image)}" alt="${safeName}" loading="lazy" decoding="async" />`
           : `<div class="club-cover-placeholder"></div>`;
 
         const logoHtml = club.logo_image
-          ? `<img class="club-logo-img" src="${club.logo_image}" alt="${club.name}" loading="lazy" decoding="async" />`
+          ? `<img class="club-logo-img" src="${esc(club.logo_image)}" alt="${safeName}" loading="lazy" decoding="async" />`
           : `<div class="club-logo-placeholder"><i class="fas fa-users"></i></div>`;
 
         card.innerHTML = `
@@ -363,7 +486,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           <div class="club-logo-row">${logoHtml}</div>
           <div class="club-body">
             <p class="club-name">
-              ${club.name}
+              ${safeName}
+              ${myClubIds.has(club.id) ? '<span class="my-club-inline">আমার ক্লাব</span>' : ''}
               ${club.is_verified ? '<i class="fas fa-circle-check verified-badge"></i>' : ''}
             </p>
             ${upazilaLabel ? `<p class="club-upajila"><i class="fas fa-location-dot"></i> ${upazilaLabel}</p>` : ''}
@@ -418,7 +542,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       loadingState.style.display = 'none';
 
       if (error) {
-        grid.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        grid.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${esc(error.message)}</p>`;
         return;
       }
 
@@ -426,6 +550,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       renderClubs();
     }
 
+    applyView();
     loadClubs();
   </script>
 </BaseLayout>
