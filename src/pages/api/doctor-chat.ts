@@ -168,6 +168,21 @@ async function getDoctorCounts(db: any): Promise<Map<string, number> | null> {
   }
 }
 
+// অ্যাডমিন চেনা: Authorization টোকেন যাচাই + profiles.role = 'admin'। ব্যর্থ হলে false (সাধারণ ইউজারের মতো লিমিট)।
+async function isAdminRequest(db: any, request: Request): Promise<boolean> {
+  try {
+    const auth = request.headers.get('authorization') || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (!token) return false;
+    const { data: u, error } = await db.auth.getUser(token);
+    if (error || !u?.user?.id) return false;
+    const { data: p } = await db.from('profiles').select('role').eq('id', u.user.id).maybeSingle();
+    return p?.role === 'admin';
+  } catch {
+    return false;
+  }
+}
+
 async function hashIp(ip: string, salt: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${salt}|${ip}`));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -302,7 +317,9 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     if (!ip) ip = (request.headers.get('x-forwarded-for') || '').split(',')[0].trim();
     const ipHash = await hashIp(ip || 'unknown', serviceKey);
 
-    const { data: limitRes, error: limitErr } = await db.rpc('check_doctor_chat_limit', {
+    // অ্যাডমিনের জন্য কোনো লিমিট নেই (RPC কলই হয় না, তাই গ্লোবাল কাউন্টেও যোগ হয় না)
+    const adminBypass = await isAdminRequest(db, request);
+    const { data: limitRes, error: limitErr } = adminBypass ? { data: { allowed: true, reason: '' } as any, error: null as any } : await db.rpc('check_doctor_chat_limit', {
       p_ip_hash: ipHash,
       p_hour_limit: LIMIT_PER_IP_HOUR,
       p_day_limit: LIMIT_PER_IP_DAY,
