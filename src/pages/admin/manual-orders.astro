@@ -52,13 +52,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         </label>
         <div class="mo-chips" id="viewChips"></div>
         <div id="counterBox"></div>
-        <div id="calBox" style="display:none;"><div id="moCal"></div><div id="moCalSum"></div></div>
+        <div id="calBox" style="display:none;"><button type="button" class="mo-ghost" id="moCalToggle" style="width:100%;">📅 ক্যালেন্ডার (দিন বাছুন)</button><div id="moCal" style="display:none;"></div><div id="moCalSum"></div></div>
         <div id="orderList"><p class="mo-muted">লোড হচ্ছে...</p></div>
       </div>
 
       <!-- ===== ট্যাব ২: হিসাব (শুধু admin) ===== -->
       <div class="mo-body" id="accountsPane" style="display:none;">
-        <div class="mo-chips" id="periodChips"></div>
+        <button type="button" class="mo-ghost" id="accCalToggle" style="width:100%;">📅 আজ · ক্যালেন্ডার থেকে বদলান</button>
+        <div id="accCal" style="display:none;"></div>
         <div id="accSummary"></div>
         <div class="mo-h">রাইডারের হিসাব</div>
         <div id="riderBalances"></div>
@@ -653,9 +654,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         tomorrow: active.filter((o) => bucketOf(o) === 'tomorrow').length,
         later: active.filter((o) => bucketOf(o) === 'later').length,
         norider: active.filter((o) => !o.manual_rider_id).length,
-        done: done.length,
+        done: done.filter((o) => o.status === 'delivered' || o.status === 'completed').length,
       };
-      const defs = [['today', 'আজ'], ['tomorrow', 'আগামীকাল'], ['later', 'পরে'], ['norider', 'রাইডার নেই'], ['done', 'শেষ'], ['cal', '📅 ক্যালেন্ডার']];
+      const defs = [['today', 'আজ'], ['tomorrow', 'আগামীকাল'], ['later', 'পরে'], ['norider', 'রাইডার নেই'], ['done', 'সম্পন্ন']];
       const chips = $('viewChips');
       chips.replaceChildren();
       defs.forEach(([k, t]) => {
@@ -672,7 +673,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('summaryLine').textContent = 'চলমান ' + bn(active.length) + 'টা · ক্যাশ আসবে ' + money(cashPending) + (unassignedToday ? ' · আজ রাইডার নেই ' + bn(unassignedToday) + 'টায়' : '');
 
       let list;
-      if (view === 'cal') { renderCalView(); return; }
+      if (view === 'done') { renderCalView(); return; }
       hideCalView();
       if (view === 'done') list = done.filter(matches);
       else if (view === 'norider') list = act.filter((o) => !o.manual_rider_id);
@@ -847,6 +848,28 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     let calDirty = true;
     let calToken = 0;
 
+    let calToggleWired = false;
+
+    function paintCalToggle() {
+      const btn = $('moCalToggle');
+      if (!btn) return;
+      const open = $('moCal').style.display !== 'none';
+      const sel = moCal ? moCal.getRange() : { from: '', to: '' };
+      const lab = sel.from ? (sel.from === sel.to ? labelKey(sel.from) : labelKey(sel.from) + ' – ' + labelKey(sel.to)) : '';
+      btn.textContent = open ? '▲ ক্যালেন্ডার ভাঁজ করুন' : '📅 ক্যালেন্ডার' + (lab ? ' · ' + lab : ' (দিন বাছুন)');
+    }
+
+    function wireCalToggle() {
+      if (calToggleWired) return;
+      calToggleWired = true;
+      $('moCalToggle').addEventListener('click', () => {
+        const c = $('moCal');
+        c.style.display = c.style.display === 'none' ? '' : 'none';
+        paintCalToggle();
+      });
+      paintCalToggle();
+    }
+
     function hideCalView() {
       const b = $('calBox');
       if (b) b.style.display = 'none';
@@ -854,6 +877,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     async function renderCalView() {
       $('calBox').style.display = '';
+      wireCalToggle();
       if (!moCal) {
         moCal = createRangeCalendar($('moCal'), {
           allowFuture: true,
@@ -874,7 +898,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           if (sr.fromIso < lo) lo = sr.fromIso;
           if (sr.toIso > hi) hi = sr.toIso;
         }
-        const res = await supabase.from('manual_orders').select('*').gte('scheduled_at', lo).lt('scheduled_at', hi).order('scheduled_at', { ascending: false }).limit(2000);
+        const res = await supabase.from('manual_orders').select('*').in('status', ['delivered', 'completed']).gte('scheduled_at', lo).lt('scheduled_at', hi).order('scheduled_at', { ascending: false }).limit(2000);
         if (token !== calToken) return;
         if (res.error) {
           $('orderList').replaceChildren(el('p', 'mo-muted', 'লোড করা যায়নি, আবার চেষ্টা করুন।'));
@@ -908,14 +932,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       });
       moCal.setCounts(counts);
       const prefix = mon.y + '-' + String(mon.m).padStart(2, '0') + '-';
-      const rows = calOrders.filter((o) => {
+      const rows = (sel.from ? calOrders : done.filter((o) => o.status === 'delivered' || o.status === 'completed')).filter((o) => {
         const k = dayKeyOf(new Date(o.scheduled_at));
-        return (sel.from ? (k >= sel.from && k <= sel.to) : k.startsWith(prefix)) && matches(o);
+        return (!sel.from || (k >= sel.from && k <= sel.to)) && matches(o);
       });
       const label = sel.from
         ? (sel.from === sel.to ? labelKey(sel.from) : labelKey(sel.from) + ' – ' + labelKey(sel.to))
-        : monthLabel(mon.y, mon.m);
+        : 'সর্বশেষ সম্পন্ন';
       renderCalSummary(rows, label);
+      paintCalToggle();
 
       const box = $('orderList');
       box.replaceChildren();
@@ -938,11 +963,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const n = (f) => rows.filter(f).length;
       const dn = rows.filter((o) => o.status === 'delivered' || o.status === 'completed');
       const cells = [
-        ['মোট অর্ডার', bn(rows.length)],
-        ['নতুন', bn(n((o) => o.status === 'new'))],
-        ['চলমান', bn(n((o) => o.status === 'rider_assigned' || o.status === 'picked_up'))],
-        ['ডেলিভারড', bn(dn.length)],
-        ['বাতিল', bn(n((o) => o.status === 'cancelled'))],
+        ['সম্পন্ন অর্ডার', bn(rows.length)],
+        
+        
+        
+        
       ];
       // টাকার হিসাব শুধু admin দেখবে (হিসাব ট্যাবের নিয়মের মতো)
       if (role === 'admin') {
@@ -1437,7 +1462,44 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       return null;
     }
 
+    let accCal = null;
+    let accSel = { from: '', to: '' };
+
+    // ডিফল্ট = আজ (বাংলাদেশ টাইম); ক্যালেন্ডারে দিন/রেঞ্জ বাছলে সেটা
+    function periodRange() {
+      if (accSel.from) return dhakaRangeIso(accSel.from, accSel.to);
+      const s = startOfDay(new Date());
+      return { fromIso: s.toISOString(), toIso: new Date(s.getTime() + 86400000).toISOString() };
+    }
+
+    function paintAccToggle() {
+      const open = $('accCal').style.display !== 'none';
+      const lab = accSel.from
+        ? (accSel.from === accSel.to ? labelKey(accSel.from) : labelKey(accSel.from) + ' – ' + labelKey(accSel.to))
+        : 'আজ';
+      $('accCalToggle').textContent = open ? '▲ ক্যালেন্ডার ভাঁজ করুন' : '📅 ' + lab + ' · ক্যালেন্ডার থেকে বদলান';
+    }
+
+    function initAccCal() {
+      if (accCal) return;
+      accCal = createRangeCalendar($('accCal'), {
+        onRangeChange: (from, to) => {
+          accSel = { from: from || '', to: to || '' };
+          paintAccToggle();
+          loadAccounts();
+        },
+      });
+      $('accCalToggle').addEventListener('click', () => {
+        const c = $('accCal');
+        c.style.display = c.style.display === 'none' ? '' : 'none';
+        paintAccToggle();
+      });
+      paintAccToggle();
+    }
+
     function renderPeriodChips() {
+      initAccCal();
+      return;
       const box = $('periodChips');
       box.replaceChildren();
       [['today', 'আজ'], ['week', 'শেষ ৭ দিন'], ['month', 'এই মাস'], ['all', 'সব']].forEach(([k, t]) => {
@@ -1453,9 +1515,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     async function loadAccounts() {
       if (role !== 'admin') return;
       $('accSummary').replaceChildren(el('p', 'mo-muted', 'লোড হচ্ছে...'));
-      const start = periodStart();
+      const rg = periodRange();
       let qy = supabase.from('manual_orders').select('*').in('status', ['delivered', 'completed']).order('delivered_at', { ascending: false }).limit(2000);
-      if (start) qy = qy.gte('delivered_at', start.toISOString());
+      qy = qy.gte('delivered_at', rg.fromIso).lt('delivered_at', rg.toIso);
       const [o, b] = await Promise.all([qy, supabase.from('manual_rider_balances').select('*').eq('is_active', true).order('name')]);
       if (o.error || b.error) {
         $('accSummary').replaceChildren(el('p', 'mo-muted', 'হিসাব লোড করা যায়নি।'));
@@ -1517,7 +1579,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
       // কে কয়টা অর্ডার নিয়েছে (সব অর্ডার থেকে, এই সময়ের)
       let eq = supabase.from('manual_orders').select('entered_by').limit(5000);
-      if (start) eq = eq.gte('created_at', start.toISOString());
+      eq = eq.gte('created_at', rg.fromIso).lt('created_at', rg.toIso);
       const e = await eq;
       const eb = $('enteredBy');
       eb.replaceChildren();
