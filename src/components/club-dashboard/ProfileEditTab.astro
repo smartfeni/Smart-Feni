@@ -97,10 +97,17 @@
 <script>
   import { supabase } from '../../lib/supabase.js';
   import { compressImage } from '../../lib/imageCompress.js';
+  import { uploadWithRetry } from '../../lib/uploadWithRetry.js';
 
   let clubId = null;
   let selectedLogoFile = null;
   let selectedCoverFile = null;
+
+  // স্লো নেটে আপলোডের অগ্রগতি সেভ বাটনেই দেখানো হয় (সেভ শেষে handler আসল লেখা ফেরত দেয়)
+  function setBtnText(text) {
+    const s = document.querySelector('#saveProfileBtn span');
+    if (s) s.textContent = text;
+  }
 
   const msgEl = document.getElementById('profileMsg');
   function showMsg(text, type = 'error') {
@@ -123,7 +130,7 @@
     // লোগো PNG (transparent background) হলে PNG-ই রাখা হচ্ছে, নাহলে
     // ব্যাকগ্রাউন্ড সাদা/কালো হয়ে ট্রান্সপারেন্সি নষ্ট হয়ে যাবে
     const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
-    selectedLogoFile = await compressImage(file, { maxDimension: 800, mimeType });
+    selectedLogoFile = await compressImage(file, { maxDimension: 512, mimeType, quality: 0.72, skipIfSmallerThan: 100 * 1024 });
     const reader = new FileReader();
     reader.onload = () => {
       document.getElementById('logoPreview').src = reader.result;
@@ -134,7 +141,7 @@
 
   document.getElementById('coverInput')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
-    selectedCoverFile = file ? await compressImage(file, { maxDimension: 1280 }) : null;
+    selectedCoverFile = file ? await compressImage(file, { maxDimension: 1024, quality: 0.72, skipIfSmallerThan: 100 * 1024 }) : null;
   });
 
   // বাগফিক্স: আগে upload fail করলে error silently ignore হয়ে যেত
@@ -150,21 +157,21 @@
       const ext = nameExt || (file.type === 'image/png' ? 'png' : 'jpg');
       const path = `clubs/${prefix}-${Date.now()}.${ext}`;
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('path', path);
-
-      const res = await fetch('/api/upload-image', {
-        method: 'POST',
+      const label = prefix.includes('-logo') ? 'লোগো' : 'কভার';
+      const { status, data: result } = await uploadWithRetry('/api/upload-image', {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: formData,
+        makeFormData: () => {
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('path', path);
+          return fd;
+        },
+        onProgress: (pct) => setBtnText(`${label} আপলোড হচ্ছে… ${pct}%`),
+        onRetry: (n, max) => setBtnText(`নেট ধীর, আবার চেষ্টা (${n}/${max})…`),
       });
 
-      let result = null;
-      try { result = await res.json(); } catch (_) { /* নন-JSON রেসপন্স */ }
-
-      if (!res.ok || !result?.url) {
-        const msg = (result && result.error) || `সার্ভার এরর (${res.status})`;
+      if (!(status >= 200 && status < 300) || !result?.url) {
+        const msg = (result && result.error) || `সার্ভার এরর (${status})`;
         console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, msg);
         window.SFReportError?.({ kind: 'api_fail', action: 'club_profile_image_upload', title: 'ক্লাব প্রোফাইল ছবি আপলোড ব্যর্থ', message: `${prefix.includes('-logo') ? 'logo' : 'cover'}: ${msg}` });
         return { url: null, error: msg };
@@ -173,7 +180,7 @@
     } catch (err) {
       console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, err);
       window.SFReportError?.({ kind: 'api_fail', action: 'club_profile_image_upload', title: 'ক্লাব প্রোফাইল ছবি আপলোড ব্যর্থ', message: String((err && err.message) || err) });
-      return { url: null, error: 'ইন্টারনেট বা সার্ভার সমস্যা, আবার চেষ্টা করুন' };
+      return { url: null, error: 'নেট খুব ধীর বা বন্ধ, কয়েকবার চেষ্টা করেও যায়নি' };
     }
   }
 
@@ -231,7 +238,7 @@
     }
 
     if (uploadErrors.length > 0) {
-      showMsg('বাকি তথ্য সেভ হয়েছে, কিন্তু ছবি আপলোড ব্যর্থ — ' + uploadErrors.join(' | '));
+      showMsg('বাকি তথ্য সেভ হয়েছে, কিন্তু ছবি আপলোড ব্যর্থ — ' + uploadErrors.join(' | ') + ' (নেট ভালো হলে আবার সেভ চাপুন)');
       return;
     }
 
