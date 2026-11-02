@@ -7,6 +7,7 @@ name: Build Pro APK and AAB
 # src/ এর ওয়েব বদল Vercel ডেপ্লয়েই অ্যাপে পৌঁছে যায়।
 # লাগে (GitHub Secrets): KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD,
 # GOOGLE_SERVICES_PRO_JSON_BASE64 (Firebase-এর com.smartfeni.pro অ্যাপের google-services.json, Base64)
+# রিংটোন: pro-assets/order_alert.mp3 -> android/app/src/main/res/raw/order_alert.mp3 (শুধু Pro বিল্ডে)
 on:
   workflow_dispatch: {}
 
@@ -100,6 +101,25 @@ jobs:
             exit 1
           fi
           grep -n 'applicationId\|versionCode\|versionName' android/app/build.gradle
+
+      - name: Add Pro order alert sound
+        run: |
+          # রিংটোন ফাইল (রিপোতে pro-assets/order_alert.mp3) -> res/raw (নাম ছোট হাতের, স্পেস ছাড়া)
+          if [ ! -f pro-assets/order_alert.mp3 ]; then
+            echo "::error::pro-assets/order_alert.mp3 নেই। আগে sf_edit_pro-sound.py চালিয়ে কমিট/পুশ করুন।"
+            exit 1
+          fi
+          mkdir -p android/app/src/main/res/raw
+          cp pro-assets/order_alert.mp3 android/app/src/main/res/raw/order_alert.mp3
+
+          # versionName শেষে -snd: অ্যাপ এটা দেখে রিংটোন-চ্যানেল বানায় (পুরোনো APK-তে বানায় না)
+          sed -i 's/\(versionName "pro-1\.0\.[0-9]*\)"/\1-snd"/' android/app/build.gradle
+
+          # যাচাই
+          test -s android/app/src/main/res/raw/order_alert.mp3
+          grep -q 'versionName "pro-1.0.[0-9]*-snd"' android/app/build.gradle || { echo "::error::versionName-এ -snd বসেনি"; exit 1; }
+          ls -l android/app/src/main/res/raw/
+          grep -n 'versionName' android/app/build.gradle
 
       - name: Decode keystore
         run: |
