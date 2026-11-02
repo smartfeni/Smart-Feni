@@ -148,7 +148,16 @@
   // (শুধু null return করত), তাই ইউজার বুঝতে পারতেন না কেন ছবি সেভ
   // হচ্ছে না। এখন error console-এ log হয় + { url, error } রিটার্ন
   // করে যাতে কলার (saveProfileBtn হ্যান্ডলার) exact কারণ দেখাতে পারে।
+  // ফেইল রিপোর্টে যোগ হয়: ছবির সাইজ, নেটের ধরন, অনলাইন কিনা, কত বার চেষ্টা, অ্যাপ/ওয়েব
+  function uploadDiag(file, attempts) {
+    const c = navigator.connection || {};
+    const kb = file && file.size ? Math.round(file.size / 1024) : 0;
+    const env = (window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()) ? 'app' : 'web';
+    return `[${kb}KB, ${c.effectiveType || '?'}, ${navigator.onLine ? 'online' : 'offline'}, চেষ্টা ${attempts}, ${env}]`;
+  }
+
   async function uploadImage(file, prefix) {
+    let attempts = 1;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return { url: null, error: 'সেশন নেই, আবার লগইন করুন' };
@@ -167,19 +176,22 @@
           return fd;
         },
         onProgress: (pct) => setBtnText(`${label} আপলোড হচ্ছে… ${pct}%`),
-        onRetry: (n, max) => setBtnText(`নেট ধীর, আবার চেষ্টা (${n}/${max})…`),
+        onRetry: (n, max) => {
+          attempts = n + 1;
+          setBtnText(`নেট ধীর, আবার চেষ্টা (${n}/${max})…`);
+        },
       });
 
       if (!(status >= 200 && status < 300) || !result?.url) {
         const msg = (result && result.error) || `সার্ভার এরর (${status})`;
         console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, msg);
-        window.SFReportError?.({ kind: 'api_fail', action: 'club_profile_image_upload', title: 'ক্লাব প্রোফাইল ছবি আপলোড ব্যর্থ', message: `${prefix.includes('-logo') ? 'logo' : 'cover'}: ${msg}` });
+        window.SFReportError?.({ kind: 'api_fail', action: 'club_profile_image_upload', title: 'ক্লাব প্রোফাইল ছবি আপলোড ব্যর্থ', message: `${prefix.includes('-logo') ? 'logo' : 'cover'}: ${msg} ${uploadDiag(file, attempts)}` });
         return { url: null, error: msg };
       }
       return { url: result.url, error: null };
     } catch (err) {
       console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, err);
-      window.SFReportError?.({ kind: 'api_fail', action: 'club_profile_image_upload', title: 'ক্লাব প্রোফাইল ছবি আপলোড ব্যর্থ', message: String((err && err.message) || err) });
+      window.SFReportError?.({ kind: 'api_fail', action: 'club_profile_image_upload', title: 'ক্লাব প্রোফাইল ছবি আপলোড ব্যর্থ', message: `${prefix.includes('-logo') ? 'logo' : 'cover'}: ${String((err && err.message) || err)} ${uploadDiag(file, attempts)}` });
       return { url: null, error: 'নেট খুব ধীর বা বন্ধ, কয়েকবার চেষ্টা করেও যায়নি' };
     }
   }
