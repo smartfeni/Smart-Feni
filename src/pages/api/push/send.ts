@@ -60,11 +60,13 @@ const PRO_URL_RE = /^\/(pro|delivery-hero|ride-hero|offline-orders|my-shop|my-cl
 function isProNotification(actionUrl) {
   return typeof actionUrl === 'string' && PRO_URL_RE.test(actionUrl);
 }
+// জরুরি (অর্ডার/রিকোয়েস্ট) -> sf_pro_orders_v2 (রিংটোন order_alert.mp3); নরমাল -> ফোনের ডিফল্ট শব্দ
+const PRO_ALERT_CHANNEL = 'sf_pro_orders_v2';
 const PRO_CHANNEL_BY_CATEGORY = {
-  shop_order: 'sf_pro_orders_v1',
-  order_status: 'sf_pro_orders_v1',
-  rider_offer: 'sf_pro_orders_v1',
-  delivery_hero: 'sf_pro_orders_v1',
+  shop_order: PRO_ALERT_CHANNEL,
+  order_status: PRO_ALERT_CHANNEL,
+  rider_offer: PRO_ALERT_CHANNEL,
+  delivery_hero: PRO_ALERT_CHANNEL,
   message: 'sf_pro_message_v1',
 };
 const PRO_DEFAULT_CHANNEL = 'sf_pro_updates_v1';
@@ -83,7 +85,7 @@ function buildAndroidConfig({ category, priority, related_entity_id, isPro = fal
   const cfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.normal;
   const notification = {
     channelId: isPro
-      ? (PRO_CHANNEL_BY_CATEGORY[category] || PRO_DEFAULT_CHANNEL)
+      ? (priority === 'urgent' ? PRO_ALERT_CHANNEL : (PRO_CHANNEL_BY_CATEGORY[category] || PRO_DEFAULT_CHANNEL))
       : (CHANNEL_BY_CATEGORY[category] || DEFAULT_CHANNEL),
     color: BRAND_COLOR,
   };

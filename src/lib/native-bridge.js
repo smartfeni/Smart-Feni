@@ -703,11 +703,16 @@ const ADMIN_CHANNEL_FLAG = 'sf_notif_admin_channel_v1';
 // Pro অ্যাপ (com.smartfeni.pro) চ্যানেল — আইডি send.ts-এর PRO_CHANNEL_BY_CATEGORY/PRO_DEFAULT_CHANNEL-এর সাথে মিলতে হবে।
 // (অর্ডার চ্যানেলে পরে রিংটোন বসবে: নতুন আইডি _v2 দিয়ে, কারণ চ্যানেলের শব্দ পরে বদলানো যায় না)
 const PRO_CHANNELS = [
-  { id: 'sf_pro_orders_v1', name: '🔔 নতুন অর্ডার ও রিকোয়েস্ট', description: 'শপের নতুন অর্ডার ও হিরো রিকোয়েস্ট', importance: 5, visibility: 1, vibration: true },
   { id: 'sf_pro_message_v1', name: '💬 মেসেজ', description: 'কাস্টমার ও রাইডারের মেসেজ', importance: 4, visibility: 1, vibration: true },
   { id: 'sf_pro_updates_v1', name: '📋 আপডেট', description: 'আবেদন, অ্যাকাউন্ট ও অন্যান্য আপডেট', importance: 3, visibility: 1, vibration: true },
 ];
 const PRO_CHANNELS_FLAG = 'sf_pro_channels_v1';
+
+// জরুরি অর্ডার-এলার্ট চ্যানেল: রিংটোন android/app/src/main/res/raw/order_alert.mp3 (Pro APK বিল্ডে workflow বসায়)।
+// ⚠️ রিংটোন বদলাতে: pro-assets/order_alert.mp3 বদলে নতুন আইডি (_v3), send.ts-এর PRO_ALERT_CHANNEL ও
+// এখানে PRO_SOUND_FLAG-এর ভার্সন বাড়ান, নতুন APK বিল্ড করুন (চ্যানেলের শব্দ একবার তৈরির পর বদলানো যায় না)।
+const PRO_SOUND_CHANNEL = { id: 'sf_pro_orders_v2', name: '🔔 নতুন অর্ডার ও রিকোয়েস্ট', description: 'শপের নতুন অর্ডার ও হিরো রিকোয়েস্ট (জরুরি রিংটোন)', importance: 5, visibility: 1, vibration: true, sound: 'order_alert.mp3' };
+const PRO_SOUND_FLAG = 'sf_pro_sound_channel_v2';
 
 import { isProApp, proPath } from './proApp.js';
 
@@ -788,6 +793,23 @@ async function initNotificationHandlers() {
       }
     } catch (err) {
       // ফেইল করলে Pro নোটিফিকেশন সাধারণ চ্যানেলে আসবে — ভাঙবে না
+    }
+
+    // ২.৬) Pro অর্ডার-এলার্ট চ্যানেল (রিংটোনসহ) — শুধু রিংটোন-সহ APK-তে (versionName শেষে -snd)।
+    // রিংটোন ছাড়া APK-তে বানালে চ্যানেল চিরতরে নিঃশব্দ থেকে যেত, তাই পুরোনো APK-তে বানাই না
+    // (সেখানে FCM সাধারণ চ্যানেলে দেখায়, ভাঙে না)। বানানোর পর পুরোনো sf_pro_orders_v1 মুছে ফেলা।
+    try {
+      if ((await isProApp()) && localStorage.getItem(PRO_SOUND_FLAG) !== 'done') {
+        const { App } = await import('@capacitor/app');
+        const info = await App.getInfo();
+        if (/-snd$/.test(String((info && info.version) || ''))) {
+          await createChannelOnce(PushNotifications, PRO_SOUND_CHANNEL);
+          try { await PushNotifications.deleteChannel({ id: 'sf_pro_orders_v1' }); } catch (e) { /* ছিল না */ }
+          localStorage.setItem(PRO_SOUND_FLAG, 'done');
+        }
+      }
+    } catch (err) {
+      // ফেইল করলে অর্ডার নোটিফিকেশন সাধারণ চ্যানেলে আসবে — ভাঙবে না
     }
 
     // ৩) অ্যাডমিন চ্যানেল — শুধু অ্যাডমিন/মডারেটর যখন অ্যাডমিন পেজ খোলে
