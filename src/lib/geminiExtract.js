@@ -144,6 +144,55 @@ const CATEGORY_CONFIG = {
       },
     },
   },
+  // ডাক্তার প্রোফাইল: একটা স্ক্রিনশট = একাধিক ডাক্তার (array), প্রতিজনের চেম্বার ও দিনভিত্তিক সময় সহ।
+  // telegram-webhook.js এটা শুধু স্পষ্টভাবে অনুমোদিত চ্যাটে দেখায়। স্পেশালিটির slug তালিকা
+  // (specialties টেবিল থেকে) extraInstruction হিসেবে যোগ হয়।
+  doctor: {
+    instruction:
+      'এই স্ক্রিনশটটি ডাক্তারের চেম্বারের বিজ্ঞাপন/পোস্টার (একাধিক ডাক্তার থাকলে প্রত্যেকের আলাদা object)। ' +
+      'শুধু ছবিতে যা লেখা আছে তা থেকে তথ্য বের করে JSON array আকারে দাও। কিছু অনুমান করে বানাবে না; না থাকলে null বা খালি array। ' +
+      '- name_bn: পদবি সহ নাম হুবহু, যেমন "সহকারী অধ্যাপক ডা. অমুক"। ' +
+      '- degrees: ডিগ্রি, কর্মস্থল ও পদবির লেখা এক লাইনে (কমা বা দাঁড়ি দিয়ে জোড়া), রোগের তালিকা বা শিরোনাম বাদে। ' +
+      '- bmdc_no: BMDC রেজিস্ট্রেশন নম্বর যেভাবে লেখা আছে (যেমন "এ-৮০০০২")। ' +
+      '- chamber_name: চেম্বার/ডায়াগনস্টিক সেন্টার/ক্লিনিকের নাম। chamber_address: তার ঠিকানা। ' +
+      '- serial_phones: সিরিয়াল বা অ্যাপয়েন্টমেন্টের মোবাইল নম্বর (সবগুলো), ইংরেজি ডিজিটে, ড্যাশ ছাড়া। সিরিয়ালের আলাদা নম্বর না থাকলে যোগাযোগের নম্বর। ' +
+      '- fee: ভিজিট ফি, শুধু স্পষ্ট লেখা থাকলে। ' +
+      '- slots: রোগী দেখার সময়, প্রতিটা দিনের জন্য আলাদা object। weekday: রবিবার=0, সোমবার=1, মঙ্গলবার=2, বুধবার=3, বৃহস্পতিবার=4, শুক্রবার=5, শনিবার=6। ' +
+      '"প্রতিদিন" হলে ৭ দিন, "অমুক দিন বাদে প্রতিদিন" হলে বাকি দিনগুলো। start ও end ২৪ ঘণ্টার HH:MM ফরম্যাটে ' +
+      '("সকাল ১০টা"=10:00, "দুপুর ১টা"=13:00, "বিকাল ৪টা"=16:00, "বিকাল ০৫টা"=17:00, "সন্ধ্যা ৬টা"=18:00, "রাত ৯টা"=21:00)। ' +
+      '- note: অন্য দরকারি তথ্য (যেমন "আগে সিরিয়াল নিতে হবে"), না থাকলে null।',
+    isArray: true,
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name_bn: { type: 'string' },
+          degrees: { type: 'string', nullable: true },
+          bmdc_no: { type: 'string', nullable: true },
+          specialty_slugs: { type: 'array', items: { type: 'string' } },
+          chamber_name: { type: 'string', nullable: true },
+          chamber_address: { type: 'string', nullable: true },
+          serial_phones: { type: 'array', items: { type: 'string' } },
+          fee: { type: 'number', nullable: true },
+          slots: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                weekday: { type: 'integer' },
+                start: { type: 'string' },
+                end: { type: 'string' },
+              },
+              required: ['weekday', 'start', 'end'],
+            },
+          },
+          note: { type: 'string', nullable: true },
+        },
+        required: ['name_bn', 'specialty_slugs', 'serial_phones', 'slots'],
+      },
+    },
+  },
   // ডেলিভারি দোকানের মেনু: একটা স্ক্রিনশট = একাধিক আইটেম (array)।
   // telegram-webhook.js এটা শুধু স্পষ্টভাবে অনুমোদিত চ্যাটে দেখায়।
   menu: {
@@ -178,7 +227,24 @@ const CATEGORY_META = {
   sports: { label: 'খেলাধুলা ও ইভেন্টস', emoji: '⚽' },
   blood: { label: 'ব্লাড ডোনার', emoji: '🩸' },
   menu: { label: 'ডেলিভারি মেনু', emoji: '🍽️' },
+  doctor: { label: 'ডাক্তার প্রোফাইল', emoji: '🩺' },
 };
+
+// Gemini ৫xx বা নেটওয়ার্ক সমস্যায় একবার আবার চেষ্টা (৪xx-এ নয়)
+async function fetchGeminiWithRetry(url, init) {
+  let lastRes = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(12000) });
+      if (res.ok || res.status < 500) return res;
+      lastRes = res;
+    } catch (e) {
+      if (attempt === 2) throw e;
+    }
+    if (attempt === 1) await new Promise((r) => setTimeout(r, 800));
+  }
+  return lastRes;
+}
 
 // telegram-webhook.js ও admin/bot-chats.astro এই লিস্ট থেকে ক্যাটাগরি বাটন/চেকবক্স বানায়
 export const SUPPORTED_CATEGORIES = Object.keys(CATEGORY_CONFIG).map((id) => ({
@@ -190,7 +256,7 @@ export const SUPPORTED_CATEGORIES = Object.keys(CATEGORY_CONFIG).map((id) => ({
 /**
  * স্ক্রিনশট থেকে structured ডেটা extract করে।
  */
-export async function extractListingFromScreenshot({ imageBase64, mimeType, category }) {
+export async function extractListingFromScreenshot({ imageBase64, mimeType, category, extraInstruction = '' }) {
   const config = CATEGORY_CONFIG[category];
   if (!config) throw new Error(`অসমর্থিত ক্যাটাগরি: ${category}`);
 
@@ -202,7 +268,7 @@ export async function extractListingFromScreenshot({ imageBase64, mimeType, cate
       {
         role: 'user',
         parts: [
-          { text: config.instruction },
+          { text: config.instruction + (extraInstruction ? '\n\n' + extraInstruction : '') },
           { inline_data: { mime_type: mimeType, data: imageBase64 } },
         ],
       },
@@ -213,7 +279,7 @@ export async function extractListingFromScreenshot({ imageBase64, mimeType, cate
     },
   };
 
-  const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+  const response = await fetchGeminiWithRetry(`${GEMINI_API_URL}?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody),
@@ -357,4 +423,101 @@ export function normalizeMenuItems(extractedArray) {
     items.push({ name, price });
   });
   return items;
+}
+
+
+// ============================================================
+// ডাক্তার প্রোফাইল ইম্পোর্ট — Gemini-র উত্তর সার্ভারে যাচাই ও ছাঁটাই
+// (AI-র লেখা কিছু সরাসরি ডেটাবেজে যায় না)
+// ============================================================
+const DOC_BN_DIGITS = '০১২৩৪৫৬৭৮৯';
+const docToAscii = (s) => String(s ?? '').replace(/[০-৯]/g, (d) => String(DOC_BN_DIGITS.indexOf(d)));
+const docToBn = (s) => String(s ?? '').replace(/[0-9]/g, (d) => DOC_BN_DIGITS[Number(d)]);
+
+function docOneLine(v, max) {
+  if (typeof v !== 'string') return null;
+  const t = v.replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return t ? t.slice(0, max) : null;
+}
+
+// আগে থেকে ডাটাবেজে থাকা ফরম্যাটে: "এ-৩০৫৪০" বা শুধু "২০৪২০" (বাংলা অঙ্ক)
+export function normalizeBmdc(v) {
+  if (v == null) return null;
+  const s = docToAscii(String(v)).trim();
+  const digits = s.replace(/\D/g, '');
+  if (digits.length < 3 || digits.length > 7) return null;
+  const hasA = /(^|[^a-z])a\s*[-–]?\s*\d/i.test(s) || /এ\s*[-–]?\s*\d/.test(s);
+  return (hasA ? 'এ-' : '') + docToBn(digits);
+}
+
+function docPhone(v) {
+  let d = docToAscii(String(v ?? '')).replace(/[^\d]/g, '');
+  if (d.startsWith('880') && d.length === 13) d = '0' + d.slice(3);
+  else if (d.length === 10 && d.startsWith('1')) d = '0' + d;
+  return /^01[3-9]\d{8}$/.test(d) ? d : null;
+}
+
+function docTime(v) {
+  const m = docToAscii(String(v ?? '')).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const mi = Number(m[2]);
+  return h <= 23 && mi <= 59 ? String(h).padStart(2, '0') + ':' + m[2] : null;
+}
+
+// specialties টেবিলের স্লাগ তালিকা থেকে Gemini-কে বলার লাইন
+export function doctorSpecialtyInstruction(specialties) {
+  const list = (specialties || []).map((s) => `${s.slug} (${s.name_bn})`).join(', ');
+  return (
+    'specialty_slugs-এ শুধু এই তালিকার slug দাও (একাধিক হলে সবগুলো; ডাক্তার যে রোগের বিশেষজ্ঞ বলে পোস্টের শিরোনামে বা ডিগ্রিতে আছে সেই অনুযায়ী; কোনোটা না মিললে খালি array): ' +
+    list +
+    '।'
+  );
+}
+
+// ফেরত: [{ name_bn, degrees, bmdc_no, specialties[], chamber_name, chamber_address,
+//          serial_phone, extra_phones[], fee, note, slots:[{weekday,start,end}] }]
+export function normalizeDoctors(extractedArray, validSlugs) {
+  const valid = validSlugs instanceof Set ? validSlugs : new Set(validSlugs || []);
+  const out = [];
+  (Array.isArray(extractedArray) ? extractedArray : []).slice(0, 5).forEach((d) => {
+    const name = docOneLine(d?.name_bn, 150);
+    if (!name || name.length < 3) return;
+
+    const specialties = [
+      ...new Set((Array.isArray(d?.specialty_slugs) ? d.specialty_slugs : []).map(String).filter((s) => valid.has(s))),
+    ].slice(0, 4);
+
+    const phones = [...new Set((Array.isArray(d?.serial_phones) ? d.serial_phones : []).map(docPhone).filter(Boolean))];
+
+    const seen = new Set();
+    const slots = [];
+    (Array.isArray(d?.slots) ? d.slots : []).forEach((s) => {
+      const wd = Number(s?.weekday);
+      const st = docTime(s?.start);
+      const en = docTime(s?.end);
+      if (!Number.isInteger(wd) || wd < 0 || wd > 6 || !st || !en || en <= st) return;
+      const key = `${wd}|${st}|${en}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      slots.push({ weekday: wd, start: st, end: en });
+    });
+
+    const feeNum = Math.round(Number(d?.fee));
+
+    out.push({
+      name_bn: name,
+      degrees: docOneLine(d?.degrees, 800),
+      bmdc_no: normalizeBmdc(d?.bmdc_no),
+      specialties,
+      chamber_name: docOneLine(d?.chamber_name, 150),
+      chamber_address: docOneLine(d?.chamber_address, 300),
+      serial_phone: phones[0] || null,
+      extra_phones: phones.slice(1, 3),
+      fee: Number.isFinite(feeNum) && feeNum > 0 && feeNum <= 100000 ? feeNum : null,
+      note: docOneLine(d?.note, 200),
+      slots: slots.slice(0, 14),
+    });
+  });
+  return out;
 }

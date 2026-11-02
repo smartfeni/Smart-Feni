@@ -22,6 +22,8 @@ import {
   buildListingRowFromExtraction,
   buildBloodDonorRows,
   normalizeMenuItems,
+  normalizeDoctors,
+  doctorSpecialtyInstruction,
   SUPPORTED_CATEGORIES,
 } from '../../lib/geminiExtract.js';
 
@@ -41,6 +43,24 @@ const ALL_CATEGORY_IDS = SUPPORTED_CATEGORIES.map((c) => c.id);
 const MENU_CATEGORY = 'menu';
 const MENU_BUCKET = 'delivery-shop-images';
 const MENU_MAX_BYTES = 3 * 1024 * 1024;
+
+// 'doctor' (ডাক্তার প্রোফাইল ইম্পোর্ট) মেনুর মতোই শুধু allowed_categories-এ স্পষ্টভাবে থাকলে দেখায়।
+// ডাক্তার ডিরেক্টরিতে উপজেলা স্লাগ (feni-sadar ইত্যাদি) রাখা হয়।
+const DOCTOR_CATEGORY = 'doctor';
+const UPAZILA_SLUGS = {
+  'ফেনী সদর': 'feni-sadar',
+  'ছাগলনাইয়া': 'chhagalnaiya',
+  'দাগনভূঞা': 'daganbhuiyan',
+  'পরশুরাম': 'parshuram',
+  'ফুলগাজী': 'fulgazi',
+  'সোনাগাজী': 'sonagazi',
+};
+const DOC_WD_NAMES = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+const DOC_WD_ORDER = [6, 0, 1, 2, 3, 4, 5]; // শনি থেকে শুরু
+const DOC_TITLE_TOKENS = new Set([
+  'সহকারী', 'সহযোগী', 'অধ্যাপক', 'প্রফেসর', 'ডাক্তার', 'ডা', 'সহ', 'মো', 'মোহা', 'মোহাম্মদ', 'মুহাম্মদ',
+  'dr', 'prof', 'professor', 'asst', 'assoc',
+]);
 
 // Vercel env TELEGRAM_WEBHOOK_SECRET সেট থাকলে ও setWebhook-এ একই secret_token দিলে,
 // শুধু Telegram-এর পাঠানো রিকোয়েস্ট চলবে। env সেট না থাকলে আগের মতোই চলে।
@@ -107,7 +127,7 @@ async function getChatConfig(chatId, senderName) {
 
 function getAllowedCategories(chatConfig) {
   if (!chatConfig.allowed_categories || chatConfig.allowed_categories.length === 0) {
-    return ALL_CATEGORY_IDS.filter((c) => c !== MENU_CATEGORY);
+    return ALL_CATEGORY_IDS.filter((c) => c !== MENU_CATEGORY && c !== DOCTOR_CATEGORY);
   }
   return chatConfig.allowed_categories.filter((c) => ALL_CATEGORY_IDS.includes(c));
 }
@@ -648,6 +668,14 @@ async function handleMenuEnable(chatId, messageId, importId) {
 }
 
 async function handleCategorySelected(chatId, messageId, importId, category, chatConfig) {
+  if (category === DOCTOR_CATEGORY && !getAllowedCategories(chatConfig).includes(DOCTOR_CATEGORY)) {
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: '❌ এই চ্যাটে ডাক্তার প্রোফাইল ইম্পোর্টের অনুমতি নেই।',
+    });
+    return;
+  }
   if (category === MENU_CATEGORY) {
     await handleMenuCategorySelected(chatId, messageId, importId, chatConfig);
     return;
@@ -670,6 +698,11 @@ async function handleUpazilaSelected(chatId, messageId, importId, upazilaIndex) 
 
   const { data: row } = await supabase.from('screenshot_imports').select('*').eq('id', importId).single();
   if (!row) return;
+
+  if (row.category === DOCTOR_CATEGORY) {
+    await handleDoctorExtract(chatId, messageId, row, upazila);
+    return;
+  }
 
   if (row.category === 'blood') {
     await supabase.from('screenshot_imports').update({ step: 'awaiting_club_name' }).eq('id', importId);
@@ -747,6 +780,297 @@ async function handleDoneImages(chatId, messageId, importId) {
   });
 }
 
+// ---------- ডাক্তার প্রোফাইল ইম্পোর্ট ----------
+// ফ্লো: ছবি → 🩺 ডাক্তার প্রোফাইল → উপজেলা → Gemini ডাক্তার+চেম্বার+সময় বের করে →
+// দেখিয়ে ✅/❌ → doctors + doctor_chambers + chamber_slots।
+// আগে থেকে থাকা ডাক্তার (BMDC বা নাম মিললে) নতুন করে বানানো হয় না, শুধু চেম্বার যোগ হয়।
+// নতুন ডাক্তার ও চেম্বার published, তবে admin_seen=false — অ্যাডমিন /admin/doctors-এ যাচাই করবে।
+
+function docBmdcKey(v) {
+  return String(v ?? '')
+    .replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d)))
+    .replace(/\D/g, '');
+}
+
+function docNameKey(v) {
+  return String(v ?? '')
+    .normalize('NFC')
+    .replace(/ঃ/g, '')
+    .toLowerCase()
+    .split(/[\s.,:;()\-]+/)
+    .filter((t) => t && !DOC_TITLE_TOKENS.has(t))
+    .join('');
+}
+
+function docPlaceKey(v) {
+  return String(v ?? '').normalize('NFC').replace(/[\s.,:;()\-]+/g, '').toLowerCase();
+}
+
+async function loadDoctorsIndex() {
+  const { data, error } = await supabase.from('doctors').select('id, name_bn, bmdc_no').limit(5000);
+  if (error) throw error;
+  return data || [];
+}
+
+function findExistingDoctor(index, d) {
+  const bk = docBmdcKey(d.bmdc_no);
+  if (bk) {
+    const hit = index.find((x) => docBmdcKey(x.bmdc_no) === bk);
+    if (hit) return hit;
+  }
+  const nk = docNameKey(d.name_bn);
+  if (nk.length >= 4) {
+    const hit = index.find((x) => docNameKey(x.name_bn) === nk);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+async function getSpecialtyRows() {
+  const { data } = await supabase
+    .from('specialties')
+    .select('slug, name_bn')
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true });
+  return data || [];
+}
+
+function fmtDoctorSlots(slots) {
+  return [...slots]
+    .sort((a, b) => DOC_WD_ORDER.indexOf(a.weekday) - DOC_WD_ORDER.indexOf(b.weekday) || a.start.localeCompare(b.start))
+    .map((s) => `${DOC_WD_NAMES[s.weekday]} ${s.start}–${s.end}`)
+    .join(', ');
+}
+
+async function handleDoctorExtract(chatId, messageId, row, upazilaName) {
+  // দুবার চাপলে একবারই চলবে
+  const { data: claimed } = await supabase
+    .from('screenshot_imports')
+    .update({ step: 'processing', upazila: upazilaName })
+    .eq('id', row.id)
+    .eq('step', 'awaiting_upazila')
+    .select('id');
+  if (!claimed || claimed.length === 0) return;
+
+  await tg('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text: `উপজেলা: ${upazilaName} ✅\n\n⏳ ডাক্তারের তথ্য পড়া হচ্ছে...`,
+  });
+
+  try {
+    const specs = await getSpecialtyRows();
+    const { base64, mimeType } = await downloadTelegramPhoto(row.file_id);
+    const raw = await extractListingFromScreenshot({
+      imageBase64: base64,
+      mimeType,
+      category: DOCTOR_CATEGORY,
+      extraInstruction: doctorSpecialtyInstruction(specs),
+    });
+    const doctors = normalizeDoctors(raw, new Set(specs.map((s) => s.slug)));
+
+    if (doctors.length === 0) {
+      await supabase.from('screenshot_imports').update({ step: 'done' }).eq('id', row.id);
+      await tg('editMessageText', {
+        chat_id: chatId,
+        message_id: messageId,
+        text: '❌ স্ক্রিনশট থেকে কোনো ডাক্তারের তথ্য পাওয়া যায়নি। পরিষ্কার স্ক্রিনশট দিয়ে আবার চেষ্টা করুন।',
+      });
+      return;
+    }
+
+    const index = await loadDoctorsIndex();
+    await supabase
+      .from('screenshot_imports')
+      .update({ extracted: { upazila_slug: UPAZILA_SLUGS[upazilaName] || null, doctors }, step: 'awaiting_confirm' })
+      .eq('id', row.id);
+
+    const specName = Object.fromEntries(specs.map((s) => [s.slug, s.name_bn]));
+    const blocks = doctors.map((d, i) => {
+      const existing = findExistingDoctor(index, d);
+      const lines = [
+        `${i + 1}. ${d.name_bn}`,
+        d.degrees ? `🎓 ${d.degrees.length > 110 ? d.degrees.slice(0, 110) + '…' : d.degrees}` : null,
+        `🏷️ ${d.specialties.length ? d.specialties.map((s) => specName[s] || s).join(', ') : '⚠️ স্পেশালিটি মেলেনি (পরে অ্যাডমিন পেজে ঠিক করুন)'}`,
+        `🆔 BMDC: ${d.bmdc_no || 'নেই'}`,
+        `📍 ${d.chamber_name ? d.chamber_name + (d.chamber_address ? ' — ' + d.chamber_address : '') : '⚠️ চেম্বারের নাম নেই (চেম্বার যোগ হবে না)'}`,
+        `📞 ${[d.serial_phone, ...d.extra_phones].filter(Boolean).join(', ') || '⚠️ ফোন নম্বর নেই'}`,
+        `🕒 ${d.slots.length ? fmtDoctorSlots(d.slots) : '⚠️ সময় পাওয়া যায়নি'}`,
+        d.fee ? `💰 ফি: ৳${d.fee}` : null,
+        existing
+          ? `♻️ আগে থেকে আছে (${existing.name_bn}) — নতুন প্রোফাইল হবে না, শুধু চেম্বার যোগ হবে`
+          : '🆕 নতুন ডাক্তার',
+      ];
+      return lines.filter(Boolean).join('\n');
+    });
+
+    let text =
+      `🩺 ${doctors.length}জন ডাক্তারের তথ্য পাওয়া গেছে (${upazilaName}):\n\n${blocks.join('\n\n')}\n\n` +
+      `সব ঠিক থাকলে ✅ চাপুন, সাথে সাথে ডিরেক্টরিতে দেখা যাবে। ভুল থাকলে ❌ চেপে পরিষ্কার স্ক্রিনশট আবার পাঠান। ` +
+      `ছবি ও ফি পরে অ্যাডমিন পেজে যোগ করা যাবে।`;
+    if (text.length > 3900) text = text.slice(0, 3890) + '…';
+
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ ডিরেক্টরিতে যোগ করো', callback_data: `docok:${row.id}` },
+            { text: '❌ বাতিল', callback_data: `docno:${row.id}` },
+          ],
+        ],
+      },
+    });
+  } catch (err) {
+    await supabase.from('screenshot_imports').update({ step: 'done' }).eq('id', row.id);
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: `❌ প্রসেস করতে সমস্যা: ${err.message}\n\nস্ক্রিনশট আবার পাঠিয়ে চেষ্টা করুন।`,
+    });
+  }
+}
+
+async function handleDoctorCancel(chatId, messageId, importId) {
+  const { data: row } = await supabase
+    .from('screenshot_imports')
+    .update({ step: 'done' })
+    .eq('id', importId)
+    .eq('telegram_chat_id', chatId)
+    .eq('category', DOCTOR_CATEGORY)
+    .eq('step', 'awaiting_confirm')
+    .select('id')
+    .maybeSingle();
+  if (!row) return;
+  await tg('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text: '❌ বাতিল করা হয়েছে, কিছু সেভ হয়নি। পরিষ্কার স্ক্রিনশট আবার পাঠাতে পারেন।',
+  });
+}
+
+async function handleDoctorConfirm(chatId, messageId, importId) {
+  // একবারই চলবে (দুবার চাপলে ডুপ্লিকেট যেন না হয়)
+  const { data: row } = await supabase
+    .from('screenshot_imports')
+    .update({ step: 'processing' })
+    .eq('id', importId)
+    .eq('telegram_chat_id', chatId)
+    .eq('category', DOCTOR_CATEGORY)
+    .eq('step', 'awaiting_confirm')
+    .select('*')
+    .maybeSingle();
+  if (!row) return;
+
+  const { doctors, upazila_slug: upSlug } = row.extracted || {};
+
+  try {
+    if (!Array.isArray(doctors) || doctors.length === 0) throw new Error('ডেটা পাওয়া যায়নি');
+
+    const index = await loadDoctorsIndex();
+    let created = 0;
+    let reused = 0;
+    let chamberCount = 0;
+    let slotCount = 0;
+    let chamberSkipped = 0;
+
+    for (const d of doctors) {
+      let doc = findExistingDoctor(index, d);
+      if (doc) {
+        reused++;
+      } else {
+        const { data: ins, error } = await supabase
+          .from('doctors')
+          .insert({
+            name_bn: d.name_bn,
+            degrees: d.degrees,
+            bmdc_no: d.bmdc_no,
+            no_bmdc: !d.bmdc_no,
+            specialties: d.specialties,
+            upazila: upSlug || null,
+            status: 'published',
+            admin_seen: false,
+          })
+          .select('id, name_bn, bmdc_no')
+          .single();
+        if (error) throw error;
+        doc = ins;
+        index.push(ins);
+        created++;
+      }
+
+      if (!d.chamber_name) {
+        chamberSkipped++;
+        continue;
+      }
+
+      const { data: chs, error: chErr } = await supabase
+        .from('doctor_chambers')
+        .select('id, place_name')
+        .eq('doctor_id', doc.id);
+      if (chErr) throw chErr;
+      if ((chs || []).some((c) => docPlaceKey(c.place_name) === docPlaceKey(d.chamber_name))) {
+        chamberSkipped++;
+        continue;
+      }
+
+      const note =
+        [d.note, d.extra_phones.length ? 'আরও নম্বর: ' + d.extra_phones.join(', ') : null].filter(Boolean).join(' · ') || null;
+
+      const { data: ch, error: insChErr } = await supabase
+        .from('doctor_chambers')
+        .insert({
+          doctor_id: doc.id,
+          place_name: d.chamber_name,
+          address: d.chamber_address,
+          upazila: upSlug || null,
+          serial_phone: d.serial_phone,
+          fee: d.fee,
+          note,
+          status: 'published',
+        })
+        .select('id')
+        .single();
+      if (insChErr) throw insChErr;
+      chamberCount++;
+
+      if (d.slots.length > 0) {
+        const { error: slotErr } = await supabase.from('chamber_slots').insert(
+          d.slots.map((s) => ({ chamber_id: ch.id, weekday: s.weekday, start_time: s.start, end_time: s.end }))
+        );
+        if (slotErr) {
+          await supabase.from('doctor_chambers').delete().eq('id', ch.id);
+          chamberCount--;
+          throw slotErr;
+        }
+        slotCount += d.slots.length;
+      }
+    }
+
+    await supabase.from('screenshot_imports').update({ step: 'done' }).eq('id', importId);
+
+    let summary = `✅ ডাক্তার ডিরেক্টরি আপডেট হয়েছে\n`;
+    summary += `নতুন ডাক্তার: ${created}জন\n`;
+    if (reused > 0) summary += `আগে থেকে ছিল (নতুন প্রোফাইল হয়নি): ${reused}জন\n`;
+    summary += `নতুন চেম্বার: ${chamberCount}টি (সময়ের স্লট ${slotCount}টি)\n`;
+    if (chamberSkipped > 0) summary += `চেম্বার বাদ (নাম নেই বা আগে থেকেই আছে): ${chamberSkipped}টি\n`;
+    summary += `\nএখন ডিরেক্টরিতে দেখা যাচ্ছে। অ্যাডমিন পেজে (/admin/doctors) "অদেখা" হিসেবে যাচাইয়ের জন্য আছে। ছবি ও ফি সেখানে যোগ করুন।`;
+
+    await tg('editMessageText', { chat_id: chatId, message_id: messageId, text: summary });
+  } catch (err) {
+    // আবার ✅ চাপা যাবে; যা তৈরি হয়ে গেছে তা BMDC/নাম/চেম্বারের নাম মিলিয়ে ধরা হবে, ডুপ্লিকেট হবে না
+    await supabase.from('screenshot_imports').update({ step: 'awaiting_confirm' }).eq('id', importId);
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: `❌ ডিরেক্টরিতে যোগ করতে সমস্যা: ${err.message}`,
+      reply_markup: { inline_keyboard: [[{ text: '🔁 আবার চেষ্টা করো', callback_data: `docok:${importId}` }]] },
+    });
+  }
+}
+
 export async function POST({ request }) {
   if (WEBHOOK_SECRET && request.headers.get('x-telegram-bot-api-secret-token') !== WEBHOOK_SECRET) {
     return new Response('forbidden', { status: 403 });
@@ -775,6 +1099,8 @@ export async function POST({ request }) {
         else if (action === 'enable') await handleMenuEnable(chatId, messageId, importId);
         else if (action === 'upa') await handleUpazilaSelected(chatId, messageId, importId, extra);
         else if (action === 'doneimg') await handleDoneImages(chatId, messageId, importId);
+        else if (action === 'docok') await handleDoctorConfirm(chatId, messageId, importId);
+        else if (action === 'docno') await handleDoctorCancel(chatId, messageId, importId);
       }
     }
   } catch (err) {
