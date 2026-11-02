@@ -60,13 +60,14 @@ const PRO_URL_RE = /^\/(pro|delivery-hero|ride-hero|offline-orders|my-shop|my-cl
 function isProNotification(actionUrl) {
   return typeof actionUrl === 'string' && PRO_URL_RE.test(actionUrl);
 }
-// জরুরি (অর্ডার/রিকোয়েস্ট) -> sf_pro_orders_v2 (রিংটোন order_alert.mp3); নরমাল -> ফোনের ডিফল্ট শব্দ
+// জরুরি -> sf_pro_orders_v2 (রিংটোন order_alert.mp3); বাকি সব -> ফোনের ডিফল্ট শব্দ।
+// ⚠️ জরুরি শুধু: নতুন অর্ডার/রিকোয়েস্ট (শপ, রাইডার, অফলাইন, ক্লিনিক সিরিয়াল), কাস্টমার দাম একসেপ্ট, priority=urgent।
+// ক্যাটাগরি দিয়ে চেনা যায় না (rider_offer/delivery_hero-তে বাতিল, দাম বাড়ানো, অভিযোগ, ধাপের আপডেটও আসে),
+// তাই নোটিফিকেশনের লেখা দেখা হয়। ডাটাবেসের নোটিফিকেশন-টেক্সট বদলালে এই রেজেক্স এবং
+// src/lib/proInbox.js-এর PRO_ALERT_TEXT_RE (অ্যাপ খোলা অবস্থার রিংটোন) একসাথে ঠিক করুন।
 const PRO_ALERT_CHANNEL = 'sf_pro_orders_v2';
+const PRO_ALERT_TEXT_RE = /(নতুন অর্ডার এসেছে|নতুন (?:ডেলিভারি|রাইড) রিকোয়েস্ট|নতুন অফলাইন অর্ডার|নতুন সিরিয়াল রিকোয়েস্ট|আপনার অফার দিন|আপনার প্রস্তাব নিশ্চিত করেছে)/;
 const PRO_CHANNEL_BY_CATEGORY = {
-  shop_order: PRO_ALERT_CHANNEL,
-  order_status: PRO_ALERT_CHANNEL,
-  rider_offer: PRO_ALERT_CHANNEL,
-  delivery_hero: PRO_ALERT_CHANNEL,
   message: 'sf_pro_message_v1',
 };
 const PRO_DEFAULT_CHANNEL = 'sf_pro_updates_v1';
@@ -81,11 +82,11 @@ const PRIORITY_CONFIG = {
 };
 const BRAND_COLOR = '#FF6B35';
 
-function buildAndroidConfig({ category, priority, related_entity_id, isPro = false }) {
+function buildAndroidConfig({ category, priority, related_entity_id, isPro = false, alertText = '' }) {
   const cfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.normal;
   const notification = {
     channelId: isPro
-      ? (priority === 'urgent' ? PRO_ALERT_CHANNEL : (PRO_CHANNEL_BY_CATEGORY[category] || PRO_DEFAULT_CHANNEL))
+      ? ((priority === 'urgent' || PRO_ALERT_TEXT_RE.test(alertText)) ? PRO_ALERT_CHANNEL : (PRO_CHANNEL_BY_CATEGORY[category] || PRO_DEFAULT_CHANNEL))
       : (CHANNEL_BY_CATEGORY[category] || DEFAULT_CHANNEL),
     color: BRAND_COLOR,
   };
@@ -291,7 +292,7 @@ export async function POST({ request }) {
                 related_entity_id: related_entity_id ? String(related_entity_id) : '',
                 action_url: action_url || '',
               },
-              android: buildAndroidConfig({ category, priority, related_entity_id, isPro: sub.app_id === 'pro' }),
+              android: buildAndroidConfig({ category, priority, related_entity_id, isPro: sub.app_id === 'pro', alertText: (title || '') + ' ' + (body || '') }),
             });
             sentCount++;
           } catch (err) {
