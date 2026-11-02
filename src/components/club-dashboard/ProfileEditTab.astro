@@ -8,6 +8,9 @@
 // না), লোগো/কভার পরিবর্তন ও সেভ বাটন হাইড হয়ে যাবে।
 // আপডেট (U3.3): কভারের সর্বোচ্চ সাইজ ১৬০০ → ১২৮০px, আপলোডে
 // cacheControl ১ বছর (আগে ডিফল্ট ছিল মাত্র ১ ঘণ্টা) — ছবি দ্রুত লোড হবে।
+// আপডেট (বাগফিক্স, ২ নভে): লোগো/কভার আপলোড এখন সার্ভার-সাইড /api/upload-image
+// দিয়ে (service role)। ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload() কল করলে
+// Storage JWT যাচাই ব্যর্থ হয় ("new row violates row-level security policy")।
 // ============================================================
 ---
 
@@ -138,18 +141,37 @@
   // হচ্ছে না। এখন error console-এ log হয় + { url, error } রিটার্ন
   // করে যাতে কলার (saveProfileBtn হ্যান্ডলার) exact কারণ দেখাতে পারে।
   async function uploadImage(file, prefix) {
-    const ext = file.name.split('.').pop();
-    const path = `clubs/${prefix}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('listing-images').upload(path, file, {
-      upsert: true,
-      cacheControl: '31536000',
-    });
-    if (error) {
-      console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, error.message);
-      return { url: null, error: error.message };
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return { url: null, error: 'সেশন নেই, আবার লগইন করুন' };
+
+      const nameExt = file.name && file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+      const ext = nameExt || (file.type === 'image/png' ? 'png' : 'jpg');
+      const path = `clubs/${prefix}-${Date.now()}.${ext}`;
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', path);
+
+      const res = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: formData,
+      });
+
+      let result = null;
+      try { result = await res.json(); } catch (_) { /* নন-JSON রেসপন্স */ }
+
+      if (!res.ok || !result?.url) {
+        const msg = (result && result.error) || `সার্ভার এরর (${res.status})`;
+        console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, msg);
+        return { url: null, error: msg };
+      }
+      return { url: result.url, error: null };
+    } catch (err) {
+      console.error(`ছবি আপলোড ব্যর্থ (${prefix}):`, err);
+      return { url: null, error: 'ইন্টারনেট বা সার্ভার সমস্যা, আবার চেষ্টা করুন' };
     }
-    const { data } = supabase.storage.from('listing-images').getPublicUrl(path);
-    return { url: data?.publicUrl || null, error: null };
   }
 
   document.getElementById('saveProfileBtn')?.addEventListener('click', async () => {
