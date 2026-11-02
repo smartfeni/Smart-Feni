@@ -83,6 +83,44 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           </button>
         </div>
 
+        <!-- ===== পেন্ডিং ক্লাব আবেদন ===== -->
+        <div id="requestsBox" class="req-box" style="display:none;">
+          <h2 class="req-title"><i class="fas fa-inbox"></i> ক্লাব আবেদন <span class="req-count" id="requestsCount">0</span></h2>
+          <div id="requestsList" class="req-list"></div>
+        </div>
+
+        <div class="modal-overlay" id="approveOverlay">
+          <div class="modal-box">
+            <button class="modal-close" id="approveClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+            <h2 class="modal-title"><i class="fas fa-circle-check"></i> আবেদন Approve</h2>
+            <p class="modal-club-name" id="approveInfo"></p>
+            <p class="modal-message" id="approveMessage"></p>
+            <label class="form-label">স্লাগ (ইংরেজি, URL এ ব্যবহার হবে)<span class="required-mark">*</span></label>
+            <input type="text" class="form-input" id="approveSlugInput" required placeholder="feni-sporting-club" />
+            <div class="field-error-msg" data-error-for="approveSlugInput">
+              <i class="fas fa-circle-exclamation"></i><span>স্লাগ দিন</span>
+            </div>
+            <p class="url-preview" id="approveSlugPreview">smartfeni.com/</p>
+            <button class="create-btn" id="approveSubmitBtn" type="button">
+              <i class="fas fa-check"></i> <span id="approveBtnText">Approve করুন</span>
+            </button>
+          </div>
+        </div>
+
+        <style is:global>
+          .req-box { background: #FFF8F3; border: 1.5px solid #FFD3BC; border-radius: 20px; padding: 18px 16px; margin-bottom: 24px; }
+          .req-title { font-size: 1rem; font-weight: 700; color: #1B2A4A; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+          .req-title i { color: #FF6B35; }
+          .req-count { background: #FF6B35; color: #fff; border-radius: 20px; font-size: 0.74rem; padding: 2px 9px; }
+          .req-list { display: flex; flex-direction: column; gap: 10px; }
+          .req-card { background: #fff; border-radius: 14px; padding: 14px; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05); }
+          .req-card p { margin: 0; }
+          .req-name { font-size: 0.95rem; font-weight: 700; color: #1B2A4A; }
+          .req-meta { font-size: 0.8rem; color: #5A6E85; margin-top: 3px !important; }
+          .req-msg { font-size: 0.8rem; color: #44506B; background: #F4F7FC; border-radius: 10px; padding: 8px 10px; margin-top: 8px !important; }
+          .req-actions { display: flex; gap: 8px; margin-top: 12px; }
+        </style>
+
         <div id="clubsContainer" class="clubs-container"></div>
 
         <div id="emptyState" class="empty-state" style="display:none;">
@@ -358,9 +396,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       actions.appendChild(verifyBtn);
 
       const reassignBtn = document.createElement('button');
-      reassignBtn.innerHTML = '<i class="fas fa-user-pen"></i>';
+      reassignBtn.innerHTML = '<i class="fas fa-user-pen"></i> ওউনার';
       reassignBtn.title = 'ওউনার পরিবর্তন';
-      reassignBtn.style.cssText = 'background:#EFF6FF;color:#2563EB;border:none;width:34px;height:34px;border-radius:10px;cursor:pointer;flex-shrink:0;';
+      reassignBtn.style.cssText = 'background:#EFF6FF;color:#2563EB;border:none;padding:8px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap;';
       reassignBtn.addEventListener('click', () => openReassign(club));
       actions.appendChild(reassignBtn);
 
@@ -460,6 +498,155 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       allClubs.forEach((club) => container.appendChild(renderClub(club)));
     }
 
+    // ===== পেন্ডিং ক্লাব আবেদন: লোড / Approve (স্লাগসহ) / Reject =====
+    const reqBox = document.getElementById('requestsBox');
+    const reqList = document.getElementById('requestsList');
+    const reqCount = document.getElementById('requestsCount');
+    const approveOverlay = document.getElementById('approveOverlay');
+    const approveInfo = document.getElementById('approveInfo');
+    const approveMessage = document.getElementById('approveMessage');
+    const approveSlugInput = document.getElementById('approveSlugInput');
+    const approveSlugPreview = document.getElementById('approveSlugPreview');
+    const approveSubmitBtn = document.getElementById('approveSubmitBtn');
+    const approveBtnText = document.getElementById('approveBtnText');
+    let approveTarget = null;
+
+    const escH = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const REQ_BTN = (bg, color) => `background:${bg};color:${color};border:none;padding:9px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;`;
+
+    function approveMsg(text, type = 'error') {
+      approveMessage.textContent = text || '';
+      approveMessage.className = text ? `modal-message ${type === 'error' ? 'show-error' : 'show-success'}` : 'modal-message';
+    }
+
+    function cleanSlug(val) {
+      return String(val || '').trim().toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
+    }
+
+    function openApprove(r) {
+      approveTarget = r;
+      approveInfo.textContent = r.club_name;
+      approveSlugInput.value = '';
+      approveSlugPreview.innerHTML = 'smartfeni.com/';
+      approveMsg('');
+      approveOverlay.classList.add('open');
+    }
+
+    function closeApprove() {
+      approveOverlay.classList.remove('open');
+      approveTarget = null;
+    }
+
+    document.getElementById('approveClose')?.addEventListener('click', closeApprove);
+    approveOverlay?.addEventListener('click', (e) => { if (e.target === approveOverlay) closeApprove(); });
+    approveSlugInput?.addEventListener('input', () => {
+      approveSlugPreview.innerHTML = `smartfeni.com/<span>${escH(cleanSlug(approveSlugInput.value)) || '...'}</span>`;
+    });
+
+    approveSubmitBtn?.addEventListener('click', async () => {
+      approveMsg('');
+      if (!window.SFValidateForm(document.querySelector('#approveOverlay .modal-box'))) return;
+      if (!approveTarget) return;
+
+      if (!currentAccessToken) {
+        approveMsg('সেশন পাওয়া যায়নি, আবার লগইন করুন');
+        return;
+      }
+
+      approveBtnText.textContent = 'তৈরি হচ্ছে...';
+      approveSubmitBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/approve-club-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentAccessToken}` },
+          body: JSON.stringify({ requestId: approveTarget.id, slug: cleanSlug(approveSlugInput.value) }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          approveMsg(result.error || 'Approve ব্যর্থ');
+        } else {
+          window.showToast(`ক্লাব তৈরি হয়েছে ✓ (smartfeni.com/${result.slug})`, 'success');
+          closeApprove();
+          loadRequests();
+          loadClubs();
+        }
+      } catch (err) {
+        approveMsg('নেটওয়ার্ক ত্রুটি: ' + err.message);
+      }
+
+      approveBtnText.textContent = 'Approve করুন';
+      approveSubmitBtn.disabled = false;
+    });
+
+    async function rejectRequest(r) {
+      if (!confirm(`"${r.club_name}" ক্লাবের আবেদন বাতিল করবেন?`)) return;
+      const { error } = await supabase.from('club_requests').update({ status: 'rejected' }).eq('id', r.id);
+      if (error) {
+        showToast('বাতিল ব্যর্থ: ' + error.message, 'error');
+        return;
+      }
+      showToast('আবেদন বাতিল করা হয়েছে', 'success');
+      loadRequests();
+    }
+
+    function renderRequest(r, p) {
+      const card = document.createElement('div');
+      card.className = 'req-card';
+      const upazilaLabel = r.upajila ? UPAZILA_LABELS[r.upajila] || r.upajila : '';
+      const applicant = p ? `${p.full_name || '(নামহীন)'}${p.phone ? ' · ' + p.phone : ''}` : '';
+
+      card.innerHTML = `
+        <p class="req-name">${escH(r.club_name)}</p>
+        <p class="req-meta"><i class="fas fa-user"></i> ${escH(applicant)}</p>
+        <p class="req-meta"><i class="fas fa-phone"></i> ${escH(r.phone)}${upazilaLabel ? ' · ' + escH(upazilaLabel) : ''}</p>
+        ${r.message ? `<p class="req-msg">${escH(r.message)}</p>` : ''}
+        <div class="req-actions"></div>
+      `;
+
+      const actions = card.querySelector('.req-actions');
+
+      const approveBtn = document.createElement('button');
+      approveBtn.type = 'button';
+      approveBtn.innerHTML = '<i class="fas fa-check"></i> Approve';
+      approveBtn.style.cssText = REQ_BTN('#EAFBF0', '#1B7A3C');
+      approveBtn.addEventListener('click', () => openApprove(r));
+      actions.appendChild(approveBtn);
+
+      const rejectBtn = document.createElement('button');
+      rejectBtn.type = 'button';
+      rejectBtn.innerHTML = '<i class="fas fa-xmark"></i> বাতিল';
+      rejectBtn.style.cssText = REQ_BTN('#FFF0EA', '#D14343');
+      rejectBtn.addEventListener('click', () => rejectRequest(r));
+      actions.appendChild(rejectBtn);
+
+      return card;
+    }
+
+    async function loadRequests() {
+      const { data, error } = await supabase
+        .from('club_requests')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true });
+
+      if (error || !data || data.length === 0) {
+        reqBox.style.display = 'none';
+        return;
+      }
+
+      const ids = [...new Set(data.map((r) => r.user_id))];
+      const { data: profs } = await supabase.from('profiles').select('id, full_name, phone').in('id', ids);
+      const pmap = {};
+      (profs || []).forEach((p) => { pmap[p.id] = p; });
+
+      reqCount.textContent = data.length;
+      reqList.innerHTML = '';
+      data.forEach((r) => reqList.appendChild(renderRequest(r, pmap[r.user_id])));
+      reqBox.style.display = 'block';
+    }
+
     window.addEventListener('smartfeni:admin-ready', (e) => {
       if (e.detail.role !== 'admin') {
         showToast('ক্লাব ম্যানেজমেন্ট শুধু অ্যাডমিনের জন্য', 'error');
@@ -467,6 +654,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         return;
       }
       currentAccessToken = e.detail.session.access_token;
+      loadRequests();
       loadClubs();
     });
 

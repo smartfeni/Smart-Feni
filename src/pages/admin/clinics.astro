@@ -35,6 +35,41 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           <p class="admin-subtitle" id="resultCount"></p>
         </div>
 
+        <!-- ===== পেন্ডিং প্রতিনিধি আবেদন ===== -->
+        <div id="requestsBox" class="req-box" style="display:none;">
+          <h2 class="req-title"><i class="fas fa-inbox"></i> প্রতিনিধি আবেদন <span class="req-count" id="requestsCount">0</span></h2>
+          <div id="requestsList" class="req-list"></div>
+        </div>
+
+        <style is:global>
+          .req-box { background: #FFF8F3; border: 1.5px solid #FFD3BC; border-radius: 20px; padding: 18px 16px; margin-bottom: 18px; }
+          .req-title { font-size: 1rem; font-weight: 700; color: #1B2A4A; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+          .req-title i { color: #FF6B35; }
+          .req-count { background: #FF6B35; color: #fff; border-radius: 20px; font-size: 0.74rem; padding: 2px 9px; }
+          .req-list { display: flex; flex-direction: column; gap: 10px; }
+          .req-card { background: #fff; border-radius: 14px; padding: 14px; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05); }
+          .req-card p { margin: 0; }
+          .req-name { font-size: 0.95rem; font-weight: 700; color: #1B2A4A; }
+          .req-meta { font-size: 0.8rem; color: #5A6E85; margin-top: 3px !important; }
+          .req-msg { font-size: 0.8rem; color: #44506B; background: #F4F7FC; border-radius: 10px; padding: 8px 10px; margin-top: 8px !important; }
+          .req-actions { display: flex; gap: 8px; margin-top: 12px; }
+        </style>
+
+        <div class="modal-overlay" id="approveOverlay">
+          <div class="modal-box">
+            <button class="modal-close" id="approveClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+            <h2 class="modal-title"><i class="fas fa-circle-check"></i> প্রতিনিধি আবেদন Approve</h2>
+            <p class="modal-sub" id="approveInfo"></p>
+            <p class="modal-message" id="approveMessage"></p>
+            <label class="form-label">কোন ক্লিনিকে বসাবেন?</label>
+            <select class="form-input" id="approveClinicSelect"></select>
+            <p class="hint" id="approveHint" style="margin-top:8px;"></p>
+            <button class="create-btn" id="approveSubmitBtn" type="button">
+              <i class="fas fa-check"></i> <span id="approveBtnText">Approve করুন</span>
+            </button>
+          </div>
+        </div>
+
         <button class="cta-toggle-btn" id="newClinicBtn" type="button">
           <i class="fas fa-plus"></i> নতুন ক্লিনিক যোগ করুন
         </button>
@@ -595,6 +630,154 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     let repTimer = null;
     $('repSearch').addEventListener('input', () => { clearTimeout(repTimer); repTimer = setTimeout(runRepSearch, 350); });
 
+    // ============================================================
+    // পেন্ডিং প্রতিনিধি আবেদন: লোড / Approve (বিদ্যমান বা নতুন ক্লিনিকে) / Reject
+    // ============================================================
+    const reqBox = $('requestsBox');
+    const reqList = $('requestsList');
+    const reqCount = $('requestsCount');
+    let approveTarget = null;
+    const REQ_BTN = (bg, color) => `background:${bg};color:${color};border:none;padding:9px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;`;
+
+    function renderRequest(r, p) {
+      const card = document.createElement('div');
+      card.className = 'req-card';
+      const place = [r.address, r.upazila ? UPAZILA_LABELS[r.upazila] || r.upazila : ''].filter(Boolean).join(', ');
+      const account = p ? `${p.full_name || '(নামহীন)'}${p.phone ? ' · ' + p.phone : ''}` : '';
+
+      card.innerHTML = `
+        <p class="req-name">${esc(r.rep_name)} <span style="font-weight:600;color:#8FA0BC;">→ ${esc(r.clinic_name)}</span></p>
+        ${place ? `<p class="req-meta"><i class="fas fa-location-dot"></i> ${esc(place)}</p>` : ''}
+        <p class="req-meta"><i class="fas fa-phone"></i> ${esc(r.phone)}</p>
+        ${account ? `<p class="req-meta"><i class="fas fa-user"></i> অ্যাকাউন্ট: ${esc(account)}</p>` : ''}
+        ${r.message ? `<p class="req-msg">${esc(r.message)}</p>` : ''}
+        <div class="req-actions"></div>`;
+
+      const actions = card.querySelector('.req-actions');
+      const add = (html, style, handler) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.innerHTML = html; b.style.cssText = style;
+        b.addEventListener('click', handler);
+        actions.appendChild(b);
+      };
+      add('<i class="fas fa-check"></i> Approve', REQ_BTN('#EAFBF0', '#1B7A3C'), () => openApprove(r));
+      add('<i class="fas fa-xmark"></i> বাতিল', REQ_BTN('#FFF0EA', '#D14343'), () => rejectRequest(r));
+      return card;
+    }
+
+    async function loadRequests() {
+      const { data, error } = await supabase
+        .from('clinic_rep_requests')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true });
+
+      if (error || !data || data.length === 0) {
+        reqBox.style.display = 'none';
+        return;
+      }
+
+      const ids = [...new Set(data.map((r) => r.user_id))];
+      const { data: profs } = await supabase.from('profiles').select('id, full_name, phone').in('id', ids);
+      const pmap = {};
+      (profs || []).forEach((p) => { pmap[p.id] = p; });
+
+      reqCount.textContent = toBn(data.length);
+      reqList.innerHTML = '';
+      data.forEach((r) => reqList.appendChild(renderRequest(r, pmap[r.user_id])));
+      reqBox.style.display = 'block';
+    }
+
+    async function rejectRequest(r) {
+      if (!confirm(`"${r.rep_name}" (${r.clinic_name}) এর আবেদন বাতিল করবেন?`)) return;
+      const { error } = await supabase.from('clinic_rep_requests').update({ status: 'rejected' }).eq('id', r.id);
+      if (error) { toast('বাতিল ব্যর্থ: ' + error.message, 'error'); return; }
+      toast('আবেদন বাতিল করা হয়েছে');
+      loadRequests();
+    }
+
+    function openApprove(r) {
+      approveTarget = r;
+      setMsg($('approveMessage'), '');
+      $('approveInfo').textContent = `${r.rep_name} — ${r.clinic_name}`;
+
+      // নামে মিলে এমন সক্রিয় ক্লিনিক থাকলে সেটাই আগে থেকে সিলেক্ট
+      const sel = $('approveClinicSelect');
+      const wanted = String(r.clinic_name || '').trim().toLowerCase();
+      const active = allClinics.filter((c) => c.is_active);
+      const match = active.find((c) => String(c.name || '').trim().toLowerCase() === wanted);
+      sel.innerHTML = `<option value="">＋ নতুন ক্লিনিক তৈরি করুন (আবেদনের তথ্য দিয়ে)</option>` +
+        active.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+      sel.value = match ? match.id : '';
+      updateApproveHint();
+      openOverlay($('approveOverlay'));
+    }
+
+    function updateApproveHint() {
+      const r = approveTarget;
+      if (!r) return;
+      $('approveHint').textContent = $('approveClinicSelect').value
+        ? 'ক্লিনিকটা আগে থেকেই আছে — আবেদনকারী এর প্রতিনিধি হবেন।'
+        : `নতুন ক্লিনিক "${r.clinic_name}" তৈরি হবে (ঠিকানা, উপজেলা, ফোন আবেদন থেকে) এবং আবেদনকারী এর প্রতিনিধি হবেন।`;
+    }
+
+    async function submitApprove() {
+      const r = approveTarget;
+      if (!r) return;
+      setMsg($('approveMessage'), '');
+
+      const btn = $('approveSubmitBtn');
+      btn.disabled = true;
+      $('approveBtnText').textContent = 'হচ্ছে...';
+
+      try {
+        let clinicId = $('approveClinicSelect').value;
+
+        // ধাপ ১: নতুন ক্লিনিক লাগলে তৈরি
+        if (!clinicId) {
+          const { data: created, error: cErr } = await supabase.from('clinics').insert({
+            name: r.clinic_name,
+            address: r.address || null,
+            upazila: r.upazila || null,
+            phone: r.phone || null,
+            is_active: true,
+            created_by: currentUserId,
+          }).select().single();
+          if (cErr) throw new Error('ক্লিনিক তৈরি ব্যর্থ: ' + cErr.message);
+          clinicId = created.id;
+        }
+
+        // ধাপ ২: প্রতিনিধি বসানো (আগে থেকে থাকলে সমস্যা নেই)
+        const { error: rErr } = await supabase.from('clinic_reps').insert({
+          clinic_id: clinicId,
+          user_id: r.user_id,
+          added_by: currentUserId,
+        });
+        if (rErr && rErr.code !== '23505') throw new Error('প্রতিনিধি বসানো ব্যর্থ: ' + rErr.message);
+
+        // ধাপ ৩: আবেদন accepted
+        const { error: sErr } = await supabase.from('clinic_rep_requests').update({ status: 'accepted' }).eq('id', r.id);
+        if (sErr) toast('প্রতিনিধি বসেছে, কিন্তু আবেদনের স্ট্যাটাস বদলানো যায়নি: ' + sErr.message, 'error');
+        else toast('প্রতিনিধি নিয়োগ হয়েছে ✓ — চাইলে সিরিয়াল পাওয়ার দায়িত্বও দিন');
+
+        closeOverlay($('approveOverlay'));
+        approveTarget = null;
+        await load(false);
+        loadRequests();
+        openReps(clinicId);
+      } catch (err) {
+        setMsg($('approveMessage'), err.message || 'Approve ব্যর্থ');
+      }
+
+      btn.disabled = false;
+      $('approveBtnText').textContent = 'Approve করুন';
+    }
+
+    $('approveClose').addEventListener('click', () => closeOverlay($('approveOverlay')));
+    $('approveOverlay').addEventListener('click', (e) => { if (e.target === $('approveOverlay')) closeOverlay($('approveOverlay')); });
+    $('approveClinicSelect').addEventListener('change', updateApproveHint);
+    $('approveSubmitBtn').addEventListener('click', submitApprove);
+
     // ===== গার্ড (শুধু admin) =====
     window.addEventListener('smartfeni:admin-ready', (e) => {
       if (e.detail.role !== 'admin') {
@@ -602,6 +785,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         return;
       }
       currentUserId = e.detail.session.user.id;
+      loadRequests();
       load();
     });
 
