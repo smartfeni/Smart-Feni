@@ -5,11 +5,10 @@
 // listing images, admin site images, shop images ইত্যাদি) ছবি
 // আপলোডের জন্য একটাই রিইউজেবল এন্ডপয়েন্ট। আগে প্রতিটা জায়গায়
 // আলাদাভাবে client-side supabase.storage.upload() কল করা হতো,
-// কিন্তু Storage সার্ভিস ইউজার-সেশন JWT ভেরিফাই করতে ব্যর্থ হচ্ছিল
-// ("new row violates row-level security policy" — সেশন/RLS পলিসি
-// ঠিক থাকা সত্ত্বেও, লগে বহুবার কনফার্ম করা হয়েছে, দেখুন
-// /api/upload-avatar.js-এর কমেন্ট)। এই রুট service role key দিয়ে
-// সরাসরি আপলোড করে, তাই ওই ভেরিফিকেশন ধাপটাই বাইপাস হয়ে যায়।
+// কিন্তু listing-images বাকেটে ইউজারের SELECT পলিসি না থাকায় Storage-এর
+// INSERT…RETURNING ফেইল করত ("new row violates row-level security policy"
+// — রোলব্যাক টেস্টে কনফার্ম, ২ নভে ২০২৬)। এই রুট service role key দিয়ে
+// সরাসরি আপলোড করে, তাই ইউজার-RLS বাইপাস হয়ে যায় (অথরাইজেশন সার্ভারেই হয়)।
 //
 // আপডেট: আপলোডের সময় cacheControl: '31536000' (১ বছর) সেট করা
 // হচ্ছে। আগে এটা না দেওয়ায় Supabase ডিফল্ট max-age=3600 (১ ঘণ্টা)
