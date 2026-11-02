@@ -52,6 +52,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         </label>
         <div class="mo-chips" id="viewChips"></div>
         <div id="counterBox"></div>
+        <div id="calBox" style="display:none;"><div id="moCal"></div><div id="moCalSum"></div></div>
         <div id="orderList"><p class="mo-muted">লোড হচ্ছে...</p></div>
       </div>
 
@@ -443,6 +444,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
+    import { createRangeCalendar, dhakaRangeIso, monthRangeIso, monthLabel, labelKey, dayKeyOf } from '../../lib/adminCalendar.js';
 
     const $ = (id) => document.getElementById(id);
     const BN = '০১২৩৪৫৬৭৮৯';
@@ -613,6 +615,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         return;
       }
       active = a.data || [];
+      calDirty = true;
       done = d.data || [];
       riders = r.data || [];
       // অ্যাপ রাইডার একসেপ্ট করলে অটো-লিংক হওয়া রাইডার লিস্টে না থাকলেও নাম আনা
@@ -652,14 +655,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         norider: active.filter((o) => !o.manual_rider_id).length,
         done: done.length,
       };
-      const defs = [['today', 'আজ'], ['tomorrow', 'আগামীকাল'], ['later', 'পরে'], ['norider', 'রাইডার নেই'], ['done', 'শেষ']];
+      const defs = [['today', 'আজ'], ['tomorrow', 'আগামীকাল'], ['later', 'পরে'], ['norider', 'রাইডার নেই'], ['done', 'শেষ'], ['cal', '📅 ক্যালেন্ডার']];
       const chips = $('viewChips');
       chips.replaceChildren();
       defs.forEach(([k, t]) => {
         const b = el('button', 'mo-pill' + (view === k ? ' active' : ''));
         b.type = 'button';
         b.appendChild(document.createTextNode(t));
-        b.appendChild(el('b', '', bn(counts[k])));
+        if (counts[k] != null) b.appendChild(el('b', '', bn(counts[k])));
         b.addEventListener('click', () => { view = k; renderOrders(); });
         chips.appendChild(b);
       });
@@ -669,6 +672,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('summaryLine').textContent = 'চলমান ' + bn(active.length) + 'টা · ক্যাশ আসবে ' + money(cashPending) + (unassignedToday ? ' · আজ রাইডার নেই ' + bn(unassignedToday) + 'টায়' : '');
 
       let list;
+      if (view === 'cal') { renderCalView(); return; }
+      hideCalView();
       if (view === 'done') list = done.filter(matches);
       else if (view === 'norider') list = act.filter((o) => !o.manual_rider_id);
       else list = act.filter((o) => bucketOf(o) === view);
@@ -834,6 +839,125 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       }
       card.appendChild(btns2);
       return card;
+    }
+
+    // ---------- ক্যালেন্ডার ভিউ: তারিখ ধরে ইতিহাস + সামারি (তারিখ = ডেলিভারির তারিখ, বাংলাদেশ টাইম) ----------
+    let moCal = null;
+    let calOrders = [];
+    let calDirty = true;
+    let calToken = 0;
+
+    function hideCalView() {
+      const b = $('calBox');
+      if (b) b.style.display = 'none';
+    }
+
+    async function renderCalView() {
+      $('calBox').style.display = '';
+      if (!moCal) {
+        moCal = createRangeCalendar($('moCal'), {
+          allowFuture: true,
+          onMonthChange: () => { calDirty = true; renderCalView(); },
+          onRangeChange: () => { calDirty = true; renderCalView(); },
+        });
+      }
+      const mon = moCal.getMonth();
+      const sel = moCal.getRange();
+      if (calDirty) {
+        calDirty = false;
+        const token = ++calToken;
+        const mr = monthRangeIso(mon.y, mon.m);
+        let lo = mr.fromIso;
+        let hi = mr.toIso;
+        if (sel.from) {
+          const sr = dhakaRangeIso(sel.from, sel.to);
+          if (sr.fromIso < lo) lo = sr.fromIso;
+          if (sr.toIso > hi) hi = sr.toIso;
+        }
+        const res = await supabase.from('manual_orders').select('*').gte('scheduled_at', lo).lt('scheduled_at', hi).order('scheduled_at', { ascending: false }).limit(2000);
+        if (token !== calToken) return;
+        if (res.error) {
+          $('orderList').replaceChildren(el('p', 'mo-muted', 'লোড করা যায়নি, আবার চেষ্টা করুন।'));
+          return;
+        }
+        calOrders = res.data || [];
+        const missing = [...new Set(calOrders.map((o) => o.manual_rider_id).filter(Boolean))].filter((id) => !riders.some((r) => r.id === id) && !extraRiders[id]);
+        if (missing.length) {
+          try {
+            const x = await supabase.from('manual_riders').select('*').in('id', missing);
+            (x.data || []).forEach((r) => { extraRiders[r.id] = r; });
+          } catch (e) { /* নাম না পেলেও চলবে */ }
+        }
+        const ids = [...new Set(calOrders.map((o) => o.entered_by).filter(Boolean))].filter((id) => !names[id]);
+        if (ids.length) {
+          try {
+            const p = await supabase.from('profiles').select('id, full_name').in('id', ids);
+            (p.data || []).forEach((x) => { names[x.id] = x.full_name || ''; });
+          } catch (e) { /* নাম না পেলেও চলবে */ }
+        }
+        if (token !== calToken) return;
+      }
+      paintCal(mon, sel);
+    }
+
+    function paintCal(mon, sel) {
+      const counts = {};
+      calOrders.forEach((o) => {
+        const k = dayKeyOf(new Date(o.scheduled_at));
+        counts[k] = (counts[k] || 0) + 1;
+      });
+      moCal.setCounts(counts);
+      const prefix = mon.y + '-' + String(mon.m).padStart(2, '0') + '-';
+      const rows = calOrders.filter((o) => {
+        const k = dayKeyOf(new Date(o.scheduled_at));
+        return (sel.from ? (k >= sel.from && k <= sel.to) : k.startsWith(prefix)) && matches(o);
+      });
+      const label = sel.from
+        ? (sel.from === sel.to ? labelKey(sel.from) : labelKey(sel.from) + ' – ' + labelKey(sel.to))
+        : monthLabel(mon.y, mon.m);
+      renderCalSummary(rows, label);
+
+      const box = $('orderList');
+      box.replaceChildren();
+      if (!rows.length) {
+        box.appendChild(el('p', 'mo-muted', q ? 'কিছু পাওয়া যায়নি।' : 'এই সময়ে কোনো অর্ডার নেই।'));
+        return;
+      }
+      const wrap = el('div', '');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.gap = '12px';
+      rows.forEach((o) => wrap.appendChild(renderCard(o)));
+      box.appendChild(wrap);
+    }
+
+    function renderCalSummary(rows, label) {
+      const box = $('moCalSum');
+      box.replaceChildren();
+      box.appendChild(el('div', 'mo-h', label + ' · সামারি'));
+      const n = (f) => rows.filter(f).length;
+      const dn = rows.filter((o) => o.status === 'delivered' || o.status === 'completed');
+      const cells = [
+        ['মোট অর্ডার', bn(rows.length)],
+        ['নতুন', bn(n((o) => o.status === 'new'))],
+        ['চলমান', bn(n((o) => o.status === 'rider_assigned' || o.status === 'picked_up'))],
+        ['ডেলিভারড', bn(dn.length)],
+        ['বাতিল', bn(n((o) => o.status === 'cancelled'))],
+      ];
+      // টাকার হিসাব শুধু admin দেখবে (হিসাব ট্যাবের নিয়মের মতো)
+      if (role === 'admin') {
+        cells.push(['ডেলিভারড অর্ডারের মোট', money(sumM(dn, 'total_amount'))]);
+        cells.push(['এর মধ্যে ডেলিভারি ফি', money(sumM(dn, 'delivery_fee'))]);
+        cells.push(['এর মধ্যে প্রোডাক্ট', money(sumM(dn, 'product_price'))]);
+      }
+      const sum = el('div', 'mo-sum');
+      cells.forEach(([l, v]) => {
+        const m = el('div', 'mo-m');
+        m.appendChild(el('small', '', l));
+        m.appendChild(el('b', '', v));
+        sum.appendChild(m);
+      });
+      box.appendChild(sum);
     }
 
     // ---------- রাইডারে পাবলিশ / চার্জ বাড়ানো / রেডি ----------

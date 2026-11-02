@@ -264,9 +264,9 @@ const guideSteps = [
               {upazilaList.map((u) => <option value={u}>{u}</option>)}
             </select>
           </div>
-          <div class="do-filter-row" id="dateRow" style="display:none;">
-            <label class="do-date"><span>থেকে</span><input type="date" id="fFrom" /></label>
-            <label class="do-date"><span>পর্যন্ত</span><input type="date" id="fTo" /></label>
+          <div class="do-cal-wrap" id="dateRow" style="display:none;"><div id="doCal"></div><div id="doCalSummary" class="do-cal-sum" style="display:none;"></div>
+            <input type="hidden" id="fFrom" />
+            <input type="hidden" id="fTo" />
           </div>
         </div>
 
@@ -448,6 +448,16 @@ const guideSteps = [
     .do-select { flex: 1; min-width: 0; padding: 10px 12px; border: 1.5px solid #E5EAF0; border-radius: 12px; background: #fff; font-size: 0.84rem; font-family: inherit; color: #1B2A4A; }
     .do-date { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 0.68rem; font-weight: 700; color: #8FA0BC; }
     .do-date input { padding: 9px 10px; border: 1.5px solid #E5EAF0; border-radius: 12px; font-family: inherit; font-size: 0.84rem; color: #1B2A4A; background: #fff; }
+
+    .do-cal-wrap { margin-bottom: 4px; }
+    .do-cal-sum { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27, 42, 74, 0.08); padding: 12px; margin-bottom: 12px; }
+    .do-cal-sum-h { font-size: 15px; font-weight: 700; color: #1B2A4A; margin-bottom: 8px; }
+    .do-cal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .do-cal-cell { background: #F8FAFC; border-radius: 12px; padding: 8px 4px; text-align: center; }
+    .do-cal-cell small { display: block; font-size: 12px; font-weight: 600; color: #5B6B86; }
+    .do-cal-cell b { font-size: 17px; color: #1B2A4A; }
+    .do-cal-cell.wide { grid-column: 1 / -1; background: #E8F7EE; }
+    .do-cal-cell.wide b { color: #14693A; font-size: 19px; }
 
     /* ইউজার সামারি */
     .do-users { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
@@ -686,6 +696,7 @@ const guideSteps = [
     import { supabase } from '../../lib/supabase.js';
     import { getSignedUrls } from '../../lib/storageSigned.js';
     import { splitMapLink, renderAddressWithNav } from '../../lib/mapLinks.js';
+    import { createRangeCalendar, dhakaRangeIso, monthRangeIso, labelKey } from '../../lib/adminCalendar.js';
 
     // ================= হেল্পার =================
     const $ = (id) => document.getElementById(id);
@@ -970,13 +981,14 @@ const guideSteps = [
       $('doMore').style.display = 'none';
       state.loading = true;
 
-      const toIso = state.to ? new Date(state.to + 'T23:59:59').toISOString() : null;
-      const fromIso = state.from ? new Date(state.from + 'T00:00:00').toISOString() : null;
+      const rng = (state.from && state.to) ? dhakaRangeIso(state.from, state.to) : null;
+      const toIso = rng ? rng.toIso : null;
+      const fromIso = rng ? rng.fromIso : null;
 
       const { data, error } = await supabase.rpc('admin_search_orders', {
         p_query: state.q || null,
         // সার্চ চলাকালীন লাইভ + হিস্ট্রি দুটোতেই খুঁজি — যেকোনো সময়ের অর্ডার পাওয়া যাবে
-        p_group: state.q ? 'all' : (state.tab === 'new' ? 'live' : state.tab),
+        p_group: state.q ? 'all' : ((state.tab === 'history' && state.from) ? 'all' : (state.tab === 'new' ? 'live' : state.tab)),
         p_category: state.cat || null,
         p_status: state.status || null,
         p_upazila: state.upazila || null,
@@ -1120,7 +1132,8 @@ const guideSteps = [
       $('fStatus').style.display = isNew ? 'none' : '';
       $('batchSeg').style.display = isBatch ? 'flex' : 'none';
       gateVisible();
-      $('dateRow').style.display = state.tab === 'history' ? 'flex' : 'none';
+      $('dateRow').style.display = state.tab === 'history' ? 'block' : 'none';
+      if (state.tab === 'history') initCalendar();
       $('noOfferChip').style.display = state.tab === 'live' ? '' : 'none';
       $('doUsers').style.display = (isFeed || isBatch) ? 'none' : $('doUsers').style.display;
       fillStatusOptions();
@@ -1151,7 +1164,7 @@ const guideSteps = [
       state.tab = tab;
       state.status = '';
       if (tab !== 'live') state.filter = '';
-      if (tab === 'history') { state.from = ''; state.to = ''; $('fFrom').value = ''; $('fTo').value = ''; }
+      if (tab === 'history') { state.from = ''; state.to = ''; if (cal) { cal.clear(true); loadCalMonth(); } paintCalSummary(); }
       applyTabUi();
       syncUrl();
       if (tab === 'feed') {
@@ -1605,6 +1618,97 @@ const guideSteps = [
         loadOverview();
         refreshCurrent();
       }, 1200);
+    }
+
+    // ================= ক্যালেন্ডার (সম্পন্ন ট্যাব): দিন বা রেঞ্জ ধরে অর্ডার + সামারি, সব বাংলাদেশ টাইমে =================
+    let cal = null;
+    let calSumToken = 0;
+    let calMonthToken = 0;
+
+    function initCalendar() {
+      if (cal || !$('doCal')) return;
+      cal = createRangeCalendar($('doCal'), {
+        onMonthChange: () => { loadCalMonth(); },
+        onRangeChange: (from, to) => {
+          state.from = from || '';
+          state.to = to || '';
+          paintCalSummary();
+          loadOrders();
+        },
+      });
+      loadCalMonth();
+    }
+
+    async function loadCalMonth() {
+      if (!cal) return;
+      const token = ++calMonthToken;
+      const mon = cal.getMonth();
+      const r = monthRangeIso(mon.y, mon.m);
+      const { data, error } = await supabase.rpc('admin_orders_calendar', {
+        p_from: r.fromIso,
+        p_to: r.toIso,
+        p_category: state.cat || null,
+        p_upazila: state.upazila || null,
+      });
+      if (token !== calMonthToken || !cal) return;
+      const map = {};
+      if (!error && data && Array.isArray(data.days)) data.days.forEach((d) => { map[d.d] = d.n; });
+      cal.setCounts(map);
+    }
+
+    function calCell(label, value, cls) {
+      const c = document.createElement('div');
+      c.className = 'do-cal-cell' + (cls ? ' ' + cls : '');
+      const s = document.createElement('small');
+      s.textContent = label;
+      const b = document.createElement('b');
+      b.textContent = value;
+      c.appendChild(s);
+      c.appendChild(b);
+      return c;
+    }
+
+    async function paintCalSummary() {
+      const box = $('doCalSummary');
+      if (!box) return;
+      if (!state.from || !state.to) {
+        calSumToken += 1;
+        box.style.display = 'none';
+        box.replaceChildren();
+        return;
+      }
+      const token = ++calSumToken;
+      const r = dhakaRangeIso(state.from, state.to);
+      const { data, error } = await supabase.rpc('admin_orders_calendar', {
+        p_from: r.fromIso,
+        p_to: r.toIso,
+        p_category: state.cat || null,
+        p_upazila: state.upazila || null,
+      });
+      if (token !== calSumToken) return;
+      if (error || !data || !data.summary) {
+        box.style.display = 'none';
+        box.replaceChildren();
+        return;
+      }
+      const s = data.summary;
+      const label = state.from === state.to ? labelKey(state.from) : labelKey(state.from) + ' – ' + labelKey(state.to);
+      box.replaceChildren();
+      const h = document.createElement('div');
+      h.className = 'do-cal-sum-h';
+      h.textContent = label + ' · সামারি';
+      box.appendChild(h);
+      const grid = document.createElement('div');
+      grid.className = 'do-cal-grid';
+      grid.appendChild(calCell('মোট অর্ডার', bn(s.total || 0)));
+      grid.appendChild(calCell('সম্পন্ন', bn(s.completed || 0)));
+      grid.appendChild(calCell('চলমান', bn(s.live || 0)));
+      grid.appendChild(calCell('বাতিল', bn((s.cancelled || 0) + (s.expired || 0))));
+      grid.appendChild(calCell('ডিসপিউট', bn(s.disputed || 0)));
+      grid.appendChild(calCell('ডেলিভারি / রাইড', bn(s.delivery || 0) + ' / ' + bn(s.ride || 0)));
+      grid.appendChild(calCell('সম্পন্ন অর্ডারের ডেলিভারি চার্জ মোট', money(s.completed_amount || 0), 'wide'));
+      box.appendChild(grid);
+      box.style.display = '';
     }
 
     // ================= ডেলিভারি UI v2: ইনবক্স (পাবলিশ / হোল্ড / ব্যাচ / অ্যাসাইন / নোট) =================
@@ -2172,6 +2276,7 @@ const guideSteps = [
       document.querySelectorAll('#catChips .do-chip[data-cat]').forEach((chip) => {
         chip.addEventListener('click', () => {
           state.cat = chip.dataset.cat;
+          if (cal && state.tab === 'history') { loadCalMonth(); paintCalSummary(); }
           applyTabUi();
           loadOrders();
         });
@@ -2184,7 +2289,7 @@ const guideSteps = [
       });
 
       $('fStatus').addEventListener('change', (e) => { state.status = e.target.value; loadOrders(); });
-      $('fUpazila').addEventListener('change', (e) => { state.upazila = e.target.value; loadOrders(); });
+      $('fUpazila').addEventListener('change', (e) => { state.upazila = e.target.value; if (cal && state.tab === 'history') { loadCalMonth(); paintCalSummary(); } loadOrders(); });
       $('fFrom').addEventListener('change', (e) => { state.from = e.target.value; loadOrders(); });
       $('fTo').addEventListener('change', (e) => { state.to = e.target.value; loadOrders(); });
 
