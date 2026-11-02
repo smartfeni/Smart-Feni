@@ -98,6 +98,31 @@ export async function POST({ request }) {
       return json({ error: 'এই আবেদনটি ইতিমধ্যে প্রক্রিয়া করা হয়েছে' }, 400);
     }
 
+    // ===== এক ওউনার = এক ক্লাব: আবেদনকারীর আগে থেকে ক্লাব থাকলে Approve ব্লক =====
+    const { count: ownedCount, error: ownedError } = await supabaseAdmin
+      .from('clubs')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', req.user_id);
+
+    if (ownedError) {
+      await reportServerError(reportDb, {
+        route: '/api/approve-club-request',
+        action: 'approve_club_owned_check',
+        title: 'ক্লাব আবেদন Approve: ওউনারের বিদ্যমান ক্লাব চেক ব্যর্থ',
+        message: ownedError.message,
+        code: ownedError.code,
+        status: 500,
+      });
+      return json({ error: 'ওউনারের ক্লাব চেক করা যায়নি — আবার চেষ্টা করুন' }, 500);
+    }
+
+    if ((ownedCount || 0) > 0) {
+      return json({
+        error: 'এই ইউজারের ইতিমধ্যে একটা ক্লাব আছে — একজন ওউনারের একটাই ক্লাব হতে পারে। আবেদনটা বাতিল করুন।',
+        code: 'owner_has_club',
+      }, 409);
+    }
+
     // ===== স্লাগ — অ্যাডমিনকে দিতেই হবে, কিছু তৈরির আগেই সব চেক =====
     if (typeof requestedSlug !== 'string' || requestedSlug.trim() === '') {
       return json({ error: 'স্লাগ (লিংক) দিন', field: 'slug' }, 400);
