@@ -48,29 +48,63 @@ export function xhrPost(url, { headers = {}, formData, timeoutMs = 60000, onProg
 
 const RETRY_STATUS = [502, 503, 504];
 
+// getAuthHeader (ঐচ্ছিক): async (forceRefresh) => ({ Authorization }) | null।
+// দেওয়া থাকলে প্রতিটা আপলোডের আগে টাটকা টোকেন বসে, আর ৪০১ এলে একবার জোর
+// রিফ্রেশ করে একই চেষ্টায় আবার পাঠানো হয় (রিট্রাই-সংখ্যা খরচ হয় না)।
 export async function uploadWithRetry(url, {
   headers,
+  getAuthHeader,
   makeFormData,
   timeoutMs = 60000,
   retries = 2,
   onProgress,
   onRetry,
 } = {}) {
+  let currentHeaders = headers || {};
+  if (getAuthHeader) {
+    try {
+      const h = await getAuthHeader(false);
+      if (h) currentHeaders = { ...currentHeaders, ...h };
+    } catch (_) { /* পুরনো headers দিয়েই চলবে */ }
+  }
+
   let lastErr = null;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    if (attempt > 0) {
+  let authRefreshed = false;
+  let attempt = 0;
+  let skipWait = false;
+
+  while (true) {
+    if (attempt > 0 && !skipWait) {
       if (onRetry) onRetry(attempt, retries);
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
+    skipWait = false;
+
     try {
-      const r = await xhrPost(url, { headers, formData: makeFormData(), timeoutMs, onProgress });
+      const r = await xhrPost(url, { headers: currentHeaders, formData: makeFormData(), timeoutMs, onProgress });
+
+      if (r.status === 401 && getAuthHeader && !authRefreshed) {
+        authRefreshed = true;
+        let h = null;
+        try { h = await getAuthHeader(true); } catch (_) { h = null; }
+        if (h) {
+          currentHeaders = { ...currentHeaders, ...h };
+          skipWait = true;
+          continue;
+        }
+        return r;
+      }
+
       if (RETRY_STATUS.includes(r.status) && attempt < retries) {
         lastErr = new Error('Server ' + r.status);
+        attempt++;
         continue;
       }
       return r;
     } catch (err) {
       lastErr = err;
+      if (attempt >= retries) break;
+      attempt++;
     }
   }
   throw lastErr || new Error('Failed to fetch');
