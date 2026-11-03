@@ -65,6 +65,21 @@
       margin-bottom: 32px;
     }
 
+    #hint {
+      display: none;
+      font-size: 0.9375rem;
+      line-height: 1.7;
+      color: var(--navy);
+      background: #FFF4EC;
+      border: 1px solid #FFD9C7;
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin: -14px 0 24px;
+      text-align: left;
+    }
+
+    #hint.show { display: block; }
+
     .actions {
       display: flex;
       flex-direction: column;
@@ -145,6 +160,8 @@
 
     <h1 id="title">পেজটি খোলা যাচ্ছে না</h1>
     <p id="desc" role="status" aria-live="polite">আমাদের সার্ভারে পৌঁছানো যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।</p>
+
+    <p id="hint" role="status" aria-live="polite"></p>
 
     <div class="actions">
       <button id="retry" type="button">আবার চেষ্টা করুন</button>
@@ -293,6 +310,130 @@
       // Splash সরাও (Capacitor bridge তৈরি হতে দেরি হলে ০.৩ সেকেন্ড পরে আবার চেষ্টা)
       hideSplash();
       setTimeout(hideSplash, 300);
+
+      // ============================================================
+      // নিজে-নিজে কারণ খোঁজা (diagnosis)
+      // এই পেজ দেখা মানে অ্যাপ smartfeni.com লোড করতে পারেনি। এখানে ৩টা সাইটে
+      // পৌঁছানো যায় কিনা দেখে (আমাদের সাইট / Supabase / Google) কাস্টমারকে সঠিক
+      // হিন্ট দেওয়া হয়, আর সাইটে না পৌঁছালে কারণটা Supabase-এ রিপোর্ট হয়
+      // (/admin/errors-এ দেখা যাবে)। কোনো ব্যক্তিগত তথ্য পাঠানো হয় না।
+      // ============================================================
+      var SB_URL = 'https://hedloawcvnbleehnurqd.supabase.co';
+      var SB_KEY = 'sb_publishable_T58iE-MmcLsM3I2bQ7vofQ_9c6CG3qx'; // পাবলিক (publishable) key
+      var REPORT_KEY = 'sf_errpage_report_at';
+      var REPORT_GAP_MS = 30 * 60 * 1000; // একই ফোন থেকে ৩০ মিনিটে একবারের বেশি রিপোর্ট নয়
+      var hintEl = document.getElementById('hint');
+
+      // উত্তর পেলেই (যেকোনো স্ট্যাটাস) "পৌঁছানো যায়"; এরর/টাইমআউটে না
+      function reach(url) {
+        return new Promise(function (resolve) {
+          var done = false;
+          var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+          function finish(v) {
+            if (!done) { done = true; resolve(v); }
+          }
+          setTimeout(function () {
+            if (ctrl) { try { ctrl.abort(); } catch (e) {} }
+            finish(false);
+          }, 6000);
+          try {
+            var opts = { mode: 'no-cors', cache: 'no-store' };
+            if (ctrl) opts.signal = ctrl.signal;
+            fetch(url + (url.indexOf('?') > -1 ? '&' : '?') + '_=' + Date.now(), opts)
+              .then(function () { finish(true); })
+              .catch(function () { finish(false); });
+          } catch (e) {
+            finish(false);
+          }
+        });
+      }
+
+      function deviceFromUA() {
+        var ua = navigator.userAgent || '';
+        var m = ua.match(/Android\s([\d.]+);\s*([^;)]*?)(?:\sBuild|[;)])/);
+        return { android: m ? m[1] : '?', model: (m && m[2]) ? m[2].trim() : '?' };
+      }
+
+      // নতুন Chrome/WebView-এ UA-তে মডেল লুকানো থাকে ("K"), তাই userAgentData থেকে আসল মডেল নেওয়ার চেষ্টা
+      function getDevice() {
+        return new Promise(function (resolve) {
+          var fb = deviceFromUA();
+          try {
+            if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+              var t = setTimeout(function () { resolve(fb); }, 800);
+              navigator.userAgentData.getHighEntropyValues(['model', 'platformVersion'])
+                .then(function (v) {
+                  clearTimeout(t);
+                  resolve({
+                    model: (v && v.model) ? v.model : fb.model,
+                    android: (v && v.platformVersion) ? v.platformVersion : fb.android
+                  });
+                })
+                .catch(function () { clearTimeout(t); resolve(fb); });
+              return;
+            }
+          } catch (e) {}
+          resolve(fb);
+        });
+      }
+
+      function sendReport(site, sb, net) {
+        try {
+          if (navigator.onLine === false) return;
+          var last = Number(localStorage.getItem(REPORT_KEY)) || 0;
+          if (Date.now() - last < REPORT_GAP_MS) return;
+          localStorage.setItem(REPORT_KEY, String(Date.now()));
+        } catch (e) {}
+
+        getDevice().then(function (d) {
+          function b(v) { return v ? 'ok' : 'fail'; }
+          var msg = 'site=' + b(site) + ' supabase=' + b(sb) + ' internet=' + b(net) +
+            ' android=' + d.android + ' model=' + d.model;
+          try {
+            fetch(SB_URL + '/rest/v1/rpc/report_client_error', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+              body: JSON.stringify({
+                p_kind: 'other',
+                p_page: '/error.html',
+                p_action: 'app_load_fail',
+                p_message: msg,
+                p_title: 'অ্যাপে সাইট লোড হয়নি (error.html)',
+                p_user_agent: navigator.userAgent
+              })
+            }).catch(function () {});
+          } catch (e) {}
+        });
+      }
+
+      function showHint(text) {
+        if (!hintEl) return;
+        hintEl.textContent = text;
+        hintEl.classList.add('show');
+      }
+
+      function diagnose() {
+        if (navigator.onLine === false) return;
+        Promise.all([
+          reach(HOME + 'favicon.ico'),
+          reach(SB_URL + '/auth/v1/health'),
+          reach('https://www.gstatic.com/generate_204')
+        ]).then(function (r) {
+          if (going) return;
+          var site = r[0], sb = r[1], net = r[2];
+          if (site) return; // সাইটে পৌঁছানো যাচ্ছে — অটো-রিট্রাই নিজেই খুলে দেবে
+
+          if (sb || net) {
+            showHint('আপনার ইন্টারনেট চলছে, কিন্তু এই মুহূর্তে আমাদের সাইটে ঢুকতে পারছে না। এটা নেটওয়ার্কের সাময়িক সমস্যা হতে পারে — ঠিক হলেই অ্যাপ নিজে থেকে খুলবে। ওয়াই-ফাই/মোবাইল ডেটা বদলে দেখুন, আর Settings → Private DNS বন্ধ করে দেখুন।');
+          } else {
+            showHint('ফোন ইন্টারনেটে সংযোগ পাচ্ছে না। মোবাইল ডেটা/ওয়াই-ফাই দেখুন, আর Settings → Date & time → Automatic চালু আছে কিনা দেখুন।');
+          }
+          sendReport(site, sb, net);
+        }).catch(function () {});
+      }
+
+      diagnose();
+
 
       // অটো-রিট্রাই: নিজে থেকেই কানেকশন যাচাই করে ফিরে যায় (৩, ৫, ৮, ১২, ২০ সেকেন্ড পর পর)।
       // মোট ১৫ বার (প্রায় ৩–৪ মিনিট), এরপর থামে — বাটন তখনও কাজ করে।
