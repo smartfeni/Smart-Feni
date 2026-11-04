@@ -180,7 +180,7 @@ export function createRangeCalendar(root, opts) {
       const b = mk('button', cls);
       b.type = 'button';
       b.disabled = !o.allowFuture && key > today;
-      b.setAttribute('aria-label', bn(d) + ' ' + MONTHS[st.m - 1] + (n ? ', ' + bn(n) + 'টি অর্ডার' : ''));
+      b.setAttribute('aria-label', bn(d) + ' ' + MONTHS[st.m - 1] + (n ? ', ' + bn(n) + 'টি ' + (o.unit || 'অর্ডার') : ''));
       b.appendChild(mk('b', '', bn(d)));
       b.appendChild(mk('i', '', n ? bn(n) : ''));
       b.addEventListener('click', () => pick(key));

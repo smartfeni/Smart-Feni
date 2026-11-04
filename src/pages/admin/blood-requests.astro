@@ -1,0 +1,246 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — ব্লাড রিকোয়েস্ট (শুধু দেখা) (/admin/blood-requests)
+// চলমান / সম্পন্ন / মেয়াদোত্তীর্ণ সব রিকোয়েস্টের ডিটেইলস + ডোনারদের সাড়া।
+// ডিফল্ট: শেষ ৩০ দিন; ক্যালেন্ডারে দিন বা রেঞ্জ ট্যাপ করলে সেই সময়ের রিকোয়েস্ট।
+// ডেটা: RPC admin_blood_requests (সার্ভারে has_permission('blood.view') চেক)।
+// কোনো অ্যাকশন বাটন নেই। ইউজারের লেখা সব textContent দিয়ে বসানো।
+// স্টাইল is:global, ক্লাব vw- দিয়ে শুরু।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="ব্লাড রিকোয়েস্ট | অ্যাডমিন">
+  <div class="vw-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="vw-loading">
+        <div class="vw-spin"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" style="display:none;">
+        <a href="/admin" class="vw-back"><i class="fas fa-arrow-left"></i> ড্যাশবোর্ড</a>
+        <h1 class="vw-h1">🩸 ব্লাড রিকোয়েস্ট</h1>
+        <p class="vw-sub" id="vwSub">লোড হচ্ছে...</p>
+
+        <button type="button" class="vw-calbtn" id="vwCalToggle">📅 ক্যালেন্ডার (দিন বাছুন)</button>
+        <div id="vwCal" style="display:none;"></div>
+
+        <div class="vw-tabs" id="vwTabs"></div>
+        <div id="vwList"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <style is:global>
+    .vw-page { min-height: 60vh; padding: 24px 0 90px; font-family: "Hind Siliguri", system-ui, sans-serif; color: #1B2A4A; }
+    .vw-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .vw-spin { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: vwspin .8s linear infinite; }
+    @keyframes vwspin { to { transform: rotate(360deg); } }
+    .vw-back { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: .9rem; }
+    .vw-h1 { font-size: 1.5rem; font-weight: 700; margin: 4px 0 2px; }
+    .vw-sub { font-size: .85rem; color: #8FA0BC; font-weight: 600; margin: 0 0 12px; }
+    .vw-calbtn { width: 100%; min-height: 48px; border: 0; border-radius: 16px; background: #fff; box-shadow: 0 2px 12px rgba(27,42,74,.08); color: #1B2A4A; font-weight: 700; font-size: .95rem; font-family: inherit; cursor: pointer; margin-bottom: 12px; }
+    .vw-tabs { display: flex; gap: 8px; margin: 4px 0 14px; overflow-x: auto; }
+    .vw-tab { flex: 1 0 auto; min-height: 44px; padding: 0 14px; border: 0; border-radius: 14px; background: #fff; box-shadow: 0 1px 6px rgba(27,42,74,.08); color: #5A6E85; font-weight: 700; font-size: .9rem; font-family: inherit; cursor: pointer; white-space: nowrap; }
+    .vw-tab.on { background: #1B2A4A; color: #fff; }
+    .vw-empty { text-align: center; color: #8FA0BC; font-weight: 600; padding: 48px 0; }
+    .vw-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27,42,74,.08); padding: 14px; margin-bottom: 12px; }
+    .vw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .vw-grp { min-width: 48px; height: 48px; border-radius: 14px; background: #FDECEC; color: #D14343; font-weight: 800; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; flex: none; }
+    .vw-main { flex: 1; min-width: 0; }
+    .vw-name { font-weight: 700; font-size: .98rem; }
+    .vw-meta { font-size: .8rem; color: #5A6E85; font-weight: 600; margin-top: 2px; }
+    .vw-badge { font-size: .72rem; font-weight: 800; padding: 4px 10px; border-radius: 20px; flex: none; }
+    .vw-badge.active { background: #FFF0E8; color: #FF6B35; }
+    .vw-badge.fulfilled { background: #E7F7EE; color: #16A34A; }
+    .vw-badge.expired { background: #EEF1F6; color: #64748B; }
+    .vw-det { margin-top: 10px; font-size: .88rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+    .vw-tel { color: #FF6B35; font-weight: 700; text-decoration: none; }
+    .vw-resp { margin-top: 10px; border-top: 1px solid #EEF1F6; padding-top: 8px; }
+    .vw-resp summary { min-height: 44px; display: flex; align-items: center; font-weight: 700; font-size: .88rem; cursor: pointer; }
+    .vw-ri { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; font-size: .85rem; }
+    .vw-ri small { color: #8FA0BC; font-weight: 600; display: block; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { createRangeCalendar, dhakaRangeIso, monthRangeIso, dayKeyOf, todayKey, addDaysKey, labelKey } from '../../lib/adminCalendar.js';
+
+    const $ = (id) => document.getElementById(id);
+    const bn = (v) => String(v).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+    const TABS = [
+      { k: 'active', l: 'চলমান' },
+      { k: 'fulfilled', l: 'সম্পন্ন' },
+      { k: 'expired', l: 'মেয়াদোত্তীর্ণ' },
+    ];
+    const STATUS_LABEL = { active: 'চলমান', fulfilled: 'সম্পন্ন', expired: 'মেয়াদোত্তীর্ণ' };
+
+    const state = { from: '', to: '', tab: 'active', rows: [] };
+    let cal = null;
+    let listToken = 0;
+    let monthToken = 0;
+
+    function el(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+
+    function fmtTime(iso) {
+      if (!iso) return '';
+      return bn(new Date(iso).toLocaleString('en-GB', {
+        timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true,
+      }));
+    }
+
+    function telLink(phone) {
+      const a = el('a', 'vw-tel', bn(phone || ''));
+      a.href = 'tel:' + String(phone || '').replace(/[^\d+]/g, '');
+      return a;
+    }
+
+    function currentRange() {
+      if (state.from) return dhakaRangeIso(state.from, state.to);
+      const t = todayKey();
+      return dhakaRangeIso(addDaysKey(t, -29), t);
+    }
+
+    function rangeLabel() {
+      if (!state.from) return 'শেষ ৩০ দিন';
+      return state.from === state.to ? labelKey(state.from) : labelKey(state.from) + ' – ' + labelKey(state.to);
+    }
+
+    function paintToggle() {
+      const open = $('vwCal').style.display !== 'none';
+      $('vwCalToggle').textContent = open
+        ? '▲ ক্যালেন্ডার ভাঁজ করুন'
+        : '📅 ক্যালেন্ডার' + (state.from ? ' · ' + rangeLabel() : ' (দিন বাছুন)');
+    }
+
+    function renderTabs() {
+      const box = $('vwTabs');
+      box.replaceChildren();
+      TABS.forEach((t) => {
+        const n = state.rows.filter((r) => r.status === t.k).length;
+        const b = el('button', 'vw-tab' + (state.tab === t.k ? ' on' : ''), t.l + ' (' + bn(n) + ')');
+        b.type = 'button';
+        b.addEventListener('click', () => { state.tab = t.k; renderTabs(); renderList(); });
+        box.appendChild(b);
+      });
+    }
+
+    function card(r) {
+      const c = el('div', 'vw-card');
+      const row = el('div', 'vw-row');
+      row.appendChild(el('div', 'vw-grp', r.blood_group || '?'));
+      const main = el('div', 'vw-main');
+      main.appendChild(el('div', 'vw-name', r.requester_name || 'নাম নেই'));
+      const meta = el('div', 'vw-meta');
+      meta.appendChild(telLink(r.requester_phone));
+      meta.appendChild(document.createTextNode(' · ' + (r.upazila || '—')));
+      main.appendChild(meta);
+      main.appendChild(el('div', 'vw-meta', 'তৈরি: ' + fmtTime(r.created_at) + ' · মেয়াদ: ' + fmtTime(r.expires_at)));
+      row.appendChild(main);
+      row.appendChild(el('span', 'vw-badge ' + (r.status || ''), STATUS_LABEL[r.status] || r.status || ''));
+      c.appendChild(row);
+
+      if (r.details) c.appendChild(el('div', 'vw-det', r.details));
+
+      const resp = Array.isArray(r.responses) ? r.responses : [];
+      const d = el('details', 'vw-resp');
+      d.appendChild(el('summary', '', '🙋 ডোনার সাড়া দিয়েছে: ' + bn(resp.length) + ' জন'));
+      if (!resp.length) {
+        d.appendChild(el('div', 'vw-meta', 'এখনো কেউ সাড়া দেয়নি'));
+      } else {
+        resp.forEach((x) => {
+          const ri = el('div', 'vw-ri');
+          const left = el('div', '');
+          left.appendChild(document.createTextNode(x.donor_name || 'নাম নেই'));
+          left.appendChild(el('small', '', fmtTime(x.created_at)));
+          ri.appendChild(left);
+          ri.appendChild(telLink(x.donor_phone));
+          d.appendChild(ri);
+        });
+      }
+      c.appendChild(d);
+      return c;
+    }
+
+    function renderList() {
+      const box = $('vwList');
+      box.replaceChildren();
+      const rows = state.rows.filter((r) => r.status === state.tab);
+      if (!rows.length) {
+        box.appendChild(el('div', 'vw-empty', 'এই সময়ে কোনো রিকোয়েস্ট নেই'));
+        return;
+      }
+      rows.forEach((r) => box.appendChild(card(r)));
+    }
+
+    async function loadList() {
+      const token = ++listToken;
+      $('vwSub').textContent = rangeLabel() + ' · লোড হচ্ছে...';
+      const r = currentRange();
+      const { data, error } = await supabase.rpc('admin_blood_requests', { p_from: r.fromIso, p_to: r.toIso });
+      if (token !== listToken) return;
+      if (error) {
+        $('vwSub').textContent = 'লোড করা যায়নি';
+        if (window.showToast) window.showToast('ব্লাড রিকোয়েস্ট লোড করা যায়নি', 'error');
+        return;
+      }
+      state.rows = Array.isArray(data) ? data : [];
+      $('vwSub').textContent = rangeLabel() + ' · মোট ' + bn(state.rows.length) + 'টি রিকোয়েস্ট';
+      renderTabs();
+      renderList();
+    }
+
+    async function loadCalMonth() {
+      if (!cal) return;
+      const token = ++monthToken;
+      const m = cal.getMonth();
+      const r = monthRangeIso(m.y, m.m);
+      const { data, error } = await supabase.rpc('admin_blood_requests', { p_from: r.fromIso, p_to: r.toIso });
+      if (token !== monthToken || !cal) return;
+      const map = {};
+      if (!error && Array.isArray(data)) {
+        data.forEach((x) => {
+          const k = dayKeyOf(new Date(x.created_at));
+          map[k] = (map[k] || 0) + 1;
+        });
+      }
+      cal.setCounts(map);
+    }
+
+    function init() {
+      $('vwCalToggle').addEventListener('click', () => {
+        const c = $('vwCal');
+        c.style.display = c.style.display === 'none' ? '' : 'none';
+        paintToggle();
+      });
+      cal = createRangeCalendar($('vwCal'), {
+        unit: 'রিকোয়েস্ট',
+        onMonthChange: () => { loadCalMonth(); },
+        onRangeChange: (from, to) => {
+          state.from = from || '';
+          state.to = to || '';
+          paintToggle();
+          loadList();
+        },
+      });
+      paintToggle();
+      loadCalMonth();
+      loadList();
+    }
+
+    window.addEventListener('smartfeni:admin-ready', init, { once: true });
+    initAdminGuard();
+  </script>
+</BaseLayout>
