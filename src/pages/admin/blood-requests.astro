@@ -31,6 +31,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         <div id="vwCal" style="display:none;"></div>
 
         <div class="vw-tabs" id="vwTabs"></div>
+        <div class="vw-chips" id="vwChips"></div>
         <div id="vwList"></div>
       </div>
 
@@ -49,6 +50,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .vw-tabs { display: flex; gap: 8px; margin: 4px 0 14px; overflow-x: auto; }
     .vw-tab { flex: 1 0 auto; min-height: 44px; padding: 0 14px; border: 0; border-radius: 14px; background: #fff; box-shadow: 0 1px 6px rgba(27,42,74,.08); color: #5A6E85; font-weight: 700; font-size: .9rem; font-family: inherit; cursor: pointer; white-space: nowrap; }
     .vw-tab.on { background: #1B2A4A; color: #fff; }
+    .vw-chips { display: flex; gap: 8px; margin: -4px 0 14px; overflow-x: auto; }
+    .vw-chip { flex: none; min-height: 44px; padding: 0 14px; border: 1.5px solid #E5EAF0; border-radius: 22px; background: #fff; color: #5A6E85; font-weight: 700; font-size: .85rem; font-family: inherit; cursor: pointer; white-space: nowrap; }
+    .vw-chip.on { border-color: #FF6B35; background: #FFF0E8; color: #FF6B35; }
     .vw-empty { text-align: center; color: #8FA0BC; font-weight: 600; padding: 48px 0; }
     .vw-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27,42,74,.08); padding: 14px; margin-bottom: 12px; }
     .vw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -82,7 +86,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     ];
     const STATUS_LABEL = { active: 'চলমান', fulfilled: 'সম্পন্ন', expired: 'মেয়াদোত্তীর্ণ' };
 
-    const state = { from: '', to: '', tab: 'active', rows: [] };
+    const state = { from: '', to: '', tab: 'active', resp: 'all', rows: [] };
     let cal = null;
     let listToken = 0;
     let monthToken = 0;
@@ -137,6 +141,25 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       });
     }
 
+    const hasResp = (r) => Array.isArray(r.responses) && r.responses.length > 0;
+
+    function renderChips(tabRows) {
+      const box = $('vwChips');
+      box.replaceChildren();
+      const withN = tabRows.filter(hasResp).length;
+      const defs = [
+        { k: 'all', l: 'সব', n: tabRows.length },
+        { k: 'yes', l: 'সাড়া পেয়েছে', n: withN },
+        { k: 'no', l: 'সাড়া পায়নি', n: tabRows.length - withN },
+      ];
+      defs.forEach((d) => {
+        const b = el('button', 'vw-chip' + (state.resp === d.k ? ' on' : ''), d.l + ' (' + bn(d.n) + ')');
+        b.type = 'button';
+        b.addEventListener('click', () => { state.resp = d.k; renderList(); });
+        box.appendChild(b);
+      });
+    }
+
     function card(r) {
       const c = el('div', 'vw-card');
       const row = el('div', 'vw-row');
@@ -177,7 +200,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     function renderList() {
       const box = $('vwList');
       box.replaceChildren();
-      const rows = state.rows.filter((r) => r.status === state.tab);
+      const tabRows = state.rows.filter((r) => r.status === state.tab);
+      renderChips(tabRows);
+      const rows = state.resp === 'yes' ? tabRows.filter(hasResp)
+        : state.resp === 'no' ? tabRows.filter((r) => !hasResp(r))
+        : tabRows;
       if (!rows.length) {
         box.appendChild(el('div', 'vw-empty', 'এই সময়ে কোনো রিকোয়েস্ট নেই'));
         return;
