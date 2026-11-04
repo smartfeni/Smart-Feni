@@ -1,0 +1,280 @@
+<!-- path: src/components/club-dashboard/MemberAnnounceTab.astro -->
+---
+// ============================================================
+// কম্পোনেন্ট: ক্লাব ড্যাশবোর্ড — "ঘোষণা" ট্যাব
+// ক্লাবের জরুরি বিজ্ঞপ্তি সদস্যদের নোটিফিকেশন (বেল + ইনবক্স + push) হিসেবে পাঠানো।
+//
+// - প্রাপক: ওই ক্লাবের club_members যাদের user_id আছে (অ্যাপ অ্যাকাউন্ট লিংকড), প্রেরক বাদ
+// - পাঠানো হয় শুধু RPC `club_send_announcement` দিয়ে (ওউনার বা can_edit_settings মডারেটর;
+//   ২৪ ঘণ্টায় সর্বোচ্চ ৫টা; বার্তা সর্বোচ্চ ৩০০ অক্ষর) — সব যাচাই সার্ভারে
+// - ইতিহাস: club_announcements টেবিল
+// - মডারেটরের can_edit_settings না থাকলে ট্যাব ও প্যানেল সরিয়ে ফেলা হয়
+// ============================================================
+---
+
+<div class="dash-card" id="annCard">
+  <h3><i class="fas fa-bullhorn"></i> সদস্যদের ঘোষণা পাঠান</h3>
+
+  <div class="form-msg" id="annMsg"></div>
+
+  <label class="form-label" for="annMessage">বার্তা</label>
+  <textarea class="form-input" id="annMessage" rows="4" maxlength="300" placeholder="যেমন: আগামীকাল বিকাল ৫টায় জরুরি সভা, সবাই উপস্থিত থাকবেন।"></textarea>
+  <p class="form-hint"><span id="annCharCount">0</span>/৩০০ অক্ষর</p>
+
+  <label class="ann-urgent-row">
+    <input type="checkbox" id="annUrgent" />
+    <span><strong>জরুরি</strong> — উচ্চ গুরুত্বের নোটিফিকেশন হিসেবে যাবে</span>
+  </label>
+
+  <p class="ann-audience" id="annAudience">সদস্য সংখ্যা লোড হচ্ছে...</p>
+
+  <button type="button" class="primary-btn" id="annSend" disabled>
+    <i class="fas fa-paper-plane"></i> সদস্যদের কাছে পাঠান
+  </button>
+</div>
+
+<div class="dash-card">
+  <h3><i class="fas fa-clock-rotate-left"></i> আগের ঘোষণা</h3>
+  <div id="annHistory"></div>
+  <p class="empty-note" id="annEmpty" style="display:none;">এখনো কোনো ঘোষণা পাঠানো হয়নি</p>
+</div>
+
+<style is:global>
+  .ann-urgent-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 14px;
+    font-size: 0.84rem;
+    color: #1B2A4A;
+    cursor: pointer;
+  }
+
+  .ann-urgent-row input {
+    margin-top: 3px;
+    accent-color: #FF6B35;
+  }
+
+  .ann-audience {
+    margin-top: 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #5A6E85;
+    background: #F4F7FC;
+    border-radius: 12px;
+    padding: 10px 14px;
+    line-height: 1.5;
+  }
+
+  .ann-item {
+    background: #FBFCFE;
+    border: 1px solid #EEF3F9;
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+
+  .ann-item-text {
+    font-size: 0.86rem;
+    color: #1B2A4A;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .ann-item-meta {
+    margin-top: 6px;
+    font-size: 0.74rem;
+    color: #8FA0BC;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+
+  .ann-urgent-tag {
+    color: #D14343;
+    font-weight: 700;
+  }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  let clubId = null;
+  let myId = null;
+  let audienceCount = 0;
+
+  const msgEl = document.getElementById('annMessage');
+  const urgentEl = document.getElementById('annUrgent');
+  const sendBtn = document.getElementById('annSend');
+  const formMsg = document.getElementById('annMsg');
+  const audienceEl = document.getElementById('annAudience');
+  const charEl = document.getElementById('annCharCount');
+
+  // ইউজারের লেখা টেক্সট innerHTML-এ বসানোর আগে এস্কেপ
+  function esc(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function showMsg(type, text) {
+    formMsg.className = 'form-msg ' + (type === 'error' ? 'show-error' : 'show-success');
+    formMsg.textContent = text;
+  }
+
+  function clearMsg() {
+    formMsg.className = 'form-msg';
+    formMsg.textContent = '';
+  }
+
+  function updateSendState() {
+    const hasText = (msgEl.value || '').trim().length > 0;
+    sendBtn.disabled = !(hasText && audienceCount > 0);
+  }
+
+  async function loadAudience() {
+    const { count: total } = await supabase
+      .from('club_members')
+      .select('id', { count: 'exact', head: true })
+      .eq('club_id', clubId);
+
+    let q = supabase
+      .from('club_members')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('club_id', clubId)
+      .not('user_id', 'is', null);
+    if (myId) q = q.neq('user_id', myId);
+    const { count: reachable } = await q;
+
+    audienceCount = reachable || 0;
+    const totalCount = total || 0;
+
+    if (audienceCount === 0) {
+      audienceEl.textContent = `এখন কারো কাছে পাঠানো যাবে না: মোট ${totalCount} জন সদস্যের কারো অ্যাপ অ্যাকাউন্ট লিংক করা নেই। অ্যাপের মাধ্যমে জয়েন করা সদস্যরাই নোটিফিকেশন পান।`;
+    } else {
+      audienceEl.textContent = `ঘোষণা যাবে ${audienceCount} জনের কাছে (মোট ${totalCount} জন সদস্যের মধ্যে যাদের অ্যাপ অ্যাকাউন্ট আছে)।`;
+    }
+    updateSendState();
+  }
+
+  function formatDate(iso) {
+    try {
+      return new Date(iso).toLocaleString('bn-BD', {
+        timeZone: 'Asia/Dhaka',
+        day: 'numeric',
+        month: 'short',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+    } catch (_) {
+      return '';
+    }
+  }
+
+  async function loadHistory() {
+    const { data, error } = await supabase
+      .from('club_announcements')
+      .select('id, message, is_urgent, recipient_count, created_at')
+      .eq('club_id', clubId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const list = document.getElementById('annHistory');
+    const emptyEl = document.getElementById('annEmpty');
+    list.innerHTML = '';
+
+    if (error || !data || data.length === 0) {
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    data.forEach((a) => {
+      const item = document.createElement('div');
+      item.className = 'ann-item';
+      item.innerHTML = `
+        <p class="ann-item-text">${esc(a.message)}</p>
+        <div class="ann-item-meta">
+          <span>${esc(formatDate(a.created_at))}</span>
+          <span>${esc(a.recipient_count)} জনের কাছে গেছে</span>
+          ${a.is_urgent ? '<span class="ann-urgent-tag">জরুরি</span>' : ''}
+        </div>
+      `;
+      list.appendChild(item);
+    });
+  }
+
+  async function sendAnnouncement() {
+    clearMsg();
+    const text = (msgEl.value || '').trim();
+    if (!text) {
+      showMsg('error', 'বার্তা লিখুন');
+      return;
+    }
+    if (audienceCount === 0) return;
+
+    const urgent = !!urgentEl.checked;
+    const ok = window.confirm(
+      `${audienceCount} জন সদস্যের কাছে ${urgent ? 'জরুরি ' : ''}ঘোষণা পাঠানো হবে। পাঠানোর পর ফেরত নেওয়া যাবে না। পাঠাবেন?`
+    );
+    if (!ok) return;
+
+    sendBtn.disabled = true;
+    const original = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> পাঠানো হচ্ছে...';
+
+    const { data, error } = await supabase.rpc('club_send_announcement', {
+      p_club_id: clubId,
+      p_message: text,
+      p_urgent: urgent,
+    });
+
+    sendBtn.innerHTML = original;
+
+    if (error) {
+      showMsg('error', error.message || 'পাঠানো ব্যর্থ হয়েছে');
+      updateSendState();
+      return;
+    }
+
+    const sent = data?.recipient_count ?? audienceCount;
+    const remaining = data?.remaining;
+    showMsg(
+      'success',
+      `${sent} জনের কাছে ঘোষণা পাঠানো হয়েছে।` +
+        (typeof remaining === 'number' ? ` আজ আর ${remaining}টা পাঠানো যাবে।` : '')
+    );
+    msgEl.value = '';
+    urgentEl.checked = false;
+    charEl.textContent = '0';
+    updateSendState();
+    loadHistory();
+  }
+
+  msgEl.addEventListener('input', () => {
+    charEl.textContent = String((msgEl.value || '').length);
+    updateSendState();
+  });
+  sendBtn.addEventListener('click', sendAnnouncement);
+
+  window.addEventListener('smartfeni:club-ready', async (e) => {
+    const { isOwner, permissions } = e.detail;
+
+    // মডারেটরের সেটিংস-পারমিশন না থাকলে এই ট্যাব দেখানো হবে না (RPC-ও ব্লক করে)
+    if (!isOwner && !permissions?.can_edit_settings) {
+      document.querySelector('.myclub-tab[data-tab="announce"]')?.remove();
+      document.querySelector('.myclub-panel[data-panel="announce"]')?.remove();
+      return;
+    }
+
+    clubId = e.detail.clubId;
+    const { data: { session } } = await supabase.auth.getSession();
+    myId = session?.user?.id || null;
+
+    loadAudience();
+    loadHistory();
+  });
+</script>
