@@ -538,6 +538,7 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
 
       const card = document.createElement('div');
       card.className = 'req-card';
+      const showDonorListBtn = req.status === 'active' && !(responses && responses.length > 0) && (Date.now() - new Date(req.created_at).getTime() >= 3600000);
 
       const statusLabel =
         req.status === 'fulfilled' ? '✅ ম্যানেজ হয়ে গেছে' :
@@ -564,11 +565,58 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
           <p class="donor-list-title">আগ্রহী ডোনার (${responses?.length || 0})</p>
           ${responseListHtml}
         </div>
+        ${showDonorListBtn ? `<button class="btn-donor-list" data-request-id="${req.id}"><i class="fas fa-phone"></i> রক্তদাতার তালিকা দেখুন</button><div class="donor-pick-box" id="pick-${req.id}" style="display:none;"></div>` : ''}
         ${req.status === 'active' ? `<button class="btn-fulfill" data-request-id="${req.id}"><i class="fas fa-check"></i> ব্লাড ম্যানেজ হয়ে গেছে</button>` : ''}
       `;
 
       list.appendChild(card);
     }
+
+    // ১ ঘণ্টায় রেসপন্স না এলে: সাম্প্রতিক সক্রিয় রক্তদাতার তালিকা (শুধু রিকোয়েস্টার দেখে; আসল চেক DB-তে)
+    list.querySelectorAll('.btn-donor-list').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const requestId = btn.getAttribute('data-request-id');
+        const box = document.getElementById('pick-' + requestId);
+        if (!box) return;
+
+        if (box.getAttribute('data-loaded') === '1') {
+          box.style.display = box.style.display === 'none' ? 'block' : 'none';
+          return;
+        }
+
+        (btn as HTMLButtonElement).disabled = true;
+        const { data, error } = await supabase.rpc('get_blood_request_donor_list', {
+          p_blood_request_id: requestId,
+        });
+        (btn as HTMLButtonElement).disabled = false;
+
+        if (error || !data?.success) {
+          if (data?.error === 'not_available') {
+            window.showToast('এখন তালিকা পাওয়া যাচ্ছে না', 'error');
+            loadCurrentRequests();
+          } else {
+            window.showToast('তালিকা লোড করতে সমস্যা হয়েছে, আবার চেষ্টা করুন', 'error');
+          }
+          return;
+        }
+
+        const donors = data.donors || [];
+        const rows = donors.map((d) => `
+          <div class="donor-row">
+            <span class="donor-name">${esc(d.name)}${d.upazila ? `<small class="donor-sub">${esc(d.upazila)}</small>` : ''}</span>
+            <a href="tel:${esc(d.phone)}" class="donor-phone"><i class="fas fa-phone"></i> ${esc(d.phone)}</a>
+          </div>
+        `).join('');
+
+        box.innerHTML = `
+          <p class="donor-list-title">সাম্প্রতিক সক্রিয় ${esc(data.blood_group)} রক্তদাতা (${donors.length})</p>
+          ${rows || '<p class="no-responses">এই মুহূর্তে কোনো রক্তদাতা পাওয়া যায়নি</p>'}
+          <p class="donor-pick-note">কল করে সরাসরি কথা বলুন। কেউ আগ্রহ দেখালে আপনার কার্ডে নাম আসবে।</p>
+        `;
+        box.setAttribute('data-loaded', '1');
+        box.style.display = 'block';
+      });
+    });
 
     list.querySelectorAll('.btn-fulfill').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -1089,6 +1137,48 @@ const groupsWithCount = bloodGroupSlugs.map((g) => ({
     font-weight: 700;
     font-size: 0.85rem;
     cursor: pointer;
+  }
+
+  .btn-donor-list {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #fff;
+    color: #D14343;
+    border: 1.5px solid #D14343;
+    padding: 10px;
+    border-radius: 40px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+
+  .btn-donor-list:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .donor-pick-box {
+    background: #F8FAFC;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+
+  .donor-sub {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #8FA0BC;
+  }
+
+  .donor-pick-note {
+    font-size: 0.74rem;
+    color: #8FA0BC;
+    margin: 8px 0 0;
   }
 
   .btn-fulfill:disabled {
