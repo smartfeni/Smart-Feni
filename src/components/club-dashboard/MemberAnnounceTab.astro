@@ -2,45 +2,74 @@
 ---
 // ============================================================
 // কম্পোনেন্ট: ক্লাব ড্যাশবোর্ড — "ঘোষণা" ট্যাব
-// ক্লাবের জরুরি বিজ্ঞপ্তি সদস্যদের নোটিফিকেশন (বেল + ইনবক্স + push) হিসেবে পাঠানো।
 //
-// - প্রাপক: ওই ক্লাবের club_members যাদের user_id আছে (অ্যাপ অ্যাকাউন্ট লিংকড), প্রেরক বাদ
-// - পাঠানো হয় শুধু RPC `club_send_announcement` দিয়ে (ওউনার বা can_edit_settings মডারেটর;
-//   ২৪ ঘণ্টায় সর্বোচ্চ ৫টা; বার্তা সর্বোচ্চ ৩০০ অক্ষর) — সব যাচাই সার্ভারে
-// - ইতিহাস: club_announcements টেবিল
-// - মডারেটরের can_edit_settings না থাকলে ট্যাব ও প্যানেল সরিয়ে ফেলা হয়
+// একটাই জায়গা থেকে ক্লাবের ঘোষণা:
+//   ১) হেডলাইন → club_posts (type='announcement') → ক্লাব পেজের টিকার বারে (আগের মতোই)
+//   ২) ঐচ্ছিক: সদস্যদের নোটিফিকেশন (বেল + ইনবক্স + push) — RPC `club_send_announcement`
+//
+// - আগের "এনাউন্সমেন্ট" পোস্ট টাইপ PostsTab থেকে সরানো হয়েছে; এই ট্যাব থেকেই হবে
+// - ঘোষণা দিতে: ওউনার বা can_edit_listings মডারেটর; নোটিফিকেশন পাঠাতে: ওউনার বা can_edit_settings
+// - প্রাপক: club_members যাদের user_id আছে (অ্যাপ অ্যাকাউন্ট লিংকড), প্রেরক বাদ
+// - সীমা (সার্ভারে যাচাই): ২৪ ঘণ্টায় ৫টা নোটিফিকেশন, বার্তা সর্বোচ্চ ৩০০ অক্ষর
+// - নিচে বটম-নেভের জন্য বাড়তি padding আছে (কার্ডের নিচের অংশ ঢাকা পড়বে না)
 // ============================================================
 ---
 
-<div class="dash-card" id="annCard">
-  <h3><i class="fas fa-bullhorn"></i> সদস্যদের ঘোষণা পাঠান</h3>
+<div class="ann-wrap" id="annWrap">
+  <div class="dash-card" id="annCard">
+    <h3><i class="fas fa-bullhorn"></i> নতুন ঘোষণা</h3>
+    <p class="ann-help">হেডলাইন ক্লাব পেজের উপরের চলমান ঘোষণা-বারে দেখাবে।</p>
+    <div class="form-msg" id="annMsg"></div>
 
-  <div class="form-msg" id="annMsg"></div>
+    <label class="form-label" for="annTitle">হেডলাইন<span class="required-mark">*</span></label>
+    <input type="text" class="form-input" id="annTitle" maxlength="100" placeholder="যেমন: আগামীকাল বিকাল ৫টায় জরুরি সভা" required />
+    <div class="field-error-msg" data-error-for="annTitle">
+      <i class="fas fa-circle-exclamation"></i><span>হেডলাইন দিন</span>
+    </div>
 
-  <label class="form-label" for="annMessage">বার্তা</label>
-  <textarea class="form-input" id="annMessage" rows="4" maxlength="300" placeholder="যেমন: আগামীকাল বিকাল ৫টায় জরুরি সভা, সবাই উপস্থিত থাকবেন।"></textarea>
-  <p class="form-hint"><span id="annCharCount">0</span>/৩০০ অক্ষর</p>
+    <label class="form-label" for="annDesc">বিস্তারিত বার্তা (ঐচ্ছিক)</label>
+    <textarea class="form-input" id="annDesc" rows="3" maxlength="190" placeholder="নোটিফিকেশনে হেডলাইনের সাথে যাবে"></textarea>
 
-  <label class="ann-urgent-row">
-    <input type="checkbox" id="annUrgent" />
-    <span><strong>জরুরি</strong> — উচ্চ গুরুত্বের নোটিফিকেশন হিসেবে যাবে</span>
-  </label>
+    <div id="annNotifyBox">
+      <label class="ann-check-row">
+        <input type="checkbox" id="annNotify" checked />
+        <span>সদস্যদের নোটিফিকেশন পাঠান</span>
+      </label>
 
-  <p class="ann-audience" id="annAudience">সদস্য সংখ্যা লোড হচ্ছে...</p>
+      <label class="ann-check-row" id="annUrgentRow">
+        <input type="checkbox" id="annUrgent" />
+        <span><strong>জরুরি</strong> — উচ্চ গুরুত্বের নোটিফিকেশন হিসেবে যাবে</span>
+      </label>
 
-  <button type="button" class="primary-btn" id="annSend" disabled>
-    <i class="fas fa-paper-plane"></i> সদস্যদের কাছে পাঠান
-  </button>
-</div>
+      <p class="ann-audience" id="annAudience">সদস্য সংখ্যা লোড হচ্ছে...</p>
+    </div>
 
-<div class="dash-card">
-  <h3><i class="fas fa-clock-rotate-left"></i> আগের ঘোষণা</h3>
-  <div id="annHistory"></div>
-  <p class="empty-note" id="annEmpty" style="display:none;">এখনো কোনো ঘোষণা পাঠানো হয়নি</p>
+    <button type="button" class="primary-btn" id="annSend">
+      <i class="fas fa-bullhorn"></i> <span>ঘোষণা দিন</span>
+    </button>
+  </div>
+
+  <div class="dash-card">
+    <h3><i class="fas fa-newspaper"></i> আমার ঘোষণা</h3>
+    <div id="annList"></div>
+    <p class="empty-note" id="annEmpty" style="display:none;">এখনো কোনো ঘোষণা নেই</p>
+  </div>
 </div>
 
 <style is:global>
-  .ann-urgent-row {
+  /* বটম নেভ (BottomNav) যেন কার্ডের নিচের অংশ ঢেকে না দেয় */
+  .ann-wrap {
+    padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .ann-help {
+    font-size: 0.8rem;
+    color: #8FA0BC;
+    margin: -4px 0 12px;
+    line-height: 1.5;
+  }
+
+  .ann-check-row {
     display: flex;
     align-items: flex-start;
     gap: 10px;
@@ -50,13 +79,16 @@
     cursor: pointer;
   }
 
-  .ann-urgent-row input {
+  .ann-check-row input {
     margin-top: 3px;
+    width: 17px;
+    height: 17px;
+    flex-shrink: 0;
     accent-color: #FF6B35;
   }
 
   .ann-audience {
-    margin-top: 14px;
+    margin: 14px 0 16px;
     font-size: 0.82rem;
     font-weight: 600;
     color: #5A6E85;
@@ -65,35 +97,6 @@
     padding: 10px 14px;
     line-height: 1.5;
   }
-
-  .ann-item {
-    background: #FBFCFE;
-    border: 1px solid #EEF3F9;
-    border-radius: 14px;
-    padding: 12px 14px;
-    margin-bottom: 10px;
-  }
-
-  .ann-item-text {
-    font-size: 0.86rem;
-    color: #1B2A4A;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .ann-item-meta {
-    margin-top: 6px;
-    font-size: 0.74rem;
-    color: #8FA0BC;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-  }
-
-  .ann-urgent-tag {
-    color: #D14343;
-    font-weight: 700;
-  }
 </style>
 
 <script>
@@ -101,14 +104,18 @@
 
   let clubId = null;
   let myId = null;
+  let canNotify = false;
   let audienceCount = 0;
 
-  const msgEl = document.getElementById('annMessage');
+  const titleEl = document.getElementById('annTitle');
+  const descEl = document.getElementById('annDesc');
+  const notifyEl = document.getElementById('annNotify');
   const urgentEl = document.getElementById('annUrgent');
+  const urgentRow = document.getElementById('annUrgentRow');
+  const notifyBox = document.getElementById('annNotifyBox');
   const sendBtn = document.getElementById('annSend');
   const formMsg = document.getElementById('annMsg');
   const audienceEl = document.getElementById('annAudience');
-  const charEl = document.getElementById('annCharCount');
 
   // ইউজারের লেখা টেক্সট innerHTML-এ বসানোর আগে এস্কেপ
   function esc(value) {
@@ -123,6 +130,9 @@
   function showMsg(type, text) {
     formMsg.className = 'form-msg ' + (type === 'error' ? 'show-error' : 'show-success');
     formMsg.textContent = text;
+    if (text && typeof window.showToast === 'function') {
+      window.showToast(text, type === 'error' ? 'error' : 'success', type === 'error' ? 3500 : 2500);
+    }
   }
 
   function clearMsg() {
@@ -130,9 +140,9 @@
     formMsg.textContent = '';
   }
 
-  function updateSendState() {
-    const hasText = (msgEl.value || '').trim().length > 0;
-    sendBtn.disabled = !(hasText && audienceCount > 0);
+  function syncNotifyUi() {
+    urgentRow.style.display = notifyEl.checked ? 'flex' : 'none';
+    audienceEl.style.display = notifyEl.checked ? 'block' : 'none';
   }
 
   async function loadAudience() {
@@ -153,11 +163,10 @@
     const totalCount = total || 0;
 
     if (audienceCount === 0) {
-      audienceEl.textContent = `এখন কারো কাছে পাঠানো যাবে না: মোট ${totalCount} জন সদস্যের কারো অ্যাপ অ্যাকাউন্ট লিংক করা নেই। অ্যাপের মাধ্যমে জয়েন করা সদস্যরাই নোটিফিকেশন পান।`;
+      audienceEl.textContent = `নোটিফিকেশন কারো কাছে যাবে না: মোট ${totalCount} জন সদস্যের কারো অ্যাপ অ্যাকাউন্ট লিংক করা নেই। অ্যাপের মাধ্যমে জয়েন করা সদস্যরাই নোটিফিকেশন পান। ঘোষণা শুধু ক্লাব পেজে দেখাবে।`;
     } else {
-      audienceEl.textContent = `ঘোষণা যাবে ${audienceCount} জনের কাছে (মোট ${totalCount} জন সদস্যের মধ্যে যাদের অ্যাপ অ্যাকাউন্ট আছে)।`;
+      audienceEl.textContent = `নোটিফিকেশন যাবে ${audienceCount} জনের কাছে (মোট ${totalCount} জন সদস্যের মধ্যে যাদের অ্যাপ অ্যাকাউন্ট আছে)।`;
     }
-    updateSendState();
   }
 
   function formatDate(iso) {
@@ -174,15 +183,15 @@
     }
   }
 
-  async function loadHistory() {
+  async function loadList() {
     const { data, error } = await supabase
-      .from('club_announcements')
-      .select('id, message, is_urgent, recipient_count, created_at')
+      .from('club_posts')
+      .select('id, title, description, created_at')
       .eq('club_id', clubId)
-      .order('created_at', { ascending: false })
-      .limit(20);
+      .eq('type', 'announcement')
+      .order('created_at', { ascending: false });
 
-    const list = document.getElementById('annHistory');
+    const list = document.getElementById('annList');
     const emptyEl = document.getElementById('annEmpty');
     list.innerHTML = '';
 
@@ -192,79 +201,119 @@
     }
     emptyEl.style.display = 'none';
 
-    data.forEach((a) => {
-      const item = document.createElement('div');
-      item.className = 'ann-item';
-      item.innerHTML = `
-        <p class="ann-item-text">${esc(a.message)}</p>
-        <div class="ann-item-meta">
-          <span>${esc(formatDate(a.created_at))}</span>
-          <span>${esc(a.recipient_count)} জনের কাছে গেছে</span>
-          ${a.is_urgent ? '<span class="ann-urgent-tag">জরুরি</span>' : ''}
+    data.forEach((p) => {
+      const card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML = `
+        <div class="item-photo-placeholder"><i class="fas fa-bullhorn"></i></div>
+        <div class="item-body">
+          <p class="item-title">${esc(p.title)}</p>
+          <p class="item-sub">${esc(p.description || '')}${p.description ? ' · ' : ''}${esc(formatDate(p.created_at))}</p>
+        </div>
+        <div class="item-actions">
+          <button class="icon-btn delete" type="button"><i class="fas fa-trash"></i></button>
         </div>
       `;
-      list.appendChild(item);
+      card.querySelector('.delete').addEventListener('click', () => deleteAnnouncement(p.id));
+      list.appendChild(card);
     });
+  }
+
+  async function deleteAnnouncement(id) {
+    if (!confirm('এই ঘোষণাটি মুছে ফেলতে চান?')) return;
+    const { error } = await supabase.from('club_posts').delete().eq('id', id);
+    if (error) {
+      showMsg('error', 'ডিলিট ব্যর্থ: ' + error.message);
+      return;
+    }
+    loadList();
   }
 
   async function sendAnnouncement() {
     clearMsg();
-    const text = (msgEl.value || '').trim();
-    if (!text) {
-      showMsg('error', 'বার্তা লিখুন');
-      return;
-    }
-    if (audienceCount === 0) return;
+    if (!window.SFValidateForm(document.getElementById('annCard'))) return;
 
-    const urgent = !!urgentEl.checked;
-    const ok = window.confirm(
-      `${audienceCount} জন সদস্যের কাছে ${urgent ? 'জরুরি ' : ''}ঘোষণা পাঠানো হবে। পাঠানোর পর ফেরত নেওয়া যাবে না। পাঠাবেন?`
-    );
-    if (!ok) return;
+    const title = (titleEl.value || '').trim();
+    const desc = (descEl.value || '').trim();
+    const wantNotify = canNotify && notifyEl.checked && audienceCount > 0;
+    const urgent = wantNotify && !!urgentEl.checked;
+
+    if (wantNotify) {
+      const ok = window.confirm(
+        `ঘোষণাটি ক্লাব পেজে দেখানো হবে এবং ${audienceCount} জন সদস্যের কাছে ${urgent ? 'জরুরি ' : ''}নোটিফিকেশন যাবে। পাঠানোর পর নোটিফিকেশন ফেরত নেওয়া যাবে না। এগোবেন?`
+      );
+      if (!ok) return;
+    }
 
     sendBtn.disabled = true;
-    const original = sendBtn.innerHTML;
-    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> পাঠানো হচ্ছে...';
+    const label = sendBtn.querySelector('span');
+    const originalLabel = label.textContent;
+    label.textContent = 'পাঠানো হচ্ছে...';
 
-    const { data, error } = await supabase.rpc('club_send_announcement', {
-      p_club_id: clubId,
-      p_message: text,
-      p_urgent: urgent,
-    });
+    // ধাপ ১: ক্লাব পেজের টিকারে দেখানোর জন্য পোস্ট (আগের এনাউন্সমেন্ট সিস্টেমই)
+    const { error: postError } = await supabase
+      .from('club_posts')
+      .insert({
+        club_id: clubId,
+        type: 'announcement',
+        title,
+        description: desc || null,
+      });
 
-    sendBtn.innerHTML = original;
-
-    if (error) {
-      showMsg('error', error.message || 'পাঠানো ব্যর্থ হয়েছে');
-      updateSendState();
+    if (postError) {
+      label.textContent = originalLabel;
+      sendBtn.disabled = false;
+      showMsg('error', 'ঘোষণা ব্যর্থ: ' + postError.message);
       return;
     }
 
-    const sent = data?.recipient_count ?? audienceCount;
-    const remaining = data?.remaining;
-    showMsg(
-      'success',
-      `${sent} জনের কাছে ঘোষণা পাঠানো হয়েছে।` +
-        (typeof remaining === 'number' ? ` আজ আর ${remaining}টা পাঠানো যাবে।` : '')
-    );
-    msgEl.value = '';
+    // ধাপ ২: ঐচ্ছিক সদস্য নোটিফিকেশন
+    let notifyResult = null;
+    let notifyError = null;
+    if (wantNotify) {
+      const message = (desc ? `${title} — ${desc}` : title).slice(0, 300);
+      const { data, error } = await supabase.rpc('club_send_announcement', {
+        p_club_id: clubId,
+        p_message: message,
+        p_urgent: urgent,
+      });
+      notifyResult = data;
+      notifyError = error;
+    }
+
+    label.textContent = originalLabel;
+    sendBtn.disabled = false;
+
+    if (notifyError) {
+      showMsg('error', `ঘোষণা ক্লাব পেজে দেওয়া হয়েছে, কিন্তু নোটিফিকেশন যায়নি: ${notifyError.message}`);
+    } else if (wantNotify) {
+      const sent = notifyResult?.recipient_count ?? audienceCount;
+      const remaining = notifyResult?.remaining;
+      showMsg(
+        'success',
+        `ঘোষণা দেওয়া হয়েছে, ${sent} জনের কাছে নোটিফিকেশন গেছে।` +
+          (typeof remaining === 'number' ? ` আজ আর ${remaining}টা নোটিফিকেশন পাঠানো যাবে।` : '')
+      );
+    } else {
+      showMsg('success', 'ঘোষণা ক্লাব পেজে দেওয়া হয়েছে ✓');
+    }
+
+    titleEl.value = '';
+    descEl.value = '';
     urgentEl.checked = false;
-    charEl.textContent = '0';
-    updateSendState();
-    loadHistory();
+    loadList();
   }
 
-  msgEl.addEventListener('input', () => {
-    charEl.textContent = String((msgEl.value || '').length);
-    updateSendState();
-  });
+  notifyEl.addEventListener('change', syncNotifyUi);
   sendBtn.addEventListener('click', sendAnnouncement);
 
   window.addEventListener('smartfeni:club-ready', async (e) => {
     const { isOwner, permissions } = e.detail;
+    const canPost = !!isOwner || !!permissions?.can_edit_listings;
+    canNotify = !!isOwner || !!permissions?.can_edit_settings;
 
-    // মডারেটরের সেটিংস-পারমিশন না থাকলে এই ট্যাব দেখানো হবে না (RPC-ও ব্লক করে)
-    if (!isOwner && !permissions?.can_edit_settings) {
+    // ঘোষণা দেওয়ার অধিকার না থাকলে ট্যাব ও প্যানেল সরিয়ে ফেলা
+    if (!canPost) {
       document.querySelector('.myclub-tab[data-tab="announce"]')?.remove();
       document.querySelector('.myclub-panel[data-panel="announce"]')?.remove();
       return;
@@ -274,7 +323,13 @@
     const { data: { session } } = await supabase.auth.getSession();
     myId = session?.user?.id || null;
 
-    loadAudience();
-    loadHistory();
+    if (!canNotify) {
+      notifyBox.style.display = 'none';
+      notifyEl.checked = false;
+    } else {
+      syncNotifyUi();
+      loadAudience();
+    }
+    loadList();
   });
 </script>
