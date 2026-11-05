@@ -48,6 +48,7 @@ import SerialsTab from '../../components/clinic-dashboard/SerialsTab.astro';
             <i class="fas fa-bell-concierge"></i> সিরিয়াল রিকোয়েস্ট
             <span class="dr-badge" id="drSerialBadge" style="display:none;">0</span>
           </button>
+          <button type="button" class="dr-tab" data-tab="stats"><i class="fas fa-chart-column"></i> পরিসংখ্যান</button>
         </div>
 
         <div id="drPanelDoctors">
@@ -85,6 +86,37 @@ import SerialsTab from '../../components/clinic-dashboard/SerialsTab.astro';
         </div>
 
         </div>
+
+        <!-- ===== পরিসংখ্যান প্যানেল (শুধু admin) ===== -->
+        <div id="drPanelStats" style="display:none;">
+          <div class="st-range" id="stRange">
+            <button type="button" class="st-chip active" data-days="30">৩০ দিন</button>
+            <button type="button" class="st-chip" data-days="7">৭ দিন</button>
+            <button type="button" class="st-chip" data-days="0">সব সময়</button>
+          </div>
+          <div id="stBody"><div class="st-empty">লোড হচ্ছে...</div></div>
+        </div>
+        <style is:global>
+          .st-range { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+          .st-chip { border: 1.5px solid #E5EAF0; background: #fff; color: #5A6E85; border-radius: 20px; padding: 8px 14px; font-weight: 700; font-size: 0.82rem; cursor: pointer; font-family: inherit; }
+          .st-chip.active { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+          .st-sec { margin-bottom: 24px; }
+          .st-h { font-size: 0.95rem; font-weight: 800; color: #1B2A4A; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+          .st-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+          .st-card { background: #fff; border-radius: 16px; padding: 14px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); }
+          .st-num { font-size: 1.5rem; font-weight: 800; color: #1B2A4A; line-height: 1.2; }
+          .st-lbl { font-size: 0.74rem; color: #8FA0BC; font-weight: 700; margin-top: 2px; }
+          .st-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+          .st-row { background: #fff; border-radius: 14px; padding: 12px 14px; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05); display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+          .st-name { font-size: 0.88rem; font-weight: 700; color: #1B2A4A; line-height: 1.4; }
+          .st-sub { font-size: 0.72rem; color: #8FA0BC; margin-top: 3px; }
+          .st-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+          .st-pill { font-size: 0.72rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; background: #F1F4F9; color: #5A6E85; white-space: nowrap; }
+          .st-pill.o { background: #FFF0EA; color: #D14343; }
+          .st-pill.g { background: #EAFBF0; color: #1B7A3C; }
+          .st-note { background: #EAF2FF; color: #1D4FA8; border-radius: 12px; padding: 10px 12px; font-size: 0.78rem; font-weight: 600; line-height: 1.55; margin-top: 10px; }
+          .st-empty { text-align: center; color: #8FA0BC; padding: 30px 10px; font-size: 0.9rem; }
+        </style>
 
         <!-- ===== সিরিয়াল রিকোয়েস্ট প্যানেল (শুধু admin) ===== -->
         <div id="drPanelSerials" style="display:none;">
@@ -1352,12 +1384,76 @@ import SerialsTab from '../../components/clinic-dashboard/SerialsTab.astro';
     let serialClinics = [];      // [{ ...clinic, open, late }]
     let serialsActive = false;
 
+    // ===== পরিসংখ্যান ট্যাব (শুধু admin) — RPC admin_doctor_stats =====
+    let statsDays = 30;
+    const stFmt = (iso) => {
+      try { return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short' }); } catch (e) { return ''; }
+    };
+
+    async function loadStats() {
+      const body = $('stBody');
+      body.innerHTML = '<div class="st-empty">লোড হচ্ছে...</div>';
+      const { data, error } = await supabase.rpc('admin_doctor_stats', { p_days: statsDays });
+      if (error || !data) {
+        body.innerHTML = `<div class="st-empty" style="color:#D14343;">লোড করা যায়নি: ${esc(error ? error.message : '')}</div>`;
+        return;
+      }
+      const s = data.serial || {};
+      const c = data.calls || {};
+      const clinics = data.clinics || [];
+      const docs = data.doctors || [];
+      const card = (n, l) => `<div class="st-card"><div class="st-num">${toBn(n || 0)}</div><div class="st-lbl">${l}</div></div>`;
+
+      let h = '<div class="st-sec"><h3 class="st-h"><i class="fas fa-ticket"></i> সিরিয়াল রিকোয়েস্ট</h3><div class="st-grid">'
+        + card(s.total, 'মোট রিকোয়েস্ট') + card(s.requesters, 'আলাদা ইউজার')
+        + card(s.confirmed, 'কনফার্মড') + card(s.open, 'চলমান')
+        + card(s.cancelled, 'বাতিল') + card(s.unreachable, 'ফোন ধরেনি')
+        + '</div>';
+
+      h += '<div class="st-list">';
+      if (clinics.length) {
+        h += clinics.map((x) => `<div class="st-row"><div class="st-name">${esc(x.name)}</div><div class="st-pills"><span class="st-pill">মোট ${toBn(x.total)}</span><span class="st-pill g">কনফার্মড ${toBn(x.confirmed)}</span>${x.open ? `<span class="st-pill o">চলমান ${toBn(x.open)}</span>` : ''}</div></div>`).join('');
+      } else {
+        h += '<div class="st-empty">এই সময়ে কোনো রিকোয়েস্ট নেই</div>';
+      }
+      h += '</div><div class="st-note">"Test" নামের ক্লিনিকের রিকোয়েস্ট এখানে গোনা হয় না।</div></div>';
+
+      h += '<div class="st-sec"><h3 class="st-h"><i class="fas fa-phone"></i> ডাক্তারের কল বাটন</h3><div class="st-grid">'
+        + card(c.total, 'মোট ক্লিক') + card(docs.length, 'ডাক্তারে ক্লিক পড়েছে')
+        + card(c.users, 'আলাদা ইউজার (লগইন)') + card(c.devices, 'আলাদা ডিভাইস')
+        + '</div>';
+
+      h += '<div class="st-list">';
+      if (docs.length) {
+        h += docs.map((d) => `<div class="st-row"><div><div class="st-name">${esc(d.name)}</div><div class="st-sub">শেষ ক্লিক: ${esc(stFmt(d.last_at))}</div></div><div class="st-pills"><span class="st-pill o">ক্লিক ${toBn(d.clicks)}</span><span class="st-pill">ইউজার ${toBn(d.users)}</span><span class="st-pill">ডিভাইস ${toBn(d.devices)}</span></div></div>`).join('');
+      } else {
+        h += '<div class="st-empty">এই সময়ে কোনো কল ক্লিক নেই</div>';
+      }
+      h += '</div>';
+      if (c.tracked_since) {
+        h += `<div class="st-note">ইউজার ও ডিভাইস গণনা শুরু ${esc(stFmt(c.tracked_since))} থেকে। তার আগের ক্লিকে শুধু ক্লিকের সংখ্যা আছে, তাই ইউজার/ডিভাইস ০ দেখাতে পারে। ক্লিক মানেই কল হয়েছে তা নয়।</div>`;
+      }
+      h += '</div>';
+
+      body.innerHTML = h;
+    }
+
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('.st-chip');
+      if (!b) return;
+      statsDays = Number(b.dataset.days) || 0;
+      document.querySelectorAll('.st-chip').forEach((x) => x.classList.toggle('active', x === b));
+      loadStats();
+    });
+
     function setDrTab(target) {
       $('drPanelDoctors').style.display = target === 'doctors' ? 'block' : 'none';
       $('drPanelSerials').style.display = target === 'serials' ? 'block' : 'none';
+      $('drPanelStats').style.display = target === 'stats' ? 'block' : 'none';
       document.querySelectorAll('.dr-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === target));
       serialsActive = target === 'serials';
       if (serialsActive) loadSerialPanel();
+      if (target === 'stats') loadStats();
     }
 
     function clinicLabel(c) {
