@@ -578,7 +578,55 @@
 
     applyState(state);
     writeHamburgerCache(state);
+    if (state.isAdminOrMod) startManualBadge(); else stopManualBadge();
   }
+
+  // ===== ম্যানুয়াল অর্ডার ব্যাজ: চ্যাট বট (AI) থেকে আসা, এখনো রাইডার ঠিক হয়নি (status = new) এমন অর্ডার =====
+  // স্টাইল inline (Astro scoped CSS সমস্যা এড়াতে); BottomNav-এর মেনু বাটনও এই ইভেন্ট শোনে
+  var manualBadgeTimer = null;
+
+  function setManualBadge(count) {
+    if (manualOrderItem) {
+      let b = document.getElementById('hmManualBadge');
+      if (!b) {
+        b = document.createElement('span');
+        b.id = 'hmManualBadge';
+        b.setAttribute('style', 'margin-left:auto;margin-right:8px;min-width:22px;height:22px;padding:0 7px;border-radius:20px;background:#D14343;color:#fff;font-size:12px;font-weight:800;display:none;align-items:center;justify-content:center;');
+        manualOrderItem.insertBefore(b, manualOrderItem.querySelector('.hm-item-arrow'));
+      }
+      b.textContent = count > 99 ? '৯৯+' : String(count).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+      b.style.display = count > 0 ? 'flex' : 'none';
+    }
+    window.dispatchEvent(new CustomEvent('smartfeni:manual-order-count', { detail: { count } }));
+  }
+
+  async function refreshManualBadge() {
+    try {
+      const { count, error } = await supabase
+        .from('manual_orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('source', 'ai_assistant')
+        .eq('status', 'new');
+      if (error) return;
+      setManualBadge(count || 0);
+    } catch (_) {
+      // ব্যর্থ হলে ব্যাজ যেমন আছে তেমনই থাকবে
+    }
+  }
+
+  function startManualBadge() {
+    refreshManualBadge();
+    if (manualBadgeTimer) return;
+    manualBadgeTimer = setInterval(() => { if (!document.hidden) refreshManualBadge(); }, 60000);
+  }
+
+  function stopManualBadge() {
+    if (manualBadgeTimer) { clearInterval(manualBadgeTimer); manualBadgeTimer = null; }
+    setManualBadge(0);
+  }
+
+  window.addEventListener('smartfeni:open-hamburger-menu', () => { if (manualBadgeTimer) refreshManualBadge(); });
+  window.addEventListener('smartfeni:logged-out', stopManualBadge);
 
   function applyState(state) {
     setSkeleton(false);
