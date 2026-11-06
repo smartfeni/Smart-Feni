@@ -132,6 +132,28 @@
       font-size: 1rem;
     }
 
+    #report {
+      background: transparent;
+      color: var(--muted);
+      border: 2px dashed var(--line);
+      min-height: 46px;
+      font-size: 0.9375rem;
+    }
+
+    #report:disabled {
+      opacity: 0.7;
+      cursor: default;
+    }
+
+    .wa-link {
+      display: block;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 0.9375rem;
+      font-weight: 600;
+      text-decoration: underline;
+    }
+
     @keyframes nudge {
       0%, 100% { transform: translateX(0); }
       25% { transform: translateX(-6px); }
@@ -166,7 +188,10 @@
     <div class="actions">
       <button id="retry" type="button">আবার চেষ্টা করুন</button>
       <button id="home" type="button">হোমে যান</button>
+      <button id="report" type="button">সমস্যা জানান</button>
     </div>
+
+    <a id="wa" class="wa-link" href="https://wa.me/8801816355833?text=%E0%A6%B8%E0%A7%8D%E0%A6%AE%E0%A6%BE%E0%A6%B0%E0%A7%8D%E0%A6%9F%20%E0%A6%AB%E0%A7%87%E0%A6%A8%E0%A7%80%20%E0%A6%85%E0%A7%8D%E0%A6%AF%E0%A6%BE%E0%A6%AA%20%E0%A6%96%E0%A7%81%E0%A6%B2%E0%A6%9B%E0%A7%87%20%E0%A6%A8%E0%A6%BE%E0%A5%A4%20%E0%A6%AB%E0%A7%8B%E0%A6%A8%E0%A7%87%E0%A6%B0%20%E0%A6%AE%E0%A6%A1%E0%A7%87%E0%A6%B2%3A%20" target="_blank" rel="noopener">হোয়াটসঅ্যাপে জানান</a>
 
     <p class="brand">
       <strong>স্মার্ট ফেনী</strong>
@@ -184,6 +209,7 @@
       var descEl = document.getElementById('desc');
       var retryBtn = document.getElementById('retry');
       var homeBtn = document.getElementById('home');
+      var reportBtn = document.getElementById('report');
 
       var TEXT = {
         offline: {
@@ -311,6 +337,10 @@
       hideSplash();
       setTimeout(hideSplash, 300);
 
+      // নেটিভ watchdog-কে জানাও: এরর পেজ দেখা গেছে (এই পেজ নিজেই রিপোর্ট করে, তাই watchdog আর লাগবে না)
+      notifyNativeErrorShown();
+      setTimeout(notifyNativeErrorShown, 300);
+
       // ============================================================
       // নিজে-নিজে কারণ খোঁজা (diagnosis)
       // এই পেজ দেখা মানে অ্যাপ smartfeni.com লোড করতে পারেনি। এখানে ৩টা সাইটে
@@ -335,7 +365,7 @@
           setTimeout(function () {
             if (ctrl) { try { ctrl.abort(); } catch (e) {} }
             finish(false);
-          }, 6000);
+          }, 12000);
           try {
             var opts = { mode: 'no-cors', cache: 'no-store' };
             if (ctrl) opts.signal = ctrl.signal;
@@ -377,9 +407,104 @@
         });
       }
 
+      // [health-v1] ---- অফলাইন-সেফ রিপোর্ট ----
+      // নেটে সমস্যার সময়ই রিপোর্ট পাঠানো সবচেয়ে কঠিন। তাই আগে ফোনে রাখি (নেটিভ কিউ/localStorage),
+      // তারপর পাঠাই; ব্যর্থ হলে নেট ফিরলে, ১০/৩০/৯০ সেকেন্ড পর, আর পরের বার এই পেজ খুললে আবার চেষ্টা।
+      var Q_KEY = 'sf_errpage_q';
+      var SESSION = String(Date.now());
+      var flushing = false;
+      var flushTries = 0;
+
+      function qRead() {
+        try {
+          var a = JSON.parse(localStorage.getItem(Q_KEY) || '[]');
+          return Array.isArray(a) ? a : [];
+        } catch (e) { return []; }
+      }
+
+      function qWrite(a) {
+        try { localStorage.setItem(Q_KEY, JSON.stringify(a.slice(-10))); } catch (e) {}
+      }
+
+      function devId() {
+        try {
+          var d = localStorage.getItem('sf_did');
+          if (!d) {
+            d = 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+            localStorage.setItem('sf_did', d);
+          }
+          return d;
+        } catch (e) { return 'unknown'; }
+      }
+
+      function sendItem(item) {
+        var url = SB_URL + (item.k === 'h' ? '/rest/v1/rpc/log_client_health' : '/rest/v1/rpc/report_client_error');
+        var body = item.k === 'h' ? { p_events: [item.b] } : item.b;
+        return fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+          body: JSON.stringify(body)
+        }).then(function (res) { return !!(res && res.ok); })
+          .catch(function () { return false; });
+      }
+
+      function flushQueue() {
+        if (flushing || navigator.onLine === false) return;
+        var q = qRead();
+        if (!q.length) return;
+        flushing = true;
+        sendItem(q[0]).then(function (ok) {
+          flushing = false;
+          if (ok) {
+            var cur = qRead();
+            cur.shift();
+            qWrite(cur);
+            flushTries = 0;
+            if (cur.length) flushQueue();
+          } else if (flushTries < 3) {
+            var wait = [10000, 30000, 90000][flushTries];
+            flushTries++;
+            setTimeout(flushQueue, wait);
+          }
+        });
+      }
+
+      // নতুন AAB-তে নেটিভ প্লাগিন (SFHealth) থাকে: সেখানে দিলে প্রসেস মরলেও রিপোর্ট হারায় না।
+      // না থাকলে localStorage কিউ। legacy = /admin/errors-এর পুরনো রিপোর্ট (আগের মতোই যায়)।
+      function push(event, detail, legacy) {
+        var net = navigator.onLine === false ? 'offline' : ((navigator.connection && navigator.connection.effectiveType) || null);
+        var ev = { event: event, device_id: devId(), session_id: SESSION, platform: 'android_app', page: '/error.html', net_type: net, detail: detail };
+        if (detail && detail.model) ev.device_model = detail.model;
+        if (detail && detail.android) ev.os_version = detail.android;
+
+        var q = qRead();
+        var viaNative = false;
+        var H = getPlugin('SFHealth');
+        if (H && typeof H.report === 'function') {
+          try {
+            var r = H.report({ event: event, detail: detail });
+            if (r && typeof r.catch === 'function') r.catch(function () {});
+            viaNative = true;
+          } catch (e) {}
+        }
+        if (!viaNative) q.push({ k: 'h', b: ev });
+        if (legacy) q.push({ k: 'e', b: legacy });
+        qWrite(q);
+        flushQueue();
+      }
+
+      function notifyNativeErrorShown() {
+        try {
+          var H = getPlugin('SFHealth');
+          if (H && typeof H.errorShown === 'function') {
+            var r = H.errorShown();
+            if (r && typeof r.catch === 'function') r.catch(function () {});
+          }
+        } catch (e) {}
+      }
+
       function sendReport(site, sb, net) {
         try {
-          if (navigator.onLine === false) return;
           var last = Number(localStorage.getItem(REPORT_KEY)) || 0;
           if (Date.now() - last < REPORT_GAP_MS) return;
           localStorage.setItem(REPORT_KEY, String(Date.now()));
@@ -389,22 +514,44 @@
           function b(v) { return v ? 'ok' : 'fail'; }
           var msg = 'site=' + b(site) + ' supabase=' + b(sb) + ' internet=' + b(net) +
             ' android=' + d.android + ' model=' + d.model;
-          try {
-            fetch(SB_URL + '/rest/v1/rpc/report_client_error', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
-              body: JSON.stringify({
-                p_kind: 'other',
-                p_page: '/error.html',
-                p_action: 'app_load_fail',
-                p_message: msg,
-                p_title: 'অ্যাপে সাইট লোড হয়নি (error.html)',
-                p_user_agent: navigator.userAgent
-              })
-            }).catch(function () {});
-          } catch (e) {}
+          push('error_page', {
+            site: b(site), supabase: b(sb), internet: b(net),
+            android: d.android, model: d.model,
+            online: navigator.onLine !== false, auto_attempts: autoAttempt
+          }, {
+            p_kind: 'other',
+            p_page: '/error.html',
+            p_action: 'app_load_fail',
+            p_message: msg,
+            p_title: 'অ্যাপে সাইট লোড হয়নি (error.html)',
+            p_user_agent: navigator.userAgent
+          });
         });
       }
+
+      // ইউজার নিজে "সমস্যা জানান" চাপলে
+      if (reportBtn) {
+        reportBtn.addEventListener('click', function () {
+          reportBtn.disabled = true;
+          getDevice().then(function (d) {
+            push('user_report', {
+              topic: 'অ্যাপ/সাইট খুলছে না',
+              note: 'error.html থেকে ইউজার নিজে জানিয়েছে',
+              android: d.android, model: d.model,
+              online: navigator.onLine !== false, auto_attempts: autoAttempt
+            }, null);
+            reportBtn.textContent = 'জানানো হয়েছে, ধন্যবাদ ✓';
+          });
+        });
+      }
+
+      window.addEventListener('online', function () {
+        flushTries = 0;
+        setTimeout(flushQueue, 1500);
+      });
+
+      // আগের বার (নেট না থাকায়) জমে থাকা রিপোর্ট পাঠানোর চেষ্টা
+      flushQueue();
 
       function showHint(text) {
         if (!hintEl) return;
@@ -413,7 +560,7 @@
       }
 
       function diagnose() {
-        if (navigator.onLine === false) return;
+        if (navigator.onLine === false) { sendReport(false, false, false); return; }
         Promise.all([
           reach(HOME + 'favicon.ico'),
           reach(SB_URL + '/auth/v1/health'),
@@ -450,7 +597,7 @@
           function finish(v) {
             if (!done) { done = true; resolve(v); }
           }
-          setTimeout(function () { finish(false); }, 4000);
+          setTimeout(function () { finish(false); }, 10000);
           try {
             fetch(HOME + 'favicon.ico?_=' + Date.now(), { mode: 'no-cors', cache: 'no-store' })
               .then(function () { finish(true); })
