@@ -1,0 +1,295 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — ইউজার হেলথ (/admin/health)
+// শুধু admin (মডারেটর /admin-এ ফেরত যায়)।
+// ডাটা: RPC get_health_summary(p_days) ← client_health_logs (src/lib/healthTracker.js + নেটিভ SFHealth থেকে)
+//   • সফলতার হার = সফল সেশন ÷ (সফল + ব্যর্থ)। ব্যর্থ = page_fail (লোড শেষ হয়নি) + native_watchdog (১৫ সেকেন্ডেও
+//     পেজ রেডি হয়নি) + error_page (অ্যাপে error.html দেখা গেছে)।
+//   • ধীর লোড = ৮ সেকেন্ডের বেশি। P50/P90 = মধ্যম ও ধীরতম ১০% ইউজারের লোড সময়।
+//   • নেটওয়ার্ক টাইপ / ফোন মডেল / WebView ভার্সন ধরে ভাগ — কোন ধরনের ইউজার সমস্যায় পড়ছে তা বোঝার জন্য।
+//   • ইউজারের নিজের "সমস্যা জানান" রিপোর্ট, ব্যর্থ রিকোয়েস্টের তালিকা, মূল কাজের (অর্ডার/সাইনআপ ইত্যাদি) ফলাফল।
+// সফলতার হার ১ ঘণ্টায় ৭০%-এর নিচে নামলে অ্যাডমিন push যায় (cron health-alert-check)।
+// ============================================================
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="ইউজার হেলথ | অ্যাডমিন">
+  <div class="hl-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="hl-loading">
+        <div class="hl-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" class="hl-content" style="display:none;">
+
+        <a href="/admin/errors" class="hl-back"><i class="fas fa-arrow-left"></i> এরর লগ</a>
+
+        <div class="hl-header">
+          <div>
+            <h1>ইউজার হেলথ</h1>
+            <p class="hl-subtitle">আসল ইউজার অ্যাপ/সাইট খুলতে পারছে কিনা</p>
+          </div>
+          <div class="hl-head-actions">
+            <select class="hl-select" id="hlDays" aria-label="সময়সীমা">
+              <option value="1">আজ (২৪ ঘণ্টা)</option>
+              <option value="7" selected>৭ দিন</option>
+              <option value="30">৩০ দিন</option>
+            </select>
+            <button type="button" class="hl-refresh" id="hlRefresh" aria-label="রিফ্রেশ"><i class="fas fa-rotate"></i></button>
+          </div>
+        </div>
+
+        <div id="hlBody"></div>
+
+        <details class="hl-help">
+          <summary>কীভাবে পড়বেন</summary>
+          <p><b>সফলতার হার:</b> যত সেশনে পেজ ব্যবহারযোগ্য হয়েছে ÷ (সফল + ব্যর্থ)। ৯০%-এর নিচে মানে সমস্যা আছে।</p>
+          <p><b>ব্যর্থ:</b> লোড শেষ হওয়ার আগেই ইউজার ছেড়ে গেছে/অ্যাপ বন্ধ করেছে, অথবা অ্যাপ ১৫ সেকেন্ডেও পেজ দেখাতে পারেনি, অথবা অ্যাপে error.html এসেছে।</p>
+          <p><b>ধীর:</b> পেজ ব্যবহারযোগ্য হতে ৮ সেকেন্ডের বেশি লেগেছে। <b>P90:</b> ১০ জনের ১ জন এর চেয়ে বেশি সময় অপেক্ষা করেছে।</p>
+          <p><b>অ্যাপ খোলা বনাম সফল সেশন:</b> "অ্যাপ খোলা" শুধু নতুন অ্যাপ ভার্সন (নেটিভ ট্র্যাকিংসহ) থেকে আসে। পুরনো ভার্সনে সংখ্যাটা কম দেখাবে।</p>
+        </details>
+
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .hl-page { min-height: 60vh; padding: 32px 0 80px; }
+    .hl-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .hl-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: hl-spin 0.8s linear infinite; }
+    @keyframes hl-spin { to { transform: rotate(360deg); } }
+    .hl-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: 0.88rem; margin-bottom: 20px; }
+    .hl-back:hover { color: #FF6B35; }
+    .hl-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+    .hl-header h1 { font-size: 1.6rem; font-weight: 700; color: #1B2A4A; }
+    .hl-subtitle { font-size: 0.85rem; color: #8FA0BC; margin-top: 4px; font-weight: 600; }
+    .hl-head-actions { display: flex; gap: 8px; align-items: center; }
+    .hl-select { padding: 10px 12px; border-radius: 12px; border: 1.5px solid #E5EAF0; font-size: 0.85rem; font-family: inherit; color: #1B2A4A; background: #fff; }
+    .hl-refresh { flex-shrink: 0; width: 42px; height: 42px; border-radius: 50%; border: none; background: #fff; color: #5A6E85; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); cursor: pointer; font-size: 0.95rem; }
+    .hl-refresh:hover { color: #FF6B35; }
+    .hl-refresh.spinning i { animation: hl-spin 0.7s linear infinite; }
+
+    .hl-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .hl-kpi { background: #fff; border-radius: 16px; padding: 14px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); }
+    .hl-kpi-label { font-size: 0.74rem; color: #8FA0BC; font-weight: 700; }
+    .hl-kpi-value { font-size: 1.55rem; font-weight: 800; color: #1B2A4A; margin-top: 4px; line-height: 1.1; }
+    .hl-kpi-sub { font-size: 0.72rem; color: #5A6E85; margin-top: 4px; font-weight: 600; }
+    .hl-good { color: #1B7A3C; }
+    .hl-warn { color: #B7791F; }
+    .hl-bad { color: #D14343; }
+
+    .hl-card { background: #fff; border-radius: 18px; padding: 14px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); margin-bottom: 14px; }
+    .hl-card h2 { font-size: 0.95rem; font-weight: 800; color: #1B2A4A; margin-bottom: 10px; }
+    .hl-card .hl-note { font-size: 0.76rem; color: #8FA0BC; margin-bottom: 10px; line-height: 1.5; }
+    .hl-scroll { overflow-x: auto; }
+    .hl-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; min-width: 420px; }
+    .hl-table th { text-align: left; color: #8FA0BC; font-weight: 700; font-size: 0.72rem; padding: 6px 8px; border-bottom: 1.5px solid #EEF1F6; white-space: nowrap; }
+    .hl-table td { padding: 8px; border-bottom: 1px solid #F1F4F9; color: #1B2A4A; font-weight: 600; word-break: break-word; }
+    .hl-table td.num, .hl-table th.num { text-align: right; white-space: nowrap; }
+    .hl-empty { color: #B0BCCB; font-size: 0.85rem; padding: 14px 0; text-align: center; }
+
+    .hl-report { border-top: 1px solid #F1F4F9; padding: 10px 0; }
+    .hl-report:first-of-type { border-top: none; }
+    .hl-report-top { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .hl-chip { padding: 3px 9px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; background: #F4F7FC; color: #5A6E85; white-space: nowrap; }
+    .hl-chip.topic { background: #FFF0EA; color: #D14343; }
+    .hl-report-note { font-size: 0.85rem; color: #1B2A4A; margin-top: 6px; word-break: break-word; white-space: pre-wrap; }
+    .hl-report-meta { font-size: 0.72rem; color: #8FA0BC; margin-top: 4px; word-break: break-word; }
+
+    .hl-help { background: #fff; border-radius: 16px; padding: 12px 14px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); font-size: 0.82rem; color: #5A6E85; line-height: 1.6; }
+    .hl-help summary { cursor: pointer; font-weight: 800; color: #1B2A4A; }
+    .hl-help p { margin-top: 8px; }
+    @media (min-width: 640px) { .hl-kpis { grid-template-columns: repeat(4, 1fr); } }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const $ = (id) => document.getElementById(id);
+    const bodyEl = $('hlBody');
+    const daysEl = $('hlDays');
+
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const BN = '০১২৩৪৫৬৭৮৯';
+    const bn = (n) => String(n).replace(/\d/g, (d) => BN[d]);
+    const num = (v) => Number(v) || 0;
+
+    const STEP_LABEL = {
+      delivery_request: 'ডেলিভারি রিকোয়েস্ট',
+      ai_order: 'AI সহকারীর অর্ডার',
+      image_upload: 'ছবি আপলোড',
+      shop_order: 'শপ অর্ডার',
+      listing_post: 'লিস্টিং পোস্ট',
+      blood_request: 'ব্লাড রিকোয়েস্ট',
+      serial_request: 'সিরিয়াল রিকোয়েস্ট',
+      signup: 'সাইনআপ',
+      login: 'লগইন',
+    };
+    const RESULT_LABEL = { ok: 'সফল', rejected: 'ইউজারের ভুল/বাতিল (৪xx)', fail: 'ব্যর্থ (সার্ভার/নেট)' };
+
+    function fmtDay(d) {
+      try { return new Date(d + 'T00:00:00').toLocaleDateString('bn-BD', { day: 'numeric', month: 'short' }); } catch (_) { return d; }
+    }
+    function fmtDateTime(iso) {
+      try { return new Date(iso).toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka', dateStyle: 'medium', timeStyle: 'short' }); } catch (_) { return iso; }
+    }
+    function ms(v) { return v == null ? '–' : (num(v) / 1000).toFixed(1).replace(/\d/g, (d) => BN[d]) + ' সে'; }
+    function rate(ok, bad) {
+      const t = num(ok) + num(bad);
+      return t ? Math.round((100 * num(ok)) / t) : null;
+    }
+    function rateClass(r) {
+      if (r == null) return '';
+      return r >= 90 ? 'hl-good' : (r >= 70 ? 'hl-warn' : 'hl-bad');
+    }
+
+    function table(headers, rows, emptyText) {
+      if (!rows.length) return `<p class="hl-empty">${esc(emptyText || 'ডেটা নেই')}</p>`;
+      const th = headers.map((h, i) => `<th class="${i > 0 ? 'num' : ''}">${esc(h)}</th>`).join('');
+      const tr = rows.map((r) => `<tr>${r.map((c, i) => `<td class="${i > 0 ? 'num' : ''}">${c}</td>`).join('')}</tr>`).join('');
+      return `<div class="hl-scroll"><table class="hl-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
+    }
+
+    function rateCell(ok, bad) {
+      const r = rate(ok, bad);
+      return r == null ? '–' : `<span class="${rateClass(r)}">${bn(r)}%</span>`;
+    }
+
+    function render(d) {
+      const daily = d.daily || [];
+      const totOk = daily.reduce((a, x) => a + num(x.ok_sessions), 0);
+      const totBad = daily.reduce((a, x) => a + num(x.bad), 0);
+      const totSlow = daily.reduce((a, x) => a + num(x.slow), 0);
+      const totOpens = daily.reduce((a, x) => a + num(x.app_opens), 0);
+      const r = rate(totOk, totBad);
+      const last = daily.length ? daily[daily.length - 1] : null;
+
+      let html = '';
+      html += `<div class="hl-kpis">
+        <div class="hl-kpi"><p class="hl-kpi-label">সফলতার হার</p><p class="hl-kpi-value ${rateClass(r)}">${r == null ? '–' : bn(r) + '%'}</p><p class="hl-kpi-sub">${bn(totOk)} সফল · ${bn(totBad)} ব্যর্থ</p></div>
+        <div class="hl-kpi"><p class="hl-kpi-label">ধীর লোড (৮ সেকেন্ডের বেশি)</p><p class="hl-kpi-value">${bn(totSlow)}</p><p class="hl-kpi-sub">মোট সময়সীমায়</p></div>
+        <div class="hl-kpi"><p class="hl-kpi-label">মধ্যম লোড সময় (P50)</p><p class="hl-kpi-value">${last ? ms(last.p50_ms) : '–'}</p><p class="hl-kpi-sub">সর্বশেষ দিন</p></div>
+        <div class="hl-kpi"><p class="hl-kpi-label">ধীরতম ১০% (P90)</p><p class="hl-kpi-value">${last ? ms(last.p90_ms) : '–'}</p><p class="hl-kpi-sub">সর্বশেষ দিন · অ্যাপ খোলা ${bn(totOpens)}</p></div>
+      </div>`;
+
+      // প্রতিদিন
+      html += `<div class="hl-card"><h2>প্রতিদিন (বাংলাদেশ সময়)</h2>${table(
+        ['দিন', 'সফলতা', 'সফল', 'ব্যর্থ', 'ধীর', 'P50', 'P90', 'অ্যাপ খোলা'],
+        daily.slice().reverse().map((x) => [esc(fmtDay(x.day)), rateCell(x.ok_sessions, x.bad), bn(num(x.ok_sessions)), bn(num(x.bad)), bn(num(x.slow)), ms(x.p50_ms), ms(x.p90_ms), bn(num(x.app_opens))]),
+        'এখনো কোনো ডেটা আসেনি। ট্র্যাকিং চালু হওয়ার পর কিছুক্ষণের মধ্যে এখানে দেখা যাবে।'
+      )}</div>`;
+
+      // নেটওয়ার্ক টাইপ
+      html += `<div class="hl-card"><h2>নেটওয়ার্ক ধরন অনুযায়ী</h2><p class="hl-note">slow-2g/2g/3g মানে ফোন নিজেই ধীর নেট বলছে। "অজানা" = ব্রাউজার/WebView এই তথ্য দেয়নি।</p>${table(
+        ['নেটওয়ার্ক', 'সফলতা', 'সফল', 'ব্যর্থ', 'ধীর'],
+        (d.by_net || []).map((x) => [esc(x.net_type), rateCell(x.ok_sessions, x.bad), bn(num(x.ok_sessions)), bn(num(x.bad)), bn(num(x.slow))]),
+        'ডেটা নেই'
+      )}</div>`;
+
+      // ফোন মডেল
+      html += `<div class="hl-card"><h2>ফোন মডেল অনুযায়ী (সবচেয়ে বেশি সমস্যা আগে)</h2>${table(
+        ['মডেল', 'সফলতা', 'সফল', 'ব্যর্থ', 'ধীর'],
+        (d.by_model || []).map((x) => [esc(x.device_model), rateCell(x.ok_sessions, x.bad), bn(num(x.ok_sessions)), bn(num(x.bad)), bn(num(x.slow))]),
+        'ডেটা নেই'
+      )}</div>`;
+
+      // WebView
+      html += `<div class="hl-card"><h2>Chrome/WebView ভার্সন অনুযায়ী</h2><p class="hl-note">পুরনো ভার্সনে নতুন ওয়েব ফিচার না চলতে পারে।</p>${table(
+        ['ভার্সন', 'সফলতা', 'সফল', 'ব্যর্থ', 'ধীর'],
+        (d.by_webview || []).map((x) => [esc(x.webview_version), rateCell(x.ok_sessions, x.bad), bn(num(x.ok_sessions)), bn(num(x.bad)), bn(num(x.slow))]),
+        'ডেটা নেই'
+      )}</div>`;
+
+      // ব্যর্থ/ধীর রিকোয়েস্ট
+      html += `<div class="hl-card"><h2>ব্যর্থ ও ধীর রিকোয়েস্ট</h2><p class="hl-note">স্ট্যাটাস ০ = নেটওয়ার্কে পৌঁছায়নি/মাঝপথে কেটে গেছে। ডিভাইস = কতগুলো আলাদা ফোন।</p>${table(
+        ['পথ', 'ধরন', 'স্ট্যাটাস', 'বার', 'ডিভাইস'],
+        (d.requests || []).map((x) => [esc(x.path || ''), x.event === 'request_slow' ? 'ধীর' : 'ফেইল', esc(x.status || '–'), bn(num(x.n)), bn(num(x.devices))]),
+        'কোনো ব্যর্থ রিকোয়েস্ট ধরা পড়েনি'
+      )}</div>`;
+
+      // মূল কাজ
+      const steps = {};
+      (d.funnel || []).forEach((x) => {
+        const k = x.step || '?';
+        steps[k] = steps[k] || {};
+        steps[k][x.result || '?'] = num(x.n);
+      });
+      const stepRows = Object.keys(steps).map((k) => {
+        const s = steps[k];
+        const ok = num(s.ok);
+        const rej = num(s.rejected);
+        const fail = num(s.fail);
+        return [esc(STEP_LABEL[k] || k), bn(ok), bn(rej), bn(fail), rateCell(ok, fail)];
+      });
+      html += `<div class="hl-card"><h2>মূল কাজের ফলাফল</h2><p class="hl-note">"ভুল/বাতিল" = ইউজারের ইনপুটের কারণে (৪xx)। শেষ কলামের হার = সফল ÷ (সফল + ব্যর্থ)।</p>${table(
+        ['কাজ', 'সফল', 'ভুল/বাতিল', 'ব্যর্থ', 'হার'],
+        stepRows,
+        'এখনো ডেটা আসেনি'
+      )}</div>`;
+
+      // ইউজার রিপোর্ট
+      const reports = d.reports || [];
+      html += `<div class="hl-card"><h2>ইউজারের নিজের রিপোর্ট (${bn(reports.length)})</h2>`;
+      if (!reports.length) {
+        html += '<p class="hl-empty">এই সময়সীমায় কেউ "সমস্যা জানান" চাপেনি</p>';
+      } else {
+        html += reports.map((x) => {
+          const det = x.detail || {};
+          const recent = Array.isArray(det.recent) ? det.recent.map((e) => esc((e.event || '') + (e.d ? ' ' + e.d : ''))).join(' → ') : '';
+          const nat = det.native || {};
+          const natBits = [nat.conn && 'কানেকশন: ' + nat.conn, nat.private_dns && 'Private DNS: ' + nat.private_dns, nat.auto_time === 0 && 'অটো তারিখ-সময় বন্ধ!'].filter(Boolean).map(esc).join(' · ');
+          return `<div class="hl-report">
+            <div class="hl-report-top">
+              ${det.topic ? `<span class="hl-chip topic">${esc(det.topic)}</span>` : ''}
+              <span class="hl-chip">${esc(x.platform || '–')}</span>
+              ${x.device_model ? `<span class="hl-chip">${esc(x.device_model)}</span>` : ''}
+              ${x.net_type ? `<span class="hl-chip">${esc(x.net_type)}</span>` : ''}
+              ${x.app_version ? `<span class="hl-chip">v${esc(x.app_version)}</span>` : ''}
+            </div>
+            ${det.note ? `<p class="hl-report-note">${esc(det.note)}</p>` : ''}
+            <p class="hl-report-meta">${esc(fmtDateTime(x.created_at))} · পেজ: ${esc(x.page || '–')}${x.os_version ? ' · Android ' + esc(x.os_version) : ''}</p>
+            ${natBits ? `<p class="hl-report-meta">${natBits}</p>` : ''}
+            ${recent ? `<p class="hl-report-meta">শেষ ঘটনা: ${recent}</p>` : ''}
+          </div>`;
+        }).join('');
+      }
+      html += '</div>';
+
+      bodyEl.innerHTML = html;
+    }
+
+    async function load() {
+      bodyEl.innerHTML = '<p class="hl-empty">লোড হচ্ছে...</p>';
+      const { data, error } = await supabase.rpc('get_health_summary', { p_days: Number(daysEl.value) || 7 });
+      if (error) {
+        bodyEl.innerHTML = `<p class="hl-empty" style="color:#D14343;">লোড করা যায়নি: ${esc(error.message)}</p>`;
+        return;
+      }
+      render(data || {});
+    }
+
+    daysEl.addEventListener('change', load);
+    $('hlRefresh').addEventListener('click', async () => {
+      const b = $('hlRefresh');
+      b.classList.add('spinning');
+      await load();
+      setTimeout(() => b.classList.remove('spinning'), 400);
+    });
+
+    window.addEventListener('smartfeni:admin-ready', async (e) => {
+      // শুধু admin; মডারেটরকে ড্যাশবোর্ডে ফেরত পাঠাও
+      if (!e.detail || e.detail.role !== 'admin') {
+        window.location.replace('/admin');
+        return;
+      }
+      await load();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>

@@ -658,6 +658,7 @@ async function hideSplashWhenReady() {
     const hide = () => {
       if (hidden) return;
       hidden = true;
+      window.__sfSplashHidden = true; // head-এর Splash সেফটি টাইমার (BaseLayout) আর কিছু করবে না
       // দুইবার requestAnimationFrame: প্রথম পেজ আঁকা হওয়ার পর সরায়, যাতে সাদা ঝলক না আসে
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {

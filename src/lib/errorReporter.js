@@ -84,6 +84,45 @@ async function captureToSentry(o, message) {
   }
 }
 
+// ---------- ব্যর্থ রিপোর্ট জমিয়ে পরে আবার পাঠানো ----------
+// মোবাইল নেটে RPC ফেইল করলে রিপোর্ট হারিয়ে যেত। এখন localStorage-এ (সর্বোচ্চ ১০টা) রেখে
+// নেট ফিরলে বা পরের পেজ লোডে আবার পাঠানো হয়।
+const FAILED_Q_KEY = 'sf_err_q';
+const FAILED_Q_MAX = 10;
+
+function queueFailedReport(payload) {
+  try {
+    const raw = localStorage.getItem(FAILED_Q_KEY);
+    const q = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(q)) return;
+    q.push(payload);
+    while (q.length > FAILED_Q_MAX) q.shift();
+    localStorage.setItem(FAILED_Q_KEY, JSON.stringify(q));
+  } catch (_) {}
+}
+
+async function flushFailedReports() {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    const raw = localStorage.getItem(FAILED_Q_KEY);
+    const q = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(q) || !q.length) return;
+    const client = await getClient();
+    if (!client || typeof client.rpc !== 'function') return;
+    localStorage.removeItem(FAILED_Q_KEY); // আগে মুছি, যাতে দুই ট্যাব একই রিপোর্ট দুইবার না পাঠায়
+    const left = [];
+    for (const p of q) {
+      try {
+        const res = await client.rpc('report_client_error', p);
+        if (res && res.error) left.push(p);
+      } catch (_) {
+        left.push(p);
+      }
+    }
+    left.forEach((p) => queueFailedReport(p));
+  } catch (_) {}
+}
+
 // ---------- মূল ফাংশন ----------
 export async function reportError(opts) {
   try {
@@ -111,7 +150,7 @@ export async function reportError(opts) {
     const client = await getClient();
     if (!client || typeof client.rpc !== 'function') return;
 
-    await client.rpc('report_client_error', {
+    const payload = {
       p_kind: kind,
       p_page: window.location ? window.location.pathname : '',
       p_action: action,
@@ -120,7 +159,13 @@ export async function reportError(opts) {
       p_title: o.title ? String(o.title).slice(0, 200) : null,
       p_user_agent: (typeof navigator !== 'undefined' && navigator.userAgent ? navigator.userAgent : '').slice(0, 300),
       p_sentry_event_id: sentryId,
-    });
+    };
+    try {
+      const res = await client.rpc('report_client_error', payload);
+      if (res && res.error) queueFailedReport(payload); // নেট/সার্ভার সমস্যায় হারাতে না দিয়ে পরে আবার পাঠাব
+    } catch (_) {
+      queueFailedReport(payload);
+    }
   } catch (_) {
     // রিপোর্টারের নিজের এরর কখনো বাইরে যাবে না
   } finally {
@@ -174,6 +219,10 @@ export function initErrorReporter() {
     initialized = true;
 
     window.SFReportError = reportError;
+
+    // আগে নেট না থাকায় জমে থাকা রিপোর্ট পাঠানো
+    setTimeout(flushFailedReports, 4000);
+    window.addEventListener('online', () => { setTimeout(flushFailedReports, 1500); });
 
     // Vite লেজি-লোডের প্রিলোড ফেইল করলে এই ইভেন্ট দেয়; রিলোড শুরু হলে এররটা আর ছোঁড়া হবে না
     window.addEventListener('vite:preloadError', (e) => {

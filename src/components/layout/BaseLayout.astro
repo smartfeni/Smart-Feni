@@ -512,6 +512,42 @@ const localBusinessSchema = {
       if (localStorage.getItem('sf_pro_app') === '1') document.documentElement.setAttribute('data-pro-app', '1');
     } catch (e) { /* উপেক্ষা */ }
   </script>
+  <script is:inline>
+    // ইউজার হেলথ: লোড শুরুর চিহ্ন (পেজ রেডি না হলে পরের খোলায় page_fail হিসেবে ধরা পড়ে — src/lib/healthTracker.js)
+    // + অ্যাপে Splash সেফটি: JS বান্ডেল ধীর নেটে দেরিতে নামলেও ৩ সেকেন্ড পর Splash সরে যায়
+    // (আগে বান্ডেল না নামা পর্যন্ত কালো স্ক্রিনে আটকে থাকত)।
+    (function () {
+      try {
+        var now = Date.now();
+        var c = navigator.connection || {};
+        window.__sfT0 = now;
+        try { window.__sfPrevPend = localStorage.getItem('sf_h_pend'); } catch (e) {}
+        try { localStorage.setItem('sf_h_pend', JSON.stringify({ t: now, p: location.pathname, n: c.effectiveType || null, r: typeof c.rtt === 'number' ? c.rtt : null })); } catch (e) {}
+        window.addEventListener('pagehide', function () {
+          try {
+            var raw = localStorage.getItem('sf_h_pend');
+            if (!raw) return;
+            var o = JSON.parse(raw);
+            if (o && o.t === now) { o.e = Date.now(); localStorage.setItem('sf_h_pend', JSON.stringify(o)); }
+          } catch (e) {}
+        });
+        var C = window.Capacitor;
+        if (C && typeof C.isNativePlatform === 'function' && C.isNativePlatform()) {
+          setTimeout(function () {
+            if (window.__sfSplashHidden) return;
+            try {
+              var S = C.Plugins && C.Plugins.SplashScreen;
+              if (S && typeof S.hide === 'function') {
+                window.__sfSplashFallback = true;
+                var r = S.hide({ fadeOutDuration: 200 });
+                if (r && typeof r.catch === 'function') r.catch(function () {});
+              }
+            } catch (e) {}
+          }, 3000);
+        }
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <AppDownloadPrompt />
@@ -538,6 +574,7 @@ const localBusinessSchema = {
   <script>
     import { initBackButtonHandler } from '../../lib/native-bridge.js';
     import { initErrorReporter } from '../../lib/errorReporter.js';
+    import { initHealthTracker } from '../../lib/healthTracker.js';
     import { initSFLoader } from '../../lib/sfLoader.js';
     import { initTimePicker12 } from '../../lib/timePicker12.js';
 
@@ -562,6 +599,9 @@ const localBusinessSchema = {
 
     // এরর মনিটরিং (ধাপ ৩): গ্লোবাল JS এরর/unhandled rejection ধরা শুরু
     initErrorReporter();
+
+    // ইউজার হেলথ: লোড সফল/ধীর/ব্যর্থ, রিকোয়েস্ট ফেইল, "সমস্যা জানান" (src/lib/healthTracker.js)
+    initHealthTracker();
 
     initSFLoader();
 
