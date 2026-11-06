@@ -31,6 +31,14 @@ const MAX_IMAGE_CACHE_ITEMS = 60;
 const NETWORK_TIMEOUT_MS = 4000;
 const OFFLINE_URL = "/offline.html";
 
+// Pro অ্যাপের পেজ (/pro, /pro/...): stale-while-revalidate — অ্যাপ খুললে শেষবারের শেল সাথে সাথে।
+// (/pro-app ডাউনলোড পেজ এর বাইরে; পেজগুলো সার্ভারে ইউজারের কিছু পড়ে না, ডেটা ক্লায়েন্ট থেকে আসে)
+const PRO_CACHE_NAME = "smartfeni-pro-v1";
+const MAX_PRO_PAGES = 40;
+function isProPage(pathname) {
+  return pathname === "/pro" || pathname.startsWith("/pro/");
+}
+
 // এই পাথের নেভিগেশন কখনো ক্যাশ হবে না বা ক্যাশ থেকে ফেরত যাবে না —
 // সংবেদনশীল/ব্যক্তিগত/লেনদেন-সম্পর্কিত পেজ
 const NEVER_CACHE_PATH_PREFIXES = [
@@ -124,6 +132,25 @@ async function networkFirstWithTimeout(request) {
   }
 }
 
+// Pro পেজ: ক্যাশ থাকলে সাথে সাথে, ব্যাকগ্রাউন্ডে রিফ্রেশ। শুধু সরাসরি (redirect ছাড়া) সফল রেসপন্স ক্যাশ হয়।
+async function proPageSWR(request) {
+  const cache = await caches.open(PRO_CACHE_NAME);
+  const cached = await cache.match(request);
+  const refresh = fetch(request)
+    .then((response) => {
+      if (response && response.ok && !response.redirected) {
+        cache.put(request, response.clone()).then(() => trimCache(PRO_CACHE_NAME, MAX_PRO_PAGES)).catch(() => {});
+      }
+      return response;
+    })
+    .catch(() => null);
+  if (cached) return cached;
+  const fresh = await refresh;
+  if (fresh) return fresh;
+  const offline = await caches.match(OFFLINE_URL);
+  return offline || Response.error();
+}
+
 // O3: গুরুত্বপূর্ণ পেজ — অফলাইনে সবচেয়ে বেশি দরকার পড়তে পারে
 // (ইমার্জেন্সি নম্বর, ডাক্তার/হাসপাতাল তালিকা, ব্লাড ডোনার — tel: লিংক নেট
 // ছাড়াও কাজ করে)। প্রতিটা আলাদাভাবে try করা হয়, একটা ব্যর্থ হলেও বাকিগুলো
@@ -149,7 +176,7 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME)
+          .filter((key) => key !== CACHE_NAME && key !== PRO_CACHE_NAME && key !== IMAGE_CACHE_NAME)
           .map((key) => caches.delete(key))
       )
     )
@@ -168,6 +195,10 @@ self.addEventListener("fetch", (event) => {
   // পেজ নেভিগেশন
   if (request.mode === "navigate") {
     if (isNeverCachePath(url.pathname)) return; // ব্রাউজার নিজে হ্যান্ডল করুক
+    if (isProPage(url.pathname)) {
+      event.respondWith(proPageSWR(request));
+      return;
+    }
     if (SWR_PATHS.has(url.pathname)) {
       event.respondWith(staleWhileRevalidate(request));
     } else {
