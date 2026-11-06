@@ -132,23 +132,23 @@ async function networkFirstWithTimeout(request) {
   }
 }
 
-// Pro পেজ: ক্যাশ থাকলে সাথে সাথে, ব্যাকগ্রাউন্ডে রিফ্রেশ। শুধু সরাসরি (redirect ছাড়া) সফল রেসপন্স ক্যাশ হয়।
+// Pro পেজ: নেট-আগে (২.৫ সেকেন্ড টাইমআউট), না পেলে ক্যাশ। (শুধু ক্যাশ-আগে করলে নতুন ডেপ্লয়ের পরে পুরনো শেল
+// মুছে যাওয়া পুরনো JS খুঁজে লোডিংয়ে আটকে যেত।) শুধু সরাসরি (redirect ছাড়া) সফল রেসপন্স ক্যাশ হয়।
 async function proPageSWR(request) {
   const cache = await caches.open(PRO_CACHE_NAME);
-  const cached = await cache.match(request);
-  const refresh = fetch(request)
-    .then((response) => {
-      if (response && response.ok && !response.redirected) {
-        cache.put(request, response.clone()).then(() => trimCache(PRO_CACHE_NAME, MAX_PRO_PAGES)).catch(() => {});
-      }
-      return response;
-    })
-    .catch(() => null);
-  if (cached) return cached;
-  const fresh = await refresh;
-  if (fresh) return fresh;
-  const offline = await caches.match(OFFLINE_URL);
-  return offline || Response.error();
+  try {
+    const response = await Promise.race([fetch(request), timeoutPromise(2500)]);
+    if (response && response.ok && !response.redirected) {
+      cache.put(request, response.clone()).then(() => trimCache(PRO_CACHE_NAME, MAX_PRO_PAGES)).catch(() => {});
+    }
+    return response;
+  } catch (err) {
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    try { return await fetch(request); } catch (e2) { /* নেট নেই */ }
+    const offline = await caches.match(OFFLINE_URL);
+    return offline || Response.error();
+  }
 }
 
 // O3: গুরুত্বপূর্ণ পেজ — অফলাইনে সবচেয়ে বেশি দরকার পড়তে পারে
