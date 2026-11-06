@@ -53,12 +53,24 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { getMyProRoles, ROLE_META, rememberRole, lastRole, esc, proLoginUrl } from '../../lib/proRoles.js';
     import { proLogout } from '../../lib/proLogin.js';
+    import { supabase } from '../../lib/supabase.js';
 
     const $ = (id) => document.getElementById(id);
     function show(id) { ['proLoading', 'proPick', 'proNone', 'proErr'].forEach((x) => { $(x).style.display = x === id ? '' : 'none'; }); }
 
     async function init() {
       show('proLoading');
+
+      // দ্রুত পথ: শেষ ব্যবহৃত রোল + লোকাল সেশন থাকলে রোল-RPC-র অপেক্ষা না করে সাথে সাথে সেই পেজে।
+      // (প্রতিটা রোল-পেজ নিজেই অনুমতি যাচাই করে; ?pick=1 হলে আগের মতো তালিকা)
+      try {
+        const fastPick = new URLSearchParams(window.location.search).get('pick') === '1';
+        const lastKey = lastRole();
+        if (!fastPick && lastKey && ROLE_META[lastKey]) {
+          const { data: { session: fastSession } } = await supabase.auth.getSession();
+          if (fastSession) { window.location.replace(ROLE_META[lastKey].href); return; }
+        }
+      } catch (_) { /* ব্যর্থ হলে আগের ধীর-কিন্তু-নিশ্চিত পথ */ }
       let res;
       try { res = await getMyProRoles(); } catch (e) { res = { loggedIn: true, roles: [], error: (e && e.message) || 'সমস্যা হয়েছে' }; }
       if (!res.loggedIn) { window.location.replace(proLoginUrl('/pro')); return; }
