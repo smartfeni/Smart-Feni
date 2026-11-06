@@ -52,8 +52,8 @@ export async function expireRequests() {
 
 // ============ কাস্টমার সাইড ============
 
-export function cancelRequest({ requestId }) {
-  return callDeliveryApi('cancel-request', { requestId });
+export function cancelRequest({ requestId, reasonCode }) {
+  return callDeliveryApi('cancel-request', { requestId, reasonCode });
 }
 
 export function markReceived({ requestId }) {

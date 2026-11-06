@@ -21,6 +21,14 @@ export const prerender = false;
 
 const ROUTE = '/api/delivery/cancel-request';
 
+// কাস্টমারের বাতিলের কারণ: শুধু এই allowlist-এর কোড গ্রহণযোগ্য (ইউজারের লেখা টেক্সট সরাসরি সেভ হয় না)
+const CANCEL_REASONS = {
+  mistake: 'কাস্টমার: ভুলে অর্ডার দিয়েছি',
+  price: 'কাস্টমার: দাম বেশি লাগছে',
+  no_offer: 'কাস্টমার: কেউ অফার দিচ্ছে না / দেরি হচ্ছে',
+  not_needed: 'কাস্টমার: আর লাগবে না / অন্য উপায়ে নিয়েছি',
+};
+
 export async function POST({ request }) {
   // এরর রিপোর্টের ক্লায়েন্ট: লগইনের পর ইউজারের নিজের client (যাতে এরর লগে ইউজার আইডি যায়)
   let reportClient = null;
@@ -35,7 +43,7 @@ export async function POST({ request }) {
     }
     reportClient = client;
 
-    const { requestId } = await request.json();
+    const { requestId, reasonCode } = await request.json();
 
     if (!requestId) {
       return new Response(
@@ -100,6 +108,37 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'বাতিল ব্যর্থ: ' + (updateError?.message || 'অজানা কারণ') }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // কে/কখন/কেন সেভ — guard ট্রিগার ইউজার-টোকেনে এই ফিল্ড লিখতে দেয় না, তাই service role।
+    // স্ট্যাটাস আগেই বদলে গেছে (ইউজার-টোকেনে, তাই order_events-এ actor থাকে); এটা best-effort।
+    try {
+      const { client: auditAdmin } = getAdminClient();
+      if (auditAdmin) {
+        const reasonLabel = CANCEL_REASONS[String(reasonCode || '')] || 'কাস্টমার বাতিল করেছেন (কারণ দেননি)';
+        const { error: auditError } = await auditAdmin
+          .from('delivery_requests')
+          .update({
+            cancelled_by: user.id,
+            cancelled_at: new Date().toISOString(),
+            cancel_reason: reasonLabel,
+          })
+          .eq('id', requestId)
+          .eq('status', 'cancelled')
+          .is('cancelled_by', null);
+        if (auditError) {
+          await reportServerError(reportClient, {
+            route: ROUTE,
+            action: 'delivery_cancel_audit',
+            title: 'রিকোয়েস্ট বাতিল: কারণ সেভ ব্যর্থ',
+            message: auditError.message,
+            code: auditError.code,
+            status: 200,
+          });
+        }
+      }
+    } catch (_) {
+      // বাতিল সফল, কারণ সেভ না হলেও চলবে
     }
 
     // যারা এই রিকোয়েস্টে একটিভ অফার দিয়ে রেখেছিল তাদের জানানো —

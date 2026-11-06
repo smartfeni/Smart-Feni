@@ -1131,6 +1131,48 @@ const ordersGuide = [
     import { compressImages } from '../lib/imageCompress.js';
     import { submitReview, uploadPaymentProof, cancelRequest, expireRequests, confirmBestPrice, updateAskingPrice } from '../lib/deliveryClient.js';
 
+    // কাস্টমার বাতিলের কারণ বাছাই (বটম শিট) — কারণ-কোড ফেরত দেয়, বাতিল না করলে null
+    function askCancelReason() {
+      return new Promise((resolve) => {
+        const reasons = [
+          ['mistake', 'ভুলে অর্ডার দিয়েছি'],
+          ['price', 'দাম বেশি লাগছে'],
+          ['no_offer', 'কেউ অফার দিচ্ছে না / দেরি হচ্ছে'],
+          ['not_needed', 'আর লাগবে না / অন্য উপায়ে নিয়েছি'],
+        ];
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(27,42,74,.55);display:flex;align-items:flex-end;justify-content:center;';
+        const sheet = document.createElement('div');
+        sheet.style.cssText = 'background:#fff;width:100%;max-width:480px;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));box-shadow:0 -6px 24px rgba(0,0,0,.18);';
+        const title = document.createElement('div');
+        title.textContent = 'রিকোয়েস্ট বাতিল করার কারণ কী?';
+        title.style.cssText = 'font-size:16px;font-weight:700;color:#1B2A4A;margin-bottom:4px;';
+        const hint = document.createElement('div');
+        hint.textContent = 'একটু অপেক্ষা করলে হিরোদের অফার আসতে পারে।';
+        hint.style.cssText = 'font-size:13px;color:#64748b;margin-bottom:12px;';
+        sheet.appendChild(title);
+        sheet.appendChild(hint);
+        const done = (val) => { wrap.remove(); resolve(val); };
+        reasons.forEach(([code, label]) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = label;
+          b.style.cssText = 'display:block;width:100%;text-align:left;padding:13px 14px;margin-bottom:8px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;color:#1B2A4A;font-size:15px;font-family:inherit;cursor:pointer;';
+          b.addEventListener('click', () => done(code));
+          sheet.appendChild(b);
+        });
+        const keep = document.createElement('button');
+        keep.type = 'button';
+        keep.textContent = 'না, অপেক্ষা করি';
+        keep.style.cssText = 'display:block;width:100%;padding:13px 14px;margin-top:4px;border:none;border-radius:12px;background:#FF6B35;color:#fff;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;';
+        keep.addEventListener('click', () => done(null));
+        sheet.appendChild(keep);
+        wrap.appendChild(sheet);
+        wrap.addEventListener('click', (ev) => { if (ev.target === wrap) done(null); });
+        document.body.appendChild(wrap);
+      });
+    }
+
     const loadingState = document.getElementById('loadingState');
     const loginRequired = document.getElementById('loginRequired');
     const ordersContent = document.getElementById('ordersContent');
@@ -1762,9 +1804,10 @@ const ordersGuide = [
 
       // রিকোয়েস্ট বাতিল
       card.querySelector('.btn-cancel-request')?.addEventListener('click', async (e) => {
-        if (!confirm('রিকোয়েস্টটি বাতিল করতে চাও?')) return;
+        const cancelReasonCode = await askCancelReason();
+        if (!cancelReasonCode) return;
         e.target.disabled = true;
-        const { error } = await cancelRequest({ requestId: req.id });
+        const { error } = await cancelRequest({ requestId: req.id, reasonCode: cancelReasonCode });
         if (error) {
           alert(error);
           e.target.disabled = false;

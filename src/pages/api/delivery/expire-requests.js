@@ -39,7 +39,7 @@ export async function POST() {
 
     const { data, error } = await adminClient
       .from('delivery_requests')
-      .update({ status: 'cancelled', updated_at: nowIso })
+      .update({ status: 'cancelled', updated_at: nowIso, cancelled_at: nowIso, cancel_reason: 'সময় শেষ (auto)' })
       .eq('status', 'open')
       // ডেলিভারি v2 গেট: pending/hold অর্ডার মেয়াদ পেরোলেও বাতিল হবে না
       .eq('publish_status', 'published')
