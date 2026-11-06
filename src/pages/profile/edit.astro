@@ -181,18 +181,19 @@ const upazilas = [
             </div>
 
             <!-- ===== ডোনার টাইমার পিকার — টগল OFF করতে চাইলে খোলে ===== -->
-            <div class="donor-group-picker" id="donorTimerPicker" style="display:none;">
-              <span class="donor-toggle-label">কবে আবার রক্তদাতা হিসেবে চালু হবেন?</span>
-              <span class="donor-toggle-hint">রক্ত দেওয়ার পর ৪ মাস অপেক্ষা করতে হয়। তারিখ দিন, সেদিন টগল নিজে চালু হবে।</span>
-              <input type="date" class="edit-input donor-timer-date" id="donorTimerDate" />
-              <p class="edit-message" id="donorTimerMessage"></p>
-              <div class="donor-group-actions">
-                <button class="edit-submit-outline" id="donorTimerCancel" type="button">বাতিল</button>
-                <button class="edit-submit" id="donorTimerSetDate" type="button">
-                  <i class="fas fa-calendar-check"></i> <span>এই তারিখে চালু হোক</span>
-                </button>
+            <div class="donor-timer-modal" id="donorTimerPicker" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="donorTimerTitle">
+              <div class="donor-timer-sheet">
+                <button type="button" class="donor-timer-close" id="donorTimerCancel" aria-label="বন্ধ করুন">✕</button>
+                <h3 class="donor-timer-title" id="donorTimerTitle">আবার কখন রক্ত দিতে পারবেন?</h3>
+                <span class="donor-toggle-hint">রক্ত দেওয়ার পর ৪ মাস অপেক্ষা করতে হয়। তারিখ বেছে নিন, সেদিন টগল নিজে চালু হবে।</span>
+                <label class="donor-date-field">
+                  <span id="donorTimerDateText">তারিখ নির্বাচন করুন</span>
+                  <i class="fas fa-chevron-down"></i>
+                  <input type="date" class="donor-date-input" id="donorTimerDate" />
+                </label>
+                <p class="edit-message" id="donorTimerMessage"></p>
+                <button class="edit-submit-outline" id="donorTimerNoTimer" type="button"><span>আমি নিজে চালু না করা পর্যন্ত</span></button>
               </div>
-              <button class="edit-submit-outline" id="donorTimerNoTimer" type="button">আমি নিজে চালু না করা পর্যন্ত</button>
             </div>
 
             <!-- ===== সংগঠন (ঐচ্ছিক) — ইনস্ট্যান্ট সেভ, ডোনার টগলের ঠিক নিচে ===== -->
@@ -1068,8 +1069,78 @@ const upazilas = [
     padding: 4px 6px;
   }
 
-  .donor-timer-date {
+  /* ডোনার টাইমার পপ-আপ মোডাল */
+  .donor-timer-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(27, 42, 74, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .donor-timer-sheet {
+    position: relative;
+    background: #FFFFFF;
+    border-radius: 20px;
+    padding: 22px 20px 20px;
     width: 100%;
+    max-width: 380px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: left;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+  }
+
+  .donor-timer-title {
+    margin: 0;
+    padding-right: 34px;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #1B2A4A;
+  }
+
+  .donor-timer-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: #F1F5F9;
+    border-radius: 50%;
+    color: #1B2A4A;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+
+  .donor-date-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: #F8FAFC;
+    border: 1.5px solid #E2E8F0;
+    border-radius: 14px;
+    padding: 14px 16px;
+    color: #1B2A4A;
+    font-weight: 600;
+    cursor: pointer;
+    overflow: hidden;
+  }
+
+  .donor-date-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    border: 0;
   }
 
   /* ===== ব্লাড গ্রুপ পিকার (ডোনার টগল অন করার সময়, গ্রুপ না থাকলে) ===== */
@@ -1489,8 +1560,10 @@ const upazilas = [
   const donorTimerDate = document.getElementById('donorTimerDate');
   const donorTimerMessage = document.getElementById('donorTimerMessage');
   const donorTimerCancel = document.getElementById('donorTimerCancel');
-  const donorTimerSetDate = document.getElementById('donorTimerSetDate');
   const donorTimerNoTimer = document.getElementById('donorTimerNoTimer');
+  const donorTimerDateText = document.getElementById('donorTimerDateText');
+  const DONOR_DATE_PLACEHOLDER = 'তারিখ নির্বাচন করুন';
+  let donorTimerSaving = false;
 
   // ===== সংগঠন (ঐচ্ছিক) সিলেক্ট =====
   const clubSelect = document.getElementById('clubSelect');
@@ -1798,6 +1871,11 @@ const upazilas = [
       donorTimerDate.max = bdDateStr(730);
       donorTimerDate.value = currentProfile?.donor_resume_on || '';
     }
+    if (donorTimerDateText) {
+      donorTimerDateText.textContent = currentProfile?.donor_resume_on
+        ? formatBnDate(currentProfile.donor_resume_on)
+        : DONOR_DATE_PLACEHOLDER;
+    }
     donorTimerPicker.style.display = 'flex';
   }
 
@@ -1809,15 +1887,21 @@ const upazilas = [
 
   // টগল OFF (বা OFF অবস্থায় তারিখ বদল) — resumeOn = 'YYYY-MM-DD' অথবা null (নিজে চালু না করা পর্যন্ত)
   async function saveDonorTimer(resumeOn, btn) {
+    if (donorTimerSaving) return;
+    donorTimerSaving = true;
     clearMsg(donorTimerMessage);
-    setLoading(btn, true, 'সেভ হচ্ছে...');
+    if (btn) btn.disabled = true;
+    if (resumeOn && donorTimerDateText) donorTimerDateText.textContent = 'সেভ হচ্ছে...';
 
     const { error } = await supabase
       .from('profiles')
       .update({ is_blood_donor: false, donor_resume_on: resumeOn })
       .eq('id', currentUserId);
 
-    setLoading(btn, false);
+    donorTimerSaving = false;
+    if (btn) btn.disabled = false;
+    if (donorTimerDateText) donorTimerDateText.textContent = DONOR_DATE_PLACEHOLDER;
+    if (donorTimerDate) donorTimerDate.value = '';
 
     if (error) {
       reportDbError('profile_donor_timer', 'ডোনার টাইমার সেভ ব্যর্থ', error);
@@ -1833,21 +1917,26 @@ const upazilas = [
 
   donorTimerCancel?.addEventListener('click', closeDonorTimerPicker);
 
-  donorTimerSetDate?.addEventListener('click', () => {
-    const v = donorTimerDate?.value || '';
-    if (!v) {
-      showMsg(donorTimerMessage, 'আগে তারিখ বেছে নিন');
-      return;
-    }
+  // ক্যালেন্ডারে তারিখ বেছে OK দিলেই সরাসরি সেভ (আলাদা কনফার্মেশন নেই)
+  donorTimerDate?.addEventListener('change', () => {
+    const v = donorTimerDate.value || '';
+    if (!v) return;
     if (v < bdDateStr(1)) {
       showMsg(donorTimerMessage, 'তারিখ আজকের পরের হতে হবে');
+      donorTimerDate.value = '';
       return;
     }
     if (v > bdDateStr(730)) {
       showMsg(donorTimerMessage, 'তারিখ ২ বছরের মধ্যে হতে হবে');
+      donorTimerDate.value = '';
       return;
     }
-    saveDonorTimer(v, donorTimerSetDate);
+    saveDonorTimer(v, null);
+  });
+
+  // কালো ব্যাকগ্রাউন্ডে ট্যাপ করলে মোডাল বন্ধ (টগল ON-ই থাকে)
+  donorTimerPicker?.addEventListener('click', (e) => {
+    if (e.target === donorTimerPicker) closeDonorTimerPicker();
   });
 
   donorTimerNoTimer?.addEventListener('click', () => {
