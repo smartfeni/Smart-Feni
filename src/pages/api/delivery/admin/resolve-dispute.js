@@ -92,6 +92,14 @@ export async function POST({ request }) {
         status: newStatus,
         dispute_resolution: resolution,
         dispute_resolved_by: adminUserId,
+        // বাতিল সিদ্ধান্তে কে/কখন/কেন সেভ (রিপোর্টে "অজানা" এড়াতে)
+        ...(resolution === 'resolve_cancelled'
+          ? {
+              cancelled_by: adminUserId,
+              cancelled_at: new Date().toISOString(),
+              cancel_reason: 'ডিসপিউট নিষ্পত্তি: ডিল বাতিল',
+            }
+          : {}),
         dispute_resolved_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
