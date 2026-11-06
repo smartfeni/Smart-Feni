@@ -24,21 +24,43 @@ export async function groqChat({ system, messages, json = false, maxTokens = 102
   if (!key) return { ok: false, status: 0, text: '', error: 'no_key' };
 
   try {
-    const res = await fetch(GROQ_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(timeoutMs),
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [{ role: 'system', content: system }, ...messages],
-        temperature,
-        max_tokens: isGptOss ? Math.max(maxTokens, 2048) : maxTokens,
-        ...(isGptOss ? { reasoning_effort: 'low' } : {}),
-        ...(json ? { response_format: { type: 'json_object' } } : {}),
-      }),
-    });
+    const cleanMessages = (messages || []).filter((m) => m && String(m.content || '').trim());
+    const call = (useJson) =>
+      fetch(GROQ_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(timeoutMs),
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: [{ role: 'system', content: system }, ...cleanMessages],
+          temperature,
+          max_tokens: isGptOss ? Math.max(maxTokens, 2048) : maxTokens,
+          ...(isGptOss ? { reasoning_effort: 'low' } : {}),
+          ...(useJson ? { response_format: { type: 'json_object' } } : {}),
+        }),
+      });
 
-    if (!res.ok) return { ok: false, status: res.status, text: '', error: `http_${res.status}` };
+    let res = await call(json);
+    let jsonDropped = false;
+    // ৪০০ মানে প্রায়ই response_format সমস্যা; প্রম্পটে JSON চাওয়া আছেই, তাই ছাড়া একবার আবার চেষ্টা
+    if (res.status === 400 && json) {
+      res = await call(false);
+      jsonDropped = true;
+    }
+
+    if (!res.ok) {
+      let code = '';
+      try {
+        const eb = await res.json();
+        code = String((eb && eb.error && (eb.error.code || eb.error.type)) || '').replace(/[^a-z0-9_]/gi, '').slice(0, 40);
+      } catch (e) { /* উপেক্ষা */ }
+      return {
+        ok: false,
+        status: res.status,
+        text: '',
+        error: `http_${res.status}${code ? '_' + code : ''}${jsonDropped ? '_nojson' : ''}`,
+      };
+    }
 
     const data = await res.json();
     const text = String(data?.choices?.[0]?.message?.content || '').trim();
