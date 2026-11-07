@@ -182,17 +182,9 @@ export async function POST({ request }) {
       return json({ error: 'ক্লাব তৈরি ব্যর্থ: ' + clubError.message }, 500);
     }
 
-    // একাধিক ক্লাব: আগে থেকে club_id থাকলে সেটা ওভাররাইট করা হয় না
-    const { data: ownerProfile } = await supabaseAdmin
-      .from('profiles')
-      .select('club_id')
-      .eq('id', req.user_id)
-      .maybeSingle();
-
-    const profileUpdate = { is_club_owner: true };
-    if (!ownerProfile?.club_id) {
-      profileUpdate.club_id = clubData.id;
-    }
+    // এক ওউনার = এক ক্লাব: ওউনারের club_id সবসময় তার নিজের ক্লাব।
+    // (আগে থেকে অন্য সংগঠন বেছে রাখা থাকলেও ওভাররাইট; নইলে /my-club ও প্রোফাইলে ভুল ক্লাব দেখাত)
+    const profileUpdate = { is_club_owner: true, club_id: clubData.id };
 
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
