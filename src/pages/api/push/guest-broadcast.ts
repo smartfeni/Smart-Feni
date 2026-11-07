@@ -35,6 +35,8 @@ const BRAND_COLOR = '#FF6B35';
 const GUEST_PROMO_TITLE = 'স্মার্ট ফেনী';
 const FCM_BATCH = 500;
 const PAGE = 1000;
+// .in() এর URL ছোট রাখতে (FCM টোকেন ~১৬০ অক্ষর; ২০০টায় URL ~৩০KB হয়ে ৪০০ Bad Request আসত)
+const CLEANUP_CHUNK = 50;
 
 const ROUTE = '/api/push/guest-broadcast';
 
@@ -220,19 +222,19 @@ export async function POST({ request }) {
     // ---------- ৪) আনইনস্টল হওয়া টোকেনে সময় বসানো, অবৈধ টোকেন ডিলিট ----------
     const nowIso = new Date().toISOString();
     let cleanupError: string | null = null;
-    for (let i = 0; i < uninstalledTokens.length; i += 200) {
+    for (let i = 0; i < uninstalledTokens.length; i += CLEANUP_CHUNK) {
       const { error: markError } = await supabaseAdmin
         .from('guest_push_devices')
         .update({ uninstalled_at: nowIso })
-        .in('fcm_token', uninstalledTokens.slice(i, i + 200))
+        .in('fcm_token', uninstalledTokens.slice(i, i + CLEANUP_CHUNK))
         .is('uninstalled_at', null);
       if (markError && !cleanupError) cleanupError = markError.message;
     }
-    for (let i = 0; i < invalidTokens.length; i += 200) {
+    for (let i = 0; i < invalidTokens.length; i += CLEANUP_CHUNK) {
       const { error: deleteError } = await supabaseAdmin
         .from('guest_push_devices')
         .delete()
-        .in('fcm_token', invalidTokens.slice(i, i + 200));
+        .in('fcm_token', invalidTokens.slice(i, i + CLEANUP_CHUNK));
       if (deleteError && !cleanupError) cleanupError = deleteError.message;
     }
 
