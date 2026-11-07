@@ -48,11 +48,15 @@ export async function fetchLikeData(targetType, targetIds) {
   const likedByMe = new Set();
   if (!targetIds.length) return { counts, likedByMe };
 
-  const { data: allLikes } = await supabase
+  // একসাথে অনেক id দিলে (যেমন ২৬৭টা কার্ড) URL বিশাল হয়ে ধীর নেটে/প্রক্সিতে ফেইল করতে পারে → ৬০টা করে ভাগে, সমান্তরালে
+  const chunks = [];
+  for (let i = 0; i < targetIds.length; i += 60) chunks.push(targetIds.slice(i, i + 60));
+  const results = await Promise.all(chunks.map((ids) => supabase
     .from('content_likes')
     .select('target_id, user_id')
     .eq('target_type', targetType)
-    .in('target_id', targetIds);
+    .in('target_id', ids)));
+  const allLikes = results.flatMap((r) => (r && r.data) || []);
 
   (allLikes || []).forEach((row) => {
     counts[row.target_id] = (counts[row.target_id] || 0) + 1;

@@ -337,7 +337,8 @@ export async function initBackButtonHandler() {
 // error.html আসে। তাই যাওয়ার আগে ছোট একটা কানেকশন চেক করি; ফেইল করলে কয়েকবার
 // আবার চেষ্টা করি, তারপরও না হলে পেজে থেকে বার্তা দেখাই (এরর পেজে পাঠাই না)।
 // ৫ সেকেন্ডের মধ্যে একবার চেক পাস করলে আবার চেক করি না (প্রতি ট্যাপে দেরি এড়াতে)।
-const NAV_CHECK_TIMEOUT_MS = 4000;
+const NAV_CHECK_TIMEOUT_MS = 6000;
+const NAV_SOFT_WAIT_MS = 3000;
 const NAV_CHECK_GAP_MS = 1500;
 const NAV_RECENT_OK_MS = 5000;
 let navLastOkAt = 0;
@@ -348,7 +349,7 @@ async function connectionOk() {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), NAV_CHECK_TIMEOUT_MS);
   try {
-    const res = await fetch('/favicon.ico?_=' + Date.now(), { cache: 'no-store', signal: ctrl.signal });
+    const res = await fetch('/ping.txt?_=' + Date.now(), { cache: 'no-store', signal: ctrl.signal });
     return res.status < 500;
   } catch (err) {
     return false;
@@ -382,12 +383,23 @@ async function safeNavigate(target, { retries = 2 } = {}) {
   navCheckBusy = true;
   let ok = false;
   try {
-    ok = await waitForConnection(retries);
+    const check = waitForConnection(retries);
+    if (retries <= 2) {
+      // সাধারণ লিংক: ধীর নেটে ইউজারকে আটকাব না — ৩ সেকেন্ডে চেক শেষ না হলে সরাসরি পেজে যাই
+      const soft = await Promise.race([check, new Promise((resolve) => setTimeout(() => resolve(null), NAV_SOFT_WAIT_MS))]);
+      ok = soft === null ? navigator.onLine !== false : soft; // ঝুলে থাকলে যাই; তবে সত্যিই অফলাইন হলে নয়
+    } else {
+      ok = await check; // নোটিফিকেশন/ডিপ লিংক: নেট ফেরা পর্যন্ত অপেক্ষা (আগের মতো)
+    }
   } catch (err) {
     ok = true; // চেক নিজে ভাঙলে আগের মতোই যাও
   } finally {
     navCheckBusy = false;
   }
+
+  // ফোন নিজে অনলাইন বলছে কিন্তু চেক ফেইল = ধীর/অস্থির নেট। এমন ইউজারকে "নেটওয়ার্ক দুর্বল" বলে আটকাব না;
+  // পেজ নিজে লোড চেষ্টা করুক (সত্যিই না এলে error.html-এ অটো-রিট্রাই আছে)। শুধু সত্যিই অফলাইনে আটকাই।
+  if (!ok && retries <= 2 && navigator.onLine !== false) ok = true;
 
   if (!ok) {
     navigatingAway = false;
