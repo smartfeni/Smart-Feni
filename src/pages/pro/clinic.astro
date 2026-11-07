@@ -159,6 +159,12 @@ import DoctorsTab from '../../components/clinic-dashboard/DoctorsTab.astro';
       userId = session.user.id;
 
       // অ্যাডমিনের জন্য আলাদা জায়গা: /admin/doctors-এর "সিরিয়াল রিকোয়েস্ট" ট্যাব
+      // ক্লিনিক তালিকার কল আগেই শুরু (অ্যাডমিন-চেকের সাথে একসাথে); অ্যাডমিন হলে ফল ব্যবহার হবে না
+      const repsQuery = Promise.resolve(supabase
+        .from('clinic_reps')
+        .select('receives_serials, clinics!inner(*)')
+        .eq('user_id', userId)
+        .eq('is_active', true));
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single();
       if (profile?.role === 'admin') {
         const qs = new URLSearchParams(window.location.search);
@@ -167,11 +173,7 @@ import DoctorsTab from '../../components/clinic-dashboard/DoctorsTab.astro';
         return;
       }
 
-      const { data } = await supabase
-        .from('clinic_reps')
-        .select('receives_serials, clinics!inner(*)')
-        .eq('user_id', userId)
-        .eq('is_active', true);
+      const { data } = await repsQuery;
       clinics = (data || [])
         .filter((r) => r.clinics && r.clinics.is_active)
         .map((r) => ({ ...r.clinics, isReceiver: !!r.receives_serials }))
