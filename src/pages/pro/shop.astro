@@ -280,6 +280,7 @@ const guideSteps = [
   <script>
     import { supabase } from '../../lib/supabase.js';
     import { getMyProRoles, rememberRole, proLoginUrl, ROLE_META } from '../../lib/proRoles.js';
+    import { readProCache, writeProCache } from '../../lib/proDataCache.js';
 
     const $ = (id) => document.getElementById(id);
     const POLL_MS = 8000;
@@ -583,10 +584,16 @@ const guideSteps = [
 
     // ---------- মেনু ----------
     async function loadMenu() {
+      const ckey = 'menu:' + shop.id;
+      const cached = await readProCache(ckey);
+      if (Array.isArray(cached)) { menu = cached; renderMenu(); }
       const { data, error } = await supabase.from('delivery_shop_items').select('id, name, price, image_url, is_available, sort_order').eq('shop_id', shop.id).order('sort_order', { ascending: true }).order('name', { ascending: true });
-      if (error) { toast('মেনু লোড হয়নি: ' + error.message, 'error'); return; }
-      menu = data || [];
-      renderMenu();
+      if (error) { if (!Array.isArray(cached)) toast('মেনু লোড হয়নি: ' + error.message, 'error'); return; }
+      const fresh = data || [];
+      const changed = !Array.isArray(cached) || JSON.stringify(cached) !== JSON.stringify(fresh);
+      menu = fresh;
+      if (changed) renderMenu();
+      writeProCache(ckey, fresh);
     }
 
     function renderMenu() {
