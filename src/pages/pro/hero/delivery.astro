@@ -1287,8 +1287,7 @@ const riderGuideSteps = [
       loadWeeklyEarnings(riderRow.id);
       riderStatRating.textContent = riderRow.avg_rating ? `${riderRow.avg_rating}` : '—';
 
-      await loadActiveDeliveries(riderRow.id);
-      await loadOpenRequests(riderRow);
+      await Promise.all([loadActiveDeliveries(riderRow.id), loadOpenRequests(riderRow)]);
     }
 
     // ===== অনলাইন/অফলাইন টগল =====
@@ -1572,15 +1571,20 @@ const riderGuideSteps = [
       // সেটিং delivery_rider_scope: 'all' (ডিফল্ট) হলে সব উপজেলার অর্ডার দেখাবে,
       // নিজের উপজেলার অর্ডার আগে
       let scopeAll = true;
-      try {
-        const { data: scopeRow } = await supabase
-          .from('site_settings')
-          .select('value')
-          .eq('key', 'delivery_rider_scope')
-          .maybeSingle();
-        scopeAll = !scopeRow || scopeRow.value !== 'upazila';
-      } catch (_) {
-        scopeAll = true;
+      if (window.__sfRiderScope && Date.now() - window.__sfRiderScope.t < 5 * 60 * 1000) {
+        scopeAll = window.__sfRiderScope.v;
+      } else {
+        try {
+          const { data: scopeRow } = await supabase
+            .from('site_settings')
+            .select('value')
+            .eq('key', 'delivery_rider_scope')
+            .maybeSingle();
+          scopeAll = !scopeRow || scopeRow.value !== 'upazila';
+          window.__sfRiderScope = { v: scopeAll, t: Date.now() };
+        } catch (_) {
+          scopeAll = true;
+        }
       }
 
       if (heroUpazila && !scopeAll) {
@@ -1601,18 +1605,19 @@ const riderGuideSteps = [
 
       const openRequestIds = openRequests.map((r) => r.id);
 
-      const { data: myOffers } = await supabase
-        .from('delivery_offers')
-        .select('request_id, offer_price, status, created_at')
-        .eq('rider_profile_id', currentUserId)
-        .eq('status', 'active')
-        .in('request_id', openRequestIds);
-
-      const { data: allActiveOffers } = await supabase
-        .from('delivery_offers')
-        .select('request_id, offer_price')
-        .eq('status', 'active')
-        .in('request_id', openRequestIds);
+      const [{ data: myOffers }, { data: allActiveOffers }] = await Promise.all([
+        supabase
+          .from('delivery_offers')
+          .select('request_id, offer_price, status, created_at')
+          .eq('rider_profile_id', currentUserId)
+          .eq('status', 'active')
+          .in('request_id', openRequestIds),
+        supabase
+          .from('delivery_offers')
+          .select('request_id, offer_price')
+          .eq('status', 'active')
+          .in('request_id', openRequestIds),
+      ]);
 
       const myOfferMap = new Map((myOffers || []).map((o) => [o.request_id, o]));
       const bestOfferMap = new Map();
