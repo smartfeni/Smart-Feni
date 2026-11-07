@@ -40,3 +40,15 @@ export function rememberHeroTab(tab) {
 export function lastHeroTab() {
   try { return localStorage.getItem(KEY); } catch (_) { return null; }
 }
+
+// ট্যাব ব্যাজ: { rider, delivery:{open,active}, offline:{open,active}, ride:{open,active} }
+// RPC get_pro_badges() (auth.uid() ভিত্তিক)। ব্যর্থ হলে null (ব্যাজ লুকানো থাকবে)
+export async function getHeroBadges() {
+  try {
+    const { data, error } = await supabase.rpc('get_pro_badges');
+    if (error || !data || !data.rider) return null;
+    return data;
+  } catch (_) {
+    return null;
+  }
+}

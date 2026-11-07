@@ -17,12 +17,21 @@ const { active = 'delivery' } = Astro.props;
   .ht-bar { background: #1B2A4A; padding: 10px 12px; gap: 8px; overflow-x: auto; font-family: 'Hind Siliguri', system-ui, sans-serif; }
   .ht-tab { flex: 1; min-width: 0; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.1); color: #fff; font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; white-space: nowrap; padding: 0 10px; }
   .ht-tab.active { background: #FF6B35; color: #1B2A4A; }
+  /* ব্যাজ: কমলা = খোলা অর্ডার, সবুজ = চলমান অর্ডার (শূন্য হলে লুকানো) */
+  .ht-tab { position: relative; }
+  .ht-bs { position: absolute; top: -7px; right: -2px; display: flex; gap: 3px; pointer-events: none; }
+  .ht-b { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #1B2A4A; }
+  .ht-b-open { background: #FF6B35; color: #fff; animation: htPulse 1.6s ease-in-out infinite; }
+  .ht-tab.active .ht-b-open { background: #fff; color: #1B2A4A; }
+  .ht-b-act { background: #14A44D; color: #fff; }
+  @keyframes htPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+  @media (prefers-reduced-motion: reduce) { .ht-b-open { animation: none; } }
   /* Pro অ্যাপে মেইনের প্রোফাইল-ফেরা লিংক ও Telegram বক্স লাগে না */
   .back-link, .oo-round, .dh-telegram-box { display: none !important; }
 </style>
 
 <script>
-  import { getHeroTabs, HERO_TABS, rememberHeroTab } from '../../lib/proHero.js';
+  import { getHeroTabs, HERO_TABS, rememberHeroTab, getHeroBadges } from '../../lib/proHero.js';
   import { proLoginUrl } from '../../lib/proRoles.js';
 
   async function run() {
@@ -38,9 +47,43 @@ const { active = 'delivery' } = Astro.props;
     if (res.tabs.length < 2) return;
     nav.innerHTML = res.tabs.map((k) => {
       const t = HERO_TABS[k];
-      return '<a class="ht-tab' + (k === active ? ' active' : '') + '" href="' + t.href + '"><i class="fas ' + t.icon + '"></i><span>' + t.label + '</span></a>';
+      return '<a class="ht-tab' + (k === active ? ' active' : '') + '" href="' + t.href + '"><i class="fas ' + t.icon + '"></i><span>' + t.label + '</span><span class="ht-bs" data-k="' + k + '"></span></a>';
     }).join('');
     nav.style.display = 'flex';
+
+    // ----- ব্যাজ -----
+    const bn = (n) => (n > 9 ? '৯+' : String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]));
+    let busy = false;
+    function chip(cls, n, title) {
+      const s = document.createElement('span');
+      s.className = 'ht-b ' + cls;
+      s.textContent = bn(n);
+      s.title = title;
+      return s;
+    }
+    async function refreshBadges() {
+      if (busy || document.hidden) return;
+      busy = true;
+      try {
+        const b = await getHeroBadges();
+        nav.querySelectorAll('.ht-bs').forEach((box) => {
+          const c = b && b[box.dataset.k];
+          box.textContent = '';
+          if (!c) return;
+          if (c.open > 0) box.appendChild(chip('ht-b-open', c.open, 'খোলা অর্ডার'));
+          if (c.active > 0) box.appendChild(chip('ht-b-act', c.active, 'চলমান অর্ডার'));
+        });
+      } finally {
+        busy = false;
+      }
+    }
+    refreshBadges();
+    setInterval(refreshBadges, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshBadges(); });
+    window.addEventListener('smartfeni:hero-badges-refresh', refreshBadges);
+    // পেজের যেকোনো বাটন (একসেপ্ট/পিকআপ/ডেলিভার্ড ইত্যাদি) চাপার একটু পর সংখ্যা নতুন করে
+    let clickT = null;
+    document.addEventListener('click', () => { clearTimeout(clickT); clickT = setTimeout(refreshBadges, 2500); });
   }
   run();
 </script>
