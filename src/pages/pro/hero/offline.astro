@@ -412,8 +412,8 @@ import HeroTabs from '../../../components/pro/HeroTabs.astro';
     }
 
     // ---------- লোড ----------
-    async function load(silent) {
-      const { data, error } = await supabase.rpc('rider_manual_orders');
+    async function load(silent, pre) {
+      const { data, error } = await (pre || supabase.rpc('rider_manual_orders'));
       if (error) {
         if (error.code === '42501' || /not_rider/.test(error.message || '')) { showGate('rider'); return; }
         if (!silent) toast('লোড করা যায়নি, আবার চেষ্টা করুন', 'error');
@@ -543,6 +543,8 @@ import HeroTabs from '../../../components/pro/HeroTabs.astro';
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { show('ooLogin'); return; }
 
+      // অর্ডার তালিকার কল আগেই শুরু (যাচাই কলের সাথে একসাথে চলবে); গেট হলে ফল ব্যবহার হবে না
+      const preOrders = Promise.resolve(supabase.rpc('rider_manual_orders'));
       const { data: rider } = await supabase.from('delivery_riders').select('verification_status').eq('profile_id', session.user.id).maybeSingle();
       if (!rider) return showGate('none');
       if (rider.verification_status === 'pending') return showGate('pending');
@@ -557,7 +559,7 @@ import HeroTabs from '../../../components/pro/HeroTabs.astro';
       $('ctSave').addEventListener('click', saveCounter);
       $('ctOverlay').addEventListener('click', (e) => { if (e.target === $('ctOverlay')) $('ctOverlay').classList.remove('active'); });
 
-      await load(false);
+      await load(false, preOrders);
 
       setInterval(() => { if (!document.hidden && !anyOpen() && !busy) load(true); }, 15000);
       document.addEventListener('visibilitychange', () => { if (!document.hidden && !anyOpen() && !busy) load(true); });
