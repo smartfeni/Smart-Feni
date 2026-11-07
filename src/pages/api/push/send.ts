@@ -255,7 +255,14 @@ export async function POST({ request }) {
           if (err.statusCode === 404 || err.statusCode === 410) {
             staleWebIds.push(sub.id);
           } else {
-            webFailCodes.add(String(err.statusCode || err.code || 'unknown'));
+            // পুশ সার্ভিসের সাময়িক সমস্যা (৫xx, ৪২৯) ও নেটওয়ার্ক টাইমআউট রিপোর্ট নয়;
+            // ৪০০/৪০১/৪০৩ (VAPID/কনফিগ সমস্যা) রিপোর্ট হবে
+            const sc = Number(err.statusCode || 0);
+            const transient =
+              (sc >= 500 && sc < 600) ||
+              sc === 429 ||
+              (!sc && /ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|socket hang up|timeout/i.test(String(err.code || err.message || '')));
+            if (!transient) webFailCodes.add(String(err.statusCode || err.code || 'unknown'));
           }
           // অন্য এরর (যেমন সাময়িক নেটওয়ার্ক সমস্যা) সাইলেন্টলি স্কিপ, পরের নোটিফিকেশনে আবার ট্রাই হবে
         }
