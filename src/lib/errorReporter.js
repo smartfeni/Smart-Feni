@@ -17,6 +17,8 @@
 const MAX_MSG = 300;
 const MAX_PER_PAGE_LOAD = 10;
 const VALID_KINDS = ['db_block', 'api_fail', 'js_crash', 'other'];
+// নেটওয়ার্ক ফেইল ধরার প্যাটার্ন (সিগন্যাল দুর্বল/কানেকশন ড্রপ): ডাটাবেস সমস্যা নয়
+const NETWORK_FAIL_RE = /failed to fetch|networkerror|load failed|network request failed/i;
 
 const seen = new Set(); // সেশনে একই এরর ১ বার
 let sentCount = 0;
@@ -131,9 +133,15 @@ export async function reportError(opts) {
     if (sentCount >= MAX_PER_PAGE_LOAD) return;
 
     const o = opts || {};
-    const kind = VALID_KINDS.includes(o.kind) ? o.kind : 'other';
     const action = String(o.action || '').slice(0, 200);
     const message = cleanMessage(o.message);
+    let kind = VALID_KINDS.includes(o.kind) ? o.kind : 'other';
+    let title = o.title;
+    // code ছাড়া "Failed to fetch" = ইউজারের নেটওয়ার্ক সমস্যা, ডাটাবেস ব্লক নয়
+    if (kind === 'db_block' && !o.code && NETWORK_FAIL_RE.test(message)) {
+      kind = 'other';
+      title = 'নেটওয়ার্ক সমস্যা (ইউজার-সাইড)';
+    }
 
     if (!message && !action) return;
     if (isIgnorable(message, o.stack, o.filename)) return;
@@ -156,7 +164,7 @@ export async function reportError(opts) {
       p_action: action,
       p_message: message,
       p_code: o.code ? String(o.code).slice(0, 50) : null,
-      p_title: o.title ? String(o.title).slice(0, 200) : null,
+      p_title: title ? String(title).slice(0, 200) : null,
       p_user_agent: (typeof navigator !== 'undefined' && navigator.userAgent ? navigator.userAgent : '').slice(0, 300),
       p_sentry_event_id: sentryId,
     };
