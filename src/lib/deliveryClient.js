@@ -35,7 +35,7 @@ async function callDeliveryApi(endpoint, body) {
 
     return { data };
   } catch (err) {
-    return { error: 'নেটওয়ার্ক সমস্যা: ' + err.message };
+    return { error: 'ইন্টারনেটে সমস্যা, আবার চেষ্টা করুন' };
   }
 }
 
