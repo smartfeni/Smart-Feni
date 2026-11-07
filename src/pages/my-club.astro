@@ -479,6 +479,24 @@ import ImageLightbox from '../components/ImageLightbox.astro';
     const tabsBar = document.getElementById('myclubTabs');
     const moderatorsTabBtn = document.getElementById('moderatorsTabBtn');
 
+    // নেট/সার্ভার সমস্যায় রিডাইরেক্ট না করে "আবার চেষ্টা" দেখানো
+    function showLoadError() {
+      if (!loadingState) return;
+      loadingState.style.display = 'flex';
+      guardedContent.style.display = 'none';
+      loadingState.textContent = '';
+      const p = document.createElement('p');
+      p.textContent = 'লোড করা যায়নি। ইন্টারনেট সংযোগ দেখে আবার চেষ্টা করুন।';
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'primary-btn';
+      b.style.maxWidth = '220px';
+      b.textContent = 'আবার চেষ্টা করুন';
+      b.addEventListener('click', () => location.reload());
+      loadingState.appendChild(p);
+      loadingState.appendChild(b);
+    }
+
     async function init() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -486,11 +504,16 @@ import ImageLightbox from '../components/ImageLightbox.astro';
         return;
       }
 
-      const { data: profile } = await supabase
+      const { data: profile, error: profileErr } = await supabase
         .from('profiles')
         .select('is_club_owner, club_id')
         .eq('id', session.user.id)
         .single();
+
+      if (profileErr && profileErr.code !== 'PGRST116') {
+        showLoadError();
+        return;
+      }
 
       let clubId = null;
       let isOwner = false;
@@ -502,12 +525,17 @@ import ImageLightbox from '../components/ImageLightbox.astro';
         isOwner = true;
       } else {
         // ============ কেস ২: মডারেটর কিনা চেক ============
-        const { data: modRow } = await supabase
+        const { data: modRow, error: modErr } = await supabase
           .from('moderators')
           .select('entity_id, can_edit_listings, can_delete_listings, can_manage_orders, can_edit_settings')
           .eq('entity_type', 'club')
           .eq('profile_id', session.user.id)
           .maybeSingle();
+
+        if (modErr) {
+          showLoadError();
+          return;
+        }
 
         if (modRow?.entity_id) {
           clubId = modRow.entity_id;
@@ -522,11 +550,16 @@ import ImageLightbox from '../components/ImageLightbox.astro';
         return;
       }
 
-      const { data: club } = await supabase
+      const { data: club, error: clubErr } = await supabase
         .from('clubs')
         .select('*')
         .eq('id', clubId)
         .single();
+
+      if (clubErr && clubErr.code !== 'PGRST116') {
+        showLoadError();
+        return;
+      }
 
       if (!club) {
         window.location.href = '/';
@@ -598,6 +631,6 @@ import ImageLightbox from '../components/ImageLightbox.astro';
 
     profileEditLink?.addEventListener('click', () => activateTab('profile'));
 
-    init();
+    init().catch(() => showLoadError());
   </script>
 </BaseLayout>
