@@ -719,6 +719,8 @@ const upazilas = [
   import { supabase } from '../../lib/supabase.js';
   import { compressImage } from '../../lib/imageCompress.js';
   import { applyPendingReferral } from '../../lib/referral.js';
+  import { isNativeApp } from '../../lib/native-bridge.js';
+  import { isProApp } from '../../lib/proApp.js';
 
   // ============================================================
   // মোডাল ওপেন/ক্লোজ, ট্যাব সুইচ — UI লজিক (আগের মতোই)
@@ -1219,4 +1221,41 @@ const upazilas = [
 
   // গ্লোবালি অ্যাক্সেসযোগ্য করা হলো যাতে Header.astro থেকে খোলা যায়
   window.openAuthModal = openAuthModal;
+
+  // ============================================================
+  // অ্যাপ খুললেই সাইনআপ মোডাল (SF-এর সিদ্ধান্ত, ৮ নভে ২০২৬):
+  // শুধু নেটিভ মেইন অ্যাপে (Pro অ্যাপ ও ওয়েব ব্রাউজারে নয়), লগইন না থাকলে।
+  // প্রতি অ্যাপ-সেশনে একবার (sessionStorage); ✕ চাপলে ওই সেশনে আর খুলবে না।
+  // আইনি/রিসেট/ডিলিট পেজে খুলবে না। সাইনআপ ফর্মের নিচে "লগইন করুন" লিংক আগে থেকেই আছে।
+  // ============================================================
+  (async () => {
+    try {
+      if (!isNativeApp()) return;
+      if (await isProApp()) return;
+
+      const p = window.location.pathname;
+      const skip = ['/reset-password', '/privacy-policy', '/terms-of-service', '/delete-account', '/pro-app'];
+      if (p === '/pro' || p.indexOf('/pro/') === 0) return;
+      if (skip.some((s) => p === s || p.indexOf(s + '/') === 0)) return;
+
+      try {
+        if (sessionStorage.getItem('sf_signup_autoshown')) return;
+      } catch (_) { /* sessionStorage না থাকলে চলবে */ }
+
+      const { data } = await supabase.auth.getSession();
+      if (data?.session) return;
+
+      // অন্য কোনো মোডাল/প্যানেল আগেই খোলা থাকলে বিরক্ত করবে না
+      if (overlay?.classList.contains('open')) return;
+
+      try { sessionStorage.setItem('sf_signup_autoshown', '1'); } catch (_) {}
+
+      // স্প্ল্যাশ সরে যাওয়ার জন্য একটু অপেক্ষা
+      setTimeout(() => {
+        if (!overlay?.classList.contains('open')) openAuthModal('signup');
+      }, 700);
+    } catch (_) {
+      // ব্যর্থ হলে চুপচাপ আগের আচরণ
+    }
+  })();
 </script>
