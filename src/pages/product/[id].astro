@@ -79,11 +79,51 @@ if (product) {
 
 const notFound = !product || !shop;
 
-const pageTitle = product ? `${product.title} | ${shop?.name || 'শপ'} | স্মার্ট ফেনী` : 'প্রোডাক্ট পাওয়া যায়নি | স্মার্ট ফেনী';
+// না-পাওয়া প্রোডাক্টে সঠিক 404 স্ট্যাটাস (soft-404 এড়াতে)
+if (notFound) {
+  Astro.response.status = 404;
+}
+
+const cleanText = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+const shopName = shop?.name || 'শপ';
+const priceNum = product ? Number(product.price) : NaN;
+const hasPrice = Number.isFinite(priceNum) && priceNum > 0;
+
+const pageTitle = product
+  ? `${cleanText(product.title).slice(0, 70)} — ফেনীতে অর্ডার করুন | ${shopName} | স্মার্ট ফেনী`
+  : 'প্রোডাক্ট পাওয়া যায়নি | স্মার্ট ফেনী';
 const ogImage = product?.images?.[0] || undefined;
+
+const pageDescription = product
+  ? `${cleanText(product.title)}${hasPrice ? ` — দাম ৳${priceNum}` : ''}। ${shopName}-এর এই প্রোডাক্ট স্মার্ট ফেনীর মাধ্যমে ফেনীতে অর্ডার করুন। ${cleanText(product.description)}`
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 160)
+  : undefined;
+
+const productJsonLd = product && shop
+  ? {
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      name: cleanText(product.title),
+      image: (product.images || []).slice(0, 5),
+      description: cleanText(product.description) || cleanText(product.title),
+      url: `https://smartfeni.com/product/${product.id}`,
+      offers: hasPrice
+        ? {
+            '@type': 'Offer',
+            url: `https://smartfeni.com/product/${product.id}`,
+            priceCurrency: 'BDT',
+            price: priceNum,
+            availability: product.is_sold_out ? 'https://schema.org/OutOfStock' : 'https://schema.org/InStock',
+            seller: { '@type': 'Organization', name: shopName },
+          }
+        : undefined,
+    }
+  : null;
 ---
 
-<BaseLayout title={pageTitle} ogImage={ogImage}>
+<BaseLayout title={pageTitle} description={pageDescription} ogImage={ogImage} jsonLd={productJsonLd}>
   {notFound ? (
     <div class="not-found-wrap">
       <div class="container">
