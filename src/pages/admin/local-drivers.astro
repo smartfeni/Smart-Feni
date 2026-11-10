@@ -1,0 +1,319 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — লোকাল রাইড ড্রাইভার ভেরিফিকেশন (/admin/local-drivers)
+// ট্যাব: পেন্ডিং | অ্যাপ্রুভড | রিজেক্টেড। নিজের ছবি (পাবলিক bucket), আইডি কার্ড (প্রাইভেট
+// bucket rider-verification → signed URL), গাড়ির ছবি (ঐচ্ছিক)।
+// Approve/Reject: RPC admin_approve_local_ride_driver (reject-এ কারণ বাধ্যতামূলক)।
+// ইউজারের লেখা টেক্সট শুধু textContent দিয়ে বসানো (innerHTML নয়)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="লোকাল রাইড ড্রাইভার | স্মার্ট ফেনী">
+  <div class="ld-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="ld-loading">
+        <div class="ld-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" style="display:none;">
+        <a href="/admin" class="ld-back"><i class="fas fa-arrow-left"></i> অ্যাডমিন ড্যাশবোর্ডে ফিরুন</a>
+        <h1 class="ld-h1"><i class="fas fa-van-shuttle"></i> লোকাল রাইড ড্রাইভার</h1>
+
+        <div class="ld-tabs" role="tablist">
+          <button type="button" class="ld-tab active" data-tab="pending">পেন্ডিং <span class="ld-count" id="ldPendingCount">0</span></button>
+          <button type="button" class="ld-tab" data-tab="approved">অ্যাপ্রুভড</button>
+          <button type="button" class="ld-tab" data-tab="rejected">রিজেক্টেড</button>
+        </div>
+
+        <div id="ldList" class="ld-list"></div>
+        <p class="ld-empty" id="ldEmpty" style="display:none;"></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="ld-lb" id="ldLb">
+    <button type="button" class="ld-lb-x" id="ldLbX" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+    <img id="ldLbImg" src="" alt="" />
+  </div>
+
+  <style is:global>
+    .ld-page { min-height: 60vh; padding: 32px 0 80px; }
+    .ld-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .ld-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: ldspin .8s linear infinite; }
+    @keyframes ldspin { to { transform: rotate(360deg); } }
+    .ld-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: .88rem; margin-bottom: 18px; min-height: 44px; }
+    .ld-h1 { font-size: 1.4rem; font-weight: 800; color: #1B2A4A; display: flex; align-items: center; gap: 10px; margin: 0 0 16px; }
+    .ld-h1 i { color: #FF6B35; }
+    .ld-tabs { display: flex; gap: 6px; margin-bottom: 20px; border-bottom: 1px solid #EEF3F9; }
+    .ld-tab { background: none; border: none; padding: 10px 14px; min-height: 44px; font-size: .86rem; font-weight: 700; color: #8FA0BC; cursor: pointer; border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 6px; font-family: inherit; }
+    .ld-tab.active { color: #FF6B35; border-bottom-color: #FF6B35; }
+    .ld-count { background: #FFF0EA; color: #FF6B35; font-size: .7rem; font-weight: 800; padding: 1px 8px; border-radius: 20px; }
+    .ld-tab:not(.active) .ld-count { background: #F4F7FC; color: #8FA0BC; }
+    .ld-list { display: flex; flex-direction: column; gap: 16px; }
+    .ld-card { background: #fff; border-radius: 20px; padding: 18px; box-shadow: 0 4px 16px rgba(15,23,42,.06); }
+    .ld-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .ld-av { width: 44px; height: 44px; border-radius: 50%; background: #FFF0EA; color: #FF6B35; display: flex; align-items: center; justify-content: center; flex: none; overflow: hidden; }
+    .ld-av img { width: 100%; height: 100%; object-fit: cover; }
+    .ld-who { flex: 1; min-width: 0; }
+    .ld-name { font-size: .95rem; font-weight: 700; color: #1B2A4A; margin: 0; }
+    .ld-meta { font-size: .76rem; color: #8FA0BC; margin: 2px 0 0; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+    .ld-badge { font-size: .68rem; font-weight: 800; padding: 4px 12px; border-radius: 20px; flex: none; }
+    .ld-badge.pending { background: #FFF4E0; color: #B8860B; }
+    .ld-badge.approved { background: #EAFBF0; color: #1B7A3C; }
+    .ld-badge.rejected { background: #FFF0EA; color: #D14343; }
+    .ld-info { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .ld-chip { font-size: .74rem; font-weight: 600; padding: 4px 10px; border-radius: 20px; background: #EAF0FF; color: #1B2A4A; }
+    .ld-chip.area { background: #F4F7FC; color: #5A6E85; }
+    .ld-docs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .ld-doc { position: relative; aspect-ratio: 4/3; border-radius: 12px; overflow: hidden; background: #F8FAFC; border: 1px solid #EEF3F9; cursor: pointer; padding: 0; }
+    .ld-doc img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ld-doc.missing { display: flex; align-items: center; justify-content: center; color: #B0BCCB; font-size: .68rem; text-align: center; cursor: default; }
+    .ld-doc-l { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(15,23,42,.6); color: #fff; font-size: .64rem; font-weight: 700; padding: 3px 6px; text-align: center; }
+    .ld-reason { font-size: .8rem; color: #5A6E85; background: #F8FAFC; padding: 10px 12px; border-radius: 10px; margin: 0 0 10px; }
+    .ld-act { display: flex; gap: 10px; }
+    .ld-act button { flex: 1; min-height: 44px; border: none; border-radius: 12px; font-size: .84rem; font-weight: 700; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .ld-ok { background: #1B7A3C; color: #fff; }
+    .ld-no { background: #FFF0EA; color: #D14343; }
+    .ld-no2 { background: #D14343; color: #fff; }
+    .ld-cancel { background: #F4F7FC; color: #5A6E85; }
+    .ld-act button:disabled { opacity: .6; cursor: default; }
+    .ld-rej { display: none; margin-top: 10px; flex-direction: column; gap: 8px; }
+    .ld-rej.on { display: flex; }
+    .ld-rej input { width: 100%; box-sizing: border-box; border: 1px solid #E5EAF0; border-radius: 10px; padding: 11px 12px; min-height: 44px; font-size: .85rem; font-family: inherit; outline: none; }
+    .ld-empty { text-align: center; color: #9AA8BC; font-size: .9rem; padding: 60px 0; }
+    .ld-lb { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 2000; align-items: center; justify-content: center; padding: 20px; }
+    .ld-lb.on { display: flex; }
+    .ld-lb img { max-width: 100%; max-height: 90vh; border-radius: 12px; }
+    .ld-lb-x { position: absolute; top: 16px; right: 16px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.18); border: none; color: #fff; font-size: 1.1rem; cursor: pointer; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const listEl = document.getElementById('ldList');
+    const emptyEl = document.getElementById('ldEmpty');
+    const pendingCountEl = document.getElementById('ldPendingCount');
+    const tabs = document.querySelectorAll('.ld-tab');
+    const lb = document.getElementById('ldLb');
+    const lbImg = document.getElementById('ldLbImg');
+
+    let data = { pending: [], approved: [], rejected: [] };
+    let tab = 'pending';
+    let canManage = true;
+
+    const ERR = {
+      FORBIDDEN: 'এই কাজের অনুমতি নেই',
+      REASON_REQUIRED: 'রিজেক্টের কারণ লিখুন',
+      DRIVER_NOT_FOUND: 'ড্রাইভার পাওয়া যায়নি',
+      AUTH_REQUIRED: 'আবার লগইন করুন',
+    };
+    function errMsg(e) {
+      const m = String((e && e.message) || '');
+      for (const k of Object.keys(ERR)) if (m.includes(k)) return ERR[k];
+      return 'কাজটা করা যায়নি, আবার চেষ্টা করুন';
+    }
+
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    function icon(cls) { const i = document.createElement('i'); i.className = cls; return i; }
+    function safeUrl(u) { return /^https:\/\//.test(u || '') ? u.replace(/["'<>\s]/g, '') : null; }
+
+    async function signedIdUrl(pathOrUrl) {
+      if (!pathOrUrl) return null;
+      if (/^https?:\/\//.test(pathOrUrl)) return safeUrl(pathOrUrl);
+      const { data: d, error } = await supabase.storage.from('rider-verification').createSignedUrl(pathOrUrl, 3600);
+      if (error) { window.SFReportError && window.SFReportError('admin local-drivers signed url', error); return null; }
+      return d && d.signedUrl ? d.signedUrl : null;
+    }
+
+    async function load() {
+      listEl.replaceChildren();
+      emptyEl.style.display = 'none';
+
+      const { data: drivers, error } = await supabase
+        .from('local_ride_drivers')
+        .select('id, user_id, vehicle_type_id, vehicle_number, photo_url, id_card_photo_url, vehicle_photo_url, status, rejection_reason, created_at')
+        .order('created_at', { ascending: false });
+      if (error) {
+        emptyEl.textContent = 'লোড করতে সমস্যা হয়েছে';
+        emptyEl.style.display = 'block';
+        window.SFReportError && window.SFReportError('admin local-drivers load', error);
+        return;
+      }
+
+      const ids = (drivers || []).map((d) => d.id);
+      const userIds = [...new Set((drivers || []).map((d) => d.user_id))];
+
+      const [vt, ar, da, pr] = await Promise.all([
+        supabase.from('local_ride_vehicle_types').select('id, name_bn'),
+        supabase.from('local_areas').select('id, name_bn, upazila'),
+        ids.length ? supabase.from('local_ride_driver_areas').select('driver_id, area_id').in('driver_id', ids) : Promise.resolve({ data: [] }),
+        userIds.length ? supabase.from('profiles').select('id, full_name, phone').in('id', userIds) : Promise.resolve({ data: [] }),
+      ]);
+      const vtMap = new Map((vt.data || []).map((x) => [x.id, x.name_bn]));
+      const areaMap = new Map((ar.data || []).map((x) => [x.id, x]));
+      const prMap = new Map((pr.data || []).map((x) => [x.id, x]));
+      const areasBy = new Map();
+      (da.data || []).forEach((r) => {
+        const a = areaMap.get(r.area_id);
+        if (!a) return;
+        if (!areasBy.has(r.driver_id)) areasBy.set(r.driver_id, []);
+        areasBy.get(r.driver_id).push(a);
+      });
+
+      const full = await Promise.all((drivers || []).map(async (d) => ({
+        ...d,
+        own: safeUrl(d.photo_url),
+        veh: safeUrl(d.vehicle_photo_url),
+        idUrl: await signedIdUrl(d.id_card_photo_url),
+        vtName: vtMap.get(d.vehicle_type_id) || '',
+        areas: areasBy.get(d.id) || [],
+        profile: prMap.get(d.user_id) || null,
+      })));
+
+      data = { pending: [], approved: [], rejected: [] };
+      full.forEach((d) => { if (data[d.status]) data[d.status].push(d); });
+      pendingCountEl.textContent = String(data.pending.length);
+      render();
+    }
+
+    function docBox(url, label) {
+      if (!url) {
+        const m = el('div', 'ld-doc missing');
+        m.appendChild(el('span', null, label + ' নেই'));
+        return m;
+      }
+      const b = el('button', 'ld-doc');
+      b.type = 'button';
+      const img = document.createElement('img');
+      img.src = url; img.alt = label; img.loading = 'lazy';
+      b.appendChild(img);
+      b.appendChild(el('span', 'ld-doc-l', label));
+      b.addEventListener('click', () => { lbImg.src = url; lb.classList.add('on'); });
+      return b;
+    }
+
+    async function decide(d, approve, reason, btn) {
+      btn.disabled = true;
+      const { error } = await supabase.rpc('admin_approve_local_ride_driver', {
+        p_driver_id: d.id, p_approve: approve, p_reason: approve ? null : reason,
+      });
+      if (error) {
+        btn.disabled = false;
+        window.showToast(errMsg(error), 'error');
+        window.SFReportError && window.SFReportError('admin_approve_local_ride_driver', error);
+        return;
+      }
+      window.showToast(approve ? 'অ্যাপ্রুভ করা হয়েছে ✓' : 'রিজেক্ট করা হয়েছে ✓', 'success');
+      load();
+    }
+
+    function render() {
+      listEl.replaceChildren();
+      const items = data[tab] || [];
+      if (!items.length) {
+        emptyEl.textContent = 'এই ট্যাবে কোনো ড্রাইভার নেই';
+        emptyEl.style.display = 'block';
+        return;
+      }
+      emptyEl.style.display = 'none';
+
+      items.forEach((d) => {
+        const card = el('div', 'ld-card');
+
+        const top = el('div', 'ld-top');
+        const av = el('span', 'ld-av');
+        if (d.own) { const im = document.createElement('img'); im.src = d.own; im.alt = ''; av.appendChild(im); }
+        else av.appendChild(icon('fas fa-user'));
+        const who = el('div', 'ld-who');
+        who.appendChild(el('p', 'ld-name', (d.profile && d.profile.full_name) || 'নাম নেই'));
+        const meta = el('p', 'ld-meta');
+        const ph = el('span'); ph.appendChild(icon('fas fa-phone')); ph.append(' ' + ((d.profile && d.profile.phone) || '—'));
+        meta.appendChild(ph);
+        who.appendChild(meta);
+        top.append(av, who, el('span', 'ld-badge ' + d.status, d.status === 'pending' ? 'পেন্ডিং' : d.status === 'approved' ? 'অ্যাপ্রুভড' : 'রিজেক্টেড'));
+        card.appendChild(top);
+
+        const info = el('div', 'ld-info');
+        if (d.vtName) info.appendChild(el('span', 'ld-chip', d.vtName));
+        if (d.vehicle_number) info.appendChild(el('span', 'ld-chip', d.vehicle_number));
+        d.areas.forEach((a) => info.appendChild(el('span', 'ld-chip area', (a.name_bn || '') + (a.upazila ? ' · ' + a.upazila : ''))));
+        card.appendChild(info);
+
+        const docs = el('div', 'ld-docs');
+        docs.append(docBox(d.own, 'নিজের ছবি'), docBox(d.idUrl, 'আইডি কার্ড'), docBox(d.veh, 'গাড়ির ছবি'));
+        card.appendChild(docs);
+
+        if (d.status === 'rejected' && d.rejection_reason) {
+          const r = el('p', 'ld-reason'); r.appendChild(icon('fas fa-circle-info')); r.append(' কারণ: ' + d.rejection_reason);
+          card.appendChild(r);
+        }
+
+        if (canManage) {
+          const act = el('div', 'ld-act');
+          const rej = el('div', 'ld-rej');
+          const input = document.createElement('input');
+          input.type = 'text'; input.maxLength = 200; input.placeholder = 'রিজেক্টের কারণ (বাধ্যতামূলক)';
+          const ra = el('div', 'ld-act');
+          const cancel = el('button', 'ld-cancel', 'বাতিল'); cancel.type = 'button';
+          const confirm = el('button', 'ld-no2', 'রিজেক্ট নিশ্চিত করুন'); confirm.type = 'button';
+          ra.append(cancel, confirm);
+          rej.append(input, ra);
+
+          if (d.status !== 'approved') {
+            const ok = el('button', 'ld-ok'); ok.type = 'button';
+            ok.appendChild(icon(d.status === 'rejected' ? 'fas fa-rotate-left' : 'fas fa-check'));
+            ok.append(d.status === 'rejected' ? ' রিঅ্যাক্টিভেট (Approve)' : ' Approve');
+            ok.addEventListener('click', () => decide(d, true, null, ok));
+            act.appendChild(ok);
+          }
+          if (d.status !== 'rejected') {
+            const no = el('button', 'ld-no'); no.type = 'button';
+            no.appendChild(icon(d.status === 'approved' ? 'fas fa-ban' : 'fas fa-xmark'));
+            no.append(d.status === 'approved' ? ' রিজেক্ট/ইনঅ্যাকটিভ' : ' Reject');
+            no.addEventListener('click', () => { rej.classList.add('on'); input.focus(); });
+            act.appendChild(no);
+          }
+          cancel.addEventListener('click', () => rej.classList.remove('on'));
+          confirm.addEventListener('click', () => {
+            const reason = input.value.trim();
+            if (!reason) { window.showToast('রিজেক্টের কারণ লিখুন', 'error'); input.focus(); return; }
+            decide(d, false, reason, confirm);
+          });
+          card.append(act, rej);
+        }
+
+        listEl.appendChild(card);
+      });
+    }
+
+    tabs.forEach((t) => t.addEventListener('click', () => {
+      tabs.forEach((x) => x.classList.remove('active'));
+      t.classList.add('active');
+      tab = t.dataset.tab;
+      render();
+    }));
+
+    document.getElementById('ldLbX').addEventListener('click', () => lb.classList.remove('on'));
+    lb.addEventListener('click', (e) => { if (e.target === lb) lb.classList.remove('on'); });
+
+    window.addEventListener('smartfeni:admin-ready', (e) => {
+      const access = e.detail && e.detail.access;
+      canManage = !access || !access.isStaff || access.can('local_ride.manage');
+      load();
+    });
+
+    initAdminGuard();
+  </script>
+</BaseLayout>
