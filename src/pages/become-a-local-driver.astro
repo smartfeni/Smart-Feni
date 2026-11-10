@@ -1,0 +1,499 @@
+---
+// path: src/pages/become-a-local-driver.astro
+// ============================================================
+// পেজ: /become-a-local-driver — লোকাল রাইডের ড্রাইভার আবেদন (মেইন অ্যাপ)
+// আবেদন Pro অ্যাপে নয়; এখান থেকে (লোকাল রাইড সেকশন + পোস্ট বাটনের "সার্ভিস দিন" ট্যাব)।
+//
+// ফর্ম: গাড়ির ধরন (একটা), গাড়ির নম্বর, নিজের ছবি (বাধ্যতামূলক), আইডি কার্ড (বাধ্যতামূলক),
+//       গাড়ির ছবি (না দিলেও চলে), এরিয়া ১–৩টা (ইউনিয়ন)।
+// ছবি: নিজের ও গাড়ির ছবি → পাবলিক bucket "rider-photos" (পাবলিক URL সেভ),
+//       আইডি কার্ড → প্রাইভেট bucket "rider-verification" (শুধু path সেভ; অ্যাডমিন signed URL দিয়ে দেখে)।
+// সাবমিট: RPC local_ride_driver_apply (সার্ভারে auth.uid(), গাড়ির ধরন/এরিয়া/ছবি যাচাই)।
+// অবস্থা: pending → অপেক্ষা, approved → অনুমোদিত, rejected → কারণসহ আবার আবেদন।
+// ডিজাইন: delivery v2 টোকেন (#FF6B35, #1B2A4A, #F8FAFC), ট্যাপ ≥ ৪৪px, GuideSheet ⓘ।
+// ইউজার/ডিবির টেক্সট সব textContent দিয়ে বসানো (innerHTML নয়)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../components/layout/BaseLayout.astro';
+import GuideSheet from '../components/delivery/GuideSheet.astro';
+
+const guideSteps = [
+  {
+    caption: 'গাড়ির ধরন, নম্বর আর আপনার ছবি দিন',
+    blocks: [
+      { kind: 'field', text: 'সিএনজি', chevron: true },
+      { kind: 'field', text: 'গাড়ির নম্বর *', tap: '১' },
+      { kind: 'button', text: 'আপনার ছবি দিন' },
+      { kind: 'button', text: 'আইডি কার্ডের ছবি দিন', tap: '২' },
+    ],
+  },
+  {
+    caption: 'যে এলাকার রিকোয়েস্ট পেতে চান, সেটা বেছে নিন (সর্বোচ্চ ৩টা)',
+    blocks: [
+      { kind: 'field', text: 'ফেনী সদর', chevron: true },
+      { kind: 'button', text: 'ধলিয়া', primary: true, tap: true },
+      { kind: 'button', text: 'ফেনী পৌরসভা' },
+      { kind: 'notice', text: 'পরে যখন খুশি এলাকা বদলাতে পারবেন।' },
+    ],
+  },
+  {
+    caption: 'জমা দিন, অ্যাডমিন অনুমোদন করলে রিকোয়েস্ট পাবেন',
+    blocks: [
+      { kind: 'spacer' },
+      { kind: 'cta', text: 'আবেদন জমা দিন', tap: true },
+      { kind: 'notice', text: 'অনুমোদনের আগে রিকোয়েস্ট আসবে না।' },
+    ],
+  },
+];
+---
+
+<BaseLayout title="লোকাল রাইড ড্রাইভার হোন | স্মার্ট ফেনী">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <div class="ld-page">
+    <div class="ld-wrap">
+
+      <div class="ld-top">
+        <a href="/services/local-ride" class="ld-round" aria-label="পেছনে যান"><i class="fas fa-arrow-left"></i></a>
+        <h1 class="ld-title">ড্রাইভার হিসেবে যোগ দিন</h1>
+        <GuideSheet id="local-ride-driver-apply" title="ড্রাইভার আবেদনের নিয়ম" subtitle="লোকাল রাইড" showButton buttonTone="light" steps={guideSteps} />
+      </div>
+
+      <div id="ldLoading" class="ld-state">
+        <div class="ld-spinner"></div>
+        <p>লোড হচ্ছে...</p>
+      </div>
+
+      <div id="ldLogin" class="ld-state ld-card" style="display:none;">
+        <i class="fas fa-lock ld-state-ic"></i>
+        <h2>লগইন করুন</h2>
+        <p>ড্রাইভার হওয়ার আবেদন করতে আগে লগইন করতে হবে</p>
+        <button type="button" class="ld-cta" id="ldLoginBtn">লগইন করুন</button>
+      </div>
+
+      <div id="ldPending" class="ld-state ld-card" style="display:none;">
+        <i class="fas fa-hourglass-half ld-state-ic"></i>
+        <h2>আবেদন পর্যালোচনাধীন</h2>
+        <p>অ্যাডমিন টিম আপনার আবেদন দেখছে। অনুমোদন হলে জানানো হবে।</p>
+        <div id="ldPendingInfo" class="ld-info"></div>
+      </div>
+
+      <div id="ldApproved" class="ld-state ld-card" style="display:none;">
+        <i class="fas fa-circle-check ld-state-ic ld-ok"></i>
+        <h2>আপনি অনুমোদিত ড্রাইভার</h2>
+        <p>নিজের এলাকার রিকোয়েস্ট পেতে Smart Feni Pro অ্যাপ ব্যবহার করবেন।</p>
+        <div id="ldApprovedInfo" class="ld-info"></div>
+        <a href="/pro-app" class="ld-ghost ld-link">Pro অ্যাপ ডাউনলোড করুন</a>
+      </div>
+
+      <div id="ldFormWrap" style="display:none;">
+        <div id="ldRejected" class="ld-reject" style="display:none;">
+          <i class="fas fa-circle-info"></i>
+          <span>আপনার আগের আবেদন গ্রহণ করা হয়নি। চাইলে আবার আবেদন করতে পারেন।<span id="ldRejectedReason" class="ld-reject-why"></span></span>
+        </div>
+
+        <form id="ldForm" class="ld-card" novalidate>
+          <p class="ld-sub">তথ্য দিন, অ্যাডমিন যাচাই করে অনুমোদন করলে আপনি নিজের এলাকার যাত্রীর রিকোয়েস্ট পাবেন।</p>
+
+          <label class="ld-lbl" for="ldTypes">গাড়ির ধরন<span class="required-mark">*</span></label>
+          <div id="ldTypes" class="ld-chips" role="radiogroup" aria-label="গাড়ির ধরন"></div>
+          <div class="field-error-msg" data-error-for="ldTypes"><i class="fas fa-circle-exclamation"></i><span>গাড়ির ধরন বেছে নিন</span></div>
+
+          <label class="ld-lbl" for="ldNumber">গাড়ির নম্বর<span class="required-mark">*</span></label>
+          <input class="ld-in" id="ldNumber" maxlength="30" placeholder="যেমন: ফেনী-থ ১১-২২৩৩" autocomplete="off" required />
+          <div class="field-error-msg" data-error-for="ldNumber"><i class="fas fa-circle-exclamation"></i><span>গাড়ির নম্বর লিখুন</span></div>
+
+          <label class="ld-lbl">আপনার ছবি<span class="required-mark">*</span></label>
+          <div class="ld-photo">
+            <div class="ld-thumb" id="ldPhotoThumb"><i class="fas fa-user"></i></div>
+            <button type="button" class="ld-ghost" id="ldPhotoBtn">ছবি বাছুন</button>
+            <input type="file" id="ldPhotoIn" accept="image/jpeg,image/png,image/webp" hidden />
+          </div>
+          <div class="field-error-msg" data-error-for="ldPhotoBtn"><i class="fas fa-circle-exclamation"></i><span>আপনার ছবি দিন</span></div>
+
+          <label class="ld-lbl">আইডি কার্ডের ছবি<span class="required-mark">*</span></label>
+          <div class="ld-photo">
+            <div class="ld-thumb" id="ldIdThumb"><i class="fas fa-id-card"></i></div>
+            <button type="button" class="ld-ghost" id="ldIdBtn">ছবি বাছুন</button>
+            <input type="file" id="ldIdIn" accept="image/jpeg,image/png,image/webp" hidden />
+          </div>
+          <div class="field-error-msg" data-error-for="ldIdBtn"><i class="fas fa-circle-exclamation"></i><span>আইডি কার্ডের ছবি দিন</span></div>
+
+          <label class="ld-lbl">গাড়ির ছবি</label>
+          <div class="ld-photo">
+            <div class="ld-thumb" id="ldVehicleThumb"><i class="fas fa-car-side"></i></div>
+            <button type="button" class="ld-ghost" id="ldVehicleBtn">ছবি বাছুন</button>
+            <input type="file" id="ldVehicleIn" accept="image/jpeg,image/png,image/webp" hidden />
+          </div>
+
+          <label class="ld-lbl" for="ldUpazila">কোন এলাকার রিকোয়েস্ট পেতে চান<span class="required-mark">*</span> <span class="ld-count" id="ldCount">০/৩</span></label>
+          <select class="ld-in" id="ldUpazila" aria-label="উপজেলা বেছে নিন">
+            <option value="">আগে উপজেলা বেছে নিন</option>
+          </select>
+          <div id="ldUnions" class="ld-chips"></div>
+          <div id="ldPicked" class="ld-chips ld-picked"></div>
+          <div class="field-error-msg" data-error-for="ldUpazila"><i class="fas fa-circle-exclamation"></i><span>কমপক্ষে ১টা এলাকা বেছে নিন (সর্বোচ্চ ৩টা)</span></div>
+
+          <button type="submit" class="ld-cta" id="ldSubmit">আবেদন জমা দিন</button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <style is:global>
+    .ld-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F8FAFC; min-height: 70vh; padding: 16px 14px 90px; }
+    .ld-wrap { max-width: 520px; margin: 0 auto; }
+    .ld-top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .ld-round { width: 44px; height: 44px; border-radius: 22px; background: #fff; box-shadow: 0 2px 10px rgba(27,42,74,.18); color: #1B2A4A; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; flex: none; }
+    .ld-title { flex: 1; font-size: 19px; font-weight: 700; margin: 0; }
+    .ld-state { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 70px 10px; text-align: center; color: #5B6B86; font-weight: 600; }
+    .ld-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: ldSpin .8s linear infinite; }
+    @keyframes ldSpin { to { transform: rotate(360deg); } }
+    .ld-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27,42,74,.08); padding: 14px 16px 18px; }
+    .ld-state.ld-card { padding: 28px 18px; }
+    .ld-state h2 { margin: 0; font-size: 19px; font-weight: 700; color: #1B2A4A; }
+    .ld-state p { margin: 0; font-size: 14.5px; line-height: 1.6; font-weight: 500; }
+    .ld-state-ic { font-size: 2.2rem; color: #FF6B35; }
+    .ld-ok { color: #14A44D; }
+    .ld-info { width: 100%; margin-top: 6px; }
+    .ld-sum { margin: 0 0 8px; font-size: 15.5px; font-weight: 700; color: #1B2A4A; }
+    .ld-sub { margin: 4px 0 6px; font-size: 14px; line-height: 1.6; color: #5B6B86; }
+    .ld-lbl { display: block; margin: 16px 0 6px; font-size: 12.5px; font-weight: 600; color: #5B6B86; }
+    .ld-count { float: right; background: #FFF6F1; color: #FF6B35; border-radius: 999px; padding: 2px 10px; font-weight: 700; }
+    .ld-in { width: 100%; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; padding: 10px 14px; font-size: 15px; min-height: 48px; font-family: inherit; color: #1B2A4A; box-sizing: border-box; }
+    .ld-in:focus { outline: none; border-color: #FF6B35; }
+    .ld-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .ld-chip { min-height: 44px; border: 1.5px solid #D5DCE8; background: #fff; color: #1B2A4A; border-radius: 999px; padding: 0 16px; font-size: 14.5px; font-weight: 600; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .ld-chip[aria-pressed="true"], .ld-chip[aria-checked="true"] { border-color: #FF6B35; background: #FFF6F1; }
+    .ld-chip-static { cursor: default; min-height: 36px; padding: 0 12px; font-size: 13.5px; background: #F1F5F9; }
+    .ld-picked .ld-chip { background: #FFF6F1; border-color: #FF6B35; }
+    .ld-photo { display: flex; align-items: center; gap: 12px; }
+    .ld-thumb { width: 64px; height: 64px; border-radius: 14px; background: #FFE4D6; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 22px; overflow: hidden; flex: none; }
+    .ld-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ld-ghost { height: 46px; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; color: #1B2A4A; font-weight: 600; font-size: 15px; padding: 0 14px; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+    .ld-link { margin-top: 6px; }
+    .ld-cta { width: 100%; height: 52px; border: 0; border-radius: 16px; background: #FF6B35; color: #1B2A4A; font-weight: 700; font-size: 17px; cursor: pointer; font-family: inherit; margin-top: 22px; }
+    .ld-cta:disabled { opacity: .65; cursor: not-allowed; }
+    .ld-state .ld-cta { margin-top: 10px; }
+    .ld-reject { display: flex; gap: 10px; background: #FFF4E5; border: 1px solid #FFD8A8; color: #5E3000; border-radius: 16px; padding: 12px 14px; margin-bottom: 12px; font-size: 14.5px; font-weight: 600; line-height: 1.5; }
+    .ld-reject-why { display: block; margin-top: 4px; font-weight: 500; }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+    import { compressImage, isHeicFile } from '../lib/imageCompress.js';
+
+    const $ = (id) => document.getElementById(id);
+    const MAX_AREAS = 3;
+
+    let userId = null;
+    let types = [];
+    let areas = [];
+    let pickedType = null;
+    let pickedAreas = [];
+    const files = { photo: null, idcard: null, vehicle: null };
+    let choicesLoaded = false;
+
+    function toast(msg, type) {
+      if (typeof window.showToast === 'function') window.showToast(msg, type || 'error');
+    }
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    function bn(n) { return String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]); }
+    function showState(id) {
+      ['ldLoading', 'ldLogin', 'ldPending', 'ldApproved', 'ldFormWrap'].forEach((x) => {
+        $(x).style.display = x === id ? '' : 'none';
+      });
+    }
+    function setErr(forId, on) {
+      const m = document.querySelector('[data-error-for="' + forId + '"]');
+      if (m) m.classList.toggle('show', !!on);
+    }
+
+    const ERR = {
+      ALREADY_APPLIED: 'আপনার আবেদন আগে থেকেই জমা আছে',
+      PHOTO_REQUIRED: 'আপনার ছবি দিন',
+      ID_CARD_REQUIRED: 'আইডি কার্ডের ছবি দিন',
+      TOO_MANY_AREAS: 'সর্বোচ্চ ৩টা এলাকা বেছে নেওয়া যাবে',
+      AREA_REQUIRED: 'কমপক্ষে ১টা এলাকা বেছে নিন',
+      AREA_INVALID: 'এলাকা ঠিক নেই, আবার বেছে নিন',
+      VEHICLE_TYPE_REQUIRED: 'গাড়ির ধরন বেছে নিন',
+      AUTH_REQUIRED: 'আগে লগইন করুন',
+    };
+    function errText(error) {
+      const m = String((error && error.message) || '');
+      const k = Object.keys(ERR).find((key) => m.includes(key));
+      return k ? ERR[k] : 'আবেদন জমা হয়নি, আবার চেষ্টা করুন';
+    }
+
+    function one(v) { return Array.isArray(v) ? v[0] : v; }
+
+    function renderSummary(box, drv) {
+      box.textContent = '';
+      const vt = one(drv.local_ride_vehicle_types);
+      box.appendChild(el('p', 'ld-sum', ((vt && vt.name_bn) || 'গাড়ি') + ' · ' + (drv.vehicle_number || '')));
+      const row = el('div', 'ld-chips');
+      (drv.local_ride_driver_areas || []).slice().sort((a, b) => a.position - b.position).forEach((a) => {
+        const la = one(a.local_areas);
+        row.appendChild(el('span', 'ld-chip ld-chip-static', (la && la.name_bn) || ''));
+      });
+      box.appendChild(row);
+    }
+
+    // ===== গাড়ির ধরন ও এরিয়া লোড =====
+    async function loadChoices() {
+      if (choicesLoaded) return true;
+      const [t, a] = await Promise.all([
+        supabase.from('local_ride_vehicle_types').select('id, name_bn').eq('is_active', true).order('sort_order'),
+        supabase.from('local_areas').select('id, name_bn, upazila').eq('is_active', true).order('sort_order'),
+      ]);
+      if (t.error || a.error) {
+        toast('তথ্য লোড করা যায়নি, আবার চেষ্টা করুন');
+        return false;
+      }
+      types = t.data || [];
+      areas = a.data || [];
+      renderTypes();
+      const sel = $('ldUpazila');
+      const seen = [];
+      areas.forEach((x) => { if (x.upazila && !seen.includes(x.upazila)) seen.push(x.upazila); });
+      seen.forEach((u) => {
+        const o = document.createElement('option');
+        o.value = u;
+        o.textContent = u;
+        sel.appendChild(o);
+      });
+      choicesLoaded = true;
+      return true;
+    }
+
+    function renderTypes() {
+      const box = $('ldTypes');
+      box.textContent = '';
+      types.forEach((t) => {
+        const b = el('button', 'ld-chip', t.name_bn);
+        b.type = 'button';
+        b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', pickedType === t.id ? 'true' : 'false');
+        b.addEventListener('click', () => {
+          pickedType = t.id;
+          setErr('ldTypes', false);
+          renderTypes();
+        });
+        box.appendChild(b);
+      });
+    }
+
+    function renderUnions() {
+      const box = $('ldUnions');
+      box.textContent = '';
+      const up = $('ldUpazila').value;
+      if (!up) return;
+      areas.filter((x) => x.upazila === up).forEach((x) => {
+        const on = pickedAreas.includes(x.id);
+        const b = el('button', 'ld-chip', x.name_bn);
+        b.type = 'button';
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        b.addEventListener('click', () => toggleArea(x.id));
+        box.appendChild(b);
+      });
+    }
+
+    function renderPicked() {
+      const box = $('ldPicked');
+      box.textContent = '';
+      pickedAreas.forEach((id) => {
+        const a = areas.find((x) => x.id === id);
+        if (!a) return;
+        const b = el('button', 'ld-chip', a.name_bn + ' ✕');
+        b.type = 'button';
+        b.setAttribute('aria-label', a.name_bn + ' বাদ দিন');
+        b.addEventListener('click', () => toggleArea(id));
+        box.appendChild(b);
+      });
+      $('ldCount').textContent = bn(pickedAreas.length) + '/' + bn(MAX_AREAS);
+    }
+
+    function toggleArea(id) {
+      const i = pickedAreas.indexOf(id);
+      if (i >= 0) {
+        pickedAreas.splice(i, 1);
+      } else {
+        if (pickedAreas.length >= MAX_AREAS) {
+          toast('সর্বোচ্চ ৩টা এলাকা বেছে নেওয়া যাবে');
+          return;
+        }
+        pickedAreas.push(id);
+        setErr('ldUpazila', false);
+      }
+      renderUnions();
+      renderPicked();
+    }
+
+    // ===== ছবি বাছাই =====
+    function bindPhoto(key, inputId, btnId, thumbId, opts) {
+      const input = $(inputId);
+      $(btnId).addEventListener('click', () => input.click());
+      input.addEventListener('change', async () => {
+        const f = input.files && input.files[0];
+        if (!f) return;
+        if (isHeicFile(f)) {
+          toast('HEIC ছবি চলে না, ছবি JPEG বা PNG করে দিন');
+          input.value = '';
+          return;
+        }
+        try {
+          const c = await compressImage(f, opts);
+          if (isHeicFile(c) || !c.type || !c.type.startsWith('image/')) {
+            toast('এই ছবি ব্যবহার করা যাবে না, অন্য ছবি বাছুন');
+            input.value = '';
+            return;
+          }
+          files[key] = c;
+          const thumb = $(thumbId);
+          thumb.textContent = '';
+          const img = document.createElement('img');
+          img.alt = '';
+          img.src = URL.createObjectURL(c);
+          thumb.appendChild(img);
+          setErr(btnId, false);
+        } catch (_) {
+          toast('ছবি প্রসেস করা যায়নি, আবার বাছুন');
+        }
+      });
+    }
+
+    function extOf(file) {
+      if (file.type === 'image/png') return 'png';
+      if (file.type === 'image/webp') return 'webp';
+      return 'jpg';
+    }
+
+    async function uploadTo(bucket, path, file) {
+      const { error } = await supabase.storage.from(bucket).upload(path, file, { contentType: file.type || 'image/jpeg', upsert: false });
+      if (error) throw new Error('UPLOAD:' + error.message);
+    }
+
+    // ===== সাবমিট =====
+    async function submitForm(e) {
+      e.preventDefault();
+      const form = $('ldForm');
+      let ok = typeof window.SFValidateForm === 'function' ? window.SFValidateForm(form) : true;
+      const num = $('ldNumber').value.trim();
+      if (num.length < 3) { setErr('ldNumber', true); ok = false; }
+      if (!pickedType) { setErr('ldTypes', true); ok = false; }
+      if (!files.photo) { setErr('ldPhotoBtn', true); ok = false; }
+      if (!files.idcard) { setErr('ldIdBtn', true); ok = false; }
+      if (!pickedAreas.length) { setErr('ldUpazila', true); ok = false; }
+      if (!ok) { toast('সব তথ্য ঠিকভাবে দিন'); return; }
+
+      const btn = $('ldSubmit');
+      btn.disabled = true;
+      btn.textContent = 'আপলোড হচ্ছে...';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) { toast('সেশন পাওয়া যায়নি, আবার লগইন করুন'); return; }
+        const uid = session.user.id;
+        const ts = Date.now();
+
+        const photoPath = uid + '/local-ride-photo-' + ts + '.' + extOf(files.photo);
+        await uploadTo('rider-photos', photoPath, files.photo);
+        const photoUrl = supabase.storage.from('rider-photos').getPublicUrl(photoPath).data.publicUrl;
+
+        const idPath = uid + '/local-ride-id-' + ts + '.' + extOf(files.idcard);
+        await uploadTo('rider-verification', idPath, files.idcard);
+
+        let vehicleUrl = null;
+        if (files.vehicle) {
+          const vPath = uid + '/local-ride-vehicle-' + ts + '.' + extOf(files.vehicle);
+          await uploadTo('rider-photos', vPath, files.vehicle);
+          vehicleUrl = supabase.storage.from('rider-photos').getPublicUrl(vPath).data.publicUrl;
+        }
+
+        const { error } = await supabase.rpc('local_ride_driver_apply', {
+          p_vehicle_type_id: pickedType,
+          p_vehicle_number: num,
+          p_photo_url: photoUrl,
+          p_id_card_url: idPath,
+          p_area_ids: pickedAreas,
+          p_vehicle_photo_url: vehicleUrl,
+        });
+        if (error) {
+          toast(errText(error));
+          return;
+        }
+        toast('আবেদন জমা হয়েছে ✓ অ্যাডমিন অনুমোদন করলে জানানো হবে', 'success');
+        await init();
+      } catch (err) {
+        const msg = String((err && err.message) || err);
+        if (msg.indexOf('UPLOAD:') === 0) {
+          toast('ছবি আপলোড হয়নি, আবার চেষ্টা করুন');
+          if (window.SFReportError) window.SFReportError({ kind: 'api_fail', action: 'local_ride_driver_photo_upload', title: 'লোকাল রাইড ড্রাইভারের ছবি আপলোড ব্যর্থ', message: msg });
+        } else {
+          toast('সমস্যা হয়েছে, আবার চেষ্টা করুন');
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'আবেদন জমা দিন';
+      }
+    }
+
+    // ===== শুরু =====
+    async function init() {
+      showState('ldLoading');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { showState('ldLogin'); return; }
+      userId = session.user.id;
+
+      const { data: drv, error } = await supabase
+        .from('local_ride_drivers')
+        .select('status, rejection_reason, vehicle_number, local_ride_vehicle_types(name_bn), local_ride_driver_areas(position, local_areas(name_bn))')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error) {
+        toast('লোড করা যায়নি, আবার চেষ্টা করুন');
+        showState('ldLogin');
+        return;
+      }
+
+      if (drv && drv.status === 'pending') {
+        renderSummary($('ldPendingInfo'), drv);
+        showState('ldPending');
+        return;
+      }
+      if (drv && drv.status === 'approved') {
+        renderSummary($('ldApprovedInfo'), drv);
+        showState('ldApproved');
+        return;
+      }
+
+      const rej = $('ldRejected');
+      if (drv && drv.status === 'rejected') {
+        $('ldRejectedReason').textContent = drv.rejection_reason ? 'কারণ: ' + drv.rejection_reason : '';
+        rej.style.display = '';
+      } else {
+        rej.style.display = 'none';
+      }
+
+      if (!(await loadChoices())) { showState('ldLogin'); return; }
+      showState('ldFormWrap');
+    }
+
+    $('ldLoginBtn').addEventListener('click', () => { if (window.openAuthModal) window.openAuthModal('login'); });
+    $('ldUpazila').addEventListener('change', renderUnions);
+    $('ldNumber').addEventListener('input', () => setErr('ldNumber', false));
+    $('ldForm').addEventListener('submit', submitForm);
+    bindPhoto('photo', 'ldPhotoIn', 'ldPhotoBtn', 'ldPhotoThumb', { maxDimension: 1280, quality: 0.8 });
+    bindPhoto('idcard', 'ldIdIn', 'ldIdBtn', 'ldIdThumb', { maxDimension: 2000, quality: 0.9 });
+    bindPhoto('vehicle', 'ldVehicleIn', 'ldVehicleBtn', 'ldVehicleThumb', { maxDimension: 1280, quality: 0.8 });
+    renderPicked();
+    init();
+  </script>
+</BaseLayout>

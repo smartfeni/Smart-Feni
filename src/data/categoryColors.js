@@ -15,6 +15,7 @@ export const categoryColors = {
   'car-rental': '#8B5CF6',
   courier: '#FF6B35',
   ride: '#6366F1',
+  'local-ride': '#7C3AED',
   emergency: '#DC2626',
   blood: '#EF4444',
   'home-food': '#EA580C',
