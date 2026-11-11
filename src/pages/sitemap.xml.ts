@@ -28,7 +28,6 @@ const STATIC_PATHS: [string, string, string][] = [
   ['/services/courier', 'daily', '0.8'],
   ['/services/ride', 'daily', '0.8'],
   ['/services/blood', 'daily', '0.8'],
-  ['/services/online-shop', 'daily', '0.8'],
   ['/services/tuition', 'daily', '0.8'],
   ['/services/housing', 'daily', '0.8'],
   ['/services/job', 'daily', '0.8'],
