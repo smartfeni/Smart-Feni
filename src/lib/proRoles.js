@@ -16,6 +16,7 @@ export const ROLE_META = {
   shop: { label: 'অনলাইন শপ', sub: 'প্রোডাক্ট ও অর্ডার', icon: 'fa-store', href: '/pro/online-shop' },
   club: { label: 'ক্লাব', sub: 'ক্লাব ম্যানেজমেন্ট', icon: 'fa-people-group', href: '/pro/club' },
   clinic: { label: 'ক্লিনিক', sub: 'সিরিয়াল ও ডাক্তার', icon: 'fa-hospital', href: '/pro/clinic' },
+  local_driver: { label: 'লোকাল ড্রাইভার', sub: 'সিএনজি/অটো রিকোয়েস্ট', icon: 'fa-van-shuttle', href: '/pro/local-ride' },
 };
 
 export async function getMyProRoles() {

@@ -1,0 +1,535 @@
+<!-- path: src/pages/pro/local-ride.astro -->
+---
+// ============================================================
+// পেজ: Smart Feni Pro — লোকাল ড্রাইভার (/pro/local-ride)
+//
+// কে: অনুমোদিত লোকাল রাইড ড্রাইভার (local_ride_drivers.status = approved)। আবেদন মেইন অ্যাপে
+//     (/become-a-local-driver); এখানে শুধু রিকোয়েস্ট ফিড ও ট্রিপ।
+// ট্যাব:
+//   রিকোয়েস্ট — ফিড (RPC local_ride_driver_feed): সব | এরিয়া ১ | ২ | ৩ সাব-ট্যাব, শুধু নিজের গাড়ির ধরন।
+//                "৳X-এ রাজি" (একসেপ্ট, প্রথম জন পায়) বা "অন্য দাম" (একবারই অফার, প্রত্যাহার যায়)।
+//   ট্রিপ     — কনফার্ম ট্রিপ (RPC local_ride_driver_trips): যাত্রীর নাম/ফোন, নেভিগেট, "ট্রিপ শেষ"।
+//   এরিয়া    — সর্বোচ্চ ৩ ইউনিয়ন, যখন খুশি বদল (RPC local_ride_driver_set_areas)।
+// অনলাইন টগল: local_ride_driver_set_online (অফলাইনে একসেপ্ট/অফার বন্ধ)।
+// রিফ্রেশ: প্রতি ৮ সেকেন্ড (পেজ দেখা গেলে)। ইউজারের টেক্সট textContent দিয়ে।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="লোকাল ড্রাইভার | Smart Feni Pro">
+  <div class="pl-page">
+    <div class="pl-wrap">
+
+      <div id="plLoading" class="pl-state"><div class="pl-spinner"></div><p>লোড হচ্ছে...</p></div>
+
+      <div id="plNoAccess" class="pl-state" style="display:none;">
+        <i class="fas fa-id-card-clip pl-state-ic"></i>
+        <h2 id="plNoTitle">আপনি অনুমোদিত লোকাল ড্রাইভার নন</h2>
+        <p id="plNoText">ড্রাইভার হতে আবেদন করুন, অ্যাডমিন অনুমোদন করলে এখানে রিকোয়েস্ট পাবেন।</p>
+        <a href="/pro?pick=1" class="pl-btn pl-line">পেছনে যান</a>
+      </div>
+
+      <div id="plMain" style="display:none;">
+
+        <div class="pl-head">
+          <div class="pl-head-txt">
+            <h1 class="pl-title"><i class="fas fa-van-shuttle"></i> লোকাল ড্রাইভার</h1>
+            <p class="pl-sub" id="plSub"></p>
+          </div>
+          <button type="button" class="pl-switch" id="plOnline" role="switch" aria-checked="false" aria-label="অনলাইন">
+            <span class="pl-knob"></span>
+            <span class="pl-switch-l" id="plOnlineL">অফলাইন</span>
+          </button>
+        </div>
+
+        <div class="pl-tabs" role="tablist">
+          <button type="button" class="pl-tab active" data-tab="feed">রিকোয়েস্ট</button>
+          <button type="button" class="pl-tab" data-tab="trips">ট্রিপ <span class="pl-badge" id="plTripBadge" style="display:none;">0</span></button>
+          <button type="button" class="pl-tab" data-tab="areas">এরিয়া</button>
+        </div>
+
+        <div id="plPanelFeed">
+          <div class="pl-areatabs" id="plAreaTabs"></div>
+          <p class="pl-off" id="plOffNote" style="display:none;"><i class="fas fa-circle-info"></i> আপনি অফলাইনে আছেন। একসেপ্ট বা অফার দিতে উপরের সুইচ দিয়ে অনলাইন হোন।</p>
+          <div id="plFeed" class="pl-list"></div>
+          <p class="pl-empty" id="plFeedEmpty" style="display:none;">এখন কোনো রিকোয়েস্ট নেই। নতুন এলে এখানেই দেখা যাবে।</p>
+        </div>
+
+        <div id="plPanelTrips" style="display:none;">
+          <div id="plTrips" class="pl-list"></div>
+          <p class="pl-empty" id="plTripsEmpty" style="display:none;">কোনো কনফার্ম ট্রিপ নেই।</p>
+        </div>
+
+        <div id="plPanelAreas" style="display:none;">
+          <div class="pl-card">
+            <p class="pl-sec">আপনার এরিয়া <span class="pl-count" id="plAreaCount">০/৩</span></p>
+            <div id="plPicked" class="pl-chips"></div>
+            <label class="pl-lbl" for="plUpazila">উপজেলা বেছে এরিয়া যোগ করুন</label>
+            <select class="pl-in" id="plUpazila"><option value="">উপজেলা</option></select>
+            <div id="plUnions" class="pl-chips"></div>
+            <button type="button" class="pl-btn pl-pri" id="plSaveAreas" style="width:100%;margin-top:14px;">এরিয়া সেভ করুন</button>
+            <p class="pl-hint">পিকআপ এই এরিয়াগুলোর কোনো একটায় হলেই আপনি রিকোয়েস্ট পাবেন।</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .pl-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F8FAFC; min-height: 70vh; padding: 16px 14px 100px; }
+    .pl-wrap { max-width: 520px; margin: 0 auto; }
+    .pl-state { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 80px 12px; text-align: center; color: #5B6B86; font-weight: 600; }
+    .pl-state h2 { margin: 0; font-size: 19px; color: #1B2A4A; }
+    .pl-state p { margin: 0; font-size: 14.5px; line-height: 1.6; font-weight: 500; }
+    .pl-state-ic { font-size: 2.2rem; color: #FF6B35; }
+    .pl-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: plSpin .8s linear infinite; }
+    @keyframes plSpin { to { transform: rotate(360deg); } }
+    .pl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .pl-title { font-size: 19px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px; }
+    .pl-title i { color: #FF6B35; }
+    .pl-sub { margin: 2px 0 0; font-size: 13px; color: #5B6B86; font-weight: 600; }
+    .pl-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px 0 6px; border-radius: 999px; border: 1.5px solid #D5DCE8; background: #fff; cursor: pointer; font-family: inherit; flex: none; }
+    .pl-knob { width: 28px; height: 28px; border-radius: 50%; background: #B7C2D8; transition: background .15s; }
+    .pl-switch[aria-checked="true"] { border-color: #1B7A3C; background: #E8F7EE; }
+    .pl-switch[aria-checked="true"] .pl-knob { background: #1B7A3C; }
+    .pl-switch-l { font-size: 13.5px; font-weight: 700; }
+    .pl-tabs { display: flex; gap: 6px; background: #fff; border-radius: 40px; padding: 5px; box-shadow: 0 2px 12px rgba(27,42,74,.08); margin-bottom: 12px; }
+    .pl-tab { flex: 1; min-height: 44px; border: 0; background: transparent; border-radius: 40px; font-weight: 700; font-size: 14px; color: #5B6B86; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .pl-tab.active { background: #FF6B35; color: #fff; }
+    .pl-badge { background: #D14343; color: #fff; font-size: 11px; font-weight: 800; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 20px; display: inline-flex; align-items: center; justify-content: center; }
+    .pl-tab.active .pl-badge { background: #fff; color: #D14343; }
+    .pl-areatabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 4px; }
+    .pl-atab { flex: none; min-height: 40px; border: 1.5px solid #D5DCE8; background: #fff; border-radius: 999px; padding: 0 14px; font-weight: 600; font-size: 14px; cursor: pointer; font-family: inherit; color: #1B2A4A; }
+    .pl-atab[aria-pressed="true"] { border-color: #FF6B35; background: #FFF6F1; }
+    .pl-off { font-size: 13px; color: #7A3E00; background: #FFF4E5; border-radius: 12px; padding: 10px 12px; margin: 4px 0 10px; line-height: 1.5; }
+    .pl-list { display: flex; flex-direction: column; gap: 12px; }
+    .pl-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27,42,74,.08); padding: 14px 16px; }
+    .pl-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .pl-no { font-size: 12.5px; font-weight: 600; color: #8696AE; }
+    .pl-left { font-size: 12.5px; font-weight: 700; color: #B8860B; background: #FFF4E0; border-radius: 999px; padding: 2px 10px; }
+    .pl-route { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
+    .pl-pt { display: flex; gap: 8px; align-items: flex-start; font-size: 15px; font-weight: 600; line-height: 1.4; }
+    .pl-pt i { margin-top: 4px; color: #FF6B35; width: 14px; text-align: center; flex: none; }
+    .pl-pt small { display: block; font-size: 12.5px; font-weight: 500; color: #5B6B86; }
+    .pl-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .pl-tag { font-size: 12.5px; font-weight: 600; background: #F1F5F9; border-radius: 999px; padding: 3px 10px; }
+    .pl-fare { font-size: 20px; font-weight: 700; margin-left: auto; }
+    .pl-note { font-size: 13px; color: #5B6B86; margin: 2px 0 8px; }
+    .pl-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .pl-acts > * { flex: 1; min-width: 120px; }
+    .pl-btn { min-height: 46px; border: 0; border-radius: 12px; padding: 0 14px; font-weight: 700; font-size: 14.5px; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; }
+    .pl-pri { background: #FF6B35; color: #fff; }
+    .pl-ok { background: #1B7A3C; color: #fff; }
+    .pl-line { background: #fff; border: 1.5px solid #D5DCE8; color: #1B2A4A; }
+    .pl-danger { background: #FFF0EA; color: #D14343; }
+    .pl-btn:disabled { opacity: .6; cursor: default; }
+    .pl-offer-in { display: none; gap: 8px; margin-top: 10px; }
+    .pl-offer-in.on { display: flex; }
+    .pl-offer-in input { flex: 1; min-width: 0; border: 1.5px solid #D5DCE8; border-radius: 12px; padding: 0 12px; min-height: 46px; font-size: 15px; font-family: inherit; box-sizing: border-box; }
+    .pl-mine { font-size: 13.5px; font-weight: 700; color: #14693A; background: #E8F7EE; border-radius: 12px; padding: 8px 12px; margin-top: 8px; }
+    .pl-empty { text-align: center; color: #9AA8BC; font-size: 14px; padding: 40px 0; }
+    .pl-sec { margin: 0 0 8px; font-size: 14px; font-weight: 700; color: #5B6B86; display: flex; justify-content: space-between; }
+    .pl-count { background: #FFF6F1; color: #FF6B35; border-radius: 999px; padding: 2px 10px; font-weight: 700; }
+    .pl-lbl { display: block; margin: 14px 0 6px; font-size: 12.5px; font-weight: 600; color: #5B6B86; }
+    .pl-in { width: 100%; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; padding: 10px 14px; font-size: 15px; min-height: 48px; font-family: inherit; color: #1B2A4A; box-sizing: border-box; }
+    .pl-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .pl-chip { min-height: 44px; border: 1.5px solid #D5DCE8; background: #fff; color: #1B2A4A; border-radius: 999px; padding: 0 16px; font-size: 14.5px; font-weight: 600; font-family: inherit; cursor: pointer; }
+    .pl-chip[aria-pressed="true"] { border-color: #FF6B35; background: #FFF6F1; }
+    .pl-hint { margin: 10px 0 0; font-size: 12.5px; color: #5B6B86; line-height: 1.5; }
+    .pl-done { opacity: .7; }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { rememberRole } from '../../lib/proRoles.js';
+
+    const $ = (id) => document.getElementById(id);
+    const BN = '০১২৩৪৫৬৭৮৯';
+    const bn = (n) => String(n).replace(/\d/g, (d) => BN[d]);
+    const POLL_MS = 8000;
+    const MAX_AREAS = 3;
+
+    let me = null;            // { id, is_online, vehicle, areas: [{id,name_bn,upazila}] }
+    let allAreas = [];
+    let curTab = 'feed';
+    let areaFilter = null;    // null = সব
+    let feedSig = '', tripSig = '';
+    let feedData = [], tripData = [];
+    let timer = null;
+    let busy = false;
+    const offerOpen = new Set();
+    const confirmDone = new Set();
+    let editAreas = [];
+
+    function toast(msg, type) { if (typeof window.showToast === 'function') window.showToast(msg, type || 'error'); }
+    function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+    function icon(cls) { const i = document.createElement('i'); i.className = cls; return i; }
+    function one(v) { return Array.isArray(v) ? v[0] : v; }
+    function safePhone(p) { return String(p || '').replace(/[^0-9+]/g, ''); }
+    function navUrl(lat, lng) {
+      if (typeof lat !== 'number' && typeof lat !== 'string') return null;
+      const a = Number(lat), b = Number(lng);
+      if (!isFinite(a) || !isFinite(b)) return null;
+      return 'https://www.google.com/maps/dir/?api=1&destination=' + a + ',' + b;
+    }
+    function showMain(id) {
+      ['plLoading', 'plNoAccess', 'plMain'].forEach((x) => { $(x).style.display = x === id ? '' : 'none'; });
+    }
+
+    const ERR = {
+      NOT_APPROVED: 'আপনি অনুমোদিত ড্রাইভার নন',
+      DRIVER_OFFLINE: 'আগে অনলাইন হোন',
+      REQUEST_NOT_AVAILABLE: 'রিকোয়েস্টটা আর খোলা নেই (কেউ নিয়ে নিয়েছে বা মেয়াদ শেষ)',
+      REQUEST_NOT_FOUND: 'রিকোয়েস্ট পাওয়া যায়নি',
+      SELF_ACCEPT: 'নিজের রিকোয়েস্ট নেওয়া যায় না',
+      SELF_OFFER: 'নিজের রিকোয়েস্টে অফার দেওয়া যায় না',
+      VEHICLE_MISMATCH: 'এই রিকোয়েস্ট আপনার গাড়ির ধরনের নয়',
+      AREA_MISMATCH: 'পিকআপ আপনার এরিয়ায় নয়',
+      OFFER_EXISTS: 'আপনি আগেই অফার দিয়েছেন',
+      PRICE_INVALID: 'দাম ঠিকভাবে লিখুন',
+      CANNOT_COMPLETE: 'ট্রিপ শেষ করা যায়নি',
+      TOO_MANY_AREAS: 'সর্বোচ্চ ৩টা এরিয়া বেছে নেওয়া যায়',
+      AREA_REQUIRED: 'কমপক্ষে ১টা এরিয়া বেছে নিন',
+      AREA_INVALID: 'এরিয়া ঠিক নেই',
+      AUTH_REQUIRED: 'আবার লগইন করুন',
+    };
+    function errText(error) {
+      const m = String((error && error.message) || '');
+      const k = Object.keys(ERR).find((key) => m.includes(key));
+      return k ? ERR[k] : 'কাজটা করা যায়নি, আবার চেষ্টা করুন';
+    }
+    const EXPECTED = /NOT_APPROVED|DRIVER_OFFLINE|REQUEST_NOT_|SELF_|VEHICLE_MISMATCH|AREA_|OFFER_EXISTS|PRICE_INVALID|CANNOT_COMPLETE|TOO_MANY_AREAS|AUTH_REQUIRED/;
+
+    async function act(btn, fn, okMsg, after) {
+      if (busy) return;
+      busy = true;
+      btn.disabled = true;
+      let res;
+      try { res = await fn(); } catch (e) { res = { error: e }; }
+      busy = false;
+      if (res && res.error) {
+        btn.disabled = false;
+        toast(errText(res.error));
+        if (window.SFReportError && !EXPECTED.test(String(res.error.message || ''))) {
+          window.SFReportError({ kind: 'api_fail', action: 'local_ride_driver_action', title: 'লোকাল ড্রাইভার অ্যাকশন ব্যর্থ', message: String(res.error.message || '') });
+        }
+        await refresh(true);
+        return;
+      }
+      toast(okMsg, 'success');
+      if (after) after();
+      await refresh(true);
+    }
+
+    function leftText(expiresAt) {
+      const ms = new Date(expiresAt).getTime() - Date.now();
+      return ms > 0 ? bn(Math.max(1, Math.ceil(ms / 60000))) + ' মিনিট বাকি' : '';
+    }
+
+    // ===== আমার তথ্য =====
+    async function loadMe(uid) {
+      const { data, error } = await supabase
+        .from('local_ride_drivers')
+        .select('id, status, is_online, vehicle_number, local_ride_vehicle_types(name_bn), local_ride_driver_areas(position, local_areas(id, name_bn, upazila))')
+        .eq('user_id', uid)
+        .maybeSingle();
+      if (error) return { error };
+      if (!data) return { none: true };
+      if (data.status !== 'approved') return { status: data.status };
+      const areas = (data.local_ride_driver_areas || []).slice().sort((a, b) => a.position - b.position)
+        .map((x) => one(x.local_areas)).filter(Boolean);
+      const vt = one(data.local_ride_vehicle_types);
+      return { me: { id: data.id, is_online: !!data.is_online, vehicle: [(vt && vt.name_bn) || '', data.vehicle_number || ''].filter(Boolean).join(' · '), areas } };
+    }
+
+    function paintHead() {
+      $('plSub').textContent = me.vehicle;
+      const sw = $('plOnline');
+      sw.setAttribute('aria-checked', me.is_online ? 'true' : 'false');
+      $('plOnlineL').textContent = me.is_online ? 'অনলাইন' : 'অফলাইন';
+      $('plOffNote').style.display = (!me.is_online && curTab === 'feed') ? '' : 'none';
+    }
+
+    // ===== ফিড =====
+    function paintAreaTabs() {
+      const box = $('plAreaTabs');
+      box.textContent = '';
+      const mk = (label, id) => {
+        const b = el('button', 'pl-atab', label);
+        b.type = 'button';
+        b.setAttribute('aria-pressed', areaFilter === id ? 'true' : 'false');
+        b.addEventListener('click', () => { areaFilter = id; feedSig = ''; paintAreaTabs(); refresh(true); });
+        box.appendChild(b);
+      };
+      mk('সব', null);
+      me.areas.forEach((a) => mk(a.name_bn, a.id));
+    }
+
+    function reqCard(r) {
+      const card = el('div', 'pl-card');
+      const row = el('div', 'pl-row');
+      row.appendChild(el('span', 'pl-no', r.request_no || ''));
+      const lt = leftText(r.expires_at);
+      if (lt) row.appendChild(el('span', 'pl-left', lt));
+      card.appendChild(row);
+
+      const route = el('div', 'pl-route');
+      const p = el('div', 'pl-pt'); p.appendChild(icon('fas fa-circle-dot'));
+      const pt = el('span'); pt.appendChild(document.createTextNode(r.pickup_text || r.pickup_area_name || ''));
+      if (r.pickup_area_name) pt.appendChild(el('small', null, r.pickup_area_name));
+      p.appendChild(pt); route.appendChild(p);
+      const d = el('div', 'pl-pt'); d.appendChild(icon('fas fa-location-dot'));
+      const dt = el('span'); dt.appendChild(document.createTextNode(r.drop_text || r.drop_area_name || 'ম্যাপে দেওয়া গন্তব্য'));
+      if (r.drop_area_name) dt.appendChild(el('small', null, r.drop_area_name));
+      d.appendChild(dt); route.appendChild(d);
+      card.appendChild(route);
+
+      const meta = el('div', 'pl-meta');
+      meta.appendChild(el('span', 'pl-tag', bn(r.passengers) + ' জন'));
+      meta.appendChild(el('span', 'pl-fare', '৳' + bn(Math.round(Number(r.fare)))));
+      card.appendChild(meta);
+      if (r.note) card.appendChild(el('p', 'pl-note', r.note));
+
+      if (r.my_offer_price != null) {
+        card.appendChild(el('p', 'pl-mine', 'আপনার অফার ৳' + bn(Math.round(Number(r.my_offer_price))) + ' — যাত্রীর উত্তরের অপেক্ষা'));
+        const acts = el('div', 'pl-acts');
+        const w = el('button', 'pl-btn pl-danger', 'অফার প্রত্যাহার'); w.type = 'button';
+        w.addEventListener('click', () => act(w, () => supabase.rpc('local_ride_driver_withdraw_offer', { p_request_id: r.id }), 'অফার প্রত্যাহার করা হয়েছে'));
+        acts.appendChild(w);
+        card.appendChild(acts);
+        return card;
+      }
+
+      const acts = el('div', 'pl-acts');
+      const ok = el('button', 'pl-btn pl-ok', '৳' + bn(Math.round(Number(r.fare))) + '-এ রাজি');
+      ok.type = 'button';
+      ok.disabled = !me.is_online;
+      ok.addEventListener('click', () => act(ok, () => supabase.rpc('local_ride_driver_accept', { p_request_id: r.id }), 'ট্রিপ কনফার্ম হয়েছে ✓', () => setTab('trips')));
+      const other = el('button', 'pl-btn pl-line', 'অন্য দাম'); other.type = 'button';
+      other.disabled = !me.is_online;
+      acts.append(ok, other);
+      card.appendChild(acts);
+
+      const inWrap = el('div', 'pl-offer-in' + (offerOpen.has(r.id) ? ' on' : ''));
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.inputMode = 'numeric'; inp.min = '1'; inp.max = '100000'; inp.placeholder = 'আপনার দাম (৳)';
+      const send = el('button', 'pl-btn pl-pri', 'অফার পাঠান'); send.type = 'button';
+      inWrap.append(inp, send);
+      card.appendChild(inWrap);
+      other.addEventListener('click', () => { offerOpen.add(r.id); inWrap.classList.add('on'); inp.focus(); });
+      send.addEventListener('click', () => {
+        const price = Math.round(Number(inp.value));
+        if (!price || price < 1 || price > 100000) { toast('দাম ঠিকভাবে লিখুন'); inp.focus(); return; }
+        act(send, () => supabase.rpc('local_ride_driver_offer', { p_request_id: r.id, p_price: price }), 'অফার পাঠানো হয়েছে ✓', () => offerOpen.delete(r.id));
+      });
+      return card;
+    }
+
+    function renderFeed() {
+      const box = $('plFeed');
+      // টাইপ করা দামের ইনপুট ফোকাসে থাকলে রিফ্রেশে আঁকা হবে না
+      const ae = document.activeElement;
+      if (ae && ae.tagName === 'INPUT' && box.contains(ae)) return;
+      box.textContent = '';
+      feedData.forEach((r) => box.appendChild(reqCard(r)));
+      $('plFeedEmpty').style.display = feedData.length ? 'none' : '';
+    }
+
+    // ===== ট্রিপ =====
+    function tripCard(t) {
+      const done = t.status === 'completed';
+      const card = el('div', 'pl-card' + (done ? ' pl-done' : ''));
+      const row = el('div', 'pl-row');
+      row.appendChild(el('span', 'pl-no', t.request_no || ''));
+      row.appendChild(el('span', 'pl-left', done ? 'সম্পন্ন' : 'কনফার্ম'));
+      card.appendChild(row);
+
+      const route = el('div', 'pl-route');
+      const p = el('div', 'pl-pt'); p.appendChild(icon('fas fa-circle-dot'));
+      const pt = el('span'); pt.appendChild(document.createTextNode(t.pickup_text || t.pickup_area || ''));
+      if (t.pickup_area) pt.appendChild(el('small', null, t.pickup_area));
+      p.appendChild(pt); route.appendChild(p);
+      const d = el('div', 'pl-pt'); d.appendChild(icon('fas fa-location-dot'));
+      const dt = el('span'); dt.appendChild(document.createTextNode(t.drop_text || t.drop_area || 'ম্যাপে দেওয়া গন্তব্য'));
+      if (t.drop_area) dt.appendChild(el('small', null, t.drop_area));
+      d.appendChild(dt); route.appendChild(d);
+      card.appendChild(route);
+
+      const meta = el('div', 'pl-meta');
+      meta.appendChild(el('span', 'pl-tag', bn(t.passengers) + ' জন'));
+      if (t.customer_name) meta.appendChild(el('span', 'pl-tag', t.customer_name));
+      meta.appendChild(el('span', 'pl-fare', '৳' + bn(Math.round(Number(t.price)))));
+      card.appendChild(meta);
+      if (t.note) card.appendChild(el('p', 'pl-note', t.note));
+
+      if (!done) {
+        const acts = el('div', 'pl-acts');
+        const ph = safePhone(t.customer_phone);
+        if (ph) {
+          const call = el('a', 'pl-btn pl-pri'); call.href = 'tel:' + ph;
+          call.appendChild(icon('fas fa-phone')); call.appendChild(document.createTextNode(' যাত্রীকে কল'));
+          acts.appendChild(call);
+        }
+        const nav = navUrl(t.pickup_lat, t.pickup_lng);
+        if (nav) {
+          const a = el('a', 'pl-btn pl-line'); a.href = nav; a.target = '_blank'; a.rel = 'noopener';
+          a.appendChild(icon('fas fa-location-arrow')); a.appendChild(document.createTextNode(' পিকআপে নেভিগেট'));
+          acts.appendChild(a);
+        }
+        const fin = el('button', 'pl-btn pl-ok', confirmDone.has(t.id) ? 'নিশ্চিত, ট্রিপ শেষ' : 'ট্রিপ শেষ'); fin.type = 'button';
+        fin.addEventListener('click', () => {
+          if (!confirmDone.has(t.id)) { confirmDone.add(t.id); renderTrips(); return; }
+          confirmDone.delete(t.id);
+          act(fin, () => supabase.rpc('local_ride_driver_complete', { p_request_id: t.id }), 'ট্রিপ শেষ হয়েছে ✓');
+        });
+        acts.appendChild(fin);
+        card.appendChild(acts);
+      }
+      return card;
+    }
+
+    function renderTrips() {
+      const box = $('plTrips');
+      box.textContent = '';
+      tripData.forEach((t) => box.appendChild(tripCard(t)));
+      $('plTripsEmpty').style.display = tripData.length ? 'none' : '';
+      const active = tripData.filter((t) => t.status === 'confirmed').length;
+      const b = $('plTripBadge');
+      b.textContent = bn(active);
+      b.style.display = active ? '' : 'none';
+    }
+
+    // ===== রিফ্রেশ =====
+    async function refresh(force) {
+      if (!me) return;
+      const [f, t] = await Promise.all([
+        supabase.rpc('local_ride_driver_feed', { p_area_id: areaFilter }),
+        supabase.rpc('local_ride_driver_trips'),
+      ]);
+      if (!f.error) {
+        const list = Array.isArray(f.data) ? f.data : [];
+        const sig = JSON.stringify(list);
+        if (force || sig !== feedSig) { feedSig = sig; feedData = list; if (curTab === 'feed') renderFeed(); }
+      }
+      if (!t.error) {
+        const list = Array.isArray(t.data) ? t.data : [];
+        const sig = JSON.stringify(list);
+        if (force || sig !== tripSig) { tripSig = sig; tripData = list; renderTrips(); }
+      }
+    }
+
+    function setTab(tab) {
+      curTab = tab;
+      document.querySelectorAll('.pl-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+      $('plPanelFeed').style.display = tab === 'feed' ? '' : 'none';
+      $('plPanelTrips').style.display = tab === 'trips' ? '' : 'none';
+      $('plPanelAreas').style.display = tab === 'areas' ? '' : 'none';
+      if (tab === 'feed') renderFeed();
+      if (tab === 'trips') renderTrips();
+      if (tab === 'areas') paintAreasTab();
+      paintHead();
+    }
+
+    // ===== এরিয়া বদল =====
+    function paintAreasTab() {
+      if (!editAreas.length && me.areas.length && !$('plPicked').dataset.init) {
+        editAreas = me.areas.map((a) => a.id);
+        $('plPicked').dataset.init = '1';
+      }
+      renderPicked();
+      renderUnions();
+    }
+    function renderPicked() {
+      const box = $('plPicked');
+      box.textContent = '';
+      editAreas.forEach((id) => {
+        const a = allAreas.find((x) => x.id === id);
+        if (!a) return;
+        const b = el('button', 'pl-chip', a.name_bn + ' ✕');
+        b.type = 'button'; b.setAttribute('aria-pressed', 'true'); b.setAttribute('aria-label', a.name_bn + ' বাদ দিন');
+        b.addEventListener('click', () => toggleArea(id));
+        box.appendChild(b);
+      });
+      $('plAreaCount').textContent = bn(editAreas.length) + '/' + bn(MAX_AREAS);
+    }
+    function renderUnions() {
+      const box = $('plUnions');
+      box.textContent = '';
+      const up = $('plUpazila').value;
+      if (!up) return;
+      allAreas.filter((x) => x.upazila === up).forEach((x) => {
+        const b = el('button', 'pl-chip', x.name_bn);
+        b.type = 'button'; b.setAttribute('aria-pressed', editAreas.includes(x.id) ? 'true' : 'false');
+        b.addEventListener('click', () => toggleArea(x.id));
+        box.appendChild(b);
+      });
+    }
+    function toggleArea(id) {
+      const i = editAreas.indexOf(id);
+      if (i >= 0) editAreas.splice(i, 1);
+      else {
+        if (editAreas.length >= MAX_AREAS) { toast('সর্বোচ্চ ৩টা এরিয়া বেছে নেওয়া যায়'); return; }
+        editAreas.push(id);
+      }
+      renderPicked(); renderUnions();
+    }
+
+    // ===== শুরু =====
+    async function init() {
+      showMain('plLoading');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { window.location.replace('/pro/login?next=' + encodeURIComponent('/pro/local-ride')); return; }
+      const r = await loadMe(session.user.id);
+      if (r.error) { $('plNoTitle').textContent = 'লোড করা যায়নি'; $('plNoText').textContent = 'আবার চেষ্টা করুন'; showMain('plNoAccess'); return; }
+      if (r.none || r.status) {
+        if (r.status === 'pending') { $('plNoTitle').textContent = 'আবেদন পর্যালোচনাধীন'; $('plNoText').textContent = 'অ্যাডমিন অনুমোদন করলে এখানে রিকোয়েস্ট পাবেন।'; }
+        else if (r.status === 'rejected') { $('plNoTitle').textContent = 'আবেদন গ্রহণ করা হয়নি'; $('plNoText').textContent = 'মেইন অ্যাপ থেকে আবার আবেদন করতে পারেন।'; }
+        showMain('plNoAccess');
+        return;
+      }
+      me = r.me;
+      rememberRole('local_driver');
+      const a = await supabase.from('local_areas').select('id, name_bn, upazila').eq('is_active', true).order('sort_order');
+      allAreas = a.data || [];
+      const seen = [];
+      allAreas.forEach((x) => { if (x.upazila && !seen.includes(x.upazila)) seen.push(x.upazila); });
+      seen.forEach((u) => { const o = document.createElement('option'); o.value = u; o.textContent = u; $('plUpazila').appendChild(o); });
+      paintHead();
+      paintAreaTabs();
+      showMain('plMain');
+      await refresh(true);
+      clearInterval(timer);
+      timer = setInterval(() => { if (!document.hidden && !busy) refresh(false); }, POLL_MS);
+    }
+
+    $('plOnline').addEventListener('click', async () => {
+      if (!me || busy) return;
+      const want = !me.is_online;
+      busy = true;
+      const { error } = await supabase.rpc('local_ride_driver_set_online', { p_online: want });
+      busy = false;
+      if (error) { toast(errText(error)); return; }
+      me.is_online = want;
+      paintHead();
+      renderFeed();
+      toast(want ? 'আপনি এখন অনলাইন' : 'আপনি এখন অফলাইন', 'success');
+    });
+    document.querySelectorAll('.pl-tab').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+    $('plUpazila').addEventListener('change', renderUnions);
+    $('plSaveAreas').addEventListener('click', async () => {
+      if (!editAreas.length) { toast('কমপক্ষে ১টা এরিয়া বেছে নিন'); return; }
+      const btn = $('plSaveAreas');
+      await act(btn, () => supabase.rpc('local_ride_driver_set_areas', { p_area_ids: editAreas }), 'এরিয়া সেভ হয়েছে ✓', async () => {
+        const r = await loadMe((await supabase.auth.getSession()).data.session.user.id);
+        if (r.me) { me = r.me; areaFilter = null; feedSig = ''; paintHead(); paintAreaTabs(); }
+      });
+      btn.disabled = false;
+    });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(false); });
+    init();
+  </script>
+</BaseLayout>
