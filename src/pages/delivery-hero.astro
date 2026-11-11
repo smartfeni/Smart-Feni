@@ -1354,9 +1354,11 @@ const riderGuideSteps = [
 
     // ===== চলমান ডেলিভারি (এখন কাস্টমারের তথ্য সহ) =====
     async function loadActiveDeliveries(riderId) {
+      // শপ-অর্ডারে রাইডার-কনফার্ম সুইচ (site_settings পাবলিক রিড)
+      const shopSwP = supabase.from('site_settings').select('value').eq('key', 'shop_notify_on_rider_confirm').maybeSingle();
       const { data: rawRequests } = await supabase
         .from('delivery_requests')
-        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, updated_at, is_asap, scheduled_at, release_requested_at, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, updated_at, is_asap, scheduled_at, release_requested_at, order_confirmed_at, shop_ids, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
         .eq('accepted_rider_id', riderId)
         .in('status', ['confirmed', 'delivered', 'completed'])
         .order('created_at', { ascending: false });
@@ -1365,6 +1367,8 @@ const riderGuideSteps = [
       // সুযোগ দেওয়ার জন্য) — এরপর লিস্ট থেকে বাদ, নাহলে পুরনো সম্পন্ন
       // অর্ডার চিরকাল এখানে জমা হতে থাকবে
       const oneHourMs = 60 * 60 * 1000;
+      let shopConfirmOn = false;
+      try { const { data: swRow } = await shopSwP; shopConfirmOn = swRow?.value === 'on'; } catch (_) { shopConfirmOn = false; }
       const activeRequests = (rawRequests || []).filter((req) => {
         if (req.status !== 'completed') return true;
         return Date.now() - new Date(req.updated_at).getTime() <= oneHourMs;
@@ -1395,6 +1399,8 @@ const riderGuideSteps = [
         // পিকআপ সম্পন্ন হলে ডেলিভারি (ড্রপ) লোকেশন হাইলাইট — Ride Hero-র
         // প্যাটার্ন অনুসরণ করে, একই pickup_done_at কলাম ও mark-pickup-done API ব্যবহার করে
         const isPickupDone = !!req.pickup_done_at;
+        const hasShopItems = Array.isArray(req.shop_ids) && req.shop_ids.length > 0;
+        const needsShopConfirm = shopConfirmOn && hasShopItems && !req.order_confirmed_at;
         let stageHtml = '';
 
         if (req.status === 'confirmed') {
@@ -1416,7 +1422,9 @@ const riderGuideSteps = [
               ${targetInstruction ? `<p class="dh-stage-instruction"><i class="fas fa-circle-info"></i> ${huEsc(targetInstruction)}</p>` : ''}
               <div class="dh-stage-actions">
                 ${targetLat && targetLng ? `<button type="button" class="dh-maps-btn" data-lat="${huEsc(targetLat)}" data-lng="${huEsc(targetLng)}"><i class="fas fa-diamond-turn-right"></i></button>` : ''}
-                ${!isPickupDone ? `<button type="button" class="btn-mark-pickup" data-request-id="${huEsc(req.id)}">পিকআপ সম্পন্ন হয়েছে</button>` : ''}
+                ${!isPickupDone ? (needsShopConfirm
+                  ? `<div style="flex:1;min-width:0;"><button type="button" class="btn-confirm-shop-order" data-request-id="${huEsc(req.id)}" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:54px;border:none;border-radius:16px;background:#16A34A;color:#fff;font-size:1rem;font-weight:800;font-family:inherit;cursor:pointer;"><i class="fas fa-circle-check"></i> অর্ডার কনফার্ম করুন</button><p style="margin:6px 2px 0;font-size:0.78rem;font-weight:600;color:#5A6B85;">কাস্টমারের সাথে ডিল ফাইনাল হলে চাপুন, তখনই দোকানে অর্ডার যাবে।</p></div>`
+                  : `<button type="button" class="btn-mark-pickup" data-request-id="${huEsc(req.id)}">পিকআপ সম্পন্ন হয়েছে</button>`) : ''}
               </div>
             </div>
           `;
@@ -1476,6 +1484,28 @@ const riderGuideSteps = [
             alert(error);
             e.target.disabled = false;
             e.target.textContent = 'পিকআপ সম্পন্ন হয়েছে';
+            return;
+          }
+          loadRiderSection();
+        });
+
+        // শপ-অর্ডার কনফার্ম: শুধু এই অর্ডারের রাইডার চাপতে পারে (সার্ভারে যাচাই হয়), একবারই
+        card.querySelector('.btn-confirm-shop-order')?.addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          if (btn.disabled) return;
+          if (!window.confirm('কাস্টমারের সাথে ডিল ফাইনাল? কনফার্ম করলে দোকানে অর্ডার চলে যাবে, আর ফেরানো যাবে না।')) return;
+          const oldHtml = btn.innerHTML;
+          btn.disabled = true;
+          btn.textContent = 'হচ্ছে...';
+          let ok = false;
+          try {
+            const { data, error } = await supabase.rpc('rider_confirm_shop_order', { p_request_id: req.id });
+            ok = !error && data && data.ok !== false;
+          } catch (_) { ok = false; }
+          if (!ok) {
+            alert('অর্ডার কনফার্ম করা যায়নি। আবার চেষ্টা করুন।');
+            btn.disabled = false;
+            btn.innerHTML = oldHtml;
             return;
           }
           loadRiderSection();

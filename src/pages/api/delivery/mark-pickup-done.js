@@ -74,7 +74,7 @@ export async function POST({ request }) {
 
     const { data: reqRow, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, accepted_rider_id, pickup_done_at')
+      .select('id, status, accepted_rider_id, pickup_done_at, order_confirmed_at, shop_ids')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -116,6 +116,21 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'পিকআপ ইতিমধ্যে সম্পন্ন হিসেবে মার্ক করা আছে' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // শপ-অর্ডারে রাইডার "অর্ডার কনফার্ম" না করলে পিকআপ নয় (সুইচ ON থাকলে)
+    if (!reqRow.order_confirmed_at && Array.isArray(reqRow.shop_ids) && reqRow.shop_ids.length > 0) {
+      const { data: swRow } = await client
+        .from('site_settings')
+        .select('value')
+        .eq('key', 'shop_notify_on_rider_confirm')
+        .maybeSingle();
+      if (swRow?.value === 'on') {
+        return new Response(
+          JSON.stringify({ error: 'আগে "অর্ডার কনফার্ম করুন" বাটন চাপুন, তারপর পিকআপ সম্পন্ন করুন' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     const { client: adminClient, error: adminError } = getAdminClient();
