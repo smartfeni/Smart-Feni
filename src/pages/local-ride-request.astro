@@ -1,0 +1,418 @@
+---
+// path: src/pages/local-ride-request.astro
+// ============================================================
+// পেজ: /local-ride-request — যাত্রীর লোকাল রাইড রিকোয়েস্ট (মেইন অ্যাপ)
+//
+// ফর্ম: পিকআপ (বাধ্যতামূলক; ম্যাপ বা লিখে) + পিকআপ এলাকা (ইউনিয়ন, ম্যাপ থেকে অটো বসে),
+//       ড্রপ (ম্যাপ বা লিখে, ম্যাপে ধরলে ইউনিয়নের নাম দেখায়), গাড়ির ধরন (একাধিক টিক, কমপক্ষে ১),
+//       যাত্রী সংখ্যা, ভাড়া (সাজেস্টেড ভাড়া ডেলিভারি fare settings থেকে, শুধু ডিফল্ট), নোট (ঐচ্ছিক)।
+// সাবমিট: RPC local_ride_create (সার্ভারে auth.uid(), ৩০ মিনিটে এক্সপায়ার, সর্বোচ্চ ২টা চালু)।
+// সফল হলে /my-local-rides-এ যায় (ড্রাইভারের অফার/কনফার্ম সেখানে দেখা যায়)।
+// ডিজাইন: delivery v2 টোকেন (#FF6B35, #1B2A4A, #F8FAFC), ট্যাপ ≥ ৪৪px, GuideSheet ⓘ।
+// ইউজার/ডিবির টেক্সট সব textContent দিয়ে বসানো (innerHTML নয়)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../components/layout/BaseLayout.astro';
+import GuideSheet from '../components/delivery/GuideSheet.astro';
+import LocationPicker from '../components/delivery/LocationPicker.astro';
+
+const guideSteps = [
+  {
+    caption: 'কোথা থেকে উঠবেন আর কোথায় যাবেন দিন',
+    blocks: [
+      { kind: 'field', text: 'পিকআপ: ধলিয়া বাজার', tap: '১' },
+      { kind: 'field', text: 'গন্তব্য: ফেনী কলেজ', tap: '২' },
+      { kind: 'notice', text: 'পিকআপের এলাকার ড্রাইভাররাই রিকোয়েস্ট দেখবে।' },
+    ],
+  },
+  {
+    caption: 'গাড়ির ধরন (একাধিক বাছতে পারবেন), যাত্রী আর ভাড়া দিন',
+    blocks: [
+      { kind: 'button', text: 'সিএনজি', primary: true, tap: true },
+      { kind: 'button', text: 'অটোরিক্সা' },
+      { kind: 'field', text: 'ভাড়া ৳১২০' },
+    ],
+  },
+  {
+    caption: 'রিকোয়েস্ট পাঠান, ড্রাইভার রাজি হলে ট্রিপ কনফার্ম',
+    blocks: [
+      { kind: 'spacer' },
+      { kind: 'cta', text: 'রিকোয়েস্ট পাঠান', tap: true },
+      { kind: 'notice', text: '৩০ মিনিটে কেউ রাজি না হলে রিকোয়েস্ট বাতিল হয়ে যাবে।' },
+    ],
+  },
+];
+---
+
+<BaseLayout title="রাইড চাই | স্মার্ট ফেনী">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <div class="lq-page">
+    <div class="lq-wrap">
+
+      <div class="lq-top">
+        <a href="/services/local-ride" class="lq-round" aria-label="পেছনে যান"><i class="fas fa-arrow-left"></i></a>
+        <h1 class="lq-title">রাইড চাই</h1>
+        <a href="/my-local-rides" class="lq-ghost lq-mine">আমার রিকোয়েস্ট</a>
+        <GuideSheet id="local-ride-request" title="রাইড কীভাবে চাইবেন" subtitle="লোকাল রাইড" showButton buttonTone="light" steps={guideSteps} />
+      </div>
+
+      <div id="lqLoading" class="lq-state">
+        <div class="lq-spinner"></div>
+        <p>লোড হচ্ছে...</p>
+      </div>
+
+      <div id="lqLogin" class="lq-state lq-card" style="display:none;">
+        <i class="fas fa-lock lq-state-ic"></i>
+        <h2>লগইন করুন</h2>
+        <p>রাইড চাইতে আগে লগইন করতে হবে</p>
+        <button type="button" class="lq-cta" id="lqLoginBtn">লগইন করুন</button>
+      </div>
+
+      <form id="lqForm" class="lq-card" style="display:none;" novalidate>
+
+        <LocationPicker id="lrpickup" label="পিকআপ লোকেশন" allowAutoLocate={true} placeholder="যেমন: ধলিয়া বাজার" />
+
+        <label class="lq-lbl" for="lqPUpazila">পিকআপ এলাকা (ইউনিয়ন)<span class="required-mark">*</span></label>
+        <p class="lq-hint" id="lqPickupHint">ম্যাপে পিন বসালে এলাকা নিজে বসে যাবে, না হলে নিচ থেকে বেছে নিন।</p>
+        <div class="lq-two">
+          <select class="lq-in" id="lqPUpazila" aria-label="পিকআপ উপজেলা">
+            <option value="">উপজেলা</option>
+          </select>
+          <select class="lq-in" id="lqPUnion" aria-label="পিকআপ ইউনিয়ন">
+            <option value="">ইউনিয়ন</option>
+          </select>
+        </div>
+        <div class="field-error-msg" data-error-for="lqPUnion"><i class="fas fa-circle-exclamation"></i><span>পিকআপের ইউনিয়ন বেছে নিন</span></div>
+
+        <div class="lq-gap"></div>
+        <LocationPicker id="lrdrop" label="গন্তব্য (ড্রপ)" allowAutoLocate={false} placeholder="যেমন: ফেনী কলেজ" />
+        <p class="lq-hint lq-drop-area" id="lqDropArea" style="display:none;"></p>
+
+        <label class="lq-lbl">গাড়ির ধরন<span class="required-mark">*</span> <span class="lq-sub-l">একাধিক বাছতে পারবেন</span></label>
+        <div id="lqTypes" class="lq-chips" role="group" aria-label="গাড়ির ধরন"></div>
+        <div class="field-error-msg" data-error-for="lqTypes"><i class="fas fa-circle-exclamation"></i><span>কমপক্ষে ১টা গাড়ির ধরন বেছে নিন</span></div>
+
+        <label class="lq-lbl">যাত্রী সংখ্যা</label>
+        <div class="lq-step">
+          <button type="button" class="lq-stepbtn" id="lqMinus" aria-label="কমান"><i class="fas fa-minus"></i></button>
+          <span class="lq-stepval" id="lqPax" aria-live="polite">১</span>
+          <button type="button" class="lq-stepbtn" id="lqPlus" aria-label="বাড়ান"><i class="fas fa-plus"></i></button>
+        </div>
+
+        <label class="lq-lbl" for="lqFare">আপনার ভাড়া (৳)<span class="required-mark">*</span></label>
+        <input class="lq-in" id="lqFare" type="number" inputmode="numeric" min="1" max="100000" placeholder="যেমন: ১২০" required />
+        <div class="field-error-msg" data-error-for="lqFare"><i class="fas fa-circle-exclamation"></i><span>ভাড়া লিখুন</span></div>
+        <div id="lqSuggest" class="lq-suggest" style="display:none;">
+          <span id="lqSuggestTxt"></span>
+          <button type="button" class="lq-use" id="lqSuggestUse">এটা ব্যবহার করুন</button>
+        </div>
+        <p class="lq-hint">আপনার ভাড়ায় যে ড্রাইভার রাজি হবে, ট্রিপ তার সাথেই কনফার্ম। কেউ অন্য দামও বলতে পারে।</p>
+
+        <label class="lq-lbl" for="lqNote">নোট <span class="lq-sub-l">(ঐচ্ছিক)</span></label>
+        <input class="lq-in" id="lqNote" maxlength="200" placeholder="যেমন: সাথে ২টা ব্যাগ আছে" autocomplete="off" />
+
+        <button type="submit" class="lq-cta" id="lqSubmit">রিকোয়েস্ট পাঠান</button>
+      </form>
+
+    </div>
+  </div>
+
+  <style is:global>
+    .lq-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F8FAFC; min-height: 70vh; padding: 16px 14px 90px; }
+    .lq-wrap { max-width: 520px; margin: 0 auto; }
+    .lq-top { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+    .lq-round { width: 44px; height: 44px; border-radius: 22px; background: #fff; box-shadow: 0 2px 10px rgba(27,42,74,.18); color: #1B2A4A; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; flex: none; }
+    .lq-title { flex: 1; font-size: 19px; font-weight: 700; margin: 0; }
+    .lq-mine { font-size: 13px; height: 40px; padding: 0 12px; }
+    .lq-state { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 70px 10px; text-align: center; color: #5B6B86; font-weight: 600; }
+    .lq-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: lqSpin .8s linear infinite; }
+    @keyframes lqSpin { to { transform: rotate(360deg); } }
+    .lq-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27,42,74,.08); padding: 14px 16px 18px; }
+    .lq-state.lq-card { padding: 28px 18px; }
+    .lq-state h2 { margin: 0; font-size: 19px; font-weight: 700; color: #1B2A4A; }
+    .lq-state p { margin: 0; font-size: 14.5px; line-height: 1.6; font-weight: 500; }
+    .lq-state-ic { font-size: 2.2rem; color: #FF6B35; }
+    .lq-lbl { display: block; margin: 16px 0 6px; font-size: 12.5px; font-weight: 600; color: #5B6B86; }
+    .lq-sub-l { font-weight: 500; color: #8696AE; }
+    .lq-hint { margin: 2px 0 8px; font-size: 12.5px; line-height: 1.5; color: #5B6B86; }
+    .lq-gap { height: 10px; }
+    .lq-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .lq-in { width: 100%; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; padding: 10px 14px; font-size: 15px; min-height: 48px; font-family: inherit; color: #1B2A4A; box-sizing: border-box; }
+    .lq-in:focus { outline: none; border-color: #FF6B35; }
+    .lq-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .lq-chip { min-height: 44px; border: 1.5px solid #D5DCE8; background: #fff; color: #1B2A4A; border-radius: 999px; padding: 0 16px; font-size: 14.5px; font-weight: 600; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .lq-chip[aria-pressed="true"] { border-color: #FF6B35; background: #FFF6F1; }
+    .lq-step { display: flex; align-items: center; gap: 14px; }
+    .lq-stepbtn { width: 48px; height: 48px; border-radius: 14px; border: 1.5px solid #D5DCE8; background: #fff; color: #1B2A4A; font-size: 16px; cursor: pointer; }
+    .lq-stepval { min-width: 36px; text-align: center; font-size: 20px; font-weight: 700; }
+    .lq-suggest { margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #FFF6F1; border-radius: 14px; padding: 8px 12px; font-size: 13.5px; font-weight: 600; }
+    .lq-use { min-height: 40px; border: 0; border-radius: 12px; background: #FF6B35; color: #fff; font-weight: 700; font-size: 13px; padding: 0 12px; cursor: pointer; font-family: inherit; flex: none; }
+    .lq-ghost { border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; color: #1B2A4A; font-weight: 600; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+    .lq-cta { width: 100%; height: 52px; border: 0; border-radius: 16px; background: #FF6B35; color: #1B2A4A; font-weight: 700; font-size: 17px; cursor: pointer; font-family: inherit; margin-top: 22px; }
+    .lq-state .lq-cta { margin-top: 10px; }
+    .lq-cta:disabled { opacity: .65; cursor: not-allowed; }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+    import { fetchDeliveryFare } from '../lib/fareCalc.js';
+
+    const $ = (id) => document.getElementById(id);
+    const BN = '০১২৩৪৫৬৭৮৯';
+    const bn = (n) => String(n).replace(/\d/g, (d) => BN[d]);
+
+    let types = [];
+    let areas = [];
+    let pickedTypes = [];
+    let pax = 1;
+    // লোকেশন স্টেট (পিকার ইভেন্ট থেকে)
+    const loc = {
+      lrpickup: { lat: null, lng: null, source: 'manual', union: '', upazila: '' },
+      lrdrop: { lat: null, lng: null, source: 'manual', union: '', upazila: '' },
+    };
+    let suggestFare = null;
+    let suggestTimer = null;
+    let submitting = false;
+
+    function toast(msg, type) {
+      if (typeof window.showToast === 'function') window.showToast(msg, type || 'error');
+    }
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    function setErr(forId, on) {
+      const m = document.querySelector('[data-error-for="' + forId + '"]');
+      if (m) m.classList.toggle('show', !!on);
+    }
+    function show(id) {
+      ['lqLoading', 'lqLogin', 'lqForm'].forEach((x) => { $(x).style.display = x === id ? '' : 'none'; });
+    }
+    function wrapOf(id) { return document.querySelector('[data-lp-id="' + id + '"]'); }
+    function addrText(id) {
+      const w = wrapOf(id);
+      const v = w && w.querySelector('.lp-address-input');
+      return v ? String(v.value || '').trim() : '';
+    }
+    function instrText(id) {
+      const w = wrapOf(id);
+      const v = w && w.querySelector('.lp-instructions-input');
+      return v ? String(v.value || '').trim() : '';
+    }
+    function findArea(upazila, union) {
+      if (!union) return null;
+      return areas.find((a) => a.name_bn === union && (!upazila || a.upazila === upazila)) || areas.find((a) => a.name_bn === union) || null;
+    }
+
+    const ERR = {
+      AUTH_REQUIRED: 'আগে লগইন করুন',
+      PICKUP_AREA_REQUIRED: 'পিকআপের ইউনিয়ন বেছে নিন',
+      DROP_AREA_INVALID: 'গন্তব্যের এলাকা ঠিক নেই, আবার বসান',
+      DROP_REQUIRED: 'গন্তব্য দিন (ম্যাপে বা লিখে)',
+      VEHICLE_TYPE_REQUIRED: 'কমপক্ষে ১টা গাড়ির ধরন বেছে নিন',
+      FARE_INVALID: 'ভাড়া ঠিকভাবে লিখুন',
+      PASSENGERS_INVALID: 'যাত্রী সংখ্যা ঠিক নেই',
+      TOO_MANY_OPEN: 'আপনার ২টা রিকোয়েস্ট এখনো চালু আছে, আগে সেগুলো শেষ করুন বা বাতিল করুন',
+    };
+    function errText(error) {
+      const m = String((error && error.message) || '');
+      const k = Object.keys(ERR).find((key) => m.includes(key));
+      return k ? ERR[k] : 'রিকোয়েস্ট পাঠানো যায়নি, আবার চেষ্টা করুন';
+    }
+
+    // ===== পিকআপ ইউনিয়ন সিলেক্ট =====
+    function fillUpazilas() {
+      const sel = $('lqPUpazila');
+      const seen = [];
+      areas.forEach((a) => { if (a.upazila && !seen.includes(a.upazila)) seen.push(a.upazila); });
+      seen.forEach((u) => { const o = document.createElement('option'); o.value = u; o.textContent = u; sel.appendChild(o); });
+    }
+    function fillUnions(upazila, selectedId) {
+      const sel = $('lqPUnion');
+      sel.textContent = '';
+      const first = document.createElement('option');
+      first.value = '';
+      first.textContent = 'ইউনিয়ন';
+      sel.appendChild(first);
+      areas.filter((a) => a.upazila === upazila).forEach((a) => {
+        const o = document.createElement('option');
+        o.value = a.id;
+        o.textContent = a.name_bn;
+        if (a.id === selectedId) o.selected = true;
+        sel.appendChild(o);
+      });
+    }
+
+    // ===== গাড়ির ধরন =====
+    function renderTypes() {
+      const box = $('lqTypes');
+      box.textContent = '';
+      types.forEach((t) => {
+        const on = pickedTypes.includes(t.id);
+        const b = el('button', 'lq-chip');
+        b.type = 'button';
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (on) { const i = document.createElement('i'); i.className = 'fas fa-check'; b.appendChild(i); }
+        b.appendChild(document.createTextNode(t.name_bn));
+        b.addEventListener('click', () => {
+          const i = pickedTypes.indexOf(t.id);
+          if (i >= 0) pickedTypes.splice(i, 1); else pickedTypes.push(t.id);
+          setErr('lqTypes', false);
+          renderTypes();
+        });
+        box.appendChild(b);
+      });
+    }
+
+    // ===== সাজেস্টেড ভাড়া (ডেলিভারি fare settings, শুধু ডিফল্ট) =====
+    function scheduleSuggest() {
+      clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(runSuggest, 500);
+    }
+    async function runSuggest() {
+      const p = loc.lrpickup, d = loc.lrdrop;
+      const box = $('lqSuggest');
+      if (p.lat == null || p.lng == null || d.lat == null || d.lng == null) { box.style.display = 'none'; suggestFare = null; return; }
+      const r = await fetchDeliveryFare({ pickup: { lat: p.lat, lng: p.lng }, drop: { lat: d.lat, lng: d.lng }, dropUnion: d.union || null });
+      if (!r || !r.enabled || !r.fare) { box.style.display = 'none'; suggestFare = null; return; }
+      suggestFare = Math.round(r.fare);
+      $('lqSuggestTxt').textContent = 'প্রস্তাবিত ভাড়া ৳' + bn(suggestFare) + (r.km ? ' · প্রায় ' + bn(Math.round(r.km * 10) / 10) + ' কিমি' : '');
+      box.style.display = '';
+      const f = $('lqFare');
+      if (!f.value) f.value = String(suggestFare);
+    }
+
+    // ===== পিকার ইভেন্ট =====
+    document.addEventListener('lp:location-changed', (e) => {
+      const d = (e && e.detail) || {};
+      if (d.id !== 'lrpickup' && d.id !== 'lrdrop') return;
+      const s = loc[d.id];
+      if (d.cleared) {
+        s.lat = null; s.lng = null; s.source = 'manual'; s.union = ''; s.upazila = '';
+      } else {
+        const ok = typeof d.lat === 'number' && typeof d.lng === 'number' && !isNaN(d.lat) && !isNaN(d.lng);
+        s.lat = ok ? d.lat : null;
+        s.lng = ok ? d.lng : null;
+        s.source = ok ? 'map' : 'manual';
+        s.union = d.union || '';
+        s.upazila = d.upazila || '';
+      }
+      if (d.id === 'lrpickup') {
+        const a = findArea(s.upazila, s.union);
+        if (a) {
+          $('lqPUpazila').value = a.upazila;
+          fillUnions(a.upazila, a.id);
+          setErr('lqPUnion', false);
+          $('lqPickupHint').textContent = 'পিন থেকে পাওয়া এলাকা: ' + a.name_bn + ' (' + a.upazila + ')। ভুল হলে নিচ থেকে বদলান।';
+        }
+      } else {
+        const a = findArea(s.upazila, s.union);
+        const line = $('lqDropArea');
+        if (a) { line.textContent = 'গন্তব্যের এলাকা: ' + a.name_bn + ' (' + a.upazila + ')'; line.style.display = ''; }
+        else { line.style.display = 'none'; }
+      }
+      scheduleSuggest();
+    });
+
+    // ===== সাবমিট =====
+    async function submitForm(e) {
+      e.preventDefault();
+      if (submitting) return;
+      const form = $('lqForm');
+      let ok = typeof window.SFValidateForm === 'function' ? window.SFValidateForm(form) : true;
+
+      const pickupAreaId = $('lqPUnion').value;
+      if (!pickupAreaId) { setErr('lqPUnion', true); ok = false; }
+      if (!pickedTypes.length) { setErr('lqTypes', true); ok = false; }
+      const fare = Math.round(Number($('lqFare').value));
+      if (!fare || fare < 1 || fare > 100000) { setErr('lqFare', true); ok = false; }
+
+      const p = loc.lrpickup, d = loc.lrdrop;
+      const pickupText = addrText('lrpickup');
+      const dropText = addrText('lrdrop');
+      if (!pickupText && p.lat == null) ok = false;
+      if (!dropText && d.lat == null) ok = false;
+      if (!ok) { toast('সব তথ্য ঠিকভাবে দিন'); return; }
+
+      const dropArea = findArea(d.upazila, d.union);
+      const extra = [];
+      const pi = instrText('lrpickup');
+      const di = instrText('lrdrop');
+      if (pi) extra.push('পিকআপ: ' + pi);
+      if (di) extra.push('ড্রপ: ' + di);
+      const userNote = $('lqNote').value.trim();
+      if (userNote) extra.push(userNote);
+
+      const btn = $('lqSubmit');
+      submitting = true;
+      btn.disabled = true;
+      btn.textContent = 'পাঠানো হচ্ছে...';
+      try {
+        const { error } = await supabase.rpc('local_ride_create', {
+          p_pickup_area_id: pickupAreaId,
+          p_pickup_text: pickupText || null,
+          p_pickup_lat: p.lat,
+          p_pickup_lng: p.lng,
+          p_pickup_loc_source: p.lat != null ? 'map' : 'manual',
+          p_drop_area_id: dropArea ? dropArea.id : null,
+          p_drop_text: dropText || null,
+          p_drop_lat: d.lat,
+          p_drop_lng: d.lng,
+          p_drop_loc_source: d.lat != null ? 'map' : 'manual',
+          p_vehicle_type_ids: pickedTypes,
+          p_passengers: pax,
+          p_fare: fare,
+          p_note: extra.length ? extra.join(' | ') : null,
+        });
+        if (error) {
+          toast(errText(error));
+          if (String(error.message || '').includes('TOO_MANY_OPEN')) setTimeout(() => { window.location.href = '/my-local-rides'; }, 1800);
+          else if (window.SFReportError && !/PICKUP_AREA|DROP_|VEHICLE_|FARE_|PASSENGERS_|AUTH_/.test(String(error.message || ''))) {
+            window.SFReportError({ kind: 'api_fail', action: 'local_ride_create', title: 'লোকাল রাইড রিকোয়েস্ট ব্যর্থ', message: String(error.message || '') });
+          }
+          return;
+        }
+        toast('রিকোয়েস্ট পাঠানো হয়েছে ✓', 'success');
+        window.location.href = '/my-local-rides';
+      } catch (_) {
+        toast('সমস্যা হয়েছে, আবার চেষ্টা করুন');
+      } finally {
+        submitting = false;
+        btn.disabled = false;
+        btn.textContent = 'রিকোয়েস্ট পাঠান';
+      }
+    }
+
+    // ===== শুরু =====
+    async function init() {
+      show('lqLoading');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { show('lqLogin'); return; }
+      const [t, a] = await Promise.all([
+        supabase.from('local_ride_vehicle_types').select('id, name_bn').eq('is_active', true).order('sort_order'),
+        supabase.from('local_areas').select('id, name_bn, upazila').eq('is_active', true).order('sort_order'),
+      ]);
+      if (t.error || a.error) { toast('তথ্য লোড করা যায়নি, আবার চেষ্টা করুন'); show('lqLogin'); return; }
+      types = t.data || [];
+      areas = a.data || [];
+      fillUpazilas();
+      renderTypes();
+      show('lqForm');
+    }
+
+    $('lqLoginBtn').addEventListener('click', () => { if (window.openAuthModal) window.openAuthModal('login'); });
+    $('lqPUpazila').addEventListener('change', () => { fillUnions($('lqPUpazila').value, null); setErr('lqPUnion', false); });
+    $('lqPUnion').addEventListener('change', () => setErr('lqPUnion', false));
+    $('lqFare').addEventListener('input', () => setErr('lqFare', false));
+    $('lqMinus').addEventListener('click', () => { if (pax > 1) { pax--; $('lqPax').textContent = bn(pax); } });
+    $('lqPlus').addEventListener('click', () => { if (pax < 20) { pax++; $('lqPax').textContent = bn(pax); } });
+    $('lqSuggestUse').addEventListener('click', () => { if (suggestFare) { $('lqFare').value = String(suggestFare); setErr('lqFare', false); } });
+    $('lqForm').addEventListener('submit', submitForm);
+    init();
+  </script>
+</BaseLayout>
