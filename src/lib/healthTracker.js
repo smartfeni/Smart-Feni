@@ -17,7 +17,9 @@
 // অফলাইন-সেফ: সব ইভেন্ট আগে localStorage কিউতে (sf_h_q, সর্বোচ্চ ৪০); পাঠানো ব্যর্থ হলে ব্যাকঅফে আবার,
 // নেট ফিরলে (online ইভেন্ট) বা পেজ লুকালে (visibilitychange) আবার চেষ্টা। সফল হলেই কিউ থেকে মোছে।
 // পাঠানো হয় সরাসরি fetch দিয়ে (Supabase JS বান্ডেল লাগে না), RPC: public.log_client_health।
-// কোনো ফোন/ইমেইল/টোকেন যায় না — শুধু ডিভাইস আইডি (sf_did), পেজ পাথ (uuid মাস্ক), নেটওয়ার্ক টাইপ।
+// ইভেন্টে ফোন/ইমেইল যায় না — শুধু ডিভাইস আইডি (sf_did), পেজ পাথ (uuid মাস্ক), নেটওয়ার্ক টাইপ।
+// ব্যতিক্রম (শুধু user_report): লগইন থাকলে লগইন টোকেন (Authorization) যায়, যাতে অ্যাডমিন রিপোর্টকারীকে চিনতে পারে;
+// লগইন না থাকলে ইউজার চাইলে ঐচ্ছিক মোবাইল নাম্বার দেয় (detail.contact)। বাকি ইভেন্ট আগের মতোই বেনামী।
 // এই ফাইল কখনো throw করে না এবং পেজের কাজ আটকায় না।
 // নেটিভ অ্যাপে (নতুন AAB): window.Capacitor.Plugins.SFHealth থাকলে ready()/getInfo() ডাকে;
 // না থাকলে (পুরনো অ্যাপ) চুপচাপ বাদ।
@@ -76,6 +78,49 @@ function lsDel(k) { try { localStorage.removeItem(k); } catch (_) {} }
 function ssGet(k) { try { return sessionStorage.getItem(k); } catch (_) { return null; } }
 function ssSet(k, v) { try { sessionStorage.setItem(k, v); } catch (_) {} }
 function timeout(ms) { return new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)); }
+
+// ---------- লগইন সেশন (Supabase JS বান্ডেল ছাড়াই localStorage থেকে) ----------
+const AUTH_KEY = 'smartfeni-auth'; // src/lib/supabase.js-এর storageKey
+
+function readSession() {
+  try {
+    const raw = lsGet(AUTH_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (!s || typeof s.access_token !== 'string' || !s.access_token) return null;
+    return s;
+  } catch (_) { return null; }
+}
+
+// মেয়াদ ৩০ সেকেন্ডের বেশি থাকলে টোকেন; নইলে null (মেয়াদোত্তীর্ণ টোকেনে PostgREST ৪০১ দেয়)
+function authToken() {
+  const s = readSession();
+  if (!s) return null;
+  const exp = Number(s.expires_at) || 0;
+  if (exp && exp * 1000 - Date.now() < 30000) return null;
+  return s.access_token;
+}
+
+function isLoggedIn() { return !!readSession(); }
+
+// সেশন আছে কিন্তু টোকেন বাসি: শুধু তখনই (user_report পাঠানোর সময়) authToken.js দিয়ে রিফ্রেশ — লোডের সময় নয়
+async function freshToken() {
+  try {
+    const m = await Promise.race([import('./authToken.js'), timeout(2500)]);
+    return await Promise.race([m.getFreshToken(), timeout(3000)]);
+  } catch (_) { return null; }
+}
+
+// বাংলা ডিজিট → ইংরেজি, স্পেস/ড্যাশ বাদ, +88 / 88 বাদ। বৈধ হলে 01XXXXXXXXX
+function normalizeBdPhone(v) {
+  const BN_DIGITS = '০১২৩৪৫৬৭৮৯';
+  let s = String(v || '')
+    .replace(/[০-৯]/g, (d) => String(BN_DIGITS.indexOf(d)))
+    .replace(/[\s\-()]/g, '');
+  if (s.indexOf('+88') === 0) s = s.slice(3);
+  else if (s.indexOf('88') === 0 && s.length === 13) s = s.slice(2);
+  return s;
+}
 
 function rand() {
   try {
@@ -253,8 +298,12 @@ async function flush(urgent) {
   flushing = true;
   try {
     await Promise.race([loadInfo(), timeout(urgent ? 300 : 2500)]).catch(() => {});
-    const batch = readQ().slice(0, MAX_BATCH);
+    let batch = readQ().slice(0, MAX_BATCH);
     if (!batch.length) return;
+    // user_report আলাদা ব্যাচে: শুধু এতেই লগইন টোকেন যায় (ইউজার চেনার জন্য), বাকি ইভেন্ট বেনামী থাকে।
+    // বাকিগুলো পরের flush-এ (সফল হলে ১.৫ সেকেন্ডে) যায়।
+    const repOnly = batch.filter((e) => e.event === 'user_report');
+    if (repOnly.length) batch = repOnly;
     const now = Date.now();
     const payload = batch.map((e) => {
       const o = Object.assign({}, e);
@@ -270,18 +319,30 @@ async function flush(urgent) {
       return o;
     });
 
+    let token = null;
+    if (batch[0].event === 'user_report') {
+      token = authToken();
+      if (!token && isLoggedIn()) token = await freshToken();
+    }
+
     const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = setTimeout(() => { try { if (ctrl) ctrl.abort(); } catch (_) {} }, 15000);
     let ok = false;
     try {
       const f = origFetch || window.fetch.bind(window);
-      const res = await f(ENDPOINT, {
+      const body = JSON.stringify({ p_events: payload });
+      const post = (tok) => f(ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: SB_KEY },
-        body: JSON.stringify({ p_events: payload }),
+        headers: tok
+          ? { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: 'Bearer ' + tok }
+          : { 'Content-Type': 'application/json', apikey: SB_KEY },
+        body,
         keepalive: !!urgent,
         signal: ctrl ? ctrl.signal : undefined,
       });
+      let res = await post(token);
+      // টোকেন বাতিল/অচল হলেও রিপোর্ট যেন হারিয়ে না যায়: বেনামী হিসেবে আবার
+      if (token && res && res.status === 401) res = await post(null);
       ok = !!(res && res.ok);
     } catch (_) {
       ok = false;
@@ -467,7 +528,8 @@ function openReport() {
     h.textContent = 'সমস্যা জানান';
     h.setAttribute('style', 'font-size:1.15rem;font-weight:800;margin:0 0 4px;');
     const sub = document.createElement('p');
-    sub.textContent = 'কী সমস্যা হচ্ছে? নিচ থেকে বাছুন, চাইলে দুই লাইনে লিখুন। ফোনের নেটওয়ার্ক ও ডিভাইসের তথ্য নিজে থেকেই যাবে (ফোন নম্বর নয়)।';
+    sub.textContent = 'কী সমস্যা হচ্ছে? নিচ থেকে বাছুন, চাইলে দুই লাইনে লিখুন। ফোনের নেটওয়ার্ক ও ডিভাইসের তথ্য নিজে থেকেই যাবে।'
+      + (isLoggedIn() ? ' আপনি লগইন করা আছেন, তাই আপনার অ্যাকাউন্টের নাম ও ফোন নাম্বারও আমরা দেখতে পাব।' : '');
     sub.setAttribute('style', 'font-size:0.82rem;color:#5A6E85;line-height:1.55;margin:0 0 12px;');
 
     const chips = document.createElement('div');
@@ -497,6 +559,31 @@ function openReport() {
     ta.placeholder = 'কী হচ্ছে লিখুন (ঐচ্ছিক)';
     ta.setAttribute('style', 'width:100%;border:1.5px solid #E5EAF0;border-radius:14px;padding:12px;font-size:0.9rem;font-family:inherit;color:#1B2A4A;background:#FBFCFE;resize:none;box-sizing:border-box;margin-bottom:12px;');
 
+    // লগইন না থাকলে ঐচ্ছিক মোবাইল নাম্বার — অ্যাডমিন যোগাযোগ করতে পারবে (detail.contact)
+    let contactEl = null;
+    const contactWrap = document.createElement('div');
+    if (!isLoggedIn()) {
+      contactWrap.setAttribute('style', 'margin-bottom:12px;');
+      const lab = document.createElement('label');
+      lab.htmlFor = 'sf-health-contact';
+      lab.textContent = 'আপনার মোবাইল নাম্বার (ঐচ্ছিক)';
+      lab.setAttribute('style', 'display:block;font-size:0.82rem;font-weight:700;color:#1B2A4A;margin:0 0 6px;');
+      contactEl = document.createElement('input');
+      contactEl.id = 'sf-health-contact';
+      contactEl.type = 'tel';
+      contactEl.inputMode = 'numeric';
+      contactEl.autocomplete = 'tel';
+      contactEl.maxLength = 14;
+      contactEl.placeholder = '01XXXXXXXXX';
+      contactEl.setAttribute('style', 'width:100%;border:1.5px solid #E5EAF0;border-radius:14px;padding:12px;font-size:0.9rem;font-family:inherit;color:#1B2A4A;background:#FBFCFE;box-sizing:border-box;');
+      const cnote = document.createElement('p');
+      cnote.textContent = 'ফাঁকা রাখলে আমরা আপনার সাথে যোগাযোগ করতে পারব না।';
+      cnote.setAttribute('style', 'font-size:0.76rem;color:#8FA0BC;line-height:1.5;margin:6px 0 0;');
+      contactWrap.appendChild(lab);
+      contactWrap.appendChild(contactEl);
+      contactWrap.appendChild(cnote);
+    }
+
     const send = document.createElement('button');
     send.type = 'button';
     send.textContent = 'পাঠান';
@@ -521,6 +608,17 @@ function openReport() {
     send.addEventListener('click', () => {
       try {
         if (!topic && !ta.value.trim()) { toast('একটা বিষয় বাছুন বা লিখুন', 'error'); return; }
+        let contact = '';
+        if (contactEl) {
+          const rawContact = contactEl.value.trim();
+          if (rawContact) {
+            contact = normalizeBdPhone(rawContact);
+            if (!/^01[3-9]\d{8}$/.test(contact)) {
+              toast('মোবাইল নাম্বার ঠিক নয়। ০১XXXXXXXXX লিখুন, অথবা ঘরটা ফাঁকা রাখুন।', 'error');
+              return;
+            }
+          }
+        }
         if (!reportAllowed()) { toast('আপনার রিপোর্ট আগেই পৌঁছেছে। কিছুক্ষণ পরে আবার জানাতে পারবেন।', 'error'); return; }
         enqueue('user_report', {
           detail: {
@@ -529,6 +627,7 @@ function openReport() {
             recent: ring.slice(-6),
             visible: document.visibilityState,
             ua: (navigator.userAgent || '').slice(0, 160),
+            contact: contact || null,
           },
         });
         const offline = navigator.onLine === false;
@@ -542,6 +641,7 @@ function openReport() {
     card.appendChild(sub);
     card.appendChild(chips);
     card.appendChild(ta);
+    if (contactEl) card.appendChild(contactWrap);
     card.appendChild(send);
     card.appendChild(wa);
     card.appendChild(close);
