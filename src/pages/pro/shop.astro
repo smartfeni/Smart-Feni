@@ -311,6 +311,11 @@ const guideSteps = [
     .ps-swtx b { display: block; font-size: 15.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ps-swtx span { font-size: 12.5px; color: #5B6B86; }
     .ps-swck { color: #14A44D; }
+    /* কাজের চিপ: কমলা = কাজ বাকি, সবুজ = চলমান (শূন্য হলে লুকানো) */
+    .pbg { display: inline-flex; gap: 4px; flex: none; }
+    .pbg-b { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; font-size: 12px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+    .pbg-open { background: #FF6B35; color: #1B2A4A; }
+    .pbg-act { background: #14A44D; color: #fff; }
 
     .ps-nm { display: flex; align-items: center; gap: 4px; min-width: 0; }
     .ps-nm h1 { min-width: 0; }
@@ -336,7 +341,7 @@ const guideSteps = [
 
   <script>
     import { supabase } from '../../lib/supabase.js';
-    import { getMyProRoles, rememberRole, proLoginUrl, ROLE_META } from '../../lib/proRoles.js';
+    import { getMyProRoles, rememberRole, proLoginUrl, ROLE_META, getProBadges, paintChips } from '../../lib/proRoles.js';
     import { readProCache, writeProCache } from '../../lib/proDataCache.js';
     import { UPAZILAS, getUnionsOfUpazilaName, getUnionBn } from '../../data/feniAreas.js';
     import { makeSortable } from '../../lib/sortable.js';
@@ -1136,7 +1141,7 @@ const guideSteps = [
     }
 
     // ---------- রোল/দোকান বদল ----------
-    function swRow(tag, icon, title, sub, cur) {
+    function swRow(tag, icon, title, sub, cur, chipKey) {
       const el = h(tag, 'ps-opt' + (cur ? ' cur' : ''));
       if (tag === 'button') el.type = 'button';
       const ic = h('span', 'ps-swic');
@@ -1146,6 +1151,11 @@ const guideSteps = [
       tx.appendChild(h('span', '', sub));
       el.appendChild(ic);
       el.appendChild(tx);
+      if (chipKey) {
+        const box = h('span', 'pbg');
+        box.dataset.chip = chipKey;
+        el.appendChild(box);
+      }
       if (cur) el.appendChild(h('i', 'fas fa-check ps-swck'));
       return el;
     }
@@ -1162,7 +1172,7 @@ const guideSteps = [
           list.appendChild(h('div', 'ps-swgrp', 'ইনস্ট্যান্ট শপ'));
           (r.shops || []).forEach((s) => {
             const cur = !!(shop && shop.id === s.id);
-            const row = swRow('button', 'fa-utensils', s.name, cur ? 'এখন এখানে আছেন' : 'এই দোকানে যান', cur);
+            const row = swRow('button', 'fa-utensils', s.name, cur ? 'এখন এখানে আছেন' : 'এই দোকানে যান', cur, 'instant_shop:' + s.id);
             row.addEventListener('click', async () => {
               closeSwitch();
               if (cur) return;
@@ -1173,13 +1183,28 @@ const guideSteps = [
             list.appendChild(row);
           });
         } else {
-          const row = swRow('a', m.icon, m.label, m.sub, false);
+          const row = swRow('a', m.icon, m.label, m.sub, false, r.role);
           row.href = m.href;
           row.addEventListener('click', () => rememberRole(r.role));
           list.appendChild(row);
         }
       });
       $('psSwOv').classList.add('active');
+      getProBadges().then((b) => {
+        list.querySelectorAll('[data-chip]').forEach((box) => {
+          const k = box.dataset.chip;
+          let c = null;
+          if (b && b.roles) {
+            if (k.indexOf('instant_shop:') === 0) {
+              const sh = b.roles.instant_shop && b.roles.instant_shop.shops;
+              c = sh ? sh[k.slice(13)] || null : null;
+            } else {
+              c = b.roles[k] || null;
+            }
+          }
+          paintChips(box, c);
+        });
+      });
     }
 
     $('psSwBtn').addEventListener('click', openSwitch);
