@@ -1,0 +1,225 @@
+---
+// ============================================================
+// পেজ: অ্যাডমিন — লোকাল রাইড মনিটর (/admin/local-rides)
+// শুধু দেখার পেজ: সব রিকোয়েস্ট (শেষ ১০০টা), ট্যাব: চলমান | কনফার্ম | সম্পন্ন | বাতিল/মেয়াদ শেষ।
+// প্রতি কার্ডে যাত্রী (নাম/ফোন), রুট, গাড়ির ধরন, ভাড়া, অফার সংখ্যা, কনফার্ম ড্রাইভার।
+// ডেটা: local_ride_requests / offers / drivers (অ্যাডমিন-মডারেটর RLS), profiles (নাম/ফোন)।
+// প্রতি ১৫ সেকেন্ডে রিফ্রেশ। ইউজারের টেক্সট textContent দিয়ে।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="লোকাল রাইড মনিটর | স্মার্ট ফেনী">
+  <div class="lm-page">
+    <div class="container">
+
+      <div id="adminLoadingState" class="lm-loading">
+        <div class="lm-spinner"></div>
+        <p>যাচাই করা হচ্ছে...</p>
+      </div>
+
+      <div id="adminGuardedContent" style="display:none;">
+        <a href="/admin" class="lm-back"><i class="fas fa-arrow-left"></i> অ্যাডমিন ড্যাশবোর্ডে ফিরুন</a>
+        <h1 class="lm-h1"><i class="fas fa-van-shuttle"></i> লোকাল রাইড মনিটর</h1>
+
+        <div class="lm-stats" id="lmStats"></div>
+
+        <div class="lm-tabs" role="tablist">
+          <button type="button" class="lm-tab active" data-tab="open">চলমান <span class="lm-count" id="lmOpenCount">0</span></button>
+          <button type="button" class="lm-tab" data-tab="confirmed">কনফার্ম</button>
+          <button type="button" class="lm-tab" data-tab="completed">সম্পন্ন</button>
+          <button type="button" class="lm-tab" data-tab="closed">বাতিল</button>
+        </div>
+
+        <div id="lmList" class="lm-list"></div>
+        <p class="lm-empty" id="lmEmpty" style="display:none;">এই ট্যাবে কোনো রিকোয়েস্ট নেই</p>
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .lm-page { min-height: 60vh; padding: 32px 0 80px; }
+    .lm-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .lm-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: lmspin .8s linear infinite; }
+    @keyframes lmspin { to { transform: rotate(360deg); } }
+    .lm-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: .88rem; margin-bottom: 18px; min-height: 44px; }
+    .lm-h1 { font-size: 1.4rem; font-weight: 800; color: #1B2A4A; display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+    .lm-h1 i { color: #FF6B35; }
+    .lm-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+    .lm-stat { background: #fff; border-radius: 14px; padding: 10px 6px; text-align: center; box-shadow: 0 2px 10px rgba(15,23,42,.05); }
+    .lm-stat b { display: block; font-size: 1.15rem; color: #1B2A4A; }
+    .lm-stat span { font-size: .7rem; color: #8FA0BC; font-weight: 700; }
+    .lm-tabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid #EEF3F9; overflow-x: auto; }
+    .lm-tab { background: none; border: none; padding: 10px 12px; min-height: 44px; font-size: .84rem; font-weight: 700; color: #8FA0BC; cursor: pointer; border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 6px; font-family: inherit; white-space: nowrap; }
+    .lm-tab.active { color: #FF6B35; border-bottom-color: #FF6B35; }
+    .lm-count { background: #FFF0EA; color: #FF6B35; font-size: .7rem; font-weight: 800; padding: 1px 8px; border-radius: 20px; }
+    .lm-list { display: flex; flex-direction: column; gap: 12px; }
+    .lm-card { background: #fff; border-radius: 18px; padding: 14px 16px; box-shadow: 0 4px 16px rgba(15,23,42,.06); }
+    .lm-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .lm-no { font-size: .76rem; font-weight: 700; color: #8FA0BC; }
+    .lm-time { font-size: .74rem; color: #8FA0BC; }
+    .lm-route { font-size: .92rem; font-weight: 700; color: #1B2A4A; line-height: 1.45; margin: 2px 0 6px; }
+    .lm-route small { display: block; font-size: .74rem; font-weight: 600; color: #5A6E85; }
+    .lm-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .lm-tag { font-size: .74rem; font-weight: 600; background: #F4F7FC; border-radius: 20px; padding: 3px 10px; color: #1B2A4A; }
+    .lm-tag.warn { background: #FFF4E0; color: #B8860B; }
+    .lm-tag.ok { background: #EAFBF0; color: #1B7A3C; }
+    .lm-fare { margin-left: auto; font-size: 1rem; font-weight: 800; color: #1B2A4A; }
+    .lm-who { margin-top: 8px; font-size: .8rem; color: #5A6E85; line-height: 1.6; }
+    .lm-who a { color: #FF6B35; font-weight: 700; text-decoration: none; }
+    .lm-empty { text-align: center; color: #9AA8BC; font-size: .9rem; padding: 60px 0; }
+    @media (max-width: 420px) { .lm-stats { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const $ = (id) => document.getElementById(id);
+    const BN = '০১২৩৪৫৬৭৮৯';
+    const bn = (n) => String(n).replace(/\d/g, (d) => BN[d]);
+    const POLL_MS = 15000;
+
+    let rows = [];
+    let tab = 'open';
+    let sig = '';
+    let timer = null;
+
+    function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+    function safePhone(p) { return String(p || '').replace(/[^0-9+]/g, ''); }
+    function timeText(iso) {
+      const d = new Date(iso);
+      if (isNaN(d)) return '';
+      const mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+      if (mins < 1) return 'এইমাত্র';
+      if (mins < 60) return bn(mins) + ' মিনিট আগে';
+      if (mins < 1440) return bn(Math.round(mins / 60)) + ' ঘণ্টা আগে';
+      return bn(Math.round(mins / 1440)) + ' দিন আগে';
+    }
+    function groupOf(r) {
+      if (r.status === 'open' && new Date(r.expires_at).getTime() > Date.now()) return 'open';
+      if (r.status === 'confirmed') return 'confirmed';
+      if (r.status === 'completed') return 'completed';
+      return 'closed';
+    }
+
+    async function load() {
+      const { data: reqs, error } = await supabase
+        .from('local_ride_requests')
+        .select('id, request_no, customer_id, pickup_area_id, pickup_text, drop_area_id, drop_text, vehicle_type_ids, passengers, fare, final_price, status, accepted_driver_id, expires_at, created_at')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) { $('lmEmpty').textContent = 'লোড করতে সমস্যা হয়েছে'; $('lmEmpty').style.display = 'block'; return; }
+      const list = reqs || [];
+      const reqIds = list.map((r) => r.id);
+      const custIds = [...new Set(list.map((r) => r.customer_id))];
+      const drvIds = [...new Set(list.map((r) => r.accepted_driver_id).filter(Boolean))];
+
+      const [vt, ar, of, cu, dr] = await Promise.all([
+        supabase.from('local_ride_vehicle_types').select('id, name_bn'),
+        supabase.from('local_areas').select('id, name_bn'),
+        reqIds.length ? supabase.from('local_ride_offers').select('request_id, status').in('request_id', reqIds) : Promise.resolve({ data: [] }),
+        custIds.length ? supabase.from('profiles').select('id, full_name, phone').in('id', custIds) : Promise.resolve({ data: [] }),
+        drvIds.length ? supabase.from('local_ride_drivers').select('id, user_id, vehicle_number').in('id', drvIds) : Promise.resolve({ data: [] }),
+      ]);
+      const drvUserIds = (dr.data || []).map((d) => d.user_id);
+      const dp = drvUserIds.length ? await supabase.from('profiles').select('id, full_name, phone').in('id', drvUserIds) : { data: [] };
+
+      const vtMap = new Map((vt.data || []).map((x) => [x.id, x.name_bn]));
+      const arMap = new Map((ar.data || []).map((x) => [x.id, x.name_bn]));
+      const cuMap = new Map((cu.data || []).map((x) => [x.id, x]));
+      const dpMap = new Map((dp.data || []).map((x) => [x.id, x]));
+      const drMap = new Map((dr.data || []).map((x) => [x.id, { ...x, profile: dpMap.get(x.user_id) || null }]));
+      const offerCount = new Map();
+      (of.data || []).forEach((o) => { if (o.status === 'active' || o.status === 'accepted') offerCount.set(o.request_id, (offerCount.get(o.request_id) || 0) + 1); });
+
+      rows = list.map((r) => ({
+        ...r,
+        group: groupOf(r),
+        pickupArea: arMap.get(r.pickup_area_id) || '',
+        dropArea: arMap.get(r.drop_area_id) || '',
+        types: (r.vehicle_type_ids || []).map((id) => vtMap.get(id)).filter(Boolean),
+        customer: cuMap.get(r.customer_id) || null,
+        driver: r.accepted_driver_id ? drMap.get(r.accepted_driver_id) || null : null,
+        offers: offerCount.get(r.id) || 0,
+      }));
+      const s = JSON.stringify(rows.map((r) => [r.id, r.status, r.group, r.offers, r.accepted_driver_id]));
+      if (s !== sig) { sig = s; render(); } else { paintStats(); }
+    }
+
+    function paintStats() {
+      const cnt = { open: 0, confirmed: 0, completed: 0, closed: 0 };
+      rows.forEach((r) => { cnt[r.group]++; });
+      $('lmOpenCount').textContent = bn(cnt.open);
+      const box = $('lmStats');
+      box.textContent = '';
+      [['চলমান', cnt.open], ['কনফার্ম', cnt.confirmed], ['সম্পন্ন', cnt.completed], ['বাতিল/মেয়াদ শেষ', cnt.closed]].forEach(([l, n]) => {
+        const s = el('div', 'lm-stat');
+        s.appendChild(el('b', null, bn(n)));
+        s.appendChild(el('span', null, l));
+        box.appendChild(s);
+      });
+    }
+
+    function render() {
+      paintStats();
+      const box = $('lmList');
+      box.textContent = '';
+      const items = rows.filter((r) => r.group === tab);
+      $('lmEmpty').style.display = items.length ? 'none' : 'block';
+      $('lmEmpty').textContent = 'এই ট্যাবে কোনো রিকোয়েস্ট নেই';
+      items.forEach((r) => {
+        const card = el('div', 'lm-card');
+        const row = el('div', 'lm-row');
+        row.appendChild(el('span', 'lm-no', r.request_no || ''));
+        row.appendChild(el('span', 'lm-time', timeText(r.created_at)));
+        card.appendChild(row);
+
+        const route = el('div', 'lm-route');
+        route.appendChild(document.createTextNode((r.pickup_text || r.pickupArea) + ' → ' + (r.drop_text || r.dropArea || 'ম্যাপে দেওয়া গন্তব্য')));
+        route.appendChild(el('small', null, (r.pickupArea || '') + (r.dropArea ? ' → ' + r.dropArea : '')));
+        card.appendChild(route);
+
+        const meta = el('div', 'lm-meta');
+        r.types.forEach((t) => meta.appendChild(el('span', 'lm-tag', t)));
+        meta.appendChild(el('span', 'lm-tag', bn(r.passengers) + ' জন'));
+        if (r.group === 'open') meta.appendChild(el('span', 'lm-tag' + (r.offers ? ' ok' : ' warn'), r.offers ? bn(r.offers) + 'টা অফার' : 'কোনো অফার নেই'));
+        if (r.status === 'cancelled') meta.appendChild(el('span', 'lm-tag', 'যাত্রী বাতিল করেছে'));
+        if (r.status === 'expired') meta.appendChild(el('span', 'lm-tag warn', 'মেয়াদ শেষ'));
+        const price = r.final_price != null ? r.final_price : r.fare;
+        meta.appendChild(el('span', 'lm-fare', '৳' + bn(Math.round(Number(price)))));
+        card.appendChild(meta);
+
+        const who = el('div', 'lm-who');
+        const cph = safePhone(r.customer && r.customer.phone);
+        who.appendChild(document.createTextNode('যাত্রী: ' + ((r.customer && r.customer.full_name) || 'নাম নেই') + ' '));
+        if (cph) { const a = el('a', null, r.customer.phone); a.href = 'tel:' + cph; who.appendChild(a); }
+        if (r.driver) {
+          who.appendChild(document.createElement('br'));
+          const dph = safePhone(r.driver.profile && r.driver.profile.phone);
+          who.appendChild(document.createTextNode('ড্রাইভার: ' + ((r.driver.profile && r.driver.profile.full_name) || 'নাম নেই') + ' · ' + (r.driver.vehicle_number || '') + ' '));
+          if (dph) { const a = el('a', null, r.driver.profile.phone); a.href = 'tel:' + dph; who.appendChild(a); }
+        }
+        card.appendChild(who);
+        box.appendChild(card);
+      });
+    }
+
+    document.querySelectorAll('.lm-tab').forEach((b) => b.addEventListener('click', () => {
+      document.querySelectorAll('.lm-tab').forEach((x) => x.classList.remove('active'));
+      b.classList.add('active');
+      tab = b.dataset.tab;
+      render();
+    }));
+
+    window.addEventListener('smartfeni:admin-ready', () => {
+      load();
+      clearInterval(timer);
+      timer = setInterval(() => { if (!document.hidden) load(); }, POLL_MS);
+    });
+    initAdminGuard();
+  </script>
+</BaseLayout>
