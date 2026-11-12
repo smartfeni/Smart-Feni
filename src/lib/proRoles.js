@@ -41,6 +41,40 @@ export function lastRole() {
   try { return localStorage.getItem(LAST_KEY); } catch (_) { return null; }
 }
 
+// ---------- কাজের ব্যাজ ----------
+// RPC get_pro_badges() (auth.uid() ভিত্তিক): { total, roles:{ rider|instant_shop|shop|club|clinic: {open, active, shops?} } }
+// ব্যর্থ হলে null (ব্যাজ লুকানো থাকবে)
+export async function getProBadges() {
+  try {
+    const { data, error } = await supabase.rpc('get_pro_badges');
+    if (error || !data) return null;
+    return data;
+  } catch (_) {
+    return null;
+  }
+}
+
+const BN_DIGITS = '০১২৩৪৫৬৭৮৯';
+export function bnCount(n) {
+  return n > 9 ? '৯+' : String(n).replace(/\d/g, (d) => BN_DIGITS[d]);
+}
+
+// counts = { open, active } → box-এ কমলা (কাজ বাকি) ও সবুজ (চলমান) চিপ; শূন্য হলে খালি
+export function paintChips(box, counts) {
+  if (!box) return;
+  box.textContent = '';
+  if (!counts) return;
+  [['open', 'pbg-open', 'কাজ বাকি'], ['active', 'pbg-act', 'চলমান']].forEach(([k, cls, title]) => {
+    const n = Number(counts[k]) || 0;
+    if (n <= 0) return;
+    const s = document.createElement('span');
+    s.className = 'pbg-b ' + cls;
+    s.textContent = bnCount(n);
+    s.title = title;
+    box.appendChild(s);
+  });
+}
+
 export function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }

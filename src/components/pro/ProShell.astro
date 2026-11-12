@@ -13,7 +13,10 @@
 ---
 
 <nav class="psh-nav" id="pshNav" aria-label="Pro নেভিগেশন">
-  <a href="/pro" class="psh-item" id="pshHome"><i class="fas fa-house"></i><span>হোম</span></a>
+  <a href="/pro" class="psh-item" id="pshHome">
+    <span class="psh-icon"><i class="fas fa-house"></i><span class="psh-badge" id="pshHomeBadge" style="display:none;">0</span></span>
+    <span>হোম</span>
+  </a>
   <button type="button" class="psh-item" id="pshBell" aria-label="নোটিফিকেশন">
     <span class="psh-icon"><i class="fas fa-bell"></i><span class="psh-badge" id="pshBadge" style="display:none;">0</span></span>
     <span>নোটিফিকেশন</span>
@@ -82,6 +85,11 @@
   .psh-otx b { display: block; font-size: 15.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .psh-otx span { font-size: 12.5px; color: #5B6B86; }
   .psh-ock { color: #14A44D; }
+  /* কাজের চিপ: কমলা = কাজ বাকি, সবুজ = চলমান (শূন্য হলে লুকানো) */
+  .pbg { display: inline-flex; gap: 4px; flex: none; }
+  .pbg-b { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; font-size: 12px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+  .pbg-open { background: #FF6B35; color: #1B2A4A; }
+  .pbg-act { background: #14A44D; color: #fff; }
   .psh-close {
     width: 100%; height: 46px; margin-top: 14px; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff;
     color: #1B2A4A; font-weight: 600; font-size: 15px; cursor: pointer; font-family: inherit;
@@ -90,7 +98,7 @@
 
 <script>
   import { isProApp } from '../../lib/proApp.js';
-  import { getMyProRoles, ROLE_META, rememberRole } from '../../lib/proRoles.js';
+  import { getMyProRoles, ROLE_META, rememberRole, getProBadges, paintChips, bnCount } from '../../lib/proRoles.js';
   import { proLogout } from '../../lib/proLogin.js';
   import { supabase } from '../../lib/supabase.js';
   import { countProUnread, markRead, subscribeProInbox, isProAlertNotif } from '../../lib/proInbox.js';
@@ -156,9 +164,49 @@
       // নতুন Pro নোটিফিকেশন: ব্যাজ আপডেট; জরুরি হলে (নতুন অর্ডার/রিকোয়েস্ট, দাম একসেপ্ট) রিংটোন + ব্যানার
       inboxUnsub = subscribeProInbox(session.user.id, (row) => {
         refreshBadge();
+        refreshWork();
         try { if (isProAlertNotif(row)) playProAlert(row); } catch (_) { /* উপেক্ষা */ }
       });
     } catch (_) { /* উপেক্ষা */ }
+  }
+
+  // ---------- কাজের ব্যাজ (হোম আইকন + মেনুর রোল সারি) ----------
+  let workBadges = null;
+  let workBusy = false;
+
+  function paintHomeBadge() {
+    const b = $('pshHomeBadge');
+    if (!b) return;
+    const n = workBadges ? Number(workBadges.total) || 0 : 0;
+    if (n > 0) { b.textContent = bnCount(n); b.style.display = 'flex'; }
+    else b.style.display = 'none';
+  }
+
+  function chipCounts(key) {
+    const r = workBadges && workBadges.roles;
+    if (!r || !key) return null;
+    if (key.indexOf('instant_shop:') === 0) {
+      const s = r.instant_shop && r.instant_shop.shops;
+      return s ? s[key.slice(13)] || null : null;
+    }
+    return r[key] || null;
+  }
+
+  function paintMenuChips() {
+    document.querySelectorAll('#pshList [data-chip]').forEach((box) => paintChips(box, chipCounts(box.dataset.chip)));
+  }
+
+  async function refreshWork() {
+    if (workBusy || document.hidden) return;
+    workBusy = true;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      workBadges = session ? await getProBadges() : null;
+      paintHomeBadge();
+      paintMenuChips();
+    } catch (_) { /* উপেক্ষা */ } finally {
+      workBusy = false;
+    }
   }
 
   window.addEventListener('smartfeni:pro-notif-changed', refreshBadge);
@@ -166,6 +214,17 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshBadge(); });
   // শুধু Pro অ্যাপে (ওয়েব/মেইন অ্যাপে এই কোয়েরি চলে না)
   isProApp().then((pro) => { if (pro || document.documentElement.hasAttribute('data-pro-app')) startInbox(); });
+  isProApp().then((pro) => {
+    if (!(pro || document.documentElement.hasAttribute('data-pro-app'))) return;
+    refreshWork();
+    setInterval(refreshWork, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshWork(); });
+    window.addEventListener('smartfeni:hero-badges-refresh', refreshWork);
+    window.addEventListener('smartfeni:pro-notif-changed', refreshWork);
+    // পেজের যেকোনো বাটন চাপার একটু পর সংখ্যা নতুন করে
+    let workClickT = null;
+    document.addEventListener('click', () => { clearTimeout(workClickT); workClickT = setTimeout(refreshWork, 2500); });
+  });
   // অ্যাপ আপডেট চেক: খোলার ৫ সেকেন্ড পর (src/lib/proUpdate.js; app_releases-এ নতুন রিলিজ থাকলে ডায়ালগ)
   isProApp().then((pro) => { if (pro) setTimeout(() => { checkProUpdate(); }, 5000); });
   window.addEventListener('smartfeni:logged-out', () => {
@@ -174,7 +233,7 @@
   });
 
   // ---------- মেনু ----------
-  function opt(tag, icon, title, sub, cur) {
+  function opt(tag, icon, title, sub, cur, chipKey) {
     const el = h(tag, 'psh-opt' + (cur ? ' cur' : ''));
     if (tag === 'button') el.type = 'button';
     const ic = h('span', 'psh-oic');
@@ -184,6 +243,11 @@
     if (sub) tx.appendChild(h('span', '', sub));
     el.appendChild(ic);
     el.appendChild(tx);
+    if (chipKey) {
+      const box = h('span', 'pbg');
+      box.dataset.chip = chipKey;
+      el.appendChild(box);
+    }
     if (cur) el.appendChild(h('i', 'fas fa-check psh-ock'));
     return el;
   }
@@ -220,20 +284,22 @@
         const wanted = new URLSearchParams(window.location.search).get('shop');
         r.shops.forEach((s) => {
           const cur = path.indexOf('/pro/shop') === 0 && (wanted ? wanted === s.id : r.shops[0].id === s.id);
-          const a = opt('a', 'fa-utensils', s.name, cur ? 'এখন এখানে আছেন' : 'এই দোকানে যান', cur);
+          const a = opt('a', 'fa-utensils', s.name, cur ? 'এখন এখানে আছেন' : 'এই দোকানে যান', cur, 'instant_shop:' + s.id);
           a.href = '/pro/shop?shop=' + encodeURIComponent(s.id);
           a.addEventListener('click', () => rememberRole('instant_shop'));
           list.appendChild(a);
         });
       } else {
         const cur = path.indexOf(m.href) === 0;
-        const a = opt('a', m.icon, m.label, m.sub, cur);
+        const a = opt('a', m.icon, m.label, m.sub, cur, r.role);
         a.href = m.href;
         a.addEventListener('click', () => rememberRole(r.role));
         list.appendChild(a);
       }
     });
 
+    paintMenuChips();
+    refreshWork();
     list.appendChild(h('div', 'psh-grp', 'অ্যাকাউন্ট'));
     const gd = opt('a', 'fa-book-open', 'নির্দেশনা', 'কাজ ও অ্যাপ ব্যবহারের নিয়ম', false);
     gd.href = '/pro/guide';
