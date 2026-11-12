@@ -90,6 +90,10 @@ const guideSteps = [
           <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
           <input id="searchIn" type="search" placeholder="দোকান খুঁজুন" autocomplete="off" aria-label="দোকান খুঁজুন" />
         </label>
+        <div class="dsa-reorderbar">
+          <button type="button" class="dsa-ghost" id="shopReorderBtn">↕ দোকানের ক্রম বদলান</button>
+          <p class="dsa-hint2" id="shopReorderHint" style="display:none;">দোকান চেপে ধরে ওপর-নিচে টেনে ক্রম বদলান। শেষ হলে ✓ চাপুন।</p>
+        </div>
         <div id="shopList"><p class="dsa-muted">লোড হচ্ছে...</p></div>
       </div>
 
@@ -150,8 +154,8 @@ const guideSteps = [
             <div id="teamFound" class="dsa-team"></div>
           </div>
 
-          <label class="dsa-lbl" for="sSort">ক্রম (ছোট নম্বর আগে দেখাবে)</label>
-          <input class="dsa-in" id="sSort" type="number" inputmode="numeric" value="100" />
+          
+          <input type="hidden" id="sSort" value="100" />
 
           <p class="dsa-err" id="shopErr" style="display:none;"></p>
 
@@ -193,8 +197,11 @@ const guideSteps = [
             <button type="button" class="dsa-sw" id="iAvail" role="switch" aria-checked="true" aria-label="পাওয়া যাচ্ছে"><i></i></button>
           </div>
 
-          <label class="dsa-lbl" for="iSort">ক্রম (ছোট নম্বর আগে দেখাবে)</label>
-          <input class="dsa-in" id="iSort" type="number" inputmode="numeric" value="10" />
+          <label class="dsa-lbl" for="iCat">ক্যাটাগরি</label>
+          <select class="dsa-in" id="iCat"></select>
+          <label class="dsa-lbl" for="iDesc">বিবরণ (ঐচ্ছিক)</label>
+          <textarea class="dsa-in" id="iDesc" rows="3" maxlength="500" placeholder="যেমন: ৩ পিস মুরগি, পোলাও ও সালাদ সহ"></textarea>
+          <input type="hidden" id="iSort" value="10" />
 
           <p class="dsa-err" id="itemErr" style="display:none;"></p>
 
@@ -309,6 +316,15 @@ const guideSteps = [
     .dsa-teamsearch .dsa-in { flex: 1; }
     .dsa-teamsearch .dsa-ghost { height: 48px; flex: none; }
 
+    .dsa-catbar { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 6px; -webkit-overflow-scrolling: touch; }
+    .dsa-cchip { flex: none; height: 40px; border: 1.5px solid #D5DCE8; border-radius: 20px; background: #fff; padding: 0 14px; font-weight: 600; font-size: 14px; cursor: pointer; color: #1B2A4A; white-space: nowrap; }
+    .dsa-cchip.sel { border-color: #FF6B35; background: #FFF6F1; }
+    .dsa-cmng { border-style: dashed; color: #5B6B86; }
+    .dsa-cathead { font-size: 13px; font-weight: 700; color: #5B6B86; margin: 10px 0 2px; }
+    .dsa-hint2 { margin: 0 2px 4px; font-size: 12.5px; color: #5B6B86; }
+    .dsa-reorderbar { display: flex; flex-direction: column; gap: 6px; }
+    .dsa-reorderbar .dsa-ghost { height: 44px; font-size: 14px; align-self: flex-start; }
+    textarea.dsa-in { resize: vertical; min-height: 80px; }
     @media (max-width: 380px) {
       .dsa-two { grid-template-columns: 1fr; }
     }
@@ -319,6 +335,8 @@ const guideSteps = [
     import { supabase } from '../../lib/supabase.js';
     import { compressImage } from '../../lib/imageCompress.js';
     import { UPAZILAS, getUnionsOfUpazilaName, getUnionBn } from '../../data/feniAreas.js';
+    import { makeSortable } from '../../lib/sortable.js';
+    import { openCategorySheet } from '../../lib/menuCategories.js';
 
     const BUCKET = 'delivery-shop-images';
     const MAX_BYTES = 3 * 1024 * 1024;
@@ -341,6 +359,9 @@ const guideSteps = [
     let busyShop = false;
     let busyItem = false;
     let firstLoad = true;
+    let catsCache = {};       // shop_id -> মেনু ক্যাটাগরি
+    let menuFilter = {};      // shop_id -> বাছা ক্যাটাগরি চিপ
+    let reorderMode = false;  // দোকানের ক্রম বদলের মোড
 
     function toast(msg, type) { if (window.showToast) window.showToast(msg, type); }
     function bnNum(n) { return String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]); }
@@ -597,6 +618,10 @@ const guideSteps = [
       info.appendChild(sub);
       row.appendChild(info);
 
+      info.style.cursor = 'pointer';
+      info.setAttribute('role', 'button');
+      info.setAttribute('aria-label', 'মেনু ভাঁজ করুন');
+      info.addEventListener('click', () => { expandedId = null; renderShops(); });
       const pop = document.createElement('div');
       pop.className = 'dsa-pop';
       const pl = document.createElement('small');
@@ -644,8 +669,9 @@ const guideSteps = [
         p.textContent = 'মেনু লোড হচ্ছে...';
         list.appendChild(p);
       } else {
-        items.forEach((it) => list.appendChild(itemRow(s, it)));
+        renderItemsGrouped(s, items, list);
       }
+      card.appendChild(catBar(s));
       card.appendChild(list);
 
       const add = document.createElement('button');
@@ -664,9 +690,128 @@ const guideSteps = [
       return card;
     }
 
+    // ---------- মেনু ক্যাটাগরি ও ক্রম ----------
+    async function loadCats(shopId) {
+      const { data, error } = await supabase.from('delivery_shop_categories').select('id, name, sort_order').eq('shop_id', shopId).order('sort_order', { ascending: true }).order('name', { ascending: true });
+      if (!error) catsCache[shopId] = data || [];
+    }
+
+    function itemGroups(s, items) {
+      const cats = catsCache[s.id] || [];
+      if (!cats.length) return [{ key: 'all', label: null, items }];
+      const g = cats.map((c) => ({ key: c.id, label: c.name, items: items.filter((i) => i.category_id === c.id) }));
+      const rest = items.filter((i) => !i.category_id || !cats.some((c) => c.id === i.category_id));
+      if (rest.length) g.push({ key: 'none', label: 'ক্যাটাগরি ছাড়া', items: rest });
+      return g;
+    }
+
+    function curFilter(s, groups) {
+      const f = menuFilter[s.id] || 'all';
+      return (f === 'all' || groups.some((g) => g.key === f)) ? f : 'all';
+    }
+
+    function catBar(s) {
+      const wrap = document.createElement('div');
+      const cats = catsCache[s.id] || [];
+      const items = itemsCache[s.id] || [];
+      const groups = itemGroups(s, items);
+      const f = curFilter(s, groups);
+      const bar = document.createElement('div');
+      bar.className = 'dsa-catbar';
+      if (cats.length) {
+        const mk = (key, label, n) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'dsa-cchip' + (f === key ? ' sel' : '');
+          b.textContent = label + ' (' + bnNum(n) + ')';
+          b.addEventListener('click', () => { menuFilter[s.id] = key; renderShops(); });
+          bar.appendChild(b);
+        };
+        mk('all', 'সব', items.length);
+        groups.forEach((g) => mk(g.key, g.label, g.items.length));
+      }
+      const mg = document.createElement('button');
+      mg.type = 'button';
+      mg.className = 'dsa-cchip dsa-cmng';
+      mg.textContent = cats.length ? '⚙ ক্যাটাগরি' : '+ ক্যাটাগরি যোগ করুন';
+      mg.addEventListener('click', () => openCategorySheet({ supabase, shopId: s.id, toast, onChanged: () => loadItems(s.id) }));
+      bar.appendChild(mg);
+      wrap.appendChild(bar);
+      if (items.length > 1) {
+        const hint = document.createElement('p');
+        hint.className = 'dsa-hint2';
+        hint.textContent = 'আইটেম চেপে ধরে ওপর-নিচে টেনে ক্রম বদলান।';
+        wrap.appendChild(hint);
+      }
+      return wrap;
+    }
+
+    async function saveItemOrder(s, ids) {
+      const items = itemsCache[s.id] || [];
+      ids.forEach((id, n) => { const it = items.find((x) => x.id === id); if (it) it.sort_order = (n + 1) * 10; });
+      items.sort((a, b) => ((a.sort_order || 0) - (b.sort_order || 0)) || String(a.name).localeCompare(String(b.name)));
+      const { data, error } = await supabase.rpc('shop_reorder', { p_shop_id: s.id, p_kind: 'items', p_ids: ids });
+      if (error || !data || !data.ok) { toast('ক্রম সেভ হয়নি, আবার চেষ্টা করুন', 'error'); await loadItems(s.id); }
+    }
+
+    function renderItemsGrouped(s, items, listEl) {
+      const groups = itemGroups(s, items);
+      const f = curFilter(s, groups);
+      if (!items.length) {
+        const p = document.createElement('p');
+        p.className = 'dsa-muted';
+        p.textContent = 'মেনুতে এখনো কোনো আইটেম নেই।';
+        listEl.appendChild(p);
+        return;
+      }
+      groups.filter((g) => f === 'all' || g.key === f).forEach((g) => {
+        if (g.label !== null && (g.items.length || f !== 'all')) {
+          const hd = document.createElement('div');
+          hd.className = 'dsa-cathead';
+          hd.textContent = g.label;
+          listEl.appendChild(hd);
+        }
+        if (!g.items.length && f !== 'all') {
+          const p = document.createElement('p');
+          p.className = 'dsa-muted';
+          p.textContent = 'এই ক্যাটাগরিতে এখনো আইটেম নেই।';
+          listEl.appendChild(p);
+        }
+        const box = document.createElement('div');
+        g.items.forEach((it) => box.appendChild(itemRow(s, it)));
+        listEl.appendChild(box);
+        if (g.items.length > 1) makeSortable(box, { itemSelector: '.dsa-it', onChange: (ids) => saveItemOrder(s, ids) });
+      });
+    }
+
+    function fillItemCats(shopId, selected) {
+      const sel = $('iCat');
+      sel.textContent = '';
+      const o0 = document.createElement('option');
+      o0.value = '';
+      o0.textContent = 'ক্যাটাগরি ছাড়া';
+      sel.appendChild(o0);
+      (catsCache[shopId] || []).forEach((c) => {
+        const o = document.createElement('option');
+        o.value = c.id;
+        o.textContent = c.name;
+        sel.appendChild(o);
+      });
+      sel.value = selected || '';
+    }
+
+    async function saveShopOrder(ids) {
+      ids.forEach((id, n) => { const sh = shops.find((x) => x.id === id); if (sh) sh.sort_order = (n + 1) * 10; });
+      shops.sort((a, b) => ((a.sort_order || 0) - (b.sort_order || 0)) || String(a.name).localeCompare(String(b.name)));
+      const { data, error } = await supabase.rpc('admin_reorder_delivery_shops', { p_ids: ids });
+      if (error || !data || !data.ok) { toast('ক্রম সেভ হয়নি, আবার চেষ্টা করুন', 'error'); await loadShops(); return; }
+      toast('দোকানের ক্রম সেভ হয়েছে ✓', 'success');
+    }
+
     function itemRow(s, it) {
       const row = document.createElement('div');
       row.className = 'dsa-it' + (it.is_available ? '' : ' off');
+      row.setAttribute('data-id', it.id);
 
       const main = document.createElement('button');
       main.type = 'button';
@@ -706,6 +851,7 @@ const guideSteps = [
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'dsa-card dsa-mini' + (s.is_active ? '' : ' off');
+      b.setAttribute('data-id', s.id);
       b.appendChild(makeTile(44, 14, s.name, s.image_url, s.id, 20));
       const info = document.createElement('div');
       info.className = 'dsa-info';
@@ -721,9 +867,9 @@ const guideSteps = [
       b.appendChild(info);
       const ch = document.createElement('span');
       ch.className = 'dsa-chev';
-      ch.innerHTML = CHEV_SVG;
+      ch.innerHTML = reorderMode ? '<i class="fas fa-grip-lines"></i>' : CHEV_SVG;
       b.appendChild(ch);
-      b.addEventListener('click', () => expand(s.id));
+      b.addEventListener('click', () => { if (!reorderMode) expand(s.id); });
       return b;
     }
 
@@ -744,6 +890,12 @@ const guideSteps = [
       }
       const box = document.createElement('div');
       box.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+      if (reorderMode) {
+        list.forEach((s) => box.appendChild(miniRow(s)));
+        wrap.appendChild(box);
+        makeSortable(box, { itemSelector: '.dsa-mini', onChange: saveShopOrder });
+        return;
+      }
       list.forEach((s) => box.appendChild(s.id === expandedId ? expandedCard(s) : miniRow(s)));
       wrap.appendChild(box);
     }
@@ -765,10 +917,7 @@ const guideSteps = [
       shops = sr.data || [];
       counts = {};
       (ir.data || []).forEach((r) => { counts[r.shop_id] = (counts[r.shop_id] || 0) + 1; });
-      if (firstLoad) {
-        firstLoad = false;
-        if (shops.length && !expandedId) expandedId = shops[0].id;
-      }
+      firstLoad = false;
       if (expandedId && !shops.some((s) => s.id === expandedId)) expandedId = null;
       renderShops();
       if (expandedId && !itemsCache[expandedId]) loadItems(expandedId);
@@ -791,6 +940,7 @@ const guideSteps = [
         .order('name', { ascending: true });
       if (error) { toast('মেনু লোড হয়নি: ' + error.message, 'error'); return; }
       itemsCache[shopId] = data || [];
+      await loadCats(shopId);
       counts[shopId] = itemsCache[shopId].length;
       renderShops();
     }
@@ -1081,6 +1231,8 @@ const guideSteps = [
       $('iPrice').value = it ? String(Number(it.price)) : '';
       setSwitch($('iAvail'), it ? !!it.is_available : true);
       $('iSort').value = String(it ? (it.sort_order || 0) : nextItemSort(shop.id));
+      fillItemCats(shop.id, it ? it.category_id : ((menuFilter[shop.id] && menuFilter[shop.id] !== 'all' && menuFilter[shop.id] !== 'none') ? menuFilter[shop.id] : ''));
+      $('iDesc').value = it && it.description ? it.description : '';
       itemImg.reset(it ? it.image_url : null);
       $('delItemBtn').style.display = it ? '' : 'none';
       openSheet('itemOverlay');
@@ -1101,6 +1253,8 @@ const guideSteps = [
         name,
         price: Math.round(price * 100) / 100,
         is_available: getSwitch($('iAvail')),
+        description: $('iDesc').value.trim() || null,
+        category_id: $('iCat').value || null,
         sort_order: Number.isFinite(sort) ? sort : 0,
       };
 
@@ -1166,6 +1320,15 @@ const guideSteps = [
     $('itemOverlay').addEventListener('click', (e) => { if (e.target === $('itemOverlay')) closeSheet('itemOverlay'); });
     ['sPopular', 'sActive', 'iAvail'].forEach((id) => {
       $(id).addEventListener('click', () => setSwitch($(id), !getSwitch($(id))));
+    });
+
+    $('shopReorderBtn').addEventListener('click', () => {
+      reorderMode = !reorderMode;
+      if (reorderMode) { expandedId = null; $('searchIn').value = ''; }
+      $('searchIn').disabled = reorderMode;
+      $('shopReorderBtn').textContent = reorderMode ? '✓ ক্রম ঠিক আছে' : '↕ দোকানের ক্রম বদলান';
+      $('shopReorderHint').style.display = reorderMode ? '' : 'none';
+      renderShops();
     });
 
     window.addEventListener('smartfeni:admin-ready', (e) => {
