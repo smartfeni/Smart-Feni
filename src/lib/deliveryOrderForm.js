@@ -67,7 +67,7 @@ export async function fetchDeliveryShops() {
   const ids = shops.map((s) => s.id);
   const { data: items, error: itemsError } = await supabase
     .from('delivery_shop_items')
-    .select('id, shop_id, name, price, image_url, is_available, sort_order')
+    .select('id, shop_id, name, price, image_url, is_available, sort_order, description, category_id')
     .in('shop_id', ids)
     .eq('is_available', true)
     .order('sort_order', { ascending: true })
@@ -75,13 +75,27 @@ export async function fetchDeliveryShops() {
 
   if (itemsError) return { shops: [], error: itemsError.message || 'মেনু লোড করা যায়নি' };
 
+  // মেনু ক্যাটাগরি (ব্যর্থ হলে ক্যাটাগরি ছাড়াই চলবে)
+  const catsByShop = {};
+  try {
+    const { data: cats } = await supabase
+      .from('delivery_shop_categories')
+      .select('id, shop_id, name, sort_order')
+      .in('shop_id', ids)
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true });
+    (cats || []).forEach((c) => {
+      (catsByShop[c.shop_id] = catsByShop[c.shop_id] || []).push(c);
+    });
+  } catch (_) { /* ক্যাটাগরি ছাড়া চলবে */ }
+
   const byShop = {};
   (items || []).forEach((it) => {
     (byShop[it.shop_id] = byShop[it.shop_id] || []).push(it);
   });
 
   const result = shops
-    .map((s) => ({ ...s, items: byShop[s.id] || [] }))
+    .map((s) => ({ ...s, items: byShop[s.id] || [], cats: catsByShop[s.id] || [] }))
     .filter((s) => s.items.length > 0);
 
   return { shops: result, error: null };
@@ -98,7 +112,7 @@ export function filterShops(shops, query) {
       out.push(s);
       return;
     }
-    const items = s.items.filter((it) => String(it.name || '').normalize('NFC').toLowerCase().includes(q));
+    const items = s.items.filter((it) => String(it.name || '').normalize('NFC').toLowerCase().includes(q) || String(it.description || '').normalize('NFC').toLowerCase().includes(q));
     if (items.length) out.push({ ...s, items });
   });
   return out;

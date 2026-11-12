@@ -283,6 +283,20 @@ const guideReview = [
   </section>
 </div>
 
+<!-- ================= আইটেম ডিটেইল মডাল ================= -->
+<div class="sfo-det-overlay" id="sfoDet" role="dialog" aria-modal="true" aria-label="আইটেমের বিবরণ">
+  <div class="sfo-det-sheet">
+    <button type="button" class="sfo-det-x" id="sfoDetClose" aria-label="বন্ধ করুন">✕</button>
+    <div class="sfo-det-img" id="sfoDetImg"></div>
+    <div class="sfo-det-body">
+      <div class="sfo-det-top"><h3 id="sfoDetName"></h3><b id="sfoDetPrice"></b></div>
+      <div class="sfo-det-cat" id="sfoDetCat"></div>
+      <p class="sfo-det-desc" id="sfoDetDesc"></p>
+    </div>
+    <div class="sfo-det-bar" id="sfoDetBar"></div>
+  </div>
+</div>
+
 <!-- ================= দোকান ও মেনু শিট ================= -->
 <div class="sfo-shop-overlay" id="sfoShop" role="dialog" aria-modal="true" aria-label="দোকান ও মেনু">
   <div class="sfo-shop-col">
@@ -866,6 +880,8 @@ const guideReview = [
   let draft = new Map(); // itemId -> qty
   let activeShopId = null;
   let shopQuery = '';
+  let shopCat = {};     // দোকান আইডি -> বাছা ক্যাটাগরি চিপ
+  let detItemId = null; // ডিটেইল মডালে খোলা আইটেম
 
   function lookupItem(id) {
     for (const s of S.shops) {
@@ -888,6 +904,7 @@ const guideReview = [
   }
 
   function renderShopBar() {
+    renderDetail();
     const t = draftTotals();
     $('sfoShopCount').textContent = `${bn(t.count)}টি আইটেম`;
     $('sfoShopTotal').textContent = taka(t.sum);
@@ -970,11 +987,43 @@ const guideReview = [
     hd.appendChild(info);
     if (shop.is_popular) hd.appendChild(h('span', 'sfo-chip sfo-chip-yellow', 'জনপ্রিয়'));
     head.appendChild(hd);
+    const gi = shopItemsGrouped(shop);
+    if (gi.groups.length > 1) {
+      const cp = h('div', 'sfo-catpills');
+      const mkChip = (key, label, n) => {
+        const b = h('button', 'sfo-catchip' + (gi.cur === key ? ' active' : ''), `${label} (${bn(n)})`);
+        b.type = 'button';
+        b.addEventListener('click', () => {
+          shopCat[shop.id] = key;
+          renderShopSheet();
+        });
+        cp.appendChild(b);
+      };
+      mkChip('all', 'সব', shop.items.length);
+      gi.groups.forEach((g) => mkChip(g.key, g.label, g.items.length));
+      head.appendChild(cp);
+    }
 
-    shop.items.forEach((it) => {
+    let lastLabel = null;
+    const flat = [];
+    gi.groups.forEach((g) => {
+      if (gi.cur === 'all' || gi.cur === g.key) g.items.forEach((x) => flat.push({ it: x, label: g.label }));
+    });
+    flat.forEach(({ it, label }) => {
+      if (label && gi.cur === 'all' && label !== lastLabel) {
+        lastLabel = label;
+        list.appendChild(h('div', 'sfo-cathead', label));
+      }
       const row = h('div', 'sfo-row');
-      row.appendChild(itemTile(it, 64));
+      const tl = itemTile(it, 64);
+      tl.style.cursor = 'pointer';
+      tl.setAttribute('role', 'button');
+      tl.setAttribute('aria-label', `${it.name} বিস্তারিত`);
+      tl.addEventListener('click', () => openDetail(it.id));
+      row.appendChild(tl);
       const mid = h('div', 'sfo-row-mid');
+      mid.style.cursor = 'pointer';
+      mid.addEventListener('click', () => openDetail(it.id));
       mid.appendChild(h('div', 'sfo-row-name', it.name));
       mid.appendChild(h('div', 'sfo-row-price', taka(it.price)));
       row.appendChild(mid);
@@ -1030,6 +1079,7 @@ const guideReview = [
   }
 
   function closeShopSheet() {
+    closeDetail();
     shopEl.classList.remove('open');
   }
 
@@ -1052,6 +1102,105 @@ const guideReview = [
   $('sfoShopSearch').addEventListener('input', (e) => {
     shopQuery = e.target.value;
     renderShopSheet();
+  });
+
+  // ====================== আইটেম ডিটেইল মডাল ======================
+  const detEl = $('sfoDet');
+
+  // ক্যাটাগরি অনুযায়ী ভাগ (ক্যাটাগরি না থাকলে একটাই গ্রুপ, চিপ দেখাবে না)
+  function shopItemsGrouped(shop) {
+    const cats = shop.cats || [];
+    const flat = { cur: 'all', groups: [{ key: 'all', label: '', items: shop.items }] };
+    if (!cats.length) return flat;
+    const groups = cats
+      .map((c) => ({ key: c.id, label: c.name, items: shop.items.filter((i) => i.category_id === c.id) }))
+      .filter((g) => g.items.length);
+    const rest = shop.items.filter((i) => !i.category_id || !cats.some((c) => c.id === i.category_id));
+    if (rest.length) groups.push({ key: 'none', label: 'অন্যান্য', items: rest });
+    if (!groups.length || (groups.length === 1 && groups[0].key === 'none')) return flat;
+    const f = shopCat[shop.id] || 'all';
+    const cur = f === 'all' || groups.some((g) => g.key === f) ? f : 'all';
+    return { cur, groups };
+  }
+
+  function openDetail(id) {
+    if (!lookupItem(id)) return;
+    detItemId = id;
+    detEl.classList.add('open');
+    renderDetail();
+  }
+
+  function closeDetail() {
+    detItemId = null;
+    detEl.classList.remove('open');
+  }
+
+  function renderDetail() {
+    if (!detItemId) return;
+    const f = lookupItem(detItemId);
+    if (!f) {
+      closeDetail();
+      return;
+    }
+    const it = f.item;
+    const box = $('sfoDetImg');
+    if (box.dataset.id !== it.id) {
+      box.textContent = '';
+      box.dataset.id = it.id;
+      box.style.background = tileColor(it.id);
+      if (it.image_url) {
+        const img = document.createElement('img');
+        img.src = it.image_url;
+        img.alt = it.name || '';
+        img.onerror = () => {
+          img.remove();
+          box.appendChild(h('i', 'fas fa-utensils'));
+        };
+        box.appendChild(img);
+      } else {
+        box.appendChild(h('i', 'fas fa-utensils'));
+      }
+    }
+    $('sfoDetName').textContent = it.name;
+    $('sfoDetPrice').textContent = taka(it.price);
+    const cat = (f.shop.cats || []).find((c) => c.id === it.category_id);
+    $('sfoDetCat').textContent = (cat ? cat.name + ' · ' : '') + (f.shop.name || '');
+    const de = $('sfoDetDesc');
+    de.textContent = it.description || '';
+    de.style.display = it.description ? '' : 'none';
+
+    const bar = $('sfoDetBar');
+    bar.textContent = '';
+    const qty = draft.get(it.id) || 0;
+    if (qty > 0) {
+      const ctr = h('div', 'sfo-ctr');
+      const minus = h('button', 'sfo-count', '−');
+      minus.type = 'button';
+      minus.setAttribute('aria-label', `${it.name} কমান`);
+      minus.addEventListener('click', () => setDraft(it.id, qty - 1));
+      const plus = h('button', 'sfo-count sfo-count-plus', '+');
+      plus.type = 'button';
+      plus.setAttribute('aria-label', `${it.name} বাড়ান`);
+      plus.addEventListener('click', () => setDraft(it.id, qty + 1));
+      ctr.appendChild(minus);
+      ctr.appendChild(h('span', 'sfo-ctr-val', bn(qty)));
+      ctr.appendChild(plus);
+      bar.appendChild(ctr);
+      const ok = h('button', 'sfo-cta', `ঠিক আছে · ${taka(Number(it.price) * qty)}`);
+      ok.type = 'button';
+      ok.addEventListener('click', closeDetail);
+      bar.appendChild(ok);
+    } else {
+      const add = h('button', 'sfo-cta', `কার্টে যোগ করুন · ${taka(it.price)}`);
+      add.type = 'button';
+      add.addEventListener('click', () => setDraft(it.id, 1));
+      bar.appendChild(add);
+    }
+  }
+
+  $('sfoDetClose').addEventListener('click', closeDetail);
+  detEl.addEventListener('click', (e) => {
+    if (e.target === detEl) closeDetail();
   });
 
   // ====================== রিভিউ (ধাপ ৩) ======================
@@ -1638,6 +1787,26 @@ const guideReview = [
   .sfo-ctr-val { min-width: 22px; text-align: center; font-weight: 700; font-size: 16px; }
   .sfo-add { height: 44px; border: 1.5px solid #ff6b35; background: #fff6f1; border-radius: 14px; font-weight: 700; font-size: 14.5px; color: #1b2a4a; padding: 0 16px; flex: none; }
   .sfo-empty { text-align: center; color: #5b6b86; font-size: 14.5px; padding: 28px 12px; }
+  .sfo-catpills { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0 2px; -webkit-overflow-scrolling: touch; }
+  .sfo-catchip { height: 40px; border-radius: 20px; padding: 0 14px; border: 1.5px solid #d5dce8; background: #fff; font-weight: 600; font-size: 14px; color: #1b2a4a; white-space: nowrap; flex: none; }
+  .sfo-catchip.active { border-color: #ff6b35; background: #fff6f1; }
+  .sfo-cathead { font-size: 13.5px; font-weight: 700; color: #5b6b86; margin: 6px 2px 0; }
+  .sfo-det-overlay { position: fixed; inset: 0; z-index: 10020; background: rgba(27, 42, 74, 0.55); display: none; align-items: flex-end; justify-content: center; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1b2a4a; }
+  .sfo-det-overlay.open { display: flex; }
+  .sfo-det-overlay * { box-sizing: border-box; }
+  .sfo-det-overlay button { font: inherit; cursor: pointer; }
+  .sfo-det-sheet { position: relative; width: 100%; max-width: 520px; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; }
+  .sfo-det-img { width: 100%; aspect-ratio: 4 / 3; display: flex; align-items: center; justify-content: center; font-size: 48px; color: #1b2a4a; overflow: hidden; flex: none; border-radius: 28px 28px 0 0; }
+  .sfo-det-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .sfo-det-x { position: absolute; top: 12px; right: 12px; z-index: 2; width: 44px; height: 44px; border-radius: 22px; border: 0; background: rgba(255, 255, 255, 0.92); color: #1b2a4a; font-size: 18px; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.2); }
+  .sfo-det-body { padding: 16px 20px 10px; }
+  .sfo-det-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .sfo-det-top h3 { margin: 0; font-size: 21px; font-weight: 700; overflow-wrap: anywhere; }
+  .sfo-det-top b { font-size: 20px; font-weight: 700; flex: none; }
+  .sfo-det-cat { font-size: 13px; color: #5b6b86; margin-top: 2px; }
+  .sfo-det-desc { margin: 10px 0 0; font-size: 15px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
+  .sfo-det-bar { position: sticky; bottom: 0; background: #fff; padding: 12px 20px calc(16px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; box-shadow: 0 -6px 18px rgba(27, 42, 74, 0.08); }
+  .sfo-det-bar .sfo-cta { flex: 1; width: auto; }
   .sfo-shopbar { background: #fff; box-shadow: 0 -6px 24px rgba(27, 42, 74, 0.12); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; flex: none; }
   .sfo-shopbar-sum { display: flex; flex-direction: column; flex: 1; font-size: 13px; color: #5b6b86; }
   .sfo-shopbar-sum b { font-size: 20px; font-weight: 700; color: #1b2a4a; }
