@@ -721,13 +721,13 @@ import { authFetch } from '../../lib/authToken.js';
     loadMembers();
   }
 
+  const MEMBER_COLS = 'id, club_id, user_id, name, photo, position, position_order, is_committee, created_at';
+
   async function loadMembers() {
-    // কমিটি সদস্যরা position_order অনুযায়ী, তারপর সাধারণ সদস্যরা
-    // created_at অনুযায়ী — দুইটা আলাদা কোয়েরি করে একসাথে জোড়া
-    // লাগানো হচ্ছে
+    // কমিটি সদস্যরা position_order অনুযায়ী, তারপর সাধারণ সদস্য created_at অনুযায়ী
     const { data: committeeData } = await supabase
       .from('club_members')
-      .select('*')
+      .select(MEMBER_COLS)
       .eq('club_id', clubId)
       .eq('is_committee', true)
       .order('position_order', { ascending: true })
@@ -735,12 +735,19 @@ import { authFetch } from '../../lib/authToken.js';
 
     const { data: regularData } = await supabase
       .from('club_members')
-      .select('*')
+      .select(MEMBER_COLS)
       .eq('club_id', clubId)
       .eq('is_committee', false)
       .order('created_at', { ascending: true });
 
-    allMembers = [...(committeeData || []), ...(regularData || [])];
+    // জন্মতারিখ পাবলিক টেবিল-পড়ায় নেই; আলাদা RPC (শুধু ওউনার/মডারেটর/অ্যাডমিন)
+    const dobMap = {};
+    try {
+      const { data: dobs } = await supabase.rpc('club_member_dobs', { p_club_id: clubId });
+      (dobs || []).forEach((r) => { dobMap[r.id] = r.dob; });
+    } catch (_) { /* জন্মতারিখ ছাড়াই চলবে */ }
+
+    allMembers = [...(committeeData || []), ...(regularData || [])].map((m) => ({ ...m, dob: dobMap[m.id] || null }));
 
     renderList(document.getElementById('membersList'), document.getElementById('membersEmpty'), allMembers);
   }
