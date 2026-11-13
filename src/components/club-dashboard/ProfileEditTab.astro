@@ -17,6 +17,32 @@
 // ============================================================
 ---
 
+<!-- ===== পাবলিকে দেখান (is_published) ===== -->
+<div class="dash-card" id="pubCard">
+  <h3><i class="fas fa-eye"></i> পাবলিকে দেখান</h3>
+  <label class="pub-toggle-row">
+    <span>
+      <b id="pubTitle">ক্লাব পাবলিকে দেখান</b>
+      <small id="pubStatus">যাচাই হচ্ছে…</small>
+    </span>
+    <span class="pub-switch"><input type="checkbox" id="pubToggle" /><i></i></span>
+  </label>
+  <p class="form-hint" id="pubMissing" style="display:none;margin-top:10px;color:#B45309;"></p>
+</div>
+
+<style is:global>
+  .pub-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; background:#F8FAFC; border-radius:14px; cursor:pointer; }
+  .pub-toggle-row b { display:block; font-size:0.9rem; color:#1B2A4A; }
+  .pub-toggle-row small { display:block; font-size:0.74rem; color:#8FA0BC; margin-top:2px; line-height:1.4; }
+  .pub-switch { position:relative; width:46px; height:26px; flex-shrink:0; }
+  .pub-switch input { position:absolute; inset:0; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; z-index:2; }
+  .pub-switch i { position:absolute; inset:0; border-radius:26px; background:#D7E0EC; transition:background 0.2s ease; }
+  .pub-switch i::after { content:''; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(15,23,42,0.25); transition:transform 0.2s ease; }
+  .pub-switch input:checked + i { background:#16A34A; }
+  .pub-switch input:checked + i::after { transform:translateX(20px); }
+  body.mod-no-settings #pubCard { pointer-events:none; opacity:0.6; }
+</style>
+
 <div class="dash-card">
   <h3><i class="fas fa-id-card"></i> ক্লাব প্রোফাইল</h3>
   <p class="form-msg" id="profileMsg"></p>
@@ -38,8 +64,9 @@
   <label class="form-label">ট্যাগলাইন</label>
   <input type="text" class="form-input" id="taglineInput" placeholder="এক লাইনের মটো" />
 
-  <label class="form-label">বিস্তারিত বিবরণ</label>
+  <label class="form-label">বিস্তারিত বিবরণ (ঐচ্ছিক)</label>
   <textarea class="form-input" id="descriptionInput" rows="4"></textarea>
+  <p class="form-hint">ঐচ্ছিক — ক্লাব কী করে, কবে শুরু, কী কাজ করে সংক্ষেপে লিখলে মানুষ সহজে চিনবে</p>
 
   <label class="form-label">ফোন নম্বর</label>
   <input type="text" class="form-input" id="phoneInput" />
@@ -300,3 +327,110 @@ import { isMapUrl } from '../../lib/mapLinks.js';
     }
   });
 </script>
+
+<script>
+  // পাবলিকে দেখান সুইচ — clubs.is_published
+  // আসল নিয়ম DB ট্রিগারে; এখানে আগে থেকে দেখিয়ে দেওয়া হয়
+  import { supabase } from '../../lib/supabase.js';
+
+  const PUB_LABELS = { logo: 'লোগো যোগ করুন', cover: 'কভার ছবি যোগ করুন' };
+  let pubId = null;
+  const pubToggle = document.getElementById('pubToggle');
+  const pubStatus = document.getElementById('pubStatus');
+  const pubMissing = document.getElementById('pubMissing');
+
+  function pubToast(msg, type) {
+    if (typeof window.showToast === 'function') window.showToast(msg, type, 3500);
+  }
+
+  function showMissing(list) {
+    if (!list.length) {
+      pubMissing.style.display = 'none';
+      pubMissing.textContent = '';
+      return;
+    }
+    pubMissing.textContent = 'পাবলিকে দেখাতে আগে এগুলো করুন: ' + list.map((k) => PUB_LABELS[k] || k).join(', ');
+    pubMissing.style.display = 'block';
+  }
+
+  async function loadState() {
+    const { data, error } = await supabase
+      .from('clubs')
+      .select('logo_image, cover_image, is_published')
+      .eq('id', pubId)
+      .maybeSingle();
+    if (error || !data) {
+      pubStatus.textContent = 'অবস্থা জানা যায়নি';
+      return null;
+    }
+    return data;
+  }
+
+  async function missingList(row) {
+    const missing = [];
+    if (!row.logo_image) missing.push('logo');
+    if (!row.cover_image) missing.push('cover');
+    return missing;
+  }
+
+  function renderState(row, missing) {
+    pubToggle.checked = !!row.is_published;
+    if (row.is_published) {
+      pubStatus.textContent = 'এখন ইউজারদের কাছে দেখা যাচ্ছে ✓';
+      showMissing([]);
+    } else {
+      pubStatus.textContent = 'এখন পাবলিকে লুকানো — প্রোফাইল সাজিয়ে সুইচ অন করুন';
+      showMissing(missing);
+    }
+  }
+
+  async function refresh() {
+    if (!pubId) return;
+    const row = await loadState();
+    if (!row) return;
+    const missing = await missingList(row);
+    renderState(row, missing);
+  }
+
+  pubToggle?.addEventListener('change', async () => {
+    if (!pubId) { pubToggle.checked = !pubToggle.checked; return; }
+    const want = pubToggle.checked;
+    pubToggle.disabled = true;
+
+    if (want) {
+      const row = await loadState();
+      const missing = row ? await missingList(row) : [];
+      if (missing.length) {
+        pubToggle.checked = false;
+        pubToggle.disabled = false;
+        showMissing(missing);
+        pubToast('আগে প্রোফাইল সম্পূর্ণ করুন', 'error');
+        return;
+      }
+    }
+
+    const { error } = await supabase.from('clubs').update({ is_published: want }).eq('id', pubId);
+    pubToggle.disabled = false;
+
+    if (error) {
+      pubToggle.checked = !want;
+      const m = /PUBLISH_INCOMPLETE:([a-z,]+)/.exec(error.message || '');
+      if (m) {
+        showMissing(m[1].split(','));
+        pubToast('আগে প্রোফাইল সম্পূর্ণ করুন', 'error');
+      } else {
+        pubToast('সেভ ব্যর্থ: ' + error.message, 'error');
+      }
+      return;
+    }
+
+    pubToast(want ? 'ক্লাব এখন পাবলিকে দেখা যাবে ✓' : 'ক্লাব পাবলিক থেকে লুকানো হলো', 'success');
+    refresh();
+  });
+
+  window.addEventListener('smartfeni:club-ready', (e) => {
+    pubId = e.detail.club.id;
+    refresh();
+  });
+</script>
+
