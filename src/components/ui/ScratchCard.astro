@@ -1,0 +1,467 @@
+---
+// ============================================================
+// কম্পোনেন্ট: ScratchCard — "আজকের স্ক্রেচ কার্ড" (হোমপেজ)
+//
+// কী করে:
+//   ১) লগইন করা ইউজার + ক্যাম্পেইন চালু থাকলে হোমে ছোট টিজার কার্ড দেখায়
+//   ২) টিজারে ট্যাপ করলে ফুলস্ক্রিন শিটে ক্যানভাস স্ক্রেচ কার্ড (ঘষলে খোলে)
+//   ৩) ঘষা শুরু হলেই সার্ভারে claim_scratch_card() যায়; ফল ঠিক করে সার্ভার,
+//      ক্লায়েন্ট কিছু ঠিক করে না। ৪০% ঘষা হলে ফল দেখায়
+//   ৪) একই ডিভাইসে দ্বিতীয় অ্যাকাউন্ট হলে ঘষার পর এরর মেসেজ দেখায় (device_limit)
+//   ৫) ক্যাশ জিতলে বিকাশ নম্বর + ঐচ্ছিক ফেসবুক পোস্ট লিংক ফর্ম (submit_scratch_bkash)
+//   ৬) প্রতিদিন রাত ১২টায় (BD) কার্ড এক্সপায়ার; কাউন্টডাউন টিজারে
+//
+// RPC: get_scratch_status(), claim_scratch_card(), submit_scratch_bkash()
+// Android back বাটন: ওভারলের ক্লাস "sc-overlay" + ".open", বন্ধ বাটনের aria-label এ "বন্ধ"
+// ============================================================
+---
+
+<section id="scTeaser" class="sc-teaser" hidden>
+  <button type="button" id="scTeaserBtn" class="sc-teaser-btn">
+    <span class="sc-teaser-ico" aria-hidden="true">🎁</span>
+    <span class="sc-teaser-txt">
+      <strong id="scTeaserTitle">আজকের স্ক্রেচ কার্ড</strong>
+      <small id="scTeaserSub"></small>
+    </span>
+    <span class="sc-teaser-go" id="scTeaserGo">ঘষুন</span>
+  </button>
+</section>
+
+<div id="scOverlay" class="sc-overlay">
+  <div class="sc-backdrop" id="scBackdrop"></div>
+  <div class="sc-sheet" role="dialog" aria-modal="true" aria-label="আজকের স্ক্রেচ কার্ড">
+    <div class="sc-head">
+      <h3 id="scSheetTitle">আজকের স্ক্রেচ কার্ড</h3>
+      <button type="button" class="sc-close" id="scClose" aria-label="বন্ধ করুন">✕</button>
+    </div>
+
+    <div class="sc-card" id="scCard">
+      <div class="sc-face" id="scFace">
+        <div class="sc-face-main" id="scFaceMain">…</div>
+        <div class="sc-face-sub" id="scFaceSub"></div>
+      </div>
+      <canvas id="scCanvas" class="sc-canvas" width="300" height="170"></canvas>
+    </div>
+    <p class="sc-hint" id="scHint">আঙুল দিয়ে কার্ডটা ঘষুন</p>
+
+    <div class="sc-greet" id="scGreet" hidden></div>
+    <div class="sc-error" id="scError" hidden></div>
+
+    <div class="sc-pay" id="scPay" hidden>
+      <h4>পুরস্কার পেতে বিকাশ নম্বর দিন</h4>
+      <label for="scBkash">বিকাশ নম্বর <span class="required-mark" style="color:#D92D20;">*</span></label>
+      <input id="scBkash" type="tel" inputmode="numeric" maxlength="11" placeholder="01XXXXXXXXX" autocomplete="off" required />
+      <label for="scPost">ফেসবুক পোস্টের লিংক (ঐচ্ছিক)</label>
+      <input id="scPost" type="url" inputmode="url" maxlength="500" placeholder="https://facebook.com/..." autocomplete="off" />
+      <p class="sc-pay-note">পুরস্কার জেতার কথা ফেসবুকে একটা পোস্ট করে লিংক দিলে আমরা খুশি হব। এটা বাধ্যতামূলক নয়, লিংক না দিলেও পেমেন্ট পাবেন।</p>
+      <button type="button" id="scPaySubmit" class="sc-btn">বিকাশ নম্বর জমা দিন</button>
+    </div>
+
+    <div class="sc-done" id="scDone" hidden></div>
+  </div>
+</div>
+
+<style is:global>
+  .sc-teaser { margin: 12px 16px; }
+  .sc-teaser[hidden] { display: none; }
+  .sc-teaser-btn { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 14px; border: none; border-radius: 18px; cursor: pointer; text-align: left; color: #fff; background: linear-gradient(135deg, #FF6B35 0%, #FF8F5E 100%); box-shadow: 0 6px 18px rgba(255, 107, 53, 0.28); font-family: inherit; }
+  .sc-teaser-ico { font-size: 1.9rem; line-height: 1; }
+  .sc-teaser-txt { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .sc-teaser-txt strong { font-size: 1rem; font-weight: 800; }
+  .sc-teaser-txt small { font-size: 0.8rem; opacity: 0.95; }
+  .sc-teaser-go { background: #fff; color: #FF6B35; font-weight: 800; font-size: 0.85rem; padding: 8px 14px; border-radius: 999px; white-space: nowrap; }
+
+  .sc-overlay { position: fixed; inset: 0; z-index: 3600; display: none; }
+  .sc-overlay.open { display: block; }
+  .sc-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.6); }
+  .sc-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 24px 24px 0 0; padding: 18px 18px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .sc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .sc-head h3 { margin: 0; font-size: 1.1rem; font-weight: 800; color: #1B2A4A; }
+  .sc-close { border: none; background: #F1F4F9; width: 34px; height: 34px; border-radius: 50%; color: #1B2A4A; cursor: pointer; }
+
+  .sc-card { position: relative; width: 100%; max-width: 340px; margin: 0 auto; aspect-ratio: 300 / 170; border-radius: 18px; overflow: hidden; background: #FFF4EC; border: 2px dashed #FF6B35; }
+  .sc-face { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 10px; text-align: center; }
+  .sc-face-main { font-size: 1.7rem; font-weight: 900; color: #1B2A4A; }
+  .sc-face-sub { font-size: 0.85rem; color: #3C4C66; }
+  .sc-face.is-cash .sc-face-main { color: #FF6B35; }
+  .sc-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: pointer; transition: opacity 0.35s ease; }
+  .sc-canvas.gone { opacity: 0; pointer-events: none; }
+  .sc-hint { text-align: center; margin: 10px 0 0; font-size: 0.85rem; color: #8090A6; }
+  .sc-hint[hidden] { display: none; }
+
+  .sc-greet { margin: 14px auto 0; max-width: 340px; text-align: center; font-size: 0.95rem; font-weight: 700; color: #1B2A4A; background: #FFF4EC; border-radius: 14px; padding: 12px 14px; }
+  .sc-greet[hidden] { display: none; }
+  .sc-error { margin: 14px auto 0; max-width: 340px; text-align: center; font-size: 0.9rem; font-weight: 700; color: #B42318; background: #FFE3E0; border-radius: 14px; padding: 12px 14px; line-height: 1.6; }
+  .sc-error[hidden] { display: none; }
+
+  .sc-pay { margin: 16px auto 0; max-width: 340px; }
+  .sc-pay[hidden] { display: none; }
+  .sc-pay h4 { margin: 0 0 10px; font-size: 1rem; font-weight: 800; color: #1B2A4A; }
+  .sc-pay label { display: block; font-size: 0.85rem; font-weight: 700; color: #1B2A4A; margin: 10px 0 4px; }
+  .sc-pay input { width: 100%; box-sizing: border-box; padding: 12px; border: 1.5px solid #D5DCE8; border-radius: 12px; font-size: 1rem; font-family: inherit; }
+  .sc-pay input:focus { outline: none; border-color: #FF6B35; }
+  .sc-pay-note { font-size: 0.78rem; color: #6B7A90; line-height: 1.6; margin: 8px 0 12px; }
+  .sc-btn { width: 100%; padding: 13px; border: none; border-radius: 14px; background: #FF6B35; color: #fff; font-size: 1rem; font-weight: 800; cursor: pointer; font-family: inherit; }
+  .sc-btn:disabled { opacity: 0.6; cursor: default; }
+  .sc-done { margin: 16px auto 0; max-width: 340px; text-align: center; font-size: 0.92rem; font-weight: 700; color: #067647; background: #E7F8EF; border-radius: 14px; padding: 12px 14px; line-height: 1.6; }
+  .sc-done[hidden] { display: none; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+
+  const $ = (id) => document.getElementById(id);
+  const teaser = $('scTeaser');
+  const overlay = $('scOverlay');
+  const canvas = $('scCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  const REVEAL_AT = 0.4; // এতটা ঘষা হলে ফল দেখায়
+
+  let status = null;      // get_scratch_status() এর ফল
+  let endTs = 0;          // আজকের কার্ড এক্সপায়ারের সময়
+  let card = null;        // যে কার্ড এখন শিটে দেখাচ্ছি
+  let claimPromise = null;
+  let claimResult = null;
+  let revealed = false;
+  let drawing = false;
+  let moves = 0;
+  let timer = null;
+
+  function bn(n) {
+    return Number(n || 0).toLocaleString('bn-BD');
+  }
+
+  function toast(msg, type) {
+    if (typeof window.showToast === 'function') window.showToast(msg, type || 'success');
+  }
+
+  function leftText() {
+    const sec = Math.max(0, Math.floor((endTs - Date.now()) / 1000));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    return h > 0 ? `${bn(h)} ঘণ্টা ${bn(m)} মিনিট বাকি` : `${bn(m)} মিনিট বাকি`;
+  }
+
+  // ---------- টিজার ----------
+  function renderTeaser() {
+    if (!status || !status.active) {
+      // ক্যাম্পেইন বন্ধ হলেও আগের জেতা পুরস্কারের বিকাশ নম্বর বাকি থাকলে টিজার দেখাই
+      if (status && status.unsubmitted_win) {
+        teaser.hidden = false;
+        $('scTeaserTitle').textContent = `আপনি ৳${bn(status.unsubmitted_win.cash_amount)} জিতেছেন`;
+        $('scTeaserSub').textContent = 'বিকাশ নম্বর দিয়ে পুরস্কার নিন';
+        $('scTeaserGo').textContent = 'নম্বর দিন';
+      } else {
+        teaser.hidden = true;
+      }
+      return;
+    }
+    teaser.hidden = false;
+    const win = status.unsubmitted_win;
+    if (win) {
+      $('scTeaserTitle').textContent = `আপনি ৳${bn(win.cash_amount)} জিতেছেন 🎉`;
+      $('scTeaserSub').textContent = 'বিকাশ নম্বর দিয়ে পুরস্কার নিন';
+      $('scTeaserGo').textContent = 'নম্বর দিন';
+    } else if (status.card) {
+      $('scTeaserTitle').textContent = 'আজকের কার্ড ঘষা হয়েছে ✅';
+      $('scTeaserSub').textContent = 'কাল রাত ১২টায় নতুন কার্ড আসবে';
+      $('scTeaserGo').textContent = 'দেখুন';
+    } else {
+      $('scTeaserTitle').textContent = 'আজকের স্ক্রেচ কার্ড';
+      $('scTeaserSub').textContent = `ঘষলেই পুরস্কার! ${leftText()}`;
+      $('scTeaserGo').textContent = 'ঘষুন';
+    }
+  }
+
+  async function loadStatus() {
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess || !sess.session) {
+        status = null;
+        teaser.hidden = true;
+        return;
+      }
+      const { data, error } = await supabase.rpc('get_scratch_status');
+      if (error || !data) {
+        teaser.hidden = true;
+        return;
+      }
+      status = data;
+      endTs = Date.now() + Number(data.seconds_left || 0) * 1000;
+      renderTeaser();
+    } catch (e) {
+      teaser.hidden = true;
+    }
+  }
+
+  // ---------- ক্যানভাস কভার ----------
+  function drawCover() {
+    ctx.globalCompositeOperation = 'source-over';
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, '#B9C0CC');
+    g.addColorStop(0.5, '#E9ECF1');
+    g.addColorStop(1, '#AEB6C3');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    for (let i = 0; i < 40; i++) {
+      ctx.beginPath();
+      ctx.arc(Math.random() * W, Math.random() * H, Math.random() * 2.2 + 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#6B7A90';
+    ctx.font = '800 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('এখানে ঘষুন 👆', W / 2, H / 2);
+  }
+
+  function clearedRatio() {
+    const img = ctx.getImageData(0, 0, W, H).data;
+    let clear = 0;
+    let total = 0;
+    for (let y = 0; y < H; y += 6) {
+      for (let x = 0; x < W; x += 6) {
+        total++;
+        if (img[(y * W + x) * 4 + 3] < 40) clear++;
+      }
+    }
+    return total ? clear / total : 0;
+  }
+
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) * W) / r.width, y: ((e.clientY - r.top) * H) / r.height };
+  }
+
+  function scratchAt(p) {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 20, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  let last = null;
+  function onDown(e) {
+    if (revealed) return;
+    drawing = true;
+    last = pos(e);
+    scratchAt(last);
+    startClaim();
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+  }
+  function onMove(e) {
+    if (!drawing || revealed) return;
+    const p = pos(e);
+    // দুই পয়েন্টের মাঝে ফাঁক না রাখতে লাইন ধরে আঁকা
+    const dx = p.x - last.x;
+    const dy = p.y - last.y;
+    const steps = Math.max(1, Math.floor(Math.hypot(dx, dy) / 8));
+    for (let i = 1; i <= steps; i++) {
+      scratchAt({ x: last.x + (dx * i) / steps, y: last.y + (dy * i) / steps });
+    }
+    last = p;
+    moves++;
+    if (moves % 6 === 0 && clearedRatio() >= REVEAL_AT) finishReveal();
+  }
+  function onUp() {
+    drawing = false;
+    if (!revealed && claimPromise && clearedRatio() >= REVEAL_AT) finishReveal();
+  }
+  canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onUp);
+  canvas.addEventListener('pointercancel', onUp);
+
+  // ---------- সার্ভারে ক্লেইম ----------
+  function startClaim() {
+    if (claimPromise) return;
+    claimPromise = supabase
+      .rpc('claim_scratch_card')
+      .then(({ data, error }) => {
+        claimResult = { data, error };
+      })
+      .catch(() => {
+        claimResult = { data: null, error: { message: '' } };
+      });
+  }
+
+  function showError(msg) {
+    const box = $('scError');
+    box.textContent = msg;
+    box.hidden = false;
+    $('scFaceMain').textContent = '😔';
+    $('scFaceSub').textContent = '';
+  }
+
+  async function finishReveal() {
+    if (revealed) return;
+    revealed = true;
+    $('scHint').hidden = true;
+    canvas.classList.add('gone');
+    await claimPromise;
+    const res = claimResult || {};
+    if (res.error) {
+      // সার্ভারের বাংলা মেসেজ থাকলে সেটা, নইলে সাধারণ মেসেজ
+      const raw = String(res.error.message || '');
+      const bangla = /[\u0980-\u09FF]/.test(raw) ? raw : 'কার্ড আনতে সমস্যা হয়েছে, একটু পরে আবার চেষ্টা করুন।';
+      showError(bangla);
+      claimPromise = null; // নেটওয়ার্ক সমস্যায় আবার চেষ্টার সুযোগ (শিট আবার খুললে)
+      return;
+    }
+    if (res.data && res.data.ok === false) {
+      showError(res.data.message || 'এই মুহূর্তে কার্ড ঘষা যাচ্ছে না।');
+      return;
+    }
+    card = res.data.card;
+    renderCard(card, true);
+    loadStatus();
+  }
+
+  // ---------- কার্ডের ফল ----------
+  function renderCard(c, justRevealed) {
+    const face = $('scFace');
+    const isCash = Number(c.cash_amount) > 0;
+    face.classList.toggle('is-cash', isCash);
+    if (isCash) {
+      $('scFaceMain').textContent = `🎉 ৳${bn(c.cash_amount)}`;
+      $('scFaceSub').textContent = 'অভিনন্দন! আপনি টাকা জিতেছেন';
+    } else {
+      $('scFaceMain').textContent = `+${bn(c.points)} পয়েন্ট`;
+      $('scFaceSub').textContent = 'পয়েন্ট আপনার ব্যালেন্সে যোগ হয়েছে';
+    }
+    const greet = $('scGreet');
+    if (c.greeting) {
+      greet.textContent = c.greeting; // textContent: ইউজারের নাম নিরাপদে বসে
+      greet.hidden = false;
+    }
+    renderPay(c);
+    if (justRevealed && isCash) toast('অভিনন্দন! আপনি টাকা জিতেছেন 🎉', 'success');
+  }
+
+  function renderPay(c) {
+    const pay = $('scPay');
+    const done = $('scDone');
+    pay.hidden = true;
+    done.hidden = true;
+    if (!(Number(c.cash_amount) > 0)) return;
+    if (c.pay_status === 'none') {
+      pay.hidden = false;
+    } else if (c.pay_status === 'pending') {
+      done.textContent = 'আপনার বিকাশ নম্বর জমা হয়েছে। যাচাই করে পেমেন্ট করা হবে।';
+      done.hidden = false;
+    } else if (c.pay_status === 'paid') {
+      done.textContent = 'পেমেন্ট সম্পন্ন হয়েছে ✅';
+      done.hidden = false;
+    } else if (c.pay_status === 'rejected') {
+      done.textContent = 'দুঃখিত, এই পুরস্কারের পেমেন্ট করা যায়নি।';
+      done.hidden = false;
+    }
+  }
+
+  // ---------- শিট খোলা/বন্ধ ----------
+  function resetSheet() {
+    revealed = false;
+    drawing = false;
+    moves = 0;
+    claimResult = null;
+    $('scError').hidden = true;
+    $('scGreet').hidden = true;
+    $('scPay').hidden = true;
+    $('scDone').hidden = true;
+    $('scHint').hidden = false;
+    $('scFace').classList.remove('is-cash');
+    $('scFaceMain').textContent = '…';
+    $('scFaceSub').textContent = '';
+    canvas.classList.remove('gone');
+    drawCover();
+  }
+
+  function openSheet() {
+    if (!status) return;
+    resetSheet();
+    // আগের দিনের জেতা কার্ড (বিকাশ নম্বর বাকি) — সরাসরি ফর্ম
+    const win = status.unsubmitted_win;
+    const todays = status.card;
+    const show = todays && (!win || win.id === todays.id) ? todays : win || todays;
+    if (show) {
+      card = show;
+      revealed = true;
+      canvas.classList.add('gone');
+      $('scHint').hidden = true;
+      renderCard(show, false);
+    } else if (!status.active) {
+      return;
+    } else {
+      claimPromise = null;
+    }
+    overlay.classList.add('open');
+  }
+
+  function closeSheet() {
+    overlay.classList.remove('open');
+  }
+
+  $('scTeaserBtn').addEventListener('click', openSheet);
+  $('scClose').addEventListener('click', closeSheet);
+  $('scBackdrop').addEventListener('click', closeSheet);
+
+  // ---------- বিকাশ নম্বর জমা ----------
+  $('scPaySubmit').addEventListener('click', async () => {
+    const btn = $('scPaySubmit');
+    const num = String($('scBkash').value || '').trim();
+    const link = String($('scPost').value || '').trim();
+    if (!/^01[0-9]{9}$/.test(num)) {
+      toast('সঠিক বিকাশ নম্বর দিন (১১ ডিজিট)', 'error');
+      return;
+    }
+    if (link && !/^https?:\/\/\S{4,}$/i.test(link)) {
+      toast('পোস্টের সঠিক লিংক দিন', 'error');
+      return;
+    }
+    if (!card) return;
+    btn.disabled = true;
+    btn.textContent = 'জমা হচ্ছে...';
+    try {
+      const { error } = await supabase.rpc('submit_scratch_bkash', {
+        p_card_id: card.id,
+        p_number: num,
+        p_post_link: link || null,
+      });
+      if (error) {
+        toast(error.message || 'জমা দেওয়া যায়নি, আবার চেষ্টা করুন', 'error');
+      } else {
+        card.pay_status = 'pending';
+        renderPay(card);
+        toast('বিকাশ নম্বর জমা হয়েছে ✅', 'success');
+        loadStatus();
+      }
+    } catch (e) {
+      toast('নেটওয়ার্ক সমস্যা, আবার চেষ্টা করুন', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'বিকাশ নম্বর জমা দিন';
+    }
+  });
+
+  // ---------- শুরু ----------
+  drawCover();
+  loadStatus();
+  // মিনিটে একবার কাউন্টডাউন আপডেট; দিন বদলালে (রাত ১২টা) নতুন স্ট্যাটাস
+  timer = setInterval(() => {
+    if (endTs && Date.now() >= endTs) {
+      loadStatus();
+    } else if (status && status.active && !status.card && !status.unsubmitted_win) {
+      renderTeaser();
+    }
+  }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadStatus();
+  });
+  // লগইন/লগআউটে টিজার ঠিক রাখা
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') loadStatus();
+  });
+</script>
