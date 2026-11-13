@@ -12,6 +12,8 @@
 // দিয়ে (service role)। ক্লায়েন্ট থেকে সরাসরি supabase.storage.upload() কল করলে
 // listing-images বাকেটে ইউজারের SELECT পলিসি নেই, তাই Storage-এর INSERT…RETURNING ফেইল করে
 // ("new row violates row-level security policy")।
+// আপডেট (ম্যাপ লিংক): Latitude/Longitude দুই ঘরের বদলে একটাই "গুগল ম্যাপ লিংক" ঘর।
+// লিংক যেমন আছে তেমন clubs.map_link-এ সেভ হয়; পাবলিক পেজে বাটন ট্যাপে সেই লিংকই খোলে।
 // ============================================================
 ---
 
@@ -51,12 +53,9 @@
   <label class="form-label">প্রতিষ্ঠার সাল</label>
   <input type="number" class="form-input" id="establishedInput" placeholder="যেমন: 2015" />
 
-  <label class="form-label">ম্যাপ লোকেশন (Latitude, Longitude)</label>
-  <div style="display:flex;gap:8px;">
-    <input type="text" class="form-input" id="latInput" placeholder="Latitude" />
-    <input type="text" class="form-input" id="lngInput" placeholder="Longitude" />
-  </div>
-  <p class="form-hint">গুগল ম্যাপে লোকেশনে লং-প্রেস করলে কোঅর্ডিনেট দেখাবে, কপি করে বসান</p>
+  <label class="form-label">ম্যাপ লোকেশন (গুগল ম্যাপ লিংক)</label>
+  <input type="text" class="form-input" id="mapLinkInput" inputmode="url" autocomplete="off" placeholder="https://maps.app.goo.gl/..." />
+  <p class="form-hint">গুগল ম্যাপে আপনার ক্লাবের জায়গা খুলে "শেয়ার" চেপে লিংক কপি করুন, এখানে পেস্ট করুন</p>
 
   <button class="primary-btn" id="saveProfileBtn" type="button">
     <i class="fas fa-check"></i> <span>সেভ করুন</span>
@@ -82,8 +81,7 @@
   body.mod-no-settings #facebookInput,
   body.mod-no-settings #addressInput,
   body.mod-no-settings #establishedInput,
-  body.mod-no-settings #latInput,
-  body.mod-no-settings #lngInput {
+  body.mod-no-settings #mapLinkInput {
     pointer-events: none;
     background: #F4F7FC;
     color: #9AA8BC;
@@ -99,6 +97,15 @@
   import { compressImage } from '../../lib/imageCompress.js';
   import { uploadWithRetry } from '../../lib/uploadWithRetry.js';
 import { authHeader } from '../../lib/authToken.js';
+import { isMapUrl } from '../../lib/mapLinks.js';
+
+  // টেক্সট থেকে প্রথম http(s) লিংক বের করে (সাথে অন্য কথা পেস্ট হলেও চলে), গুগল ম্যাপের না হলে null
+  function pickMapLink(raw) {
+    const m = (raw || '').match(/https?:\/\/[^\s<>"']+/i);
+    if (!m) return null;
+    const url = m[0].replace(/[)\].,;!?।]+$/u, '');
+    return isMapUrl(url) ? url : null;
+  }
 
   let clubId = null;
   let selectedLogoFile = null;
@@ -217,6 +224,18 @@ import { authHeader } from '../../lib/authToken.js';
       return;
     }
 
+    const rawMap = document.getElementById('mapLinkInput').value.trim();
+    let mapLink = null;
+    if (rawMap) {
+      mapLink = pickMapLink(rawMap);
+      if (!mapLink) {
+        span.textContent = original;
+        btn.disabled = false;
+        showMsg('ম্যাপ লিংক ঠিক নেই — গুগল ম্যাপ থেকে "শেয়ার" করে লিংক কপি করে দিন।');
+        return;
+      }
+    }
+
     const updates = {
       tagline: document.getElementById('taglineInput').value.trim(),
       description: document.getElementById('descriptionInput').value.trim(),
@@ -224,8 +243,10 @@ import { authHeader } from '../../lib/authToken.js';
       facebook_link: document.getElementById('facebookInput').value.trim(),
       address: document.getElementById('addressInput').value.trim(),
       established_year: document.getElementById('establishedInput').value ? parseInt(document.getElementById('establishedInput').value) : null,
-      latitude: document.getElementById('latInput').value ? parseFloat(document.getElementById('latInput').value) : null,
-      longitude: document.getElementById('lngInput').value ? parseFloat(document.getElementById('lngInput').value) : null,
+      map_link: mapLink,
+      // পুরনো পিন আর ফর্মে নেই; লিংক খালি করলে যেন পুরনো পিন ফিরে না আসে
+      latitude: null,
+      longitude: null,
     };
 
     const uploadErrors = [];
@@ -270,8 +291,8 @@ import { authHeader } from '../../lib/authToken.js';
     document.getElementById('facebookInput').value = club.facebook_link || '';
     document.getElementById('addressInput').value = club.address || '';
     document.getElementById('establishedInput').value = club.established_year || '';
-    document.getElementById('latInput').value = club.latitude || '';
-    document.getElementById('lngInput').value = club.longitude || '';
+    document.getElementById('mapLinkInput').value =
+      club.map_link || ((club.latitude && club.longitude) ? `https://www.google.com/maps?q=${club.latitude},${club.longitude}` : '');
 
     if (club.logo_image) {
       document.getElementById('logoPreview').src = club.logo_image;
