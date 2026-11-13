@@ -121,6 +121,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           .req-actions { display: flex; gap: 8px; margin-top: 12px; }
         </style>
 
+        <div class="rc-bar">
+          <button type="button" class="rc-btn" id="clubReorderBtn"><i class="fas fa-arrows-up-down"></i> ক্লাবের ক্রম বদলান</button>
+          <p class="rc-hint" id="clubReorderHint" style="display:none;">ক্লাব চেপে ধরে ওপর-নিচে টেনে ক্রম সাজান। এই ক্রমেই পাবলিক ক্লাব পেজে দেখাবে। শেষ হলে ✓ চাপুন।</p>
+        </div>
         <div id="clubsContainer" class="clubs-container"></div>
 
         <div id="emptyState" class="empty-state" style="display:none;">
@@ -196,6 +200,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
+    import { makeSortable } from '../../lib/sortable.js';
 import { authFetch, getFreshToken } from '../../lib/authToken.js';
 
     const UPAZILA_LABELS = {
@@ -483,30 +488,124 @@ import { authFetch, getFreshToken } from '../../lib/authToken.js';
       loadClubs();
     }
 
+    let reorderMode = false;
+    let clubsCache = [];
+    let stopClubSort = null;
+
+    (function injectReorderCss() {
+      const st = document.createElement('style');
+      st.textContent =
+        '.rc-bar{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;}' +
+        '.rc-btn{align-self:flex-start;min-height:44px;border:1.5px solid #D5DCE8;background:#fff;border-radius:14px;padding:0 16px;font:inherit;font-weight:700;font-size:0.9rem;color:#1B2A4A;cursor:pointer;}' +
+        '.rc-btn.on{background:#FFF0EA;border-color:#FF6B35;color:#FF6B35;}' +
+        '.rc-hint{margin:0 2px;font-size:0.8rem;color:#5A6E85;line-height:1.45;}' +
+        '.rc-row{display:flex;align-items:center;gap:10px;background:#fff;border-radius:14px;padding:8px 10px;min-height:60px;box-shadow:0 2px 10px rgba(15,23,42,0.05);min-width:0;}' +
+        '.rc-ic{width:40px;height:40px;border-radius:12px;background:#FFF0EA;color:#FF6B35;display:flex;align-items:center;justify-content:center;flex:none;overflow:hidden;}' +
+        '.rc-ic img{width:100%;height:100%;object-fit:cover;display:block;}' +
+        '.rc-body{flex:1;min-width:0;}' +
+        '.rc-name{font-size:0.93rem;font-weight:700;color:#1B2A4A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+        '.rc-sub{font-size:0.76rem;color:#8FA0BC;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+        '.rc-grip{width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:#8A97AE;flex:none;}';
+      document.head.appendChild(st);
+    })();
+
+    function renderClubsView() {
+      if (stopClubSort) { stopClubSort(); stopClubSort = null; }
+      container.innerHTML = '';
+      const list = clubsCache;
+      if (list.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+      emptyState.style.display = 'none';
+      if (!reorderMode) {
+        list.forEach((club) => container.appendChild(renderClub(club)));
+        return;
+      }
+      list.forEach((club) => {
+        const row = document.createElement('div');
+        row.className = 'rc-row';
+        row.setAttribute('data-id', club.id);
+        const ic = document.createElement('div');
+        ic.className = 'rc-ic';
+        if (club.logo_image) {
+          const im = document.createElement('img');
+          im.src = club.logo_image;
+          im.alt = '';
+          im.loading = 'lazy';
+          im.onerror = () => { im.remove(); ic.innerHTML = '<i class="fas fa-users"></i>'; };
+          ic.appendChild(im);
+        } else {
+          ic.innerHTML = '<i class="fas fa-users"></i>';
+        }
+        const body = document.createElement('div');
+        body.className = 'rc-body';
+        const nm = document.createElement('div');
+        nm.className = 'rc-name';
+        nm.textContent = club.name || '(নামহীন ক্লাব)';
+        const sb = document.createElement('div');
+        sb.className = 'rc-sub';
+        sb.textContent = '/' + (club.slug || '') + (club.is_active ? '' : ' · নিষ্ক্রিয়');
+        body.appendChild(nm);
+        body.appendChild(sb);
+        const g = document.createElement('span');
+        g.className = 'rc-grip';
+        g.setAttribute('data-sort-handle', '1');
+        g.setAttribute('aria-hidden', 'true');
+        g.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+        row.appendChild(ic);
+        row.appendChild(body);
+        row.appendChild(g);
+        container.appendChild(row);
+      });
+      if (list.length > 1) stopClubSort = makeSortable(container, { itemSelector: '.rc-row', onChange: saveClubOrder });
+    }
+
+    async function saveClubOrder(ids) {
+      ids.forEach((id, n) => {
+        const c = clubsCache.find((x) => x.id === id);
+        if (c) c.sort_order = (n + 1) * 10;
+      });
+      clubsCache.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      const { data, error } = await supabase.rpc('admin_reorder_clubs', { p_ids: ids });
+      if (error || !data || !data.ok) {
+        window.showToast?.('ক্রম সেভ হয়নি, আবার চেষ্টা করুন', 'error');
+        await loadClubs();
+        return;
+      }
+      window.showToast?.('ক্লাবের ক্রম সেভ হয়েছে ✓', 'success', 1500);
+    }
+
+    document.getElementById('clubReorderBtn').addEventListener('click', () => {
+      reorderMode = !reorderMode;
+      const b = document.getElementById('clubReorderBtn');
+      b.classList.toggle('on', reorderMode);
+      b.innerHTML = reorderMode ? '<i class="fas fa-check"></i> ক্রম ঠিক আছে' : '<i class="fas fa-arrows-up-down"></i> ক্লাবের ক্রম বদলান';
+      document.getElementById('clubReorderHint').style.display = reorderMode ? '' : 'none';
+      renderClubsView();
+    });
+
     async function loadClubs() {
       container.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>';
 
       const { data, error } = await supabase
         .from('clubs')
         .select('*')
+        .order('sort_order', { ascending: true })
         .order('created_at', { ascending: false });
 
       if (error) {
-        container.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        container.textContent = '';
+        const p = document.createElement('p');
+        p.style.cssText = 'text-align:center;color:#D14343;padding:40px 0;';
+        p.textContent = 'লোড করা যায়নি: ' + error.message;
+        container.appendChild(p);
         return;
       }
 
-      const allClubs = data || [];
-      resultCount.textContent = `মোট ${allClubs.length} টি ক্লাব`;
-      container.innerHTML = '';
-
-      if (allClubs.length === 0) {
-        emptyState.style.display = 'flex';
-        return;
-      }
-
-      emptyState.style.display = 'none';
-      allClubs.forEach((club) => container.appendChild(renderClub(club)));
+      clubsCache = data || [];
+      resultCount.textContent = `মোট ${clubsCache.length} টি ক্লাব`;
+      renderClubsView();
     }
 
     // ===== পেন্ডিং ক্লাব আবেদন: লোড / Approve (স্লাগসহ) / Reject =====
