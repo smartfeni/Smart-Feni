@@ -109,6 +109,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           </div>
 
           <div class="sca-card">
+            <h3>স্ট্রিক বোনাস (টানা দিন)</h3>
+            <label class="sca-label" for="scaStreak">টানা কত দিনে কত পয়েন্ট (ফরম্যাট দিন:পয়েন্ট, কমা দিয়ে)</label>
+            <input id="scaStreak" class="sca-input" type="text" placeholder="7:50, 14:100, 30:300" />
+            <p class="sca-note">যেমন "7:50" মানে টানা ৭ দিন কার্ড ঘষলে +৫০ পয়েন্ট। একদিন মিস হলে স্ট্রিক নতুন করে শুরু। ফাঁকা রাখলে কোনো স্ট্রিক বোনাস থাকবে না।</p>
+          </div>
+
+          <div class="sca-card">
             <h3>শুভেচ্ছা লাইন</h3>
             <label class="sca-label" for="scaGreet">প্রতি লাইনে একটা (প্রতিদিন সবাই একই লাইন পায়, শুরুতে "প্রিয় নাম," নিজে বসে)</label>
             <textarea id="scaGreet" class="sca-input" rows="7"></textarea>
@@ -427,6 +434,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('scaWeekly').value = (cfg.weekly_cash_amounts || []).join(', ');
       $('scaMegaAmt').value = cfg.mega_amount;
       $('scaAge').value = cfg.cash_min_account_age_hours;
+      $('scaStreak').value = Object.entries(cfg.streak_milestones || {})
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([d, p]) => d + ':' + p)
+        .join(', ');
       $('scaGreet').value = (cfg.greetings || []).join('\n');
     }
 
@@ -474,6 +485,13 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const age = Number($('scaAge').value);
       if (!Number.isInteger(age) || age < 0) return showSettingsError('ন্যূনতম বয়স ঠিক নয়');
 
+      const streakMs = {};
+      for (const part of String($('scaStreak').value || '').split(/[,،]+/).map((x) => x.trim()).filter(Boolean)) {
+        const m = part.match(/^(\d{1,3})\s*[:=]\s*(\d{1,5})$/);
+        if (!m || Number(m[1]) < 2 || Number(m[2]) <= 0) return showSettingsError('স্ট্রিক বোনাস ঠিক নয়: ' + part + ' (ফরম্যাট ৭:৫০)');
+        streakMs[m[1]] = Number(m[2]);
+      }
+
       const greetings = String($('scaGreet').value || '').split('\n').map((x) => x.trim()).filter(Boolean);
       if (!greetings.length) return showSettingsError('অন্তত একটা শুভেচ্ছা লাইন দিন');
 
@@ -491,6 +509,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           mega_amount: megaAmt,
           cash_min_account_age_hours: age,
           greetings,
+          streak_milestones: streakMs,
           updated_at: new Date().toISOString(),
         }).eq('id', 1);
         if (error) showSettingsError(error.message || 'সেভ হয়নি');

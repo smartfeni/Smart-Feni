@@ -43,6 +43,8 @@
       <canvas id="scCanvas" class="sc-canvas" width="300" height="170"></canvas>
     </div>
     <p class="sc-hint" id="scHint">আঙুল দিয়ে কার্ডটা ঘষুন</p>
+    <div class="sc-streak" id="scStreak" hidden></div>
+    <div class="sc-bonus" id="scBonus" hidden></div>
 
     <div class="sc-greet" id="scGreet" hidden></div>
     <div class="sc-error" id="scError" hidden></div>
@@ -58,6 +60,11 @@
     </div>
 
     <div class="sc-done" id="scDone" hidden></div>
+
+    <div class="sc-wall" id="scWall" hidden>
+      <h4>🏆 সাম্প্রতিক বিজয়ী</h4>
+      <div id="scWallList"></div>
+    </div>
   </div>
 </div>
 
@@ -105,6 +112,15 @@
   .sc-btn:disabled { opacity: 0.6; cursor: default; }
   .sc-done { margin: 16px auto 0; max-width: 340px; text-align: center; font-size: 0.92rem; font-weight: 700; color: #067647; background: #E7F8EF; border-radius: 14px; padding: 12px 14px; line-height: 1.6; }
   .sc-done[hidden] { display: none; }
+
+  .sc-streak { margin: 12px auto 0; max-width: 340px; text-align: center; font-size: 0.85rem; font-weight: 700; color: #B54708; background: #FFF4E5; border-radius: 12px; padding: 9px 12px; line-height: 1.6; }
+  .sc-bonus { margin: 10px auto 0; max-width: 340px; text-align: center; font-size: 0.95rem; font-weight: 800; color: #067647; background: #E7F8EF; border-radius: 12px; padding: 10px 12px; }
+  .sc-streak[hidden], .sc-bonus[hidden], .sc-wall[hidden] { display: none; }
+  .sc-wall { margin: 20px auto 0; max-width: 340px; }
+  .sc-wall h4 { margin: 0 0 8px; font-size: 0.95rem; font-weight: 800; color: #1B2A4A; }
+  .sc-wall-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #F8FAFC; border-radius: 12px; padding: 9px 12px; margin-bottom: 6px; font-size: 0.85rem; color: #1B2A4A; }
+  .sc-wall-item b { font-weight: 800; color: #FF6B35; white-space: nowrap; }
+  .sc-wall-note { text-align: center; font-size: 0.82rem; color: #6B7A90; padding: 6px 0 10px; line-height: 1.6; }
 </style>
 
 <script>
@@ -166,11 +182,11 @@
       $('scTeaserGo').textContent = 'নম্বর দিন';
     } else if (status.card) {
       $('scTeaserTitle').textContent = 'আজকের কার্ড ঘষা হয়েছে ✅';
-      $('scTeaserSub').textContent = 'কাল রাত ১২টায় নতুন কার্ড আসবে';
+      $('scTeaserSub').textContent = 'কাল রাত ১২টায় নতুন কার্ড আসবে' + (status.streak > 1 ? ` · 🔥 ${bn(status.streak)} দিন টানা` : '');
       $('scTeaserGo').textContent = 'দেখুন';
     } else {
       $('scTeaserTitle').textContent = 'আজকের স্ক্রেচ কার্ড';
-      $('scTeaserSub').textContent = `ঘষলেই পুরস্কার! ${leftText()}`;
+      $('scTeaserSub').textContent = `ঘষলেই পুরস্কার! ${leftText()}` + (status.streak > 0 ? ` · 🔥 ${bn(status.streak)} দিন টানা` : '');
       $('scTeaserGo').textContent = 'ঘষুন';
     }
   }
@@ -316,8 +332,8 @@
       return;
     }
     card = res.data.card;
+    await loadStatus();
     renderCard(card, true);
-    loadStatus();
   }
 
   // ---------- কার্ডের ফল ----------
@@ -338,7 +354,28 @@
       greet.hidden = false;
     }
     renderPay(c);
+    renderStreak(c);
     if (justRevealed && isCash) toast('অভিনন্দন! আপনি টাকা জিতেছেন 🎉', 'success');
+  }
+
+  function renderStreak(c) {
+    const bonus = $('scBonus');
+    if (Number(c.streak_bonus) > 0) {
+      bonus.textContent = `🔥 স্ট্রিক বোনাস! +${bn(c.streak_bonus)} পয়েন্ট`;
+      bonus.hidden = false;
+    } else {
+      bonus.hidden = true;
+    }
+    const sk = $('scStreak');
+    if (status && status.streak > 0) {
+      let t = `🔥 ${bn(status.streak)} দিন টানা`;
+      const nm = status.next_milestone;
+      if (nm && nm.days_left > 0) t += ` · আর ${bn(nm.days_left)} দিন টানা ঘষলে +${bn(nm.points)} পয়েন্ট`;
+      sk.textContent = t;
+      sk.hidden = false;
+    } else {
+      sk.hidden = true;
+    }
   }
 
   function renderPay(c) {
@@ -361,6 +398,46 @@
     }
   }
 
+  // ---------- বিজয়ী দেয়াল (সার্ভার নাম মাস্ক করে দেয়; ফোন/বিকাশ নম্বর আসে না) ----------
+  const KIND_LABEL = { daily_cash: 'দৈনিক', weekly_cash: 'সাপ্তাহিক', mega: 'মেগা চমক' };
+
+  async function loadWinners() {
+    const wall = $('scWall');
+    try {
+      const { data, error } = await supabase.rpc('get_scratch_winners');
+      if (error || !Array.isArray(data)) {
+        wall.hidden = true;
+        return;
+      }
+      const list = $('scWallList');
+      list.textContent = '';
+      const today = status && status.today;
+      if (!data.some((x) => x.card_date === today)) {
+        const note = document.createElement('div');
+        note.className = 'sc-wall-note';
+        note.textContent = 'আজকের ক্যাশ বিজয়ী এখনো ঠিক হয়নি, আপনিই হতে পারেন!';
+        list.appendChild(note);
+      }
+      data.forEach((x) => {
+        const row = document.createElement('div');
+        row.className = 'sc-wall-item';
+        const left = document.createElement('span');
+        const day = x.card_date === today
+          ? 'আজ'
+          : new Date(x.card_date + 'T00:00:00').toLocaleDateString('bn-BD', { day: 'numeric', month: 'short' });
+        left.textContent = `🏆 ${x.name} · ${day}`;
+        const right = document.createElement('b');
+        right.textContent = `৳${bn(x.amount)} · ${KIND_LABEL[x.kind] || ''}`;
+        row.appendChild(left);
+        row.appendChild(right);
+        list.appendChild(row);
+      });
+      wall.hidden = false;
+    } catch (e) {
+      wall.hidden = true;
+    }
+  }
+
   // ---------- শিট খোলা/বন্ধ ----------
   function resetSheet() {
     revealed = false;
@@ -371,6 +448,8 @@
     $('scGreet').hidden = true;
     $('scPay').hidden = true;
     $('scDone').hidden = true;
+    $('scStreak').hidden = true;
+    $('scBonus').hidden = true;
     $('scHint').hidden = false;
     $('scFace').classList.remove('is-cash');
     $('scFaceMain').textContent = '…';
@@ -396,7 +475,9 @@
       return;
     } else {
       claimPromise = null;
+      renderStreak({ streak_bonus: 0 });
     }
+    loadWinners();
     overlay.classList.add('open');
   }
 
