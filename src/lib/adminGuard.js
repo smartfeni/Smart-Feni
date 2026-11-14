@@ -53,6 +53,7 @@ const AREA_BY_SEGMENT = {
   'devices': 'devices',
   'manual-orders': 'manual_orders',
   'lucky-draw': 'lucky_draw',
+  'scratch-cards': 'scratch_card',
   'local-drivers': 'local_ride',
   'local-ride': 'local_ride',
 };

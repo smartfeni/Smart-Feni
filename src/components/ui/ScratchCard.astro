@@ -1,17 +1,22 @@
 ---
 // ============================================================
-// কম্পোনেন্ট: ScratchCard — "আজকের স্ক্রেচ কার্ড" (হোমপেজ)
+// কম্পোনেন্ট: ScratchCard — "আজকের স্ক্রেচ কার্ড" (হোমপেজ)  [v2]
 //
 // কী করে:
 //   ১) লগইন করা ইউজার + ক্যাম্পেইন চালু থাকলে হোমে ছোট টিজার কার্ড দেখায়
 //   ২) টিজারে ট্যাপ করলে ফুলস্ক্রিন শিটে ক্যানভাস স্ক্রেচ কার্ড (ঘষলে খোলে)
 //   ৩) ঘষা শুরু হলেই সার্ভারে claim_scratch_card() যায়; ফল ঠিক করে সার্ভার,
 //      ক্লায়েন্ট কিছু ঠিক করে না। ৪০% ঘষা হলে ফল দেখায়
-//   ৪) একই ডিভাইসে দ্বিতীয় অ্যাকাউন্ট হলে ঘষার পর এরর মেসেজ দেখায় (device_limit)
+//   ৪) একই ডিভাইসে দ্বিতীয় অ্যাকাউন্ট হলে ঘষার পর মেসেজ দেখায় (device_limit)
 //   ৫) ক্যাশ জিতলে বিকাশ নম্বর + ঐচ্ছিক ফেসবুক পোস্ট লিংক ফর্ম (submit_scratch_bkash)
-//   ৬) প্রতিদিন রাত ১২টায় (BD) কার্ড এক্সপায়ার; কাউন্টডাউন টিজারে
+//   ৬) "পুরস্কার ও নিয়ম" ভাঁজ করা অংশ — অংক সবই অ্যাডমিন সেটিং থেকে আসে
+//      (get_scratch_status().prizes); মেগা অংশ শুধু মেগা সুইচ অন + মেগা দিন বাকি +
+//      বিজয়ী এখনো হয়নি হলে দেখায়, নইলে পুরোপুরি বাদ (সার্ভার prizes.mega = null দেয়)
+//   ৭) সাম্প্রতিক ক্যাশ বিজয়ী: পুরো নাম + অংক, সর্বশেষ বিজয়ী সবার উপরে (get_scratch_winners)
 //
-// RPC: get_scratch_status(), claim_scratch_card(), submit_scratch_bkash()
+// ইউজারকে বলা হয় না: দিনে/সপ্তাহে কয়জন ক্যাশ পায়, মেগা কোন দিনে হয় — এগুলো শুধু অ্যাডমিনের হিসাব।
+//
+// RPC: get_scratch_status(), claim_scratch_card(), submit_scratch_bkash(), get_scratch_winners()
 // Android back বাটন: ওভারলের ক্লাস "sc-overlay" + ".open", বন্ধ বাটনের aria-label এ "বন্ধ"
 // ============================================================
 ---
@@ -23,7 +28,7 @@
       <strong id="scTeaserTitle">আজকের স্ক্রেচ কার্ড</strong>
       <small id="scTeaserSub"></small>
     </span>
-    <span class="sc-teaser-go" id="scTeaserGo">ঘষুন</span>
+    <span class="sc-teaser-go" id="scTeaserGo">খুলুন</span>
   </button>
 </section>
 
@@ -31,7 +36,7 @@
   <div class="sc-backdrop" id="scBackdrop"></div>
   <div class="sc-sheet" role="dialog" aria-modal="true" aria-label="আজকের স্ক্রেচ কার্ড">
     <div class="sc-head">
-      <h3 id="scSheetTitle">আজকের স্ক্রেচ কার্ড</h3>
+      <h3>আজকের স্ক্রেচ কার্ড</h3>
       <button type="button" class="sc-close" id="scClose" aria-label="বন্ধ করুন">✕</button>
     </div>
 
@@ -42,27 +47,37 @@
       </div>
       <canvas id="scCanvas" class="sc-canvas" width="300" height="170"></canvas>
     </div>
-    <p class="sc-hint" id="scHint">আঙুল দিয়ে কার্ডটা ঘষুন</p>
+    <p class="sc-hint" id="scHint">রূপালি অংশে আঙুল বুলিয়ে কার্ডটি খুলুন</p>
+
     <div class="sc-streak" id="scStreak" hidden></div>
     <div class="sc-bonus" id="scBonus" hidden></div>
-
     <div class="sc-greet" id="scGreet" hidden></div>
     <div class="sc-error" id="scError" hidden></div>
 
     <div class="sc-pay" id="scPay" hidden>
-      <h4>পুরস্কার পেতে বিকাশ নম্বর দিন</h4>
+      <h4>পুরস্কার গ্রহণের তথ্য</h4>
       <label for="scBkash">বিকাশ নম্বর <span class="required-mark" style="color:#D92D20;">*</span></label>
       <input id="scBkash" type="tel" inputmode="numeric" maxlength="11" placeholder="01XXXXXXXXX" autocomplete="off" required />
       <label for="scPost">ফেসবুক পোস্টের লিংক (ঐচ্ছিক)</label>
       <input id="scPost" type="url" inputmode="url" maxlength="500" placeholder="https://facebook.com/..." autocomplete="off" />
-      <p class="sc-pay-note">পুরস্কার জেতার কথা ফেসবুকে একটা পোস্ট করে লিংক দিলে আমরা খুশি হব। এটা বাধ্যতামূলক নয়, লিংক না দিলেও পেমেন্ট পাবেন।</p>
-      <button type="button" id="scPaySubmit" class="sc-btn">বিকাশ নম্বর জমা দিন</button>
+      <p class="sc-pay-note">আপনার জয়ের অভিজ্ঞতা ফেসবুকে শেয়ার করলে আমরা কৃতজ্ঞ থাকব। লিংক দেওয়া বাধ্যতামূলক নয়, না দিলেও পুরস্কার একইভাবে পাঠানো হবে।</p>
+      <button type="button" id="scPaySubmit" class="sc-btn">তথ্য জমা দিন</button>
     </div>
 
     <div class="sc-done" id="scDone" hidden></div>
 
+    <!-- পুরস্কার ও নিয়ম (ডিফল্টে ভাঁজ করা) -->
+    <div class="sc-info" id="scInfo" hidden>
+      <button type="button" class="sc-info-head" id="scInfoBtn" aria-expanded="false" aria-controls="scInfoBody">
+        <span>পুরস্কার ও নিয়ম</span>
+        <span class="sc-info-arrow" aria-hidden="true">▾</span>
+      </button>
+      <div class="sc-info-body" id="scInfoBody" hidden></div>
+    </div>
+
+    <!-- সাম্প্রতিক ক্যাশ বিজয়ী -->
     <div class="sc-wall" id="scWall" hidden>
-      <h4>🏆 সাম্প্রতিক বিজয়ী</h4>
+      <h4>সাম্প্রতিক ক্যাশ বিজয়ী</h4>
       <div id="scWallList"></div>
     </div>
   </div>
@@ -71,11 +86,11 @@
 <style is:global>
   .sc-teaser { margin: 12px 16px; }
   .sc-teaser[hidden] { display: none; }
-  .sc-teaser-btn { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 14px; border: none; border-radius: 18px; cursor: pointer; text-align: left; color: #fff; background: linear-gradient(135deg, #FF6B35 0%, #FF8F5E 100%); box-shadow: 0 6px 18px rgba(255, 107, 53, 0.28); font-family: inherit; }
+  .sc-teaser-btn { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px; border: none; border-radius: 18px; cursor: pointer; text-align: left; color: #fff; background: linear-gradient(135deg, #FF6B35 0%, #FF8F5E 100%); box-shadow: 0 6px 18px rgba(255, 107, 53, 0.28); font-family: inherit; }
   .sc-teaser-ico { font-size: 1.9rem; line-height: 1; }
-  .sc-teaser-txt { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .sc-teaser-txt { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .sc-teaser-txt strong { font-size: 1rem; font-weight: 800; }
-  .sc-teaser-txt small { font-size: 0.8rem; opacity: 0.95; }
+  .sc-teaser-txt small { font-size: 0.8rem; opacity: 0.95; line-height: 1.5; }
   .sc-teaser-go { background: #fff; color: #FF6B35; font-weight: 800; font-size: 0.85rem; padding: 8px 14px; border-radius: 999px; white-space: nowrap; }
 
   .sc-overlay { position: fixed; inset: 0; z-index: 3600; display: none; }
@@ -89,17 +104,19 @@
   .sc-card { position: relative; width: 100%; max-width: 340px; margin: 0 auto; aspect-ratio: 300 / 170; border-radius: 18px; overflow: hidden; background: #FFF4EC; border: 2px dashed #FF6B35; }
   .sc-face { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 10px; text-align: center; }
   .sc-face-main { font-size: 1.7rem; font-weight: 900; color: #1B2A4A; }
-  .sc-face-sub { font-size: 0.85rem; color: #3C4C66; }
-  .sc-face.is-cash .sc-face-main { color: #FF6B35; }
+  .sc-face-sub { font-size: 0.85rem; color: #3C4C66; line-height: 1.5; }
+  .sc-face.is-cash .sc-face-main { color: #FF6B35; font-size: 2rem; }
+  .sc-face.is-error .sc-face-main { font-size: 1.05rem; color: #B42318; }
   .sc-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: pointer; transition: opacity 0.35s ease; }
   .sc-canvas.gone { opacity: 0; pointer-events: none; }
   .sc-hint { text-align: center; margin: 10px 0 0; font-size: 0.85rem; color: #8090A6; }
   .sc-hint[hidden] { display: none; }
 
-  .sc-greet { margin: 14px auto 0; max-width: 340px; text-align: center; font-size: 0.95rem; font-weight: 700; color: #1B2A4A; background: #FFF4EC; border-radius: 14px; padding: 12px 14px; }
-  .sc-greet[hidden] { display: none; }
-  .sc-error { margin: 14px auto 0; max-width: 340px; text-align: center; font-size: 0.9rem; font-weight: 700; color: #B42318; background: #FFE3E0; border-radius: 14px; padding: 12px 14px; line-height: 1.6; }
-  .sc-error[hidden] { display: none; }
+  .sc-streak { margin: 12px auto 0; max-width: 340px; text-align: center; font-size: 0.85rem; font-weight: 700; color: #B54708; background: #FFF4E5; border-radius: 12px; padding: 9px 12px; line-height: 1.6; }
+  .sc-bonus { margin: 10px auto 0; max-width: 340px; text-align: center; font-size: 0.9rem; font-weight: 800; color: #067647; background: #E7F8EF; border-radius: 12px; padding: 10px 12px; line-height: 1.6; }
+  .sc-greet { margin: 14px auto 0; max-width: 340px; text-align: center; font-size: 0.95rem; font-weight: 700; color: #1B2A4A; background: #FFF4EC; border-radius: 14px; padding: 12px 14px; line-height: 1.6; }
+  .sc-error { margin: 14px auto 0; max-width: 340px; text-align: center; font-size: 0.9rem; font-weight: 700; color: #B42318; background: #FFE3E0; border-radius: 14px; padding: 12px 14px; line-height: 1.7; }
+  .sc-streak[hidden], .sc-bonus[hidden], .sc-greet[hidden], .sc-error[hidden], .sc-wall[hidden], .sc-info[hidden] { display: none; }
 
   .sc-pay { margin: 16px auto 0; max-width: 340px; }
   .sc-pay[hidden] { display: none; }
@@ -107,20 +124,27 @@
   .sc-pay label { display: block; font-size: 0.85rem; font-weight: 700; color: #1B2A4A; margin: 10px 0 4px; }
   .sc-pay input { width: 100%; box-sizing: border-box; padding: 12px; border: 1.5px solid #D5DCE8; border-radius: 12px; font-size: 1rem; font-family: inherit; }
   .sc-pay input:focus { outline: none; border-color: #FF6B35; }
-  .sc-pay-note { font-size: 0.78rem; color: #6B7A90; line-height: 1.6; margin: 8px 0 12px; }
+  .sc-pay-note { font-size: 0.78rem; color: #6B7A90; line-height: 1.7; margin: 8px 0 12px; }
   .sc-btn { width: 100%; padding: 13px; border: none; border-radius: 14px; background: #FF6B35; color: #fff; font-size: 1rem; font-weight: 800; cursor: pointer; font-family: inherit; }
   .sc-btn:disabled { opacity: 0.6; cursor: default; }
-  .sc-done { margin: 16px auto 0; max-width: 340px; text-align: center; font-size: 0.92rem; font-weight: 700; color: #067647; background: #E7F8EF; border-radius: 14px; padding: 12px 14px; line-height: 1.6; }
+  .sc-done { margin: 16px auto 0; max-width: 340px; text-align: center; font-size: 0.92rem; font-weight: 700; color: #067647; background: #E7F8EF; border-radius: 14px; padding: 12px 14px; line-height: 1.7; }
   .sc-done[hidden] { display: none; }
 
-  .sc-streak { margin: 12px auto 0; max-width: 340px; text-align: center; font-size: 0.85rem; font-weight: 700; color: #B54708; background: #FFF4E5; border-radius: 12px; padding: 9px 12px; line-height: 1.6; }
-  .sc-bonus { margin: 10px auto 0; max-width: 340px; text-align: center; font-size: 0.95rem; font-weight: 800; color: #067647; background: #E7F8EF; border-radius: 12px; padding: 10px 12px; }
-  .sc-streak[hidden], .sc-bonus[hidden], .sc-wall[hidden] { display: none; }
+  .sc-info { margin: 18px auto 0; max-width: 340px; border: 1px solid #E5EAF0; border-radius: 14px; overflow: hidden; }
+  .sc-info-head { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border: none; background: #F8FAFC; color: #1B2A4A; font-size: 0.92rem; font-weight: 800; cursor: pointer; font-family: inherit; }
+  .sc-info-arrow { transition: transform 0.2s; }
+  .sc-info-head[aria-expanded="true"] .sc-info-arrow { transform: rotate(180deg); }
+  .sc-info-body { padding: 4px 14px 14px; font-size: 0.84rem; color: #3C4C66; line-height: 1.75; }
+  .sc-info-body[hidden] { display: none; }
+  .sc-info-body h5 { margin: 12px 0 4px; font-size: 0.86rem; font-weight: 800; color: #1B2A4A; }
+  .sc-info-body ul { margin: 0; padding-left: 18px; }
+  .sc-info-body li { margin-bottom: 4px; }
+
   .sc-wall { margin: 20px auto 0; max-width: 340px; }
   .sc-wall h4 { margin: 0 0 8px; font-size: 0.95rem; font-weight: 800; color: #1B2A4A; }
-  .sc-wall-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #F8FAFC; border-radius: 12px; padding: 9px 12px; margin-bottom: 6px; font-size: 0.85rem; color: #1B2A4A; }
+  .sc-wall-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #F8FAFC; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px; font-size: 0.88rem; color: #1B2A4A; }
+  .sc-wall-item span { min-width: 0; overflow-wrap: anywhere; }
   .sc-wall-item b { font-weight: 800; color: #FF6B35; white-space: nowrap; }
-  .sc-wall-note { text-align: center; font-size: 0.82rem; color: #6B7A90; padding: 6px 0 10px; line-height: 1.6; }
 </style>
 
 <script>
@@ -143,10 +167,16 @@
   let revealed = false;
   let drawing = false;
   let moves = 0;
-  let timer = null;
 
   function bn(n) {
     return Number(n || 0).toLocaleString('bn-BD');
+  }
+
+  // [১, ২, ৩] → "১, ২ ও ৩"
+  function joinBn(arr) {
+    const a = arr.map((x) => String(x));
+    if (a.length <= 1) return a.join('');
+    return a.slice(0, -1).join(', ') + ' ও ' + a[a.length - 1];
   }
 
   function toast(msg, type) {
@@ -157,37 +187,39 @@
     const sec = Math.max(0, Math.floor((endTs - Date.now()) / 1000));
     const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
-    return h > 0 ? `${bn(h)} ঘণ্টা ${bn(m)} মিনিট বাকি` : `${bn(m)} মিনিট বাকি`;
+    return h > 0 ? `আর ${bn(h)} ঘণ্টা ${bn(m)} মিনিট` : `আর ${bn(m)} মিনিট`;
   }
 
   // ---------- টিজার ----------
+  function setTeaser(title, sub, go) {
+    teaser.hidden = false;
+    $('scTeaserTitle').textContent = title;
+    $('scTeaserSub').textContent = sub;
+    $('scTeaserGo').textContent = go;
+  }
+
   function renderTeaser() {
-    if (!status || !status.active) {
-      // ক্যাম্পেইন বন্ধ হলেও আগের জেতা পুরস্কারের বিকাশ নম্বর বাকি থাকলে টিজার দেখাই
-      if (status && status.unsubmitted_win) {
-        teaser.hidden = false;
-        $('scTeaserTitle').textContent = `আপনি ৳${bn(status.unsubmitted_win.cash_amount)} জিতেছেন`;
-        $('scTeaserSub').textContent = 'বিকাশ নম্বর দিয়ে পুরস্কার নিন';
-        $('scTeaserGo').textContent = 'নম্বর দিন';
-      } else {
-        teaser.hidden = true;
-      }
+    const win = status && status.unsubmitted_win;
+    if (win) {
+      setTeaser(`আপনার ৳${bn(win.cash_amount)} পুরস্কার অপেক্ষায় আছে`, 'বিকাশ নম্বর জমা দিলেই পাঠিয়ে দেওয়া হবে', 'জমা দিন');
       return;
     }
-    teaser.hidden = false;
-    const win = status.unsubmitted_win;
-    if (win) {
-      $('scTeaserTitle').textContent = `আপনি ৳${bn(win.cash_amount)} জিতেছেন 🎉`;
-      $('scTeaserSub').textContent = 'বিকাশ নম্বর দিয়ে পুরস্কার নিন';
-      $('scTeaserGo').textContent = 'নম্বর দিন';
-    } else if (status.card) {
-      $('scTeaserTitle').textContent = 'আজকের কার্ড ঘষা হয়েছে ✅';
-      $('scTeaserSub').textContent = 'কাল রাত ১২টায় নতুন কার্ড আসবে' + (status.streak > 1 ? ` · 🔥 ${bn(status.streak)} দিন টানা` : '');
-      $('scTeaserGo').textContent = 'দেখুন';
+    if (!status || !status.active) {
+      teaser.hidden = true;
+      return;
+    }
+    if (status.card) {
+      setTeaser(
+        'আজকের কার্ড খোলা হয়েছে',
+        'আগামীকাল রাত ১২টায় নতুন কার্ড পাবেন' + (status.streak > 1 ? ` · টানা ${bn(status.streak)} দিন` : ''),
+        'দেখুন'
+      );
     } else {
-      $('scTeaserTitle').textContent = 'আজকের স্ক্রেচ কার্ড';
-      $('scTeaserSub').textContent = `ঘষলেই পুরস্কার! ${leftText()}` + (status.streak > 0 ? ` · 🔥 ${bn(status.streak)} দিন টানা` : '');
-      $('scTeaserGo').textContent = 'ঘষুন';
+      setTeaser(
+        'আজকের স্ক্রেচ কার্ড',
+        `আজকের কার্ডটি আপনার অপেক্ষায় আছে · ${leftText()}` + (status.streak > 0 ? ` · টানা ${bn(status.streak)} দিন` : ''),
+        'খুলুন'
+      );
     }
   }
 
@@ -231,7 +263,7 @@
     ctx.font = '800 22px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('এখানে ঘষুন 👆', W / 2, H / 2);
+    ctx.fillText('এখানে ঘষুন', W / 2, H / 2);
   }
 
   function clearedRatio() {
@@ -308,7 +340,8 @@
     const box = $('scError');
     box.textContent = msg;
     box.hidden = false;
-    $('scFaceMain').textContent = '😔';
+    $('scFace').classList.add('is-error');
+    $('scFaceMain').textContent = 'কার্ড খোলা যায়নি';
     $('scFaceSub').textContent = '';
   }
 
@@ -322,30 +355,29 @@
     if (res.error) {
       // সার্ভারের বাংলা মেসেজ থাকলে সেটা, নইলে সাধারণ মেসেজ
       const raw = String(res.error.message || '');
-      const bangla = /[\u0980-\u09FF]/.test(raw) ? raw : 'কার্ড আনতে সমস্যা হয়েছে, একটু পরে আবার চেষ্টা করুন।';
-      showError(bangla);
-      claimPromise = null; // নেটওয়ার্ক সমস্যায় আবার চেষ্টার সুযোগ (শিট আবার খুললে)
+      showError(/[\u0980-\u09FF]/.test(raw) ? raw : 'কার্ড আনতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।');
+      claimPromise = null; // নেটওয়ার্ক সমস্যায় শিট আবার খুললে নতুন করে চেষ্টা
       return;
     }
     if (res.data && res.data.ok === false) {
-      showError(res.data.message || 'এই মুহূর্তে কার্ড ঘষা যাচ্ছে না।');
+      showError(res.data.message || 'এই মুহূর্তে কার্ড খোলা যাচ্ছে না।');
       return;
     }
     card = res.data.card;
-    await loadStatus();
+    await loadStatus(); // স্ট্রিক ও পরের মাইলফলক হালনাগাদ
     renderCard(card, true);
+    loadWinners();
   }
 
   // ---------- কার্ডের ফল ----------
   function renderCard(c, justRevealed) {
-    const face = $('scFace');
     const isCash = Number(c.cash_amount) > 0;
-    face.classList.toggle('is-cash', isCash);
+    $('scFace').classList.toggle('is-cash', isCash);
     if (isCash) {
-      $('scFaceMain').textContent = `🎉 ৳${bn(c.cash_amount)}`;
-      $('scFaceSub').textContent = 'অভিনন্দন! আপনি টাকা জিতেছেন';
+      $('scFaceMain').textContent = `৳${bn(c.cash_amount)}`;
+      $('scFaceSub').textContent = 'অভিনন্দন, আপনি জিতেছেন';
     } else {
-      $('scFaceMain').textContent = `+${bn(c.points)} পয়েন্ট`;
+      $('scFaceMain').textContent = `${bn(c.points)} পয়েন্ট`;
       $('scFaceSub').textContent = 'পয়েন্ট আপনার ব্যালেন্সে যোগ হয়েছে';
     }
     const greet = $('scGreet');
@@ -355,22 +387,22 @@
     }
     renderPay(c);
     renderStreak(c);
-    if (justRevealed && isCash) toast('অভিনন্দন! আপনি টাকা জিতেছেন 🎉', 'success');
+    if (justRevealed && isCash) toast(`অভিনন্দন! আপনি ৳${bn(c.cash_amount)} জিতেছেন।`, 'success');
   }
 
   function renderStreak(c) {
     const bonus = $('scBonus');
     if (Number(c.streak_bonus) > 0) {
-      bonus.textContent = `🔥 স্ট্রিক বোনাস! +${bn(c.streak_bonus)} পয়েন্ট`;
+      bonus.textContent = `স্ট্রিক বোনাস হিসেবে আরও ${bn(c.streak_bonus)} পয়েন্ট যোগ হয়েছে।`;
       bonus.hidden = false;
     } else {
       bonus.hidden = true;
     }
     const sk = $('scStreak');
     if (status && status.streak > 0) {
-      let t = `🔥 ${bn(status.streak)} দিন টানা`;
+      let t = `টানা ${bn(status.streak)} দিন কার্ড খুলেছেন।`;
       const nm = status.next_milestone;
-      if (nm && nm.days_left > 0) t += ` · আর ${bn(nm.days_left)} দিন টানা ঘষলে +${bn(nm.points)} পয়েন্ট`;
+      if (nm && nm.days_left > 0) t += ` আর ${bn(nm.days_left)} দিন খুললে ${bn(nm.points)} পয়েন্ট বোনাস পাবেন।`;
       sk.textContent = t;
       sk.hidden = false;
     } else {
@@ -387,49 +419,100 @@
     if (c.pay_status === 'none') {
       pay.hidden = false;
     } else if (c.pay_status === 'pending') {
-      done.textContent = 'আপনার বিকাশ নম্বর জমা হয়েছে। যাচাই করে পেমেন্ট করা হবে।';
+      done.textContent = `আপনার তথ্য পেয়েছি। যাচাইয়ের পর বিকাশে ৳${bn(c.cash_amount)} পাঠিয়ে দেওয়া হবে।`;
       done.hidden = false;
     } else if (c.pay_status === 'paid') {
-      done.textContent = 'পেমেন্ট সম্পন্ন হয়েছে ✅';
+      done.textContent = 'পুরস্কারের টাকা বিকাশে পাঠানো হয়েছে।';
       done.hidden = false;
     } else if (c.pay_status === 'rejected') {
-      done.textContent = 'দুঃখিত, এই পুরস্কারের পেমেন্ট করা যায়নি।';
+      done.textContent = 'দুঃখিত, এই পুরস্কারটি পাঠানো সম্ভব হয়নি। বিস্তারিত জানতে আমাদের সাথে যোগাযোগ করুন।';
       done.hidden = false;
     }
   }
 
-  // ---------- বিজয়ী দেয়াল (সার্ভার নাম মাস্ক করে দেয়; ফোন/বিকাশ নম্বর আসে না) ----------
-  const KIND_LABEL = { daily_cash: 'দৈনিক', weekly_cash: 'সাপ্তাহিক', mega: 'মেগা চমক' };
+  // ---------- পুরস্কার ও নিয়ম (তথ্য সবই সার্ভারের সেটিং থেকে) ----------
+  function addSection(parent, title, lines) {
+    if (!lines.length) return;
+    const h = document.createElement('h5');
+    h.textContent = title;
+    parent.appendChild(h);
+    const ul = document.createElement('ul');
+    lines.forEach((t) => {
+      const li = document.createElement('li');
+      li.textContent = t;
+      ul.appendChild(li);
+    });
+    parent.appendChild(ul);
+  }
 
+  function renderInfo() {
+    const box = $('scInfo');
+    const body = $('scInfoBody');
+    const pr = status && status.prizes;
+    if (!pr) {
+      box.hidden = true;
+      return;
+    }
+    body.textContent = '';
+
+    const prizes = [];
+    const pts = (pr.points || []).slice().sort((a, b) => a - b);
+    if (pts.length) {
+      let t = `প্রতিদিন কার্ড খুললে কমপক্ষে ${bn(pts[0])} পয়েন্ট নিশ্চিত।`;
+      if (pts.length > 1) t += ` কখনো ${joinBn(pts.slice(1).map(bn))} পয়েন্টও মিলতে পারে।`;
+      prizes.push(t);
+    }
+    const cash = pr.cash || [];
+    if (cash.length) prizes.push(`ক্যাশ পুরস্কার জেতার সুযোগ আছে: ${joinBn(cash.map((x) => '৳' + bn(x)))}।`);
+    // মেগা: সার্ভার null দিলে (সুইচ বন্ধ / মেগার দিন নেই / বিজয়ী হয়ে গেছে) এই লাইন পুরোপুরি বাদ
+    if (pr.mega) prizes.push(`মেগা চমক হিসেবে ৳${bn(pr.mega)} জেতার সুযোগও আছে। যে কেউ হতে পারেন সেই ভাগ্যবান।`);
+    const st = pr.streak || [];
+    if (st.length) {
+      prizes.push(
+        `টানা ${joinBn(st.map((s) => bn(s.days)))} দিন কার্ড খুললে অতিরিক্ত ${joinBn(st.map((s) => bn(s.points)))} পয়েন্ট বোনাস।`
+      );
+    }
+    addSection(body, 'কার্ডে কী কী পাওয়া যেতে পারে', prizes);
+
+    const rules = ['প্রতিদিন রাত ১২টায় নতুন কার্ড আসে। আগের দিনের কার্ডের মেয়াদ শেষ হয়ে যায়।', 'একটি ডিভাইসে দিনে একবারই কার্ড খোলা যায়।'];
+    if (cash.length || pr.mega) {
+      if (Number(pr.min_age_hours) > 0) rules.push(`ক্যাশ পুরস্কারের জন্য অ্যাকাউন্ট কমপক্ষে ${bn(pr.min_age_hours)} ঘণ্টার পুরনো হতে হয়।`);
+      rules.push('ক্যাশ জিতলে বিকাশ নম্বর জমা দিতে হয়। যাচাইয়ের পর টাকা পাঠানো হয়।');
+    }
+    rules.push('১০ পয়েন্টে ৳১। ১,০০০ পয়েন্ট জমলে উইথড্র করা যায়।');
+    addSection(body, 'নিয়ম', rules);
+
+    box.hidden = false;
+  }
+
+  function setInfoOpen(open) {
+    $('scInfoBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+    $('scInfoBody').hidden = !open;
+  }
+  $('scInfoBtn').addEventListener('click', () => {
+    setInfoOpen($('scInfoBtn').getAttribute('aria-expanded') !== 'true');
+  });
+
+  // ---------- সাম্প্রতিক ক্যাশ বিজয়ী (পুরো নাম + অংক, সর্বশেষ সবার উপরে) ----------
   async function loadWinners() {
     const wall = $('scWall');
     try {
       const { data, error } = await supabase.rpc('get_scratch_winners');
-      if (error || !Array.isArray(data)) {
+      if (error || !Array.isArray(data) || !data.length) {
         wall.hidden = true;
         return;
       }
       const list = $('scWallList');
       list.textContent = '';
-      const today = status && status.today;
-      if (!data.some((x) => x.card_date === today)) {
-        const note = document.createElement('div');
-        note.className = 'sc-wall-note';
-        note.textContent = 'আজকের ক্যাশ বিজয়ী এখনো ঠিক হয়নি, আপনিই হতে পারেন!';
-        list.appendChild(note);
-      }
       data.forEach((x) => {
         const row = document.createElement('div');
         row.className = 'sc-wall-item';
-        const left = document.createElement('span');
-        const day = x.card_date === today
-          ? 'আজ'
-          : new Date(x.card_date + 'T00:00:00').toLocaleDateString('bn-BD', { day: 'numeric', month: 'short' });
-        left.textContent = `🏆 ${x.name} · ${day}`;
-        const right = document.createElement('b');
-        right.textContent = `৳${bn(x.amount)} · ${KIND_LABEL[x.kind] || ''}`;
-        row.appendChild(left);
-        row.appendChild(right);
+        const name = document.createElement('span');
+        name.textContent = x.name;
+        const amt = document.createElement('b');
+        amt.textContent = `৳${bn(x.amount)}`;
+        row.appendChild(name);
+        row.appendChild(amt);
         list.appendChild(row);
       });
       wall.hidden = false;
@@ -451,17 +534,18 @@
     $('scStreak').hidden = true;
     $('scBonus').hidden = true;
     $('scHint').hidden = false;
-    $('scFace').classList.remove('is-cash');
+    $('scFace').classList.remove('is-cash', 'is-error');
     $('scFaceMain').textContent = '…';
     $('scFaceSub').textContent = '';
     canvas.classList.remove('gone');
+    setInfoOpen(false);
     drawCover();
   }
 
   function openSheet() {
     if (!status) return;
     resetSheet();
-    // আগের দিনের জেতা কার্ড (বিকাশ নম্বর বাকি) — সরাসরি ফর্ম
+    // আগের দিনের জেতা কার্ড (বিকাশ নম্বর বাকি) থাকলে সরাসরি ফর্ম
     const win = status.unsubmitted_win;
     const todays = status.card;
     const show = todays && (!win || win.id === todays.id) ? todays : win || todays;
@@ -477,6 +561,7 @@
       claimPromise = null;
       renderStreak({ streak_bonus: 0 });
     }
+    renderInfo();
     loadWinners();
     overlay.classList.add('open');
   }
@@ -495,7 +580,7 @@
     const num = String($('scBkash').value || '').trim();
     const link = String($('scPost').value || '').trim();
     if (!/^01[0-9]{9}$/.test(num)) {
-      toast('সঠিক বিকাশ নম্বর দিন (১১ ডিজিট)', 'error');
+      toast('সঠিক বিকাশ নম্বর দিন (১১ সংখ্যা)', 'error');
       return;
     }
     if (link && !/^https?:\/\/\S{4,}$/i.test(link)) {
@@ -512,18 +597,19 @@
         p_post_link: link || null,
       });
       if (error) {
-        toast(error.message || 'জমা দেওয়া যায়নি, আবার চেষ্টা করুন', 'error');
+        const raw = String(error.message || '');
+        toast(/[\u0980-\u09FF]/.test(raw) ? raw : 'তথ্য জমা দেওয়া যায়নি। আবার চেষ্টা করুন।', 'error');
       } else {
         card.pay_status = 'pending';
         renderPay(card);
-        toast('বিকাশ নম্বর জমা হয়েছে ✅', 'success');
+        toast('আপনার তথ্য জমা হয়েছে।', 'success');
         loadStatus();
       }
     } catch (e) {
-      toast('নেটওয়ার্ক সমস্যা, আবার চেষ্টা করুন', 'error');
+      toast('নেটওয়ার্ক সমস্যা হয়েছে। আবার চেষ্টা করুন।', 'error');
     } finally {
       btn.disabled = false;
-      btn.textContent = 'বিকাশ নম্বর জমা দিন';
+      btn.textContent = 'তথ্য জমা দিন';
     }
   });
 
@@ -531,7 +617,7 @@
   drawCover();
   loadStatus();
   // মিনিটে একবার কাউন্টডাউন আপডেট; দিন বদলালে (রাত ১২টা) নতুন স্ট্যাটাস
-  timer = setInterval(() => {
+  setInterval(() => {
     if (endTs && Date.now() >= endTs) {
       loadStatus();
     } else if (status && status.active && !status.card && !status.unsubmitted_win) {

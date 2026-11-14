@@ -1,7 +1,8 @@
 ---
 // ============================================================
 // পেজ: অ্যাডমিন — স্ক্রেচ কার্ড (/admin/scratch-cards)
-// শুধু role === 'admin' (টাকার হিসাব, মডারেটর/স্টাফ বন্ধ) — adminGuard.js + extra চেক।
+// সুপার অ্যাডমিন + রোলে scratch_card পারমিশন থাকা স্টাফ (দেখা = শুধু পড়া, পরিচালনা = বদলানো ও পেমেন্ট মার্ক)।
+// DB-তেও একই পারমিশন-ভিত্তিক RLS/RPC (has_permission), তাই UI ছাড়া অন্য পথেও অনুমতি ছাড়া কিছু হবে না।
 //
 // তিনটা অংশ:
 //   ১) সেটিং — ক্যাম্পেইন অন/অফ, শুরু-শেষের তারিখ, মেগার দিন, পয়েন্টের অনুপাত,
@@ -37,6 +38,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         </div>
 
         <div class="sca-stats" id="scaStats"></div>
+
+        <div class="sca-readonly" id="scaReadonly" style="display:none;">আপনার শুধু দেখার অনুমতি আছে। সেটিং বদলাতে বা পেমেন্ট মার্ক করতে "পরিচালনা" অনুমতি লাগবে।</div>
 
         <div class="sca-tabs" role="tablist">
           <button type="button" class="sca-tab active" data-tab="winners" role="tab">বিজয়ী <span class="sca-tab-count" id="scaPendingCount" style="display:none;">0</span></button>
@@ -81,7 +84,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             <input id="scaEnd" class="sca-input" type="date" />
             <label class="sca-label" for="scaMega">মেগা চমকের দিন (তারিখ, কমা দিয়ে: ২০২৬-১২-২৭, ২০২৬-১২-২৮)</label>
             <input id="scaMega" class="sca-input" type="text" placeholder="YYYY-MM-DD, YYYY-MM-DD" />
-            <p class="sca-note">মেগা ১ জনই পাবে, এই দিনগুলোর মধ্যে যে দিন আগে ঘটে যায়। তারিখ বাংলাদেশ সময় ধরে।</p>
+            <label class="sca-check"><input id="scaMegaOn" type="checkbox" /> মেগা চমক চালু আছে</label>
+            <p class="sca-note">মেগা ১ জনই পাবে, এই দিনগুলোর মধ্যে যে দিন আগে ঘটে যায়। তারিখ বাংলাদেশ সময় ধরে। এই সুইচ বন্ধ করলে, বা মেগা বিজয়ী হয়ে গেলে, বা মেগার সব দিন পেরিয়ে গেলে ইউজারের "পুরস্কার ও নিয়ম" অংশ থেকে মেগার কথা নিজে থেকে মুছে যায়।</p>
           </div>
 
           <div class="sca-card">
@@ -206,6 +210,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .sca-btn:disabled { opacity: 0.6; }
     .sca-error { background: #FFF0F0; color: #B42318; border-radius: 12px; padding: 10px 12px; font-size: 0.86rem; margin-bottom: 12px; line-height: 1.6; }
 
+    .sca-readonly { background: #FFF7E6; color: #93370D; border-radius: 12px; padding: 10px 12px; font-size: 0.84rem; line-height: 1.6; margin-bottom: 14px; }
+    .sca-check { display: flex; align-items: center; gap: 8px; margin: 12px 0 2px; font-size: 0.88rem; font-weight: 700; color: #1B2A4A; }
+    .sca-check input { width: 18px; height: 18px; accent-color: #FF6B35; }
     .sca-modal-overlay { position: fixed; inset: 0; z-index: 3600; display: none; }
     .sca-modal-overlay.open { display: block; }
     .sca-modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.55); }
@@ -230,6 +237,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     let recent = [];
     let filter = 'pending';
     let modalState = null; // { status, card }
+    let canManage = false;
 
     function bn(n) { return Number(n || 0).toLocaleString('bn-BD'); }
     function toast(msg, type) { if (typeof window.showToast === 'function') window.showToast(msg, type || 'success'); }
@@ -349,7 +357,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         if (w.submitted_at) item.appendChild(el('div', 'sca-item-sub', 'জমা: ' + fmtDate(w.submitted_at) + (w.paid_at ? ' · পেইড: ' + fmtDate(w.paid_at) : '')));
         if (w.admin_note) item.appendChild(el('div', 'sca-item-sub', 'নোট: ' + w.admin_note));
 
-        if (w.pay_status === 'pending') {
+        if (canManage && w.pay_status === 'pending') {
           const act = el('div', 'sca-actions');
           const pay = el('button', 'sca-act pay', 'পেইড মার্ক করুন');
           pay.type = 'button';
@@ -428,6 +436,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('scaStart').value = cfg.start_date || '';
       $('scaEnd').value = cfg.end_date || '';
       $('scaMega').value = (cfg.mega_dates || []).join(', ');
+      $('scaMegaOn').checked = cfg.mega_enabled !== false;
       const w = cfg.point_weights || {};
       ['10', '20', '50', '100'].forEach((k) => { $('scaW' + k).value = w[k] ?? 0; });
       $('scaDaily').value = (cfg.daily_cash_amounts || []).join(', ');
@@ -452,6 +461,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     }
 
     $('scaSave').addEventListener('click', async () => {
+      if (!canManage) return;
       showSettingsError('');
       const start = $('scaStart').value || null;
       const end = $('scaEnd').value || null;
@@ -503,6 +513,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           start_date: start,
           end_date: end,
           mega_dates: mega,
+          mega_enabled: $('scaMegaOn').checked,
           point_weights: weights,
           daily_cash_amounts: daily,
           weekly_cash_amounts: weekly,
@@ -524,7 +535,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     // অন/অফ: সেভ করা তারিখ না থাকলে চালু করতে দেয় না
     $('scaToggle').addEventListener('click', async () => {
-      if (!cfg) return;
+      if (!cfg || !canManage) return;
       showSettingsError('');
       const next = !cfg.enabled;
       if (next && (!cfg.start_date || !cfg.end_date)) {
@@ -554,12 +565,26 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       });
     });
 
+    // শুধু দেখার অনুমতি হলে সব ইনপুট/বোতাম বন্ধ
+    function applyPermissions() {
+      $('scaReadonly').style.display = canManage ? 'none' : '';
+      if (canManage) return;
+      document.querySelectorAll('#scaPaneSettings input, #scaPaneSettings textarea').forEach((x) => { x.disabled = true; });
+      $('scaSave').style.display = 'none';
+      $('scaToggle').disabled = true;
+    }
+
     // ---------- শুরু ----------
     initAdminGuard();
     window.addEventListener('smartfeni:admin-ready', async (e) => {
-      // টাকার হিসাব: শুধু সুপার অ্যাডমিন
-      if (e.detail.role !== 'admin') { window.location.href = '/admin'; return; }
+      // টাকার হিসাব: সুপার অ্যাডমিন অথবা রোলে scratch_card পারমিশন থাকা স্টাফ
+      const acc = e.detail.access;
+      const isSuper = e.detail.role === 'admin';
+      const staffView = !!(acc && acc.isStaff && acc.can('scratch_card.view'));
+      if (!isSuper && !staffView) { window.location.href = '/admin'; return; }
+      canManage = isSuper || !!(acc && acc.isStaff && acc.can('scratch_card.manage'));
       await Promise.all([loadConfig(), loadCards()]);
+      applyPermissions();
       const q = new URLSearchParams(window.location.search).get('tab');
       if (q) document.querySelector('.sca-tab[data-tab="' + q + '"]')?.click();
     });
