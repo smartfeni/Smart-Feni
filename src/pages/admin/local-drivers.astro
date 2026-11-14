@@ -23,6 +23,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
       <div id="adminGuardedContent" style="display:none;">
         <a href="/admin" class="ld-back"><i class="fas fa-arrow-left"></i> অ্যাডমিন ড্যাশবোর্ডে ফিরুন</a>
+        <div class="sw-bar">
+          <a href="/admin/delivery-riders"><i class="fas fa-box"></i> ডেলিভারি হিরো</a>
+          <a href="/admin/local-drivers" class="on"><i class="fas fa-van-shuttle"></i> লোকাল রাইড</a>
+        </div>
+
         <h1 class="ld-h1"><i class="fas fa-van-shuttle"></i> লোকাল রাইড ড্রাইভার</h1>
 
         <div class="ld-tabs" role="tablist">
@@ -48,6 +53,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .ld-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: ldspin .8s linear infinite; }
     @keyframes ldspin { to { transform: rotate(360deg); } }
     .ld-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: .88rem; margin-bottom: 18px; min-height: 44px; }
+    .sw-bar { display: flex; gap: 6px; background: #F1F5F9; border-radius: 14px; padding: 4px; margin-bottom: 16px; }
+    .sw-bar a { flex: 1; min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 11px; font-size: .86rem; font-weight: 800; color: #5A6E85; text-decoration: none; }
+    .sw-bar a.on { background: #fff; color: #FF6B35; box-shadow: 0 2px 8px rgba(15,23,42,.08); }
     .ld-h1 { font-size: 1.4rem; font-weight: 800; color: #1B2A4A; display: flex; align-items: center; gap: 10px; margin: 0 0 16px; }
     .ld-h1 i { color: #FF6B35; }
     .ld-tabs { display: flex; gap: 6px; margin-bottom: 20px; border-bottom: 1px solid #EEF3F9; }
@@ -155,12 +163,18 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const ids = (drivers || []).map((d) => d.id);
       const userIds = [...new Set((drivers || []).map((d) => d.user_id))];
 
-      const [vt, ar, da, pr] = await Promise.all([
+      const [vt, ar, da, pr, du] = await Promise.all([
         supabase.from('local_ride_vehicle_types').select('id, name_bn'),
         supabase.from('local_areas').select('id, name_bn, upazila'),
         ids.length ? supabase.from('local_ride_driver_areas').select('driver_id, area_id').in('driver_id', ids) : Promise.resolve({ data: [] }),
         userIds.length ? supabase.from('profiles').select('id, full_name, phone').in('id', userIds) : Promise.resolve({ data: [] }),
+        ids.length ? supabase.from('local_ride_driver_upazilas').select('driver_id, upazila').in('driver_id', ids) : Promise.resolve({ data: [] }),
       ]);
+      const upaBy = new Map();
+      (du.data || []).forEach((r) => {
+        if (!upaBy.has(r.driver_id)) upaBy.set(r.driver_id, []);
+        upaBy.get(r.driver_id).push(r.upazila);
+      });
       const vtMap = new Map((vt.data || []).map((x) => [x.id, x.name_bn]));
       const areaMap = new Map((ar.data || []).map((x) => [x.id, x]));
       const prMap = new Map((pr.data || []).map((x) => [x.id, x]));
@@ -179,6 +193,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         idUrl: await signedIdUrl(d.id_card_photo_url),
         vtName: vtMap.get(d.vehicle_type_id) || '',
         areas: areasBy.get(d.id) || [],
+        upazilas: upaBy.get(d.id) || [],
         profile: prMap.get(d.user_id) || null,
       })));
 
@@ -249,6 +264,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         if (d.vtName) info.appendChild(el('span', 'ld-chip', d.vtName));
         if (d.vehicle_number) info.appendChild(el('span', 'ld-chip', d.vehicle_number));
         d.areas.forEach((a) => info.appendChild(el('span', 'ld-chip area', (a.name_bn || '') + (a.upazila ? ' · ' + a.upazila : ''))));
+        d.upazilas.forEach((u) => info.appendChild(el('span', 'ld-chip area', (u || '') + ' (পুরো উপজেলা)')));
         card.appendChild(info);
 
         const docs = el('div', 'ld-docs');
