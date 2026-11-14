@@ -120,6 +120,11 @@ const ordersGuide = [
           <button type="button" class="mo-tab" data-tab="done">সম্পন্ন</button>
         </div>
 
+        <div id="ordersFilter" class="mo-filter" style="display:none;">
+          <label for="typeFilter">ধরন</label>
+          <select id="typeFilter" class="mo-filter-select" aria-label="অর্ডারের ধরন অনুযায়ী ফিল্টার"></select>
+        </div>
+
         <div id="ordersContainer" class="orders-list"></div>
       </div>
 
@@ -1123,6 +1128,42 @@ const ordersGuide = [
       font-family: inherit;
       cursor: pointer;
     }
+
+    /* ধরন ফিল্টার + লোকাল রাইড কার্ড */
+    .mo-filter { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+    .mo-filter label { font-size: 0.8rem; font-weight: 700; color: #5B6B86; flex: none; }
+    .mo-filter-select { flex: 1; min-height: 44px; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; color: #1B2A4A; font-family: inherit; font-size: 0.92rem; font-weight: 700; padding: 0 12px; }
+    .mo-filter-select:focus { outline: none; border-color: #FF6B35; }
+    .lo-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+    .lo-title { font-weight: 800; font-size: 0.98rem; color: #1B2A4A; display: inline-flex; align-items: center; gap: 8px; }
+    .lo-title i { color: #FF6B35; }
+    .lo-chip { border-radius: 999px; padding: 3px 10px; font-size: 12.5px; font-weight: 700; background: #FFF1C9; color: #6B4A00; flex: none; }
+    .lo-chip.ok { background: #E8F7EE; color: #14693A; }
+    .lo-chip.done { background: #E3F0FF; color: #0B4A8F; }
+    .lo-chip.off { background: #F1F5F9; color: #5B6B86; }
+    .lo-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .lo-tag { font-size: 12.5px; font-weight: 600; background: #F1F5F9; border-radius: 999px; padding: 3px 10px; }
+    .lo-fare { font-size: 1.05rem; font-weight: 800; color: #1B2A4A; }
+    .lo-left { font-size: 12.5px; color: #8696AE; font-weight: 600; margin-left: 8px; }
+    .lo-note { font-size: 13px; color: #5B6B86; margin: 6px 0; }
+    .lo-sec { margin: 12px 0 6px; font-size: 13px; font-weight: 700; color: #5B6B86; }
+    .lo-offer { display: flex; align-items: center; gap: 10px; border: 1.5px solid #FFD9C7; background: #FFF9F6; border-radius: 16px; padding: 10px; margin-bottom: 8px; }
+    .lo-av { width: 44px; height: 44px; border-radius: 50%; background: #FFE4D6; color: #FF6B35; display: flex; align-items: center; justify-content: center; overflow: hidden; flex: none; }
+    .lo-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .lo-who { flex: 1; min-width: 0; }
+    .lo-who b { display: block; font-size: 14.5px; }
+    .lo-who small { font-size: 12.5px; color: #5B6B86; }
+    .lo-price { font-size: 16px; font-weight: 800; margin-right: 4px; }
+    .lo-btn { min-height: 44px; border: 0; border-radius: 12px; padding: 0 14px; font-weight: 700; font-size: 14px; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; }
+    .lo-btn.pri { background: #FF6B35; color: #fff; }
+    .lo-btn.ok { background: #1B7A3C; color: #fff; }
+    .lo-btn.danger { background: #FFF0EA; color: #D14343; }
+    .lo-btn:disabled { opacity: .6; cursor: default; }
+    .lo-driver { display: flex; align-items: center; gap: 10px; background: #E8F7EE; border-radius: 16px; padding: 10px; margin-top: 8px; }
+    .lo-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .lo-actions .lo-btn { flex: 1; }
+    .lo-wait { font-size: 13.5px; color: #5B6B86; margin-top: 6px; }
+    .lo-reported { font-size: 13px; color: #7A3E00; background: #FFF4E5; border-radius: 12px; padding: 8px 12px; margin-top: 10px; font-weight: 600; }
   </style>
 
   <script>
@@ -1196,11 +1237,17 @@ const ordersGuide = [
 
     // ট্যাব + ডিপ-লিংক স্টেট
     let activeTab = 'ongoing';
+    // ধরন ফিল্টার (সব / অনলাইন শপ / ডেলিভারি / লোকাল রাইড / ডাক্তার সিরিয়াল / অফলাইন) — পেজ রিফ্রেশেও মনে থাকে
+    let activeType = 'all';
+    try { activeType = sessionStorage.getItem('mo_type') || 'all'; } catch (_) { /* সেশন স্টোরেজ না থাকলেও চলবে */ }
     let deepLinkHandled = false;
     let lastData = null;
     const deepLinkParams = new URLSearchParams(window.location.search);
+    if (deepLinkParams.get('tab') === 'done') activeTab = 'done';
     const ordersTabs = document.getElementById('ordersTabs');
     const tabCountOngoing = document.getElementById('tabCountOngoing');
+    const ordersFilter = document.getElementById('ordersFilter');
+    const typeFilter = document.getElementById('typeFilter');
 
     // ============ কনফার্ম বটম শিট ============
     // শিটটা পেজের কার্ড-কনটেইনারের বাইরে, তাই ১৫ সেকেন্ডের রিফ্রেশে বন্ধ হয় না
@@ -1938,8 +1985,306 @@ const ordersGuide = [
       }
     }
 
+    // ============ লোকাল রাইড কার্ড ============
+    const LR_ERR = {
+      REQUEST_NOT_AVAILABLE: 'এই রিকোয়েস্ট আর চালু নেই',
+      OFFER_NOT_ACTIVE: 'এই অফারটা আর নেই',
+      OFFER_NOT_FOUND: 'অফার পাওয়া যায়নি',
+      DRIVER_NOT_AVAILABLE: 'ড্রাইভার এখন পাওয়া যাচ্ছে না',
+      CANNOT_CANCEL: 'এই রিকোয়েস্ট আর বাতিল করা যাবে না',
+      FORBIDDEN: 'এই কাজের অনুমতি নেই',
+      AUTH_REQUIRED: 'আবার লগইন করুন',
+      NOT_REPORTABLE: 'এই রাইডের রিপোর্ট এখন করা যাবে না',
+      REPORT_WINDOW_CLOSED: 'রিপোর্টের সময় (২৪ ঘণ্টা) পার হয়ে গেছে',
+      ALREADY_REPORTED: 'এই রাইডের রিপোর্ট আগেই জমা আছে',
+      DAILY_LIMIT: 'আজকের জন্য রিপোর্টের সীমা শেষ, কাল আবার চেষ্টা করুন',
+      REASON_INVALID: 'কারণ ঠিক নেই, আবার বেছে নিন',
+    };
+    function lrErrText(error) {
+      const m = String((error && error.message) || '');
+      const k = Object.keys(LR_ERR).find((key) => m.includes(key));
+      return k ? LR_ERR[k] : 'কাজটা করা যায়নি, আবার চেষ্টা করুন';
+    }
+    function lrToast(msg, type) {
+      if (typeof window.showToast === 'function') window.showToast(msg, type || 'error');
+    }
+    function lrEl(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    function lrIcon(cls) { const i = document.createElement('i'); i.className = cls; return i; }
+    function lrSafeUrl(u) { return /^https:[/][/]/.test(u || '') ? String(u).replace(/["'<>\s]/g, '') : null; }
+    function lrSafePhone(p) { return String(p || '').replace(/[^0-9+]/g, ''); }
+    function lrLeft(expiresAt) {
+      const ms = new Date(expiresAt).getTime() - Date.now();
+      if (!(ms > 0)) return '';
+      return toBn(Math.max(1, Math.ceil(ms / 60000))) + ' মিনিট বাকি';
+    }
+    function lrAvatar(url) {
+      const av = lrEl('span', 'lo-av');
+      const u = lrSafeUrl(url);
+      if (u) { const im = document.createElement('img'); im.src = u; im.alt = ''; im.loading = 'lazy'; av.appendChild(im); }
+      else av.appendChild(lrIcon('fas fa-user'));
+      return av;
+    }
+
+    let lrBusy = false;
+    async function lrAct(btn, fn, okMsg) {
+      if (lrBusy) return;
+      lrBusy = true;
+      btn.disabled = true;
+      const { error } = await fn();
+      lrBusy = false;
+      if (error) {
+        btn.disabled = false;
+        lrToast(lrErrText(error));
+        if (window.SFReportError && !/REQUEST_NOT_AVAILABLE|OFFER_NOT_|DRIVER_NOT_AVAILABLE|CANNOT_CANCEL|FORBIDDEN|AUTH_REQUIRED|NOT_REPORTABLE|REPORT_WINDOW_CLOSED|ALREADY_REPORTED|DAILY_LIMIT|REASON_INVALID/.test(String(error.message || ''))) {
+          window.SFReportError({ kind: 'api_fail', action: 'local_ride_customer_action', title: 'লোকাল রাইড যাত্রীর অ্যাকশন ব্যর্থ', message: String(error.message || '') });
+        }
+        refreshOrders();
+        return;
+      }
+      lrToast(okMsg, 'success');
+      refreshOrders();
+    }
+
+    // রিপোর্টের কারণ + ঐচ্ছিক নোট (বটম শিট) — { reason, note } ফেরত দেয়, বাদ দিলে null
+    function askLocalRideReport() {
+      return new Promise((resolve) => {
+        const reasons = [
+          ['driver_no_show', 'ড্রাইভার আসেনি'],
+          ['fare_dispute', 'ভাড়া নিয়ে সমস্যা'],
+          ['unsafe_behavior', 'খারাপ আচরণ / নিরাপত্তা'],
+          ['wrong_info', 'ভুল তথ্য'],
+          ['other', 'অন্য সমস্যা'],
+        ];
+        let picked = null;
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(27,42,74,.55);display:flex;align-items:flex-end;justify-content:center;';
+        const sheet = document.createElement('div');
+        sheet.style.cssText = 'background:#fff;width:100%;max-width:480px;max-height:90vh;overflow:auto;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));box-shadow:0 -6px 24px rgba(0,0,0,.18);';
+        const title = lrEl('div', null, 'কী সমস্যা হয়েছে?');
+        title.style.cssText = 'font-size:16px;font-weight:700;color:#1B2A4A;margin-bottom:10px;';
+        sheet.appendChild(title);
+        const done = (val) => { wrap.remove(); resolve(val); };
+        const submit = lrEl('button', null, 'রিপোর্ট পাঠান');
+        submit.type = 'button';
+        submit.disabled = true;
+        submit.style.cssText = 'display:block;width:100%;padding:13px 14px;margin-top:10px;border:none;border-radius:12px;background:#FF6B35;color:#fff;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;opacity:.6;';
+        const btns = [];
+        reasons.forEach(([code, label]) => {
+          const b = lrEl('button', null, label);
+          b.type = 'button';
+          b.style.cssText = 'display:block;width:100%;text-align:left;padding:13px 14px;margin-bottom:8px;border:1.5px solid #e2e8f0;border-radius:12px;background:#fff;color:#1B2A4A;font-size:15px;font-family:inherit;cursor:pointer;';
+          b.addEventListener('click', () => {
+            picked = code;
+            btns.forEach((x) => { x.style.borderColor = x === b ? '#FF6B35' : '#e2e8f0'; x.style.background = x === b ? '#FFF6F1' : '#fff'; });
+            submit.disabled = false;
+            submit.style.opacity = '1';
+          });
+          btns.push(b);
+          sheet.appendChild(b);
+        });
+        const note = document.createElement('textarea');
+        note.maxLength = 500;
+        note.rows = 3;
+        note.placeholder = 'কী হয়েছে সংক্ষেপে লিখুন (ঐচ্ছিক)';
+        note.style.cssText = 'width:100%;box-sizing:border-box;border:1.5px solid #D5DCE8;border-radius:12px;padding:10px 12px;font-size:14.5px;font-family:inherit;color:#1B2A4A;resize:vertical;';
+        sheet.appendChild(note);
+        submit.addEventListener('click', () => { if (picked) done({ reason: picked, note: note.value.trim() }); });
+        sheet.appendChild(submit);
+        const cancel = lrEl('button', null, 'না, বাদ দিন');
+        cancel.type = 'button';
+        cancel.style.cssText = 'display:block;width:100%;padding:12px 14px;margin-top:4px;border:none;background:transparent;color:#6C7A93;font-size:14.5px;font-weight:700;font-family:inherit;cursor:pointer;';
+        cancel.addEventListener('click', () => done(null));
+        sheet.appendChild(cancel);
+        wrap.appendChild(sheet);
+        wrap.addEventListener('click', (ev) => { if (ev.target === wrap) done(null); });
+        document.body.appendChild(wrap);
+      });
+    }
+
+    function renderLocalRideCard(r) {
+      const card = document.createElement('div');
+      card.className = 'order-card';
+      card.dataset.lrId = r.id;
+      const st = r.status;
+
+      const head = lrEl('div', 'lo-head');
+      const ttl = lrEl('span', 'lo-title');
+      ttl.appendChild(lrIcon('fas fa-van-shuttle'));
+      ttl.appendChild(document.createTextNode('লোকাল রাইড'));
+      head.appendChild(ttl);
+      const label = st === 'open' ? 'ড্রাইভারের অপেক্ষায়' : st === 'confirmed' ? 'কনফার্ম' : st === 'completed' ? 'সম্পন্ন' : st === 'cancelled' ? 'বাতিল' : 'মেয়াদ শেষ';
+      head.appendChild(lrEl('span', 'lo-chip' + (st === 'confirmed' ? ' ok' : st === 'completed' ? ' done' : st === 'open' ? '' : ' off'), label));
+      card.appendChild(head);
+
+      const dateLine = lrEl('p', 'order-date');
+      if (r.request_no) {
+        const b = lrEl('b', null, '#' + r.request_no);
+        b.style.cssText = 'color:#1B2A4A;letter-spacing:0.3px;';
+        dateLine.appendChild(b);
+        dateLine.appendChild(document.createTextNode(' · '));
+      }
+      dateLine.appendChild(document.createTextNode(formatDate(r.created_at)));
+      card.appendChild(dateLine);
+
+      const trip = lrEl('div', 'hu-trip');
+      const p = lrEl('div', 'hu-trip-stop');
+      p.appendChild(document.createTextNode(r.pickup_text || r.pickup_area || '—'));
+      p.appendChild(lrEl('small', null, 'পিকআপ' + (r.pickup_area ? ' · ' + r.pickup_area : '')));
+      trip.appendChild(p);
+      const d = lrEl('div', 'hu-trip-stop');
+      d.appendChild(document.createTextNode(r.drop_text || r.drop_area || 'ম্যাপে দেওয়া গন্তব্য'));
+      d.appendChild(lrEl('small', null, 'গন্তব্য' + (r.drop_area ? ' · ' + r.drop_area : '')));
+      trip.appendChild(d);
+      card.appendChild(trip);
+
+      const meta = lrEl('div', 'lo-meta');
+      (r.vehicle_types || []).forEach((v) => meta.appendChild(lrEl('span', 'lo-tag', v)));
+      meta.appendChild(lrEl('span', 'lo-tag', toBn(r.passengers) + ' জন'));
+      card.appendChild(meta);
+
+      const fareRow = lrEl('div');
+      const price = (st === 'confirmed' || st === 'completed') && r.final_price != null ? r.final_price : r.fare;
+      fareRow.appendChild(lrEl('span', 'lo-fare', '৳' + toBn(Math.round(Number(price)))));
+      if (st === 'open') { const lt = lrLeft(r.expires_at); if (lt) fareRow.appendChild(lrEl('span', 'lo-left', lt)); }
+      card.appendChild(fareRow);
+
+      if (r.note) card.appendChild(lrEl('p', 'lo-note', r.note));
+
+      if (st === 'open') {
+        const offers = r.offers || [];
+        if (offers.length) {
+          card.appendChild(lrEl('p', 'lo-sec', 'ড্রাইভারের অফার (' + toBn(offers.length) + ')'));
+          offers.forEach((o) => {
+            const row = lrEl('div', 'lo-offer');
+            row.appendChild(lrAvatar(o.driver_photo));
+            const who = lrEl('div', 'lo-who');
+            who.appendChild(lrEl('b', null, o.driver_name || 'ড্রাইভার'));
+            who.appendChild(lrEl('small', null, [o.vehicle_type, o.vehicle_number].filter(Boolean).join(' · ')));
+            row.appendChild(who);
+            row.appendChild(lrEl('span', 'lo-price', '৳' + toBn(Math.round(Number(o.price)))));
+            const b = lrEl('button', 'lo-btn ok', 'গ্রহণ');
+            b.type = 'button';
+            b.addEventListener('click', async () => {
+              const ok = await askConfirm({
+                title: '৳' + toBn(Math.round(Number(o.price))) + '-এ কনফার্ম করবেন?',
+                text: 'কনফার্ম করলে এই ড্রাইভারের সাথে ট্রিপ ঠিক হয়ে যাবে।',
+                okLabel: 'হ্যাঁ, কনফার্ম করুন',
+              });
+              if (!ok) return;
+              lrAct(b, () => supabase.rpc('local_ride_customer_accept_offer', { p_offer_id: o.id }), 'ট্রিপ কনফার্ম হয়েছে ✓');
+            });
+            row.appendChild(b);
+            card.appendChild(row);
+          });
+        } else {
+          card.appendChild(lrEl('p', 'lo-wait', 'এলাকার ড্রাইভাররা রিকোয়েস্ট দেখছে। কেউ রাজি হলে এখানেই জানা যাবে।'));
+        }
+        const actions = lrEl('div', 'lo-actions');
+        const c = lrEl('button', 'lo-btn danger', 'রিকোয়েস্ট বাতিল');
+        c.type = 'button';
+        c.addEventListener('click', async () => {
+          const ok = await askConfirm({
+            title: 'রিকোয়েস্ট বাতিল করবেন?',
+            text: 'বাতিল করলে ড্রাইভাররা আর এই রিকোয়েস্ট দেখবে না।',
+            okLabel: 'হ্যাঁ, বাতিল করুন',
+          });
+          if (!ok) return;
+          lrAct(c, () => supabase.rpc('local_ride_cancel', { p_request_id: r.id }), 'রিকোয়েস্ট বাতিল করা হয়েছে');
+        });
+        actions.appendChild(c);
+        card.appendChild(actions);
+      }
+
+      if ((st === 'confirmed' || st === 'completed') && r.driver) {
+        const dr = lrEl('div', 'lo-driver');
+        dr.appendChild(lrAvatar(r.driver.photo));
+        const who = lrEl('div', 'lo-who');
+        who.appendChild(lrEl('b', null, r.driver.name || 'ড্রাইভার'));
+        who.appendChild(lrEl('small', null, [r.driver.vehicle_type, r.driver.vehicle_number].filter(Boolean).join(' · ')));
+        dr.appendChild(who);
+        card.appendChild(dr);
+        const ph = lrSafePhone(r.driver.phone);
+        if (ph && st === 'confirmed') {
+          const call = lrEl('a', 'lo-btn pri', '');
+          call.href = 'tel:' + ph;
+          call.appendChild(lrIcon('fas fa-phone'));
+          call.appendChild(document.createTextNode(' কল করুন ' + (r.driver.phone || '')));
+          const row = lrEl('div', 'lo-actions');
+          row.appendChild(call);
+          card.appendChild(row);
+        }
+      }
+
+      // রিপোর্ট: কনফার্ম থাকলে, বা সম্পন্ন হওয়ার ২৪ ঘণ্টার মধ্যে
+      const completedMs = r.completed_at ? new Date(r.completed_at).getTime() : 0;
+      const canReport = st === 'confirmed' || (st === 'completed' && Date.now() - completedMs <= 24 * 60 * 60 * 1000);
+      if (canReport) {
+        if (r.has_open_report) {
+          card.appendChild(lrEl('p', 'lo-reported', 'আপনার রিপোর্ট জমা আছে, অ্যাডমিন দেখছেন।'));
+        } else {
+          const rb = lrEl('button', 'dispute-link', 'সমস্যা হয়েছে? রিপোর্ট করুন');
+          rb.type = 'button';
+          rb.addEventListener('click', async () => {
+            const res = await askLocalRideReport();
+            if (!res) return;
+            lrAct(rb, () => supabase.rpc('local_ride_report_create', { p_request_id: r.id, p_reason: res.reason, p_note: res.note || null }), 'রিপোর্ট জমা হয়েছে, অ্যাডমিন দেখবেন');
+          });
+          card.appendChild(rb);
+        }
+      }
+      return card;
+    }
+
+    // ============ ধরন ফিল্টার ============
+    const TYPE_ORDER = ['shop_order', 'delivery', 'local_ride', 'serial', 'manual_order'];
+    const TYPE_LABELS = {
+      all: 'সব ধরন',
+      shop_order: 'অনলাইন শপ',
+      delivery: 'ডেলিভারি',
+      local_ride: 'লোকাল রাইড',
+      serial: 'ডাক্তার সিরিয়াল',
+      manual_order: 'অফলাইন অর্ডার',
+    };
+    // পুরনো Ride Hero রিকোয়েস্ট (category='ride') "লোকাল রাইড" ধরনের সাথে একসাথে দেখায়
+    function typeKey(item) {
+      if (item.__type === 'delivery' && item.category === 'ride') return 'local_ride';
+      return item.__type;
+    }
+    let lastFilterSig = '';
+    function renderTypeFilter(tabItems) {
+      const counts = {};
+      tabItems.forEach((it) => { const k = typeKey(it); counts[k] = (counts[k] || 0) + 1; });
+      const sig = activeType + '|' + tabItems.length + '|' + TYPE_ORDER.map((k) => counts[k] || 0).join(',');
+      if (sig === lastFilterSig) return;
+      lastFilterSig = sig;
+      typeFilter.textContent = '';
+      const all = document.createElement('option');
+      all.value = 'all';
+      all.textContent = TYPE_LABELS.all + ' (' + toBn(tabItems.length) + ')';
+      typeFilter.appendChild(all);
+      TYPE_ORDER.forEach((k) => {
+        const o = document.createElement('option');
+        o.value = k;
+        o.textContent = TYPE_LABELS[k] + ' (' + toBn(counts[k] || 0) + ')';
+        typeFilter.appendChild(o);
+      });
+      typeFilter.value = activeType;
+    }
+    typeFilter.addEventListener('change', () => {
+      activeType = typeFilter.value || 'all';
+      try { sessionStorage.setItem('mo_type', activeType); } catch (_) { /* ঠিক আছে */ }
+      lastFilterSig = '';
+      if (lastData) paint();
+    });
+
     // ============ মার্জ ও রেন্ডার ============
     function isOngoingItem(item) {
+      if (item.__type === 'local_ride') return item.status === 'open' || item.status === 'confirmed';
       if (item.__type === 'manual_order') return ['new', 'rider_assigned', 'picked_up'].includes(item.status);
       if (item.__type === 'shop_order') return item.status === 'pending' || item.status === 'confirmed';
       if (item.__type === 'serial') {
@@ -1962,6 +2307,8 @@ const ordersGuide = [
       const reqId = deepLinkParams.get('req');
       const orderId = deepLinkParams.get('order');
       const serialId = deepLinkParams.get('serial');
+      const lrId = deepLinkParams.get('lr');
+      if (lrId) return combined.find((i) => i.__type === 'local_ride' && i.id === lrId) || null;
       if (reqId) return combined.find((i) => i.__type === 'delivery' && i.id === reqId) || null;
       if (orderId) return combined.find((i) => i.__type === 'shop_order' && i.id === orderId) || null;
       if (serialId) return combined.find((i) => i.__type === 'serial' && i.id === serialId) || null;
@@ -1969,7 +2316,9 @@ const ordersGuide = [
     }
 
     function scrollToDeepLinkCard(target) {
-      const selector = target.__type === 'delivery'
+      const selector = target.__type === 'local_ride'
+        ? `[data-lr-id="${target.id}"]`
+        : target.__type === 'delivery'
         ? `[data-req-id="${target.id}"]`
         : target.__type === 'serial'
           ? `[data-serial-id="${target.id}"]`
@@ -1990,31 +2339,42 @@ const ordersGuide = [
         ...deliveryRequests.map((d) => ({ ...d, __type: 'delivery', __hasReview: reviewedRequestIds.has(d.id) })),
         ...serialRequests.map((s) => ({ ...s, __type: 'serial' })),
         ...(lastData.manualOrders || []).map((m) => ({ ...m, __type: 'manual_order' })),
+        ...(lastData.localRides || []).map((l) => ({ ...l, __type: 'local_ride' })),
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       if (combined.length === 0) {
         ordersTabs.style.display = 'none';
+        ordersFilter.style.display = 'none';
         emptyOrders.style.display = 'block';
         return;
       }
       emptyOrders.style.display = 'none';
       ordersTabs.style.display = 'flex';
+      ordersFilter.style.display = 'flex';
 
       let deepTarget = null;
       if (!deepLinkHandled) {
         deepLinkHandled = true;
         deepTarget = findDeepLinkTarget(combined);
-        if (deepTarget) activeTab = isOngoingItem(deepTarget) ? 'ongoing' : 'done';
+        if (deepTarget) {
+          activeTab = isOngoingItem(deepTarget) ? 'ongoing' : 'done';
+          activeType = 'all';
+          lastFilterSig = '';
+        }
       }
 
       const ongoingCount = combined.filter(isOngoingItem).length;
       tabCountOngoing.textContent = ongoingCount > 0 ? toBn(ongoingCount) : '';
       syncTabButtons();
 
-      const visible = combined.filter((item) => (activeTab === 'ongoing') === isOngoingItem(item));
+      const tabItems = combined.filter((item) => (activeTab === 'ongoing') === isOngoingItem(item));
+      renderTypeFilter(tabItems);
+      const visible = activeType === 'all' ? tabItems : tabItems.filter((item) => typeKey(item) === activeType);
 
       if (visible.length === 0) {
-        const msg = activeTab === 'ongoing' ? 'এখন কোনো চলমান অর্ডার বা সিরিয়াল নেই' : 'এখনো কোনো সম্পন্ন অর্ডার বা সিরিয়াল নেই';
+        const msg = activeType !== 'all'
+          ? 'এই ধরনের কোনো ' + (activeTab === 'ongoing' ? 'চলমান' : 'সম্পন্ন') + ' অর্ডার নেই'
+          : (activeTab === 'ongoing' ? 'এখন কোনো চলমান অর্ডার বা সিরিয়াল নেই' : 'এখনো কোনো সম্পন্ন অর্ডার বা সিরিয়াল নেই');
         ordersContainer.innerHTML = `<p class="tab-empty">${msg}</p>`;
         return;
       }
@@ -2023,6 +2383,7 @@ const ordersGuide = [
         let card;
         if (item.__type === 'shop_order') card = renderShopOrderCard(item);
         else if (item.__type === 'manual_order') card = renderManualOrderCard(item);
+        else if (item.__type === 'local_ride') card = renderLocalRideCard(item);
         else if (item.__type === 'serial') card = renderSerialCard(item);
         else card = renderDeliveryCard(item);
         ordersContainer.appendChild(card);
@@ -2031,8 +2392,8 @@ const ordersGuide = [
       if (deepTarget) setTimeout(() => scrollToDeepLinkCard(deepTarget), 80);
     }
 
-    function renderAll(shopOrders, deliveryRequests, serialRequests, reviewedRequestIds, manualOrders = []) {
-      lastData = { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds, manualOrders };
+    function renderAll(shopOrders, deliveryRequests, serialRequests, reviewedRequestIds, manualOrders = [], localRides = []) {
+      lastData = { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds, manualOrders, localRides };
       paint();
     }
 
@@ -2092,6 +2453,13 @@ const ordersGuide = [
         if (!mo.error && Array.isArray(mo.data)) manualOrders = mo.data;
       } catch (_) { /* ম্যানুয়াল অর্ডার লোড না হলেও বাকি অর্ডার দেখাবে */ }
 
+      // লোকাল রাইড রিকোয়েস্ট (অফার, ড্রাইভার, রিপোর্ট অবস্থাসহ)
+      let localRides = [];
+      try {
+        const lr = await supabase.rpc('local_ride_my_requests');
+        if (!lr.error && Array.isArray(lr.data)) localRides = lr.data;
+      } catch (_) { /* লোকাল রাইড লোড না হলেও বাকি অর্ডার দেখাবে */ }
+
       const reviewedRequestIds = new Set((reviewsRes.data || []).map((r) => r.request_id));
 
       const deliveryRequests = (deliveryRes.data || []).map((req) => ({
@@ -2102,7 +2470,7 @@ const ordersGuide = [
       // ইউজার কিছু টাইপ করছে বা কনফার্ম শিট খোলা থাকলে অটো-রিফ্রেশে কার্ড নতুন করে আঁকব না
       if (silent && isUserInteracting()) return;
 
-      renderAll(ordersRes.data || [], deliveryRequests, serialRequests, reviewedRequestIds, manualOrders);
+      renderAll(ordersRes.data || [], deliveryRequests, serialRequests, reviewedRequestIds, manualOrders, localRides);
     }
 
     function refreshOrders() {
