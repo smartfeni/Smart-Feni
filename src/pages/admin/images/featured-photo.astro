@@ -310,6 +310,7 @@ import BaseLayout from '../../../components/layout/BaseLayout.astro';
     import { supabase } from '../../../lib/supabase.js';
 import { authFetch } from '../../../lib/authToken.js';
     import { categories } from '../../../data/services.js';
+    import { makeSortable } from '../../../lib/sortable.js';
 
     const BUCKET = 'listing-images';
     const FOLDER = 'site/featured';
@@ -953,6 +954,35 @@ import { authFetch } from '../../../lib/authToken.js';
       }));
     }
 
+    let stopPhotoSort = null;
+
+    function renderPhotos() {
+      if (stopPhotoSort) { stopPhotoSort(); stopPhotoSort = null; }
+      photosContainer.innerHTML = '';
+      photos.forEach((p, i) => {
+        const r = renderPhotoRow(p, i);
+        r.setAttribute('data-id', p.id);
+        photosContainer.appendChild(r);
+      });
+      if (photos.length > 1) stopPhotoSort = makeSortable(photosContainer, { onChange: savePhotoOrder });
+    }
+
+    async function savePhotoOrder(ids) {
+      const byId = new Map(photos.map((p) => [p.id, p]));
+      const next = ids.map((id) => byId.get(id)).filter(Boolean);
+      if (next.length !== photos.length) { loadPhotos(); return; }
+      const { data, error } = await supabase.rpc('admin_reorder_rows', { p_table: 'featured_photos', p_ids: ids });
+      if (error || !data || !data.ok) {
+        window.showToast?.('ক্রম সেভ হয়নি, আবার চেষ্টা করুন', 'error');
+        await loadPhotos();
+        return;
+      }
+      next.forEach((p, i) => { p.sort_order = (i + 1) * 10; });
+      photos = next;
+      renderPhotos();
+      window.showToast?.('ক্রম সেভ হয়েছে ✓', 'success', 1500);
+    }
+
     async function loadPhotos() {
       photosContainer.innerHTML = '<p style="text-align:center;color:#8FA0BC;padding:20px 0;">লোড হচ্ছে...</p>';
 
@@ -980,7 +1010,7 @@ import { authFetch } from '../../../lib/authToken.js';
       }
 
       emptyState.style.display = 'none';
-      photos.forEach((p, i) => photosContainer.appendChild(renderPhotoRow(p, i)));
+      renderPhotos();
     }
 
     window.addEventListener('smartfeni:admin-ready', () => {

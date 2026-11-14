@@ -349,6 +349,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { makeSortable } from '../../lib/sortable.js';
     import { supabase } from '../../lib/supabase.js';
     import { categories } from '../../data/services.js';
 
@@ -453,11 +454,42 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       renderList(generalContainer, generalList);
     }
 
+    let catSortStops = new Map();
+
+    function attachCatSort(container, list) {
+      const prev = catSortStops.get(container);
+      if (prev) prev();
+      catSortStops.delete(container);
+      if (list.length > 1) {
+        catSortStops.set(container, makeSortable(container, {
+          itemSelector: '.cat-order-card',
+          onChange: (ids) => saveCatOrder(ids),
+        }));
+      }
+    }
+
+    async function saveCatOrder(ids) {
+      const { data, error } = await supabase.rpc('admin_reorder_rows', { p_table: 'category_settings', p_ids: ids });
+      if (error || !data || !data.ok) {
+        window.showToast?.('ক্রম সেভ হয়নি, আবার চেষ্টা করুন', 'error');
+        loadCategorySettings();
+        return;
+      }
+      window.showToast?.('ক্রম সেভ হয়েছে ✓', 'success', 1500);
+      loadCategorySettings();
+    }
+
     function renderList(container, list) {
+      renderListCards(container, list);
+      attachCatSort(container, list);
+    }
+
+    function renderListCards(container, list) {
       container.innerHTML = '';
       list.forEach((cat, idx) => {
         const card = document.createElement('div');
         card.className = 'cat-order-card';
+        card.setAttribute('data-id', cat.id);
         card.innerHTML = `
           <div class="cat-order-icon"><i class="fas ${cat.icon}"></i></div>
           <span class="cat-order-name">${cat.name}${cat.hidden ? ' (হিডেন)' : ''}</span>

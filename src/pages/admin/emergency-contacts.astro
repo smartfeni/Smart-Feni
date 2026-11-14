@@ -110,6 +110,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
+    import { makeSortable } from '../../lib/sortable.js';
 
     const $ = (id) => document.getElementById(id);
 
@@ -170,7 +171,28 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       });
     }
 
+    let stopEmgSorts = [];
+
     function renderList() {
+      stopEmgSorts.forEach((s) => s());
+      stopEmgSorts = [];
+      renderListRows();
+      $('listWrap').querySelectorAll('.emga-grp').forEach((g) => {
+        if (g.children.length > 1) stopEmgSorts.push(makeSortable(g, { itemSelector: '.emga-row', onChange: saveEmgOrder }));
+      });
+    }
+
+    // ক্যাটাগরির ভেতরে টানা যায়; সেভে পুরো তালিকা নতুন করে ১০,২০,৩০… (ক্যাটাগরির ক্রম অপরিবর্তিত)
+    async function saveEmgOrder() {
+      const ids = Array.from($('listWrap').querySelectorAll('.emga-row')).map((el) => el.getAttribute('data-id'));
+      if (ids.length !== rows.length) { await loadRows(); return; }
+      const { data, error } = await supabase.rpc('admin_reorder_rows', { p_table: 'emergency_contacts', p_ids: ids });
+      const ok = !error && data && data.ok;
+      window.showToast?.(ok ? 'ক্রম সেভ হয়েছে ✓' : 'ক্রম সেভ হয়নি, আবার চেষ্টা করুন', ok ? 'success' : 'error', 1800);
+      await loadRows();
+    }
+
+    function renderListRows() {
       const wrap = $('listWrap');
       wrap.innerHTML = '';
       $('countLbl').textContent = rows.length ? '(' + rows.length + 'টি)' : '';
@@ -184,6 +206,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       }
 
       let last = null;
+      let grp = null;
       rows.forEach((r) => {
         if (r.category !== last) {
           last = r.category;
@@ -191,10 +214,14 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
           h.className = 'emga-cat';
           h.textContent = last;
           wrap.appendChild(h);
+          grp = document.createElement('div');
+          grp.className = 'emga-grp';
+          wrap.appendChild(grp);
         }
 
         const row = document.createElement('div');
         row.className = 'emga-row' + (r.is_active ? '' : ' off');
+        row.setAttribute('data-id', r.id);
 
         const info = document.createElement('div');
         info.className = 'emga-info';
@@ -236,7 +263,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         tools.appendChild(db);
         row.appendChild(info);
         row.appendChild(tools);
-        wrap.appendChild(row);
+        (grp || wrap).appendChild(row);
       });
     }
 

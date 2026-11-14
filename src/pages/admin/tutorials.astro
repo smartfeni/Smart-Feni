@@ -110,6 +110,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
   <script>
     import { initAdminGuard } from '../../lib/adminGuard.js';
     import { supabase } from '../../lib/supabase.js';
+    import { makeSortable } from '../../lib/sortable.js';
 
     const $ = (id) => document.getElementById(id);
 
@@ -176,7 +177,32 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
+    let stopTutSort = null;
+
     function renderList() {
+      if (stopTutSort) { stopTutSort(); stopTutSort = null; }
+      renderListRows();
+      if (rows.length > 1) stopTutSort = makeSortable($('listWrap'), { itemSelector: '.tuta-row', onChange: saveTutOrder });
+    }
+
+    async function saveTutOrder(ids) {
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const next = ids.map((id) => byId.get(id)).filter(Boolean);
+      if (next.length !== rows.length) { await loadRows(); return; }
+      const { data, error } = await supabase.rpc('admin_reorder_rows', { p_table: 'tutorial_videos', p_ids: ids });
+      if (error || !data || !data.ok) {
+        window.showToast?.('ক্রম সেভ হয়নি, আবার চেষ্টা করুন', 'error');
+        await loadRows();
+        return;
+      }
+      next.forEach((r, i) => { r.sort_order = (i + 1) * 10; });
+      rows = next;
+      renderList();
+      if (!editingId) $('fSort').value = String(nextSort());
+      window.showToast?.('ক্রম সেভ হয়েছে ✓', 'success', 1500);
+    }
+
+    function renderListRows() {
       const wrap = $('listWrap');
       wrap.innerHTML = '';
       $('countLbl').textContent = rows.length ? '(' + rows.length + 'টি)' : '';
@@ -192,6 +218,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       rows.forEach((r) => {
         const row = document.createElement('div');
         row.className = 'tuta-row' + (r.is_active ? '' : ' off');
+        row.setAttribute('data-id', r.id);
 
         const info = document.createElement('div');
         info.className = 'tuta-info';

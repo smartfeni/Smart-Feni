@@ -572,6 +572,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
 
 <script>
   import { supabase } from '../../lib/supabase.js';
+  import { makeSortable } from '../../lib/sortable.js';
   import { compressImages, isHeicFile } from '../../lib/imageCompress.js';
   import { formatPrice, parsePriceText, sanitizePriceInput, guessUnit, PRICE_UNITS } from '../../lib/price.js';
 
@@ -1023,7 +1024,34 @@ import AddListingModal from '../ui/AddListingModal.astro';
     });
   }
 
+  let stopPcatSort = null;
+
   function renderPcatManager() {
+    if (stopPcatSort) { stopPcatSort(); stopPcatSort = null; }
+    renderPcatManagerRows();
+    const cats = window.__shopProductCategories || [];
+    if (cats.length > 1) stopPcatSort = makeSortable(pcatList, { itemSelector: '.pcat-row', onChange: savePcatOrder });
+  }
+
+  async function savePcatOrder(ids) {
+    const cats = window.__shopProductCategories || [];
+    const byId = new Map(cats.map((c) => [c.id, c]));
+    const next = ids.map((id) => byId.get(id)).filter(Boolean);
+    if (next.length !== cats.length) { await loadProductCategories(); return; }
+    const { data, error } = await supabase.rpc('shop_reorder_product_categories', { p_shop_id: currentShopId, p_ids: ids });
+    if (error || !data || !data.ok) {
+      window.showToast?.('ক্রম সেভ হয়নি, আবার চেষ্টা করুন', 'error', 2500);
+      await loadProductCategories();
+      return;
+    }
+    next.forEach((c, i) => { c.sort_order = i; });
+    window.__shopProductCategories = next;
+    window.dispatchEvent(new CustomEvent('smartfeni:product-categories', { detail: { categories: next } }));
+    renderPcatFilter();
+    renderPcatManager();
+  }
+
+  function renderPcatManagerRows() {
     const cats = window.__shopProductCategories || [];
     pcatList.innerHTML = '';
 
@@ -1036,6 +1064,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
       const n = products.filter((p) => p.shop_category_id === c.id).length;
       const row = document.createElement('div');
       row.className = 'pcat-row';
+      row.setAttribute('data-id', c.id);
       row.innerHTML = `
         <span class="pcat-row-name">${esc(c.name)}<small>${n}টা প্রোডাক্ট</small></span>
         <button type="button" class="pcat-up" aria-label="উপরে"><i class="fas fa-arrow-up"></i></button>
