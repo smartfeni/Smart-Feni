@@ -9,7 +9,9 @@
 //   রিকোয়েস্ট — ফিড (RPC local_ride_driver_feed): সব | এরিয়া ১ | ২ | ৩ সাব-ট্যাব, শুধু নিজের গাড়ির ধরন।
 //                "৳X-এ রাজি" (একসেপ্ট, প্রথম জন পায়) বা "অন্য দাম" (একবারই অফার, প্রত্যাহার যায়)।
 //   ট্রিপ     — কনফার্ম ট্রিপ (RPC local_ride_driver_trips): যাত্রীর নাম/ফোন, নেভিগেট, "ট্রিপ শেষ"।
-//   এরিয়া    — সর্বোচ্চ ৩ ইউনিয়ন, যখন খুশি বদল (RPC local_ride_driver_set_areas)।
+//   এরিয়া    — union ধরনে সর্বোচ্চ ৩ ইউনিয়ন; upazila ধরনে (প্রাইভেট কার/মাইক্রো/পিকআপ) এক বা একাধিক উপজেলা, সীমা নেই;
+//               যখন খুশি বদল (RPC local_ride_driver_set_areas)।
+//   রিপোর্ট   — ট্রিপ কার্ডে "সমস্যা হয়েছে? রিপোর্ট করুন" (RPC local_ride_report_create)।
 // অনলাইন টগল: local_ride_driver_set_online (অফলাইনে একসেপ্ট/অফার বন্ধ)।
 // রিফ্রেশ: প্রতি ৮ সেকেন্ড (পেজ দেখা গেলে)। ইউজারের টেক্সট textContent দিয়ে।
 // ============================================================
@@ -164,6 +166,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     const offerOpen = new Set();
     const confirmDone = new Set();
     let editAreas = [];
+    let editUpazilas = [];
+    const reportedIds = new Set();
 
     function toast(msg, type) { if (typeof window.showToast === 'function') window.showToast(msg, type || 'error'); }
     function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
@@ -196,13 +200,20 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       AREA_REQUIRED: 'কমপক্ষে ১টা এরিয়া বেছে নিন',
       AREA_INVALID: 'এরিয়া ঠিক নেই',
       AUTH_REQUIRED: 'আবার লগইন করুন',
+      NOT_REPORTABLE: 'এই ট্রিপের রিপোর্ট এখন করা যাবে না',
+      REPORT_WINDOW_CLOSED: 'রিপোর্টের সময় (২৪ ঘণ্টা) পার হয়ে গেছে',
+      ALREADY_REPORTED: 'এই ট্রিপের রিপোর্ট আগেই জমা আছে',
+      DAILY_LIMIT: 'আজকের জন্য রিপোর্টের সীমা শেষ, কাল আবার চেষ্টা করুন',
+      REASON_INVALID: 'কারণ ঠিক নেই, আবার বেছে নিন',
+      UPAZILA_REQUIRED: 'কমপক্ষে ১টা উপজেলা বেছে নিন',
+      UPAZILA_INVALID: 'উপজেলা ঠিক নেই',
     };
     function errText(error) {
       const m = String((error && error.message) || '');
       const k = Object.keys(ERR).find((key) => m.includes(key));
       return k ? ERR[k] : 'কাজটা করা যায়নি, আবার চেষ্টা করুন';
     }
-    const EXPECTED = /NOT_APPROVED|DRIVER_OFFLINE|REQUEST_NOT_|SELF_|VEHICLE_MISMATCH|AREA_|OFFER_EXISTS|PRICE_INVALID|CANNOT_COMPLETE|TOO_MANY_AREAS|AUTH_REQUIRED/;
+    const EXPECTED = /NOT_REPORTABLE|REPORT_WINDOW_CLOSED|ALREADY_REPORTED|DAILY_LIMIT|REASON_INVALID|UPAZILA_|NOT_APPROVED|DRIVER_OFFLINE|REQUEST_NOT_|SELF_|VEHICLE_MISMATCH|AREA_|OFFER_EXISTS|PRICE_INVALID|CANNOT_COMPLETE|TOO_MANY_AREAS|AUTH_REQUIRED/;
 
     async function act(btn, fn, okMsg, after) {
       if (busy) return;
@@ -234,7 +245,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     async function loadMe(uid) {
       const { data, error } = await supabase
         .from('local_ride_drivers')
-        .select('id, status, is_online, vehicle_number, local_ride_vehicle_types(name_bn), local_ride_driver_areas(position, local_areas(id, name_bn, upazila))')
+        .select('id, status, is_online, vehicle_number, local_ride_vehicle_types(name_bn, area_scope), local_ride_driver_areas(position, local_areas(id, name_bn, upazila)), local_ride_driver_upazilas(upazila)')
         .eq('user_id', uid)
         .maybeSingle();
       if (error) return { error };
@@ -243,7 +254,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const areas = (data.local_ride_driver_areas || []).slice().sort((a, b) => a.position - b.position)
         .map((x) => one(x.local_areas)).filter(Boolean);
       const vt = one(data.local_ride_vehicle_types);
-      return { me: { id: data.id, is_online: !!data.is_online, vehicle: [(vt && vt.name_bn) || '', data.vehicle_number || ''].filter(Boolean).join(' · '), areas } };
+      return { me: { id: data.id, is_online: !!data.is_online, vehicle: [(vt && vt.name_bn) || '', data.vehicle_number || ''].filter(Boolean).join(' · '), areas, scope: (vt && vt.area_scope === 'upazila') ? 'upazila' : 'union', upazilas: (data.local_ride_driver_upazilas || []).map((u) => u.upazila).filter(Boolean) } };
     }
 
     function paintHead() {
@@ -266,7 +277,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         box.appendChild(b);
       };
       mk('সব', null);
-      me.areas.forEach((a) => mk(a.name_bn, a.id));
+      if (me.scope === 'upazila') me.upazilas.forEach((u) => mk(u, u));
+      else me.areas.forEach((a) => mk(a.name_bn, a.id));
     }
 
     function reqCard(r) {
@@ -339,6 +351,62 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       $('plFeedEmpty').style.display = feedData.length ? 'none' : '';
     }
 
+    // রিপোর্টের কারণ + ঐচ্ছিক নোট (বটম শিট) — { reason, note } ফেরত দেয়, বাদ দিলে null
+    function askReport() {
+      return new Promise((resolve) => {
+        const reasons = [
+          ['customer_no_show', 'যাত্রী পাওয়া যায়নি'],
+          ['fare_dispute', 'ভাড়া নিয়ে সমস্যা'],
+          ['unsafe_behavior', 'খারাপ আচরণ / নিরাপত্তা'],
+          ['wrong_info', 'ভুল তথ্য'],
+          ['other', 'অন্য সমস্যা'],
+        ];
+        let picked = null;
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(27,42,74,.55);display:flex;align-items:flex-end;justify-content:center;';
+        const sheet = document.createElement('div');
+        sheet.style.cssText = 'background:#fff;width:100%;max-width:480px;max-height:90vh;overflow:auto;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));box-shadow:0 -6px 24px rgba(0,0,0,.18);';
+        const title = el('div', null, 'কী সমস্যা হয়েছে?');
+        title.style.cssText = 'font-size:16px;font-weight:700;color:#1B2A4A;margin-bottom:10px;';
+        sheet.appendChild(title);
+        const done = (val) => { wrap.remove(); resolve(val); };
+        const submit = el('button', null, 'রিপোর্ট পাঠান');
+        submit.type = 'button';
+        submit.disabled = true;
+        submit.style.cssText = 'display:block;width:100%;padding:13px 14px;margin-top:10px;border:none;border-radius:12px;background:#FF6B35;color:#fff;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;opacity:.6;';
+        const btns = [];
+        reasons.forEach(([code, label]) => {
+          const b = el('button', null, label);
+          b.type = 'button';
+          b.style.cssText = 'display:block;width:100%;text-align:left;padding:13px 14px;margin-bottom:8px;border:1.5px solid #e2e8f0;border-radius:12px;background:#fff;color:#1B2A4A;font-size:15px;font-family:inherit;cursor:pointer;';
+          b.addEventListener('click', () => {
+            picked = code;
+            btns.forEach((x) => { x.style.borderColor = x === b ? '#FF6B35' : '#e2e8f0'; x.style.background = x === b ? '#FFF6F1' : '#fff'; });
+            submit.disabled = false;
+            submit.style.opacity = '1';
+          });
+          btns.push(b);
+          sheet.appendChild(b);
+        });
+        const note = document.createElement('textarea');
+        note.maxLength = 500;
+        note.rows = 3;
+        note.placeholder = 'কী হয়েছে সংক্ষেপে লিখুন (ঐচ্ছিক)';
+        note.style.cssText = 'width:100%;box-sizing:border-box;border:1.5px solid #D5DCE8;border-radius:12px;padding:10px 12px;font-size:14.5px;font-family:inherit;color:#1B2A4A;resize:vertical;';
+        sheet.appendChild(note);
+        submit.addEventListener('click', () => { if (picked) done({ reason: picked, note: note.value.trim() }); });
+        sheet.appendChild(submit);
+        const cancel = el('button', null, 'না, বাদ দিন');
+        cancel.type = 'button';
+        cancel.style.cssText = 'display:block;width:100%;padding:12px 14px;margin-top:4px;border:none;background:transparent;color:#6C7A93;font-size:14.5px;font-weight:700;font-family:inherit;cursor:pointer;';
+        cancel.addEventListener('click', () => done(null));
+        sheet.appendChild(cancel);
+        wrap.appendChild(sheet);
+        wrap.addEventListener('click', (ev) => { if (ev.target === wrap) done(null); });
+        document.body.appendChild(wrap);
+      });
+    }
+
     // ===== ট্রিপ =====
     function tripCard(t) {
       const done = t.status === 'completed';
@@ -389,6 +457,23 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         acts.appendChild(fin);
         card.appendChild(acts);
       }
+      // রিপোর্ট: কনফার্ম ট্রিপে, বা সম্পন্ন হওয়ার ২৪ ঘণ্টার মধ্যে
+      const cMs = t.completed_at ? new Date(t.completed_at).getTime() : 0;
+      if (!done || (Date.now() - cMs <= 24 * 60 * 60 * 1000)) {
+        if (t.has_open_report || reportedIds.has(t.id)) {
+          card.appendChild(el('p', 'pl-mine', 'আপনার রিপোর্ট জমা আছে, অ্যাডমিন দেখছেন।'));
+        } else {
+          const rb = el('button', 'pl-btn pl-line', 'সমস্যা হয়েছে? রিপোর্ট করুন');
+          rb.type = 'button';
+          rb.style.cssText = 'width:100%;margin-top:10px;';
+          rb.addEventListener('click', async () => {
+            const res = await askReport();
+            if (!res) return;
+            act(rb, () => supabase.rpc('local_ride_report_create', { p_request_id: t.id, p_reason: res.reason, p_note: res.note || null }), 'রিপোর্ট জমা হয়েছে, অ্যাডমিন দেখবেন', () => reportedIds.add(t.id));
+          });
+          card.appendChild(rb);
+        }
+      }
       return card;
     }
 
@@ -407,7 +492,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     async function refresh(force) {
       if (!me) return;
       const [f, t] = await Promise.all([
-        supabase.rpc('local_ride_driver_feed', { p_area_id: areaFilter }),
+        supabase.rpc('local_ride_driver_feed', me.scope === 'upazila' ? { p_area_id: null, p_upazila: areaFilter } : { p_area_id: areaFilter, p_upazila: null }),
         supabase.rpc('local_ride_driver_trips'),
       ]);
       if (!f.error) {
@@ -436,6 +521,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     // ===== এরিয়া বদল =====
     function paintAreasTab() {
+      if (me.scope === 'upazila') { paintUpazilaTab(); return; }
       if (!editAreas.length && me.areas.length && !$('plPicked').dataset.init) {
         editAreas = me.areas.map((a) => a.id);
         $('plPicked').dataset.init = '1';
@@ -476,6 +562,46 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         editAreas.push(id);
       }
       renderPicked(); renderUnions();
+    }
+
+    // ===== উপজেলা-ধরনের ড্রাইভার (প্রাইভেট কার/মাইক্রো/পিকআপ): এক বা একাধিক উপজেলা, সীমা নেই =====
+    function distinctUpazilas() {
+      const seen = [];
+      allAreas.forEach((x) => { if (x.upazila && !seen.includes(x.upazila)) seen.push(x.upazila); });
+      return seen;
+    }
+    function toggleUpazila(u) {
+      const i = editUpazilas.indexOf(u);
+      if (i >= 0) editUpazilas.splice(i, 1); else editUpazilas.push(u);
+      renderUpazilaChips();
+    }
+    function renderUpazilaChips() {
+      const picked = $('plPicked');
+      picked.textContent = '';
+      editUpazilas.forEach((u) => {
+        const b = el('button', 'pl-chip', u + ' ✕');
+        b.type = 'button'; b.setAttribute('aria-pressed', 'true'); b.setAttribute('aria-label', u + ' বাদ দিন');
+        b.addEventListener('click', () => toggleUpazila(u));
+        picked.appendChild(b);
+      });
+      $('plAreaCount').textContent = bn(editUpazilas.length) + 'টা';
+      const box = $('plUnions');
+      box.textContent = '';
+      distinctUpazilas().forEach((u) => {
+        const b = el('button', 'pl-chip', u);
+        b.type = 'button'; b.setAttribute('aria-pressed', editUpazilas.includes(u) ? 'true' : 'false');
+        b.addEventListener('click', () => toggleUpazila(u));
+        box.appendChild(b);
+      });
+    }
+    function paintUpazilaTab() {
+      $('plUpazila').style.display = 'none';
+      const lbl = document.querySelector('label[for="plUpazila"]');
+      if (lbl) lbl.textContent = 'যেসব উপজেলার রিকোয়েস্ট পেতে চান (কোনো সীমা নেই)';
+      const hint = document.querySelector('#plPanelAreas .pl-hint');
+      if (hint) hint.textContent = 'পিকআপ এই উপজেলাগুলোর যেকোনো জায়গায় হলেই আপনি রিকোয়েস্ট পাবেন।';
+      if (!$('plPicked').dataset.init) { editUpazilas = me.upazilas.slice(); $('plPicked').dataset.init = '1'; }
+      renderUpazilaChips();
     }
 
     // ===== শুরু =====
@@ -526,9 +652,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     document.querySelectorAll('.pl-tab').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
     $('plUpazila').addEventListener('change', renderUnions);
     $('plSaveAreas').addEventListener('click', async () => {
-      if (!editAreas.length) { toast('কমপক্ষে ১টা এরিয়া বেছে নিন'); return; }
+      const isUpa = me.scope === 'upazila';
+      if (isUpa ? !editUpazilas.length : !editAreas.length) { toast(isUpa ? 'কমপক্ষে ১টা উপজেলা বেছে নিন' : 'কমপক্ষে ১টা এরিয়া বেছে নিন'); return; }
       const btn = $('plSaveAreas');
-      await act(btn, () => supabase.rpc('local_ride_driver_set_areas', { p_area_ids: editAreas }), 'এরিয়া সেভ হয়েছে ✓', async () => {
+      await act(btn, () => supabase.rpc('local_ride_driver_set_areas', isUpa ? { p_area_ids: null, p_upazilas: editUpazilas } : { p_area_ids: editAreas, p_upazilas: null }), 'এরিয়া সেভ হয়েছে ✓', async () => {
         const r = await loadMe((await supabase.auth.getSession()).data.session.user.id);
         if (r.me) { me = r.me; areaFilter = null; feedSig = ''; paintHead(); paintAreaTabs(); }
       });
