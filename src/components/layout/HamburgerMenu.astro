@@ -146,6 +146,11 @@
         <span class="hm-item-label">লোকাল রাইড</span>
         <i class="fas fa-chevron-right hm-item-arrow"></i>
       </a>
+      <a href="/?scratch=1" class="hm-item" id="hmScratchItem" style="--c:#FF6B35;display:none;">
+        <span class="hm-item-icon"><i class="fas fa-gift"></i></span>
+        <span class="hm-item-label">আজকের স্ক্রেচ কার্ড</span>
+        <i class="fas fa-chevron-right hm-item-arrow"></i>
+      </a>
       <a href="/my-listings" class="hm-item" style="--c:#3B82F6;">
         <span class="hm-item-icon"><i class="fas fa-list-check"></i></span>
         <span class="hm-item-label">আমার পোস্ট</span>
@@ -527,6 +532,54 @@
   const offlineOrderItem = document.getElementById('hmOfflineOrderItem');
   const rideRiderItem = document.getElementById('hmRideRiderItem');
   const emergencyItem = document.getElementById('hmEmergencyItem');
+
+  // ===== স্ক্রেচ কার্ড মেনু আইটেম: লগইন + ক্যাম্পেইন চালু (বা জেতা পুরস্কারের তথ্য বাকি) হলে দেখায় =====
+  const scratchItem = document.getElementById('hmScratchItem');
+
+  function setScratchBadge(text, urgent) {
+    if (!scratchItem) return;
+    let b = document.getElementById('hmScratchBadge');
+    if (!b) {
+      b = document.createElement('span');
+      b.id = 'hmScratchBadge';
+      scratchItem.insertBefore(b, scratchItem.querySelector('.hm-item-arrow'));
+    }
+    b.setAttribute('style', 'margin-left:auto;margin-right:8px;padding:2px 9px;border-radius:20px;color:#fff;font-size:12px;font-weight:800;align-items:center;background:' + (urgent ? '#D14343' : '#FF6B35') + ';display:' + (text ? 'inline-flex' : 'none') + ';');
+    b.textContent = text;
+  }
+
+  async function loadScratchItem() {
+    if (!scratchItem) return;
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess || !sess.session) { scratchItem.style.display = 'none'; return; }
+      const { data, error } = await supabase.rpc('get_scratch_status');
+      if (error || !data) { scratchItem.style.display = 'none'; return; }
+      const win = data.unsubmitted_win;
+      if (!data.active && !win) { scratchItem.style.display = 'none'; return; }
+      setScratchBadge(win ? 'জমা দিন' : (!data.card ? 'নতুন' : ''), !!win);
+      scratchItem.style.display = 'flex';
+    } catch (e) {
+      scratchItem.style.display = 'none';
+    }
+  }
+
+  if (scratchItem) {
+    scratchItem.addEventListener('click', (e) => {
+      // হোমে থাকলে সরাসরি শিট খোলে; অন্য পেজে থাকলে লিংক (/?scratch=1) দিয়ে হোমে গিয়ে খোলে
+      if (location.pathname === '/' || location.pathname === '') {
+        e.preventDefault();
+        if (closeBtn) closeBtn.click();
+        window.dispatchEvent(new CustomEvent('smartfeni:open-scratch'));
+      }
+    });
+    window.addEventListener('smartfeni:open-hamburger-menu', loadScratchItem);
+    window.addEventListener('smartfeni:logged-out', () => { scratchItem.style.display = 'none'; });
+    supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') loadScratchItem();
+    });
+    loadScratchItem();
+  }
 
   const logoutBtn = document.getElementById('hmLogoutBtn');
   const logoutText = document.getElementById('hmLogoutText');
