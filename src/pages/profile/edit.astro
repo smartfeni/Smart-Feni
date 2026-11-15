@@ -196,18 +196,18 @@ const upazilas = [
               </div>
             </div>
 
-            <!-- ===== সংগঠন (ঐচ্ছিক) — ইনস্ট্যান্ট সেভ, ডোনার টগলের ঠিক নিচে ===== -->
-            <div class="club-select-row">
+            <!-- ===== আমার ক্লাব — সদস্য হলে ক্লাবের নাম অটো; ছাড়তে চাইলে বাটন ===== -->
+            <div class="club-select-row" id="myClubRow">
               <div class="donor-toggle-text">
-                <span class="donor-toggle-label">আমার সংগঠন (ঐচ্ছিক)</span>
-                <span class="donor-toggle-hint">নির্দিষ্ট কোনো সংগঠনের সাথে যুক্ত থাকলে বেছে নিন — ব্লাড সার্চে খুঁজে পেতে সহজ হবে</span>
+                <span class="donor-toggle-label">আমার ক্লাব</span>
+                <span class="donor-toggle-hint" id="myClubHint">ক্লাবের সদস্য হলে এখানে ক্লাবের নাম অটো দেখাবে</span>
               </div>
-              <div class="edit-select-wrap club-select-wrap">
-                <i class="fas fa-users edit-input-icon"></i>
-                <select class="edit-input edit-select" id="clubSelect">
-                  <option value="">— কোনো সংগঠন না —</option>
-                </select>
+              <div class="my-club-box" id="myClubBox" style="display:none;">
+                <i class="fas fa-users"></i>
+                <span class="my-club-name" id="myClubName"></span>
+                <button type="button" class="my-club-leave" id="myClubLeaveBtn" style="display:none;">ক্লাব ছাড়ুন</button>
               </div>
+              <a class="my-club-find" id="myClubFind" href="/clubs" style="display:none;">ক্লাব খুঁজে জয়েন রিকোয়েস্ট দিন</a>
               <p class="edit-message" id="clubSelectMessage"></p>
             </div>
 
@@ -1196,6 +1196,56 @@ const upazilas = [
     padding: 8px 12px;
   }
 
+  /* ===== আমার ক্লাব (সদস্যের ক্লাবের নাম + ছাড়ুন) ===== */
+  .my-club-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid #EEF3F9;
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+
+  .my-club-box i {
+    color: #FF6B35;
+    flex-shrink: 0;
+  }
+
+  .my-club-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #1B2A4A;
+    overflow-wrap: anywhere;
+  }
+
+  .my-club-leave {
+    flex-shrink: 0;
+    background: #FFF1F0;
+    color: #D14343;
+    border: 1px solid #F7CFCB;
+    border-radius: 10px;
+    padding: 7px 12px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .my-club-leave:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .my-club-find {
+    align-self: flex-start;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #FF6B35;
+    text-decoration: none;
+  }
+
   .rider-status-row {
     display: flex;
     align-items: center;
@@ -1995,52 +2045,79 @@ const upazilas = [
     watchPushPermissionThenUpdate();
   });
 
-  // ===== সংগঠন (ঐচ্ছিক) — ক্লাব লিস্ট লোড ও ইনস্ট্যান্ট সেভ =====
+  // ===== আমার ক্লাব — সদস্য হলে নাম অটো (club_members.user_id), ক্লাব ছাড়ুন (leave_club RPC) =====
+  // আগের "সংগঠন" ড্রপডাউন সরানো হয়েছে; ক্লাবে যোগ দিতে জয়েন রিকোয়েস্ট লাগে।
+  let myClubId = null;
+
   async function loadClubOptions() {
-    const { data: clubs } = await supabase
-      .from('clubs')
-      .select('id, name')
-      .eq('is_active', true)
-      .order('name', { ascending: true });
+    const box = document.getElementById('myClubBox');
+    const nameEl = document.getElementById('myClubName');
+    const leaveBtn = document.getElementById('myClubLeaveBtn');
+    const findLink = document.getElementById('myClubFind');
+    const hint = document.getElementById('myClubHint');
+    if (!box || !nameEl || !leaveBtn || !findLink || !hint) return;
 
-    if (!clubSelect) return;
+    myClubId = null;
+    box.style.display = 'none';
+    leaveBtn.style.display = 'none';
+    findLink.style.display = 'none';
 
-    // ক্লাব ওউনারের সংগঠন বদলানো যায় না (DB trigger ব্লক করে) — তাই ড্রপডাউন লুকানো
-    if (currentProfile?.is_club_owner) {
-      const ownerRow = clubSelect.closest('.club-select-row');
-      if (ownerRow) ownerRow.style.display = 'none';
-      return;
+    const isOwner = !!currentProfile?.is_club_owner;
+    let clubId = null;
+    let clubName = '';
+
+    if (isOwner && currentProfile?.club_id) {
+      const { data: c } = await supabase.from('clubs').select('id, name').eq('id', currentProfile.club_id).maybeSingle();
+      if (c) {
+        clubId = c.id;
+        clubName = c.name || '';
+      }
+    } else {
+      const { data: m } = await supabase
+        .from('club_members')
+        .select('club_id, clubs(name)')
+        .eq('user_id', currentUserId)
+        .limit(1)
+        .maybeSingle();
+      if (m) {
+        clubId = m.club_id;
+        const cl = Array.isArray(m.clubs) ? m.clubs[0] : m.clubs;
+        clubName = cl?.name || 'আপনার ক্লাব';
+      }
     }
 
-    (clubs || []).forEach((club) => {
-      const opt = document.createElement('option');
-      opt.value = club.id;
-      opt.textContent = club.name;
-      clubSelect.appendChild(opt);
-    });
-
-    clubSelect.value = currentProfile?.club_id || '';
+    if (clubId) {
+      myClubId = clubId;
+      nameEl.textContent = clubName || 'আপনার ক্লাব';
+      box.style.display = 'flex';
+      hint.textContent = isOwner ? 'আপনি এই ক্লাবের ওউনার' : 'আপনি এই ক্লাবের সদস্য';
+      if (!isOwner) leaveBtn.style.display = '';
+    } else {
+      hint.textContent = 'কোনো ক্লাবের সদস্য হতে চাইলে ক্লাবের পেজ থেকে জয়েন রিকোয়েস্ট দিন';
+      findLink.style.display = '';
+    }
   }
 
-  clubSelect?.addEventListener('change', async () => {
-    clearMsg(clubSelectMessage);
-    const newClubId = clubSelect.value || null;
+  document.getElementById('myClubLeaveBtn')?.addEventListener('click', async () => {
+    if (!myClubId) return;
+    const btn = document.getElementById('myClubLeaveBtn');
+    const name = document.getElementById('myClubName')?.textContent || 'এই';
+    if (!window.confirm('আপনি কি নিশ্চিত যে "' + name + '" ক্লাব ছাড়তে চান? কমিটির পদ থাকলে সেটাও চলে যাবে।')) return;
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({ club_id: newClubId })
-      .eq('id', currentUserId);
+    clearMsg(clubSelectMessage);
+    btn.disabled = true;
+    const { error } = await supabase.rpc('leave_club', { p_club_id: myClubId });
+    btn.disabled = false;
 
     if (error) {
-      reportDbError('profile_club_save', 'সংগঠন সেভ ব্যর্থ', error);
-      showMsg(clubSelectMessage, 'আপডেট ব্যর্থ: ' + error.message);
-      clubSelect.value = currentProfile?.club_id || '';
+      reportDbError('leave_club', 'ক্লাব ছাড়া ব্যর্থ', error);
+      showMsg(clubSelectMessage, error.message);
       return;
     }
 
-    currentProfile.club_id = newClubId;
-    showMsg(clubSelectMessage, 'সংগঠন আপডেট হয়েছে ✓', 'success');
-    setTimeout(() => clearMsg(clubSelectMessage), 2000);
+    if (currentProfile) currentProfile.club_id = null;
+    showMsg(clubSelectMessage, 'ক্লাব ছেড়েছেন ✓', 'success');
+    await loadClubOptions();
   });
 
   // ===== নোটিফিকেশন সেটিংস কার্ড — অ্যাপে অনুমতির অবস্থা, ওয়েবে নোট =====
