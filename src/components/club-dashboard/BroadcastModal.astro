@@ -1,18 +1,32 @@
 ---
+// path: src/components/club-dashboard/BroadcastModal.astro
+// ব্রডকাস্ট মডাল (ইন্টারক্লাব নোটিফিকেশন)
+//
+// আপডেট (১৫ নভে ২০২৬): একই ক্লাবকে দিনে ১টা, মাসে সর্বোচ্চ ১০টা (DB ট্রিগার
+// private.club_notif_before_insert)। মডাল খুললে RPC club_broadcast_quota থেকে
+// blocked_today / blocked_month নিয়ে ওই ক্লাবগুলো ধূসর + সিলেক্ট-অসম্ভব করা হয়;
+// "সব ক্লাব" মোডেও ওরা বাদ। নির্দিষ্ট তালিকায়: সার্চ, "সবাইকে সিলেক্ট", সংখ্যা।
+// ক্লাবের নাম innerHTML-এ নয়, DOM/textContent দিয়ে (এস্কেপ)। CSS is:global
+// কারণ তালিকার আইটেম JS দিয়ে বানানো (Astro scoped CSS কাজ করে না)।
 ---
 
 <div class="broadcast-overlay" id="broadcastOverlay">
   <div class="broadcast-modal">
-    <button class="broadcast-close" id="broadcastClose"><i class="fas fa-xmark"></i></button>
+    <button class="broadcast-close" id="broadcastClose" type="button"><i class="fas fa-xmark"></i></button>
 
     <h3><i class="fas fa-tower-broadcast"></i> ব্রডকাস্ট পাঠান</h3>
     <p class="broadcast-post-title" id="broadcastPostTitle"></p>
 
+    <div class="broadcast-note">
+      <i class="fas fa-circle-info"></i>
+      <span>একই ক্লাবকে দিনে ১টি এবং মাসে সর্বোচ্চ ১০টি ব্রডকাস্ট পাঠানো যায়। যাদের আজ পাঠানো হয়েছে বা মাসের সীমা শেষ, তারা ধূসর থাকবে এবং বাছাই করা যাবে না।</span>
+    </div>
+
     <p class="form-msg" id="broadcastMsg"></p>
 
     <div class="broadcast-mode-tabs">
-      <button class="myclub-tab active" data-mode="all">সব ক্লাব (উপজেলা ফিল্টার)</button>
-      <button class="myclub-tab" data-mode="specific">নির্দিষ্ট ক্লাব বাছাই</button>
+      <button class="myclub-tab active" data-mode="all" type="button">সব ক্লাব (উপজেলা ফিল্টার)</button>
+      <button class="myclub-tab" data-mode="specific" type="button">নির্দিষ্ট ক্লাব বাছাই</button>
     </div>
 
     <div id="allModeFields">
@@ -30,8 +44,14 @@
 
     <div id="specificModeFields" style="display:none;">
       <label class="form-label">ক্লাব বাছাই করুন<span class="required-mark">*</span></label>
+      <div class="broadcast-search-row">
+        <input type="search" class="form-input" id="broadcastClubSearch" placeholder="ক্লাবের নাম খুঁজুন" autocomplete="off" />
+        <button type="button" class="broadcast-selectall-btn" id="broadcastSelectAll">সবাইকে সিলেক্ট</button>
+      </div>
       <div id="specificClubList" class="specific-club-list"></div>
     </div>
+
+    <p class="broadcast-summary" id="broadcastSummary"></p>
 
     <button class="primary-btn" id="sendBroadcastBtn" type="button">
       <i class="fas fa-paper-plane"></i> <span>পাঠান</span>
@@ -39,7 +59,7 @@
   </div>
 </div>
 
-<style>
+<style is:global>
   .broadcast-overlay {
     display: none;
     position: fixed;
@@ -65,7 +85,7 @@
     background: #fff;
     width: 100%;
     max-width: 520px;
-    max-height: 82vh;
+    max-height: 86vh;
     overflow-y: auto;
     border-radius: 24px 24px 0 0;
     padding: 24px 20px 32px;
@@ -100,14 +120,58 @@
   .broadcast-post-title {
     font-size: 0.85rem;
     color: #8FA0BC;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     margin-top: 4px;
+  }
+
+  .broadcast-note {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    background: #FFF4EC;
+    border: 1px solid #FFD9C2;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: #1B2A4A;
+  }
+
+  .broadcast-note i {
+    color: #FF6B35;
+    margin-top: 3px;
   }
 
   .broadcast-mode-tabs {
     display: flex;
     gap: 8px;
     margin-bottom: 16px;
+  }
+
+  .broadcast-search-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .broadcast-search-row .form-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .broadcast-selectall-btn {
+    flex-shrink: 0;
+    background: #FFF4EC;
+    color: #FF6B35;
+    border: 1px solid #FFD9C2;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
   }
 
   .specific-club-list {
@@ -130,6 +194,43 @@
     color: #1B2A4A;
     font-weight: 600;
   }
+
+  .club-check-item input {
+    width: auto;
+    flex-shrink: 0;
+  }
+
+  .club-check-item .club-check-name {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .club-check-item.is-blocked {
+    background: #F1F3F6;
+    color: #9AA6B8;
+    cursor: not-allowed;
+  }
+
+  .club-check-item .club-block-reason {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #9AA6B8;
+  }
+
+  .broadcast-list-empty {
+    font-size: 0.82rem;
+    color: #8FA0BC;
+    padding: 10px 4px;
+  }
+
+  .broadcast-summary {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #1B2A4A;
+    margin: 14px 0 12px;
+  }
 </style>
 
 <script>
@@ -137,67 +238,192 @@
 
   let currentPostId = null;
   let currentClubId = null;
-  let currentClubName = '';
   let broadcastMode = 'all';
+  let allClubs = [];
+  let blockedToday = new Set();
+  let blockedMonth = new Set();
+  let selected = new Set();
+
+  const $ = (id) => document.getElementById(id);
+
+  function blockReason(id) {
+    if (blockedMonth.has(id)) return 'এই মাসের সীমা শেষ';
+    if (blockedToday.has(id)) return 'আজ পাঠানো হয়েছে';
+    return '';
+  }
+
+  function isBlocked(id) {
+    return blockedToday.has(id) || blockedMonth.has(id);
+  }
+
+  function allModeClubs() {
+    const upajila = $('broadcastUpajilaSelect').value;
+    return upajila ? allClubs.filter((c) => c.upajila === upajila) : allClubs;
+  }
+
+  function visibleSpecificClubs() {
+    const q = ($('broadcastClubSearch').value || '').trim().toLowerCase();
+    return q ? allClubs.filter((c) => (c.name || '').toLowerCase().includes(q)) : allClubs;
+  }
+
+  function updateSummary() {
+    const el = $('broadcastSummary');
+    if (broadcastMode === 'specific') {
+      el.textContent = selected.size + ' টি ক্লাব নির্বাচিত';
+      return;
+    }
+    const pool = allModeClubs();
+    const ok = pool.filter((c) => !isBlocked(c.id)).length;
+    const skipped = pool.length - ok;
+    el.textContent = ok + ' টি ক্লাবকে যাবে' + (skipped > 0 ? ' (' + skipped + ' টি বাদ: আজ পাঠানো হয়েছে বা মাসের সীমা শেষ)' : '');
+  }
+
+  function updateSelectAllLabel() {
+    const enabled = visibleSpecificClubs().filter((c) => !isBlocked(c.id));
+    const allOn = enabled.length > 0 && enabled.every((c) => selected.has(c.id));
+    $('broadcastSelectAll').textContent = allOn ? 'সব বাদ দিন' : 'সবাইকে সিলেক্ট';
+  }
+
+  function renderSpecificList() {
+    const listEl = $('specificClubList');
+    listEl.textContent = '';
+    const clubs = visibleSpecificClubs();
+
+    if (clubs.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'broadcast-list-empty';
+      empty.textContent = 'কোনো ক্লাব পাওয়া যায়নি';
+      listEl.appendChild(empty);
+      updateSelectAllLabel();
+      updateSummary();
+      return;
+    }
+
+    clubs.forEach((c) => {
+      const reason = blockReason(c.id);
+      const item = document.createElement('label');
+      item.className = 'club-check-item' + (reason ? ' is-blocked' : '');
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = c.id;
+      cb.disabled = !!reason;
+      cb.checked = !reason && selected.has(c.id);
+      cb.addEventListener('change', () => {
+        if (cb.checked) selected.add(c.id);
+        else selected.delete(c.id);
+        updateSelectAllLabel();
+        updateSummary();
+      });
+
+      const name = document.createElement('span');
+      name.className = 'club-check-name';
+      name.textContent = c.name || '';
+
+      item.appendChild(cb);
+      item.appendChild(name);
+
+      if (reason) {
+        const tag = document.createElement('span');
+        tag.className = 'club-block-reason';
+        tag.textContent = reason;
+        item.appendChild(tag);
+      }
+      listEl.appendChild(item);
+    });
+
+    updateSelectAllLabel();
+    updateSummary();
+  }
+
+  function setMode(mode) {
+    broadcastMode = mode;
+    document.querySelectorAll('.broadcast-mode-tabs .myclub-tab').forEach((t) => {
+      t.classList.toggle('active', t.dataset.mode === mode);
+    });
+    $('allModeFields').style.display = mode === 'all' ? 'block' : 'none';
+    $('specificModeFields').style.display = mode === 'specific' ? 'block' : 'none';
+    if (mode === 'specific') renderSpecificList();
+    else updateSummary();
+  }
+
+  function showMsg(text, isError) {
+    const msgEl = $('broadcastMsg');
+    msgEl.textContent = text || '';
+    msgEl.className = text && isError ? 'form-msg show-error' : 'form-msg';
+  }
 
   window.openBroadcastModal = async (postId, postTitle, clubId, clubName) => {
     currentPostId = postId;
     currentClubId = clubId;
-    currentClubName = clubName;
-    document.getElementById('broadcastPostTitle').textContent = postTitle;
-    document.getElementById('broadcastOverlay').classList.add('open');
-    document.getElementById('broadcastMsg').className = 'form-msg';
+    selected = new Set();
+    allClubs = [];
+    blockedToday = new Set();
+    blockedMonth = new Set();
 
-    const { data: clubs } = await supabase
-      .from('clubs')
-      .select('id, name, upajila')
-      .eq('is_active', true)
-      .neq('id', clubId);
+    $('broadcastPostTitle').textContent = postTitle || '';
+    $('broadcastClubSearch').value = '';
+    $('broadcastUpajilaSelect').value = '';
+    showMsg('', false);
+    setMode('all');
+    $('broadcastSummary').textContent = 'লোড হচ্ছে...';
+    $('broadcastOverlay').classList.add('open');
 
-    const listEl = document.getElementById('specificClubList');
-    listEl.innerHTML = '';
-    (clubs || []).forEach((c) => {
-      const item = document.createElement('label');
-      item.className = 'club-check-item';
-      item.innerHTML = `<input type="checkbox" value="${c.id}" style="width:auto;" /> ${c.name}`;
-      listEl.appendChild(item);
-    });
+    const [clubsRes, quotaRes] = await Promise.all([
+      supabase
+        .from('clubs')
+        .select('id, name, upajila')
+        .eq('is_active', true)
+        .neq('id', clubId)
+        .order('name'),
+      supabase.rpc('club_broadcast_quota', { p_club_id: clubId }),
+    ]);
+
+    allClubs = clubsRes.data || [];
+    const q = quotaRes.data || {};
+    blockedToday = new Set(q.blocked_today || []);
+    blockedMonth = new Set(q.blocked_month || []);
+
+    if (clubsRes.error) showMsg('ক্লাব তালিকা লোড হয়নি, আবার চেষ্টা করুন', true);
+
+    if (broadcastMode === 'specific') renderSpecificList();
+    else updateSummary();
   };
 
-  document.getElementById('broadcastClose')?.addEventListener('click', () => {
-    document.getElementById('broadcastOverlay').classList.remove('open');
+  $('broadcastClose')?.addEventListener('click', () => {
+    $('broadcastOverlay').classList.remove('open');
   });
 
   document.querySelectorAll('.broadcast-mode-tabs .myclub-tab').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.broadcast-mode-tabs .myclub-tab').forEach((t) => t.classList.remove('active'));
-      btn.classList.add('active');
-      broadcastMode = btn.dataset.mode;
-      document.getElementById('allModeFields').style.display = broadcastMode === 'all' ? 'block' : 'none';
-      document.getElementById('specificModeFields').style.display = broadcastMode === 'specific' ? 'block' : 'none';
-    });
+    btn.addEventListener('click', () => setMode(btn.dataset.mode));
   });
 
-  document.getElementById('sendBroadcastBtn')?.addEventListener('click', async () => {
-    const msgEl = document.getElementById('broadcastMsg');
-    const btn = document.getElementById('sendBroadcastBtn');
+  $('broadcastUpajilaSelect')?.addEventListener('change', updateSummary);
+  $('broadcastClubSearch')?.addEventListener('input', renderSpecificList);
+
+  $('broadcastSelectAll')?.addEventListener('click', () => {
+    const enabled = visibleSpecificClubs().filter((c) => !isBlocked(c.id));
+    const allOn = enabled.length > 0 && enabled.every((c) => selected.has(c.id));
+    enabled.forEach((c) => {
+      if (allOn) selected.delete(c.id);
+      else selected.add(c.id);
+    });
+    renderSpecificList();
+  });
+
+  $('sendBroadcastBtn')?.addEventListener('click', async () => {
+    const btn = $('sendBroadcastBtn');
     const span = btn.querySelector('span');
 
     let targetClubIds = [];
-
     if (broadcastMode === 'all') {
-      const upajila = document.getElementById('broadcastUpajilaSelect').value;
-      let query = supabase.from('clubs').select('id').eq('is_active', true).neq('id', currentClubId);
-      if (upajila) query = query.eq('upajila', upajila);
-      const { data } = await query;
-      targetClubIds = (data || []).map((c) => c.id);
+      targetClubIds = allModeClubs().filter((c) => !isBlocked(c.id)).map((c) => c.id);
     } else {
-      targetClubIds = Array.from(document.querySelectorAll('#specificClubList input:checked')).map((i) => i.value);
+      targetClubIds = Array.from(selected).filter((id) => !isBlocked(id));
     }
 
     if (targetClubIds.length === 0) {
-      msgEl.textContent = 'কোনো ক্লাব নির্বাচিত হয়নি';
-      msgEl.className = 'form-msg show-error';
+      showMsg('পাঠানোর মতো কোনো ক্লাব নেই (নির্বাচিত হয়নি, অথবা আজ পাঠানো হয়েছে/মাসের সীমা শেষ)', true);
       return;
     }
 
@@ -216,16 +442,14 @@
     btn.disabled = false;
 
     if (error) {
-      msgEl.textContent = 'ব্যর্থ: ' + error.message;
-      msgEl.className = 'form-msg show-error';
+      showMsg('ব্যর্থ: ' + error.message, true);
       return;
     }
 
-    msgEl.className = 'form-msg';
-    msgEl.textContent = '';
-    window.showToast(`${targetClubIds.length} টি ক্লাবকে জানানো হয়েছে ✓`, 'success');
+    showMsg('', false);
+    window.showToast(targetClubIds.length + ' টি ক্লাবকে জানানো হয়েছে ✓', 'success');
     setTimeout(() => {
-      document.getElementById('broadcastOverlay').classList.remove('open');
+      $('broadcastOverlay').classList.remove('open');
     }, 1200);
   });
 </script>
