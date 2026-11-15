@@ -2,7 +2,7 @@
 // ============================================================
 // Smart Feni Pro — হিরো (রাইডার) ট্যাব নির্ধারণ
 // delivery_riders.offers_delivery -> "ডিরেক্ট অর্ডার" + "অফলাইন অর্ডার"
-// delivery_riders.offers_ride     -> "রাইড"
+// (রাইড ট্যাব বাদ: রাইড এখন আলাদা রোল local_driver → /pro/local-ride; /pro/hero/ride সেখানে রিডাইরেক্ট)
 // UI শুধু রাউটিং; আসল সুরক্ষা প্রতিটা পেজের RLS/RPC-তে (auth.uid())।
 // ============================================================
 
@@ -28,7 +28,7 @@ export async function getHeroTabs() {
   if (!data) return { loggedIn: true, hasRider: false, tabs: [] };
   const tabs = [];
   if (data.offers_delivery) tabs.push('delivery', 'offline');
-  if (data.offers_ride) tabs.push('ride');
+  // offers_ride আর ট্যাব দেখায় না — লোকাল রাইডে সরানো হয়েছে
   if (!tabs.length) tabs.push('delivery');
   return { loggedIn: true, hasRider: true, tabs };
 }

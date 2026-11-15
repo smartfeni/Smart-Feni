@@ -18,7 +18,7 @@ export const PRO_FLAG_KEY = 'sf_pro_app';
 // পাথের প্রিফিক্স মেলে; বাকি অংশ (/সাব-পাথ) অপরিবর্তিত; query আলাদা, কলারই রাখে।
 const PRO_PATH_MAP = [
   ['/delivery-hero', '/pro/hero/delivery'],
-  ['/ride-hero', '/pro/hero/ride'],
+  ['/ride-hero', '/pro/local-ride'],
   ['/offline-orders', '/pro/hero/offline'],
   ['/my-club', '/pro/club'],
   ['/my-clinic', '/pro/clinic'],
