@@ -14,8 +14,6 @@ export const categories = [
   { id: 'tuition', name: 'টিউশন খুঁজুন', icon: 'fa-chalkboard-user', desc: 'টিউটর/স্টুডেন্ট খোঁজা', slug: 'tuition' },
   { id: 'sports', name: 'খেলাধুলা ও ইভেন্টস', icon: 'fa-football', desc: 'স্পোর্টস ও বিনোদন', slug: 'sports' },
   { id: 'lost-found', name: 'লস্ট এন্ড ফাউন্ড', icon: 'fa-magnifying-glass', desc: 'হারানো-পাওয়া', slug: 'lost-found', hidden: true },
-  { id: 'health', name: 'স্বাস্থ্য পরামর্শ', icon: 'fa-user-doctor', desc: 'স্বাস্থ্য বিষয়ক পরামর্শ', slug: 'health', hidden: true },
-  { id: 'legal', name: 'আইনি পরামর্শ', icon: 'fa-scale-balanced', desc: 'আইনি পরামর্শ ও নথি', slug: 'legal', hidden: true },
   { id: 'event', name: 'ইভেন্ট ম্যানেজমেন্ট', icon: 'fa-calendar-check', desc: 'অনুষ্ঠান আয়োজন', slug: 'event', hidden: true },
   { id: 'laundry', name: 'লন্ড্রি সার্ভিস', icon: 'fa-shirt', desc: 'কাপড় ধোলাই সার্ভিস', slug: 'laundry', hidden: true },
   { id: 'doctor-directory', name: 'ডাক্তার ডিরেক্টরি', icon: 'fa-stethoscope', desc: 'ডাক্তারের চেম্বার, সময় ও সিরিয়াল', slug: 'doctor-directory' },
@@ -23,6 +21,5 @@ export const categories = [
 
 export const featuredServices = [
   { title: 'বাসা ভাড়া', tag: 'ভাড়া', desc: 'মিরপুরে ৩ বেডরুম ফ্ল্যাট ভাড়া দেওয়া হবে, সাথে পার্কিং ও লিফট', time: '২ ঘণ্টা আগে', location: 'মিরপুর-১২', icon: 'fa-house-chimney', slug: 'housing' },
-  { title: 'স্বাস্থ্য পরামর্শ', tag: 'চিকিৎসক', desc: 'অভিজ্ঞ কার্ডিওলজিস্ট ডা. রহমান, বিকাল ৫-৮ টা', time: '৫ ঘণ্টা আগে', location: 'ধানমন্ডি', icon: 'fa-user-md', slug: 'health' },
   { title: 'রিপেয়ার সার্ভিস', tag: 'প্লাম্বিং', desc: 'বাথরুমের পাইপ লিকেজ, ওয়াটার হিটার ইন্সটলেশন', time: '১ দিন আগে', location: 'বাড্ডা', icon: 'fa-tools', slug: 'repair' },
 ];

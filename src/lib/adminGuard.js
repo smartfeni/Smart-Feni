@@ -42,8 +42,6 @@ const AREA_BY_SEGMENT = {
   'blood-requests': 'blood',
   'shop-orders': 'shops',
   'delivery-disputes': 'disputes',
-  'health-requests': 'health_requests',
-  'legal-requests': 'legal_requests',
   'doctors': 'doctors',
   'clinics': 'clinics',
   'referrals': 'referrals',
