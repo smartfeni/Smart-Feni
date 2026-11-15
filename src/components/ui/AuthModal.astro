@@ -999,13 +999,12 @@ const upazilas = [
 
     // ইমেইল দিয়েও পরবর্তীতে লগইন করা যাবে বলে অন্য কোনো একাউন্টে
     // একই ইমেইল আগে থেকে যুক্ত আছে কিনা চেক করা হচ্ছে
-    const { data: existingEmailProfiles } = await supabase
-      .from('profiles')
-      .select('id')
-      .ilike('recovery_email', recoveryEmail)
-      .limit(1);
+    const { data: emailTaken } = await supabase.rpc('auth_email_exists', {
+      p_email: recoveryEmail,
+      p_exclude_self: false,
+    });
 
-    if (existingEmailProfiles && existingEmailProfiles.length > 0) {
+    if (emailTaken === true) {
       showMessage('এই ইমেইল দিয়ে আগে থেকেই একটি একাউন্ট আছে');
       setLoading(signupNext, false);
       return;
@@ -1014,12 +1013,10 @@ const upazilas = [
     // একই নাম্বারে পুরনো ফরম্যাটের (880/+88) অ্যাকাউন্ট থাকলে ডুপ্লিকেট বানানো আটকানো
     const normPhone = normalizeBdPhone(phone);
     if (/^01\d{9}$/.test(normPhone)) {
-      const { data: samePhone } = await supabase
-        .from('profiles')
-        .select('id')
-        .in('phone', [normPhone, '+' + normPhone, '88' + normPhone, '+88' + normPhone])
-        .limit(1);
-      if (samePhone && samePhone.length > 0) {
+      const { data: samePhone } = await supabase.rpc('auth_phone_exists', {
+        p_phone: normPhone,
+      });
+      if (samePhone === true) {
         showMessage('এই ফোন নাম্বারে আগে থেকেই অ্যাকাউন্ট আছে');
         setLoading(signupNext, false);
         return;
@@ -1129,25 +1126,23 @@ const upazilas = [
     if (identifier.includes('@')) {
       // ইমেইল দিয়ে লগইন — recovery_email দিয়ে আগে ফোন নাম্বার
       // লুকআপ করে সেই ফোন থেকে বানানো Auth ইমেইল বের করা হচ্ছে
-      const { data: matches } = await supabase
-        .from('profiles')
-        .select('phone')
-        .ilike('recovery_email', identifier)
-        .limit(2);
+      const { data: resolved } = await supabase.rpc('auth_resolve_login', {
+        p_email: identifier.trim(),
+      });
 
-      if (!matches || matches.length === 0) {
+      if (!resolved || resolved.status === 'none' || (!resolved.phone && resolved.status !== 'multiple')) {
         showMessage('এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি');
         setLoading(loginSubmit, false);
         return;
       }
 
-      if (matches.length > 1) {
+      if (resolved.status === 'multiple') {
         showMessage('একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন');
         setLoading(loginSubmit, false);
         return;
       }
 
-      loginEmail = phoneToEmail(matches[0].phone);
+      loginEmail = phoneToEmail(resolved.phone);
     } else {
       loginEmail = phoneToEmail(identifier);
     }

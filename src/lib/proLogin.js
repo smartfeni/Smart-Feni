@@ -38,16 +38,14 @@ export async function loginWithIdentifier(identifier, password) {
 
   let loginEmail;
   if (id.indexOf('@') !== -1) {
-    // ILIKE-র বিশেষ চিহ্ন (% _ \) এস্কেপ
-    const pattern = id.replace(/[\\%_]/g, '\\$&');
-    const { data: matches } = await supabase
-      .from('profiles')
-      .select('phone')
-      .ilike('recovery_email', pattern)
-      .limit(2);
-    if (!matches || matches.length === 0) return { ok: false, error: 'এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি' };
-    if (matches.length > 1) return { ok: false, error: 'একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন' };
-    loginEmail = phoneToEmail(matches[0].phone);
+    const { data: resolved } = await supabase.rpc('auth_resolve_login', { p_email: id });
+    if (!resolved || resolved.status === 'none' || (!resolved.phone && resolved.status !== 'multiple')) {
+      return { ok: false, error: 'এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি' };
+    }
+    if (resolved.status === 'multiple') {
+      return { ok: false, error: 'একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন' };
+    }
+    loginEmail = phoneToEmail(resolved.phone);
   } else {
     loginEmail = phoneToEmail(id);
   }
