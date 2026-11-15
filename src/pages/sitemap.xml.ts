@@ -26,7 +26,7 @@ const STATIC_PATHS: [string, string, string][] = [
   ['/services/car-rental', 'daily', '0.9'],
   ['/services/doctor-directory', 'daily', '0.9'],
   ['/services/courier', 'daily', '0.8'],
-  ['/services/ride', 'daily', '0.8'],
+  ['/services/local-ride', 'daily', '0.8'],
   ['/services/blood', 'daily', '0.8'],
   ['/services/tuition', 'daily', '0.8'],
   ['/services/housing', 'daily', '0.8'],
