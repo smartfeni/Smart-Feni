@@ -54,11 +54,11 @@ export async function POST({ request }) {
     }
 
     const finalOffersDelivery = Boolean(offersDelivery);
-    const finalOffersRide = Boolean(offersRide);
+    const finalOffersRide = false; // রাইড এখন লোকাল রাইডে (/become-a-local-driver); পুরনো ক্লায়েন্ট offersRide পাঠালেও উপেক্ষা
 
     if (!finalOffersDelivery && !finalOffersRide) {
       return new Response(
-        JSON.stringify({ error: 'অন্তত একটা সার্ভিস (ডেলিভারি বা রাইড) সিলেক্ট করতে হবে' }),
+        JSON.stringify({ error: 'ডেলিভারি সার্ভিস সিলেক্ট করতে হবে (রাইডের জন্য লোকাল ড্রাইভার হিসেবে আবেদন করুন)' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }

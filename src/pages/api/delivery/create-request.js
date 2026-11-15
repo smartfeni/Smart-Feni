@@ -101,6 +101,14 @@ export async function POST({ request }) {
 
     const finalCategory = VALID_CATEGORIES.includes(category) ? category : 'delivery';
 
+    // রাইড এখন আলাদা সিস্টেম "লোকাল রাইড" (/local-ride-request); এখানে আর নতুন রাইড রিকোয়েস্ট নয়
+    if (finalCategory === 'ride') {
+      return new Response(
+        JSON.stringify({ error: 'রাইড এখন "লোকাল রাইড" থেকে নিন', code: 'RIDE_MOVED' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     // ===== কখন লাগবে: এখনই / পরে (বাধ্যতামূলক) =====
     const timeError = (error, code) =>
       new Response(JSON.stringify({ error, code }), {
