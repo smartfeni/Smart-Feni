@@ -197,6 +197,14 @@ const guideSteps = [
             <button type="button" class="dsa-sw" id="iAvail" role="switch" aria-checked="true" aria-label="পাওয়া যাচ্ছে"><i></i></button>
           </div>
 
+          <label class="dsa-lbl" for="iOld">আগের দাম (ঐচ্ছিক, ছাড় দেখাতে)</label>
+          <input class="dsa-in" id="iOld" type="number" inputmode="decimal" min="0" max="1000000" step="any" placeholder="যেমন: 400" />
+          <div class="dsa-lbl">ট্যাগ</div>
+          <div class="dsa-tagrow" id="iTags">
+            <button type="button" class="dsa-tagchip" data-tag="popular" aria-pressed="false">🔥 জনপ্রিয়</button>
+            <button type="button" class="dsa-tagchip" data-tag="spicy" aria-pressed="false">🌶️ ঝাল</button>
+            <button type="button" class="dsa-tagchip" data-tag="new" aria-pressed="false">✨ নতুন</button>
+          </div>
           <label class="dsa-lbl" for="iCat">ক্যাটাগরি</label>
           <select class="dsa-in" id="iCat"></select>
           <label class="dsa-lbl" for="iDesc">বিবরণ (ঐচ্ছিক)</label>
@@ -325,6 +333,12 @@ const guideSteps = [
     .dsa-reorderbar { display: flex; flex-direction: column; gap: 6px; }
     .dsa-reorderbar .dsa-ghost { height: 44px; font-size: 14px; align-self: flex-start; }
     textarea.dsa-in { resize: vertical; min-height: 80px; }
+    .dsa-tagrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    .dsa-tagchip { min-height: 44px; border: 1.5px solid #D5DCE8; border-radius: 22px; background: #fff; padding: 0 14px; font: inherit; font-weight: 600; font-size: 14px; color: #1B2A4A; cursor: pointer; }
+    .dsa-tagchip[aria-pressed="true"] { border-color: #FF6B35; background: #FFF6F1; }
+    .dsa-tg { display: inline-block; font-size: 11.5px; font-weight: 700; border-radius: 8px; padding: 1px 7px; margin: 3px 4px 0 0; background: #FFF0EA; color: #C2410C; }
+    .dsa-oldp { font-size: 11px; font-weight: 600; color: #8FA0BC; text-decoration: line-through; }
+    .dsa-menusearch { margin: 4px 0 6px; }
     @media (max-width: 380px) {
       .dsa-two { grid-template-columns: 1fr; }
     }
@@ -737,6 +751,27 @@ const guideSteps = [
       mg.addEventListener('click', () => openCategorySheet({ supabase, shopId: s.id, toast, onChanged: () => loadItems(s.id) }));
       bar.appendChild(mg);
       wrap.appendChild(bar);
+      if (items.length > 6) {
+        const sq = document.createElement('input');
+        sq.type = 'search';
+        sq.className = 'dsa-in dsa-menusearch';
+        sq.placeholder = 'মেনুতে খুঁজুন (নাম বা বিবরণ)';
+        sq.setAttribute('aria-label', 'মেনুতে খুঁজুন');
+        sq.addEventListener('input', () => {
+          const card = wrap.parentElement;
+          if (!card) return;
+          const q = sq.value.trim().toLowerCase();
+          card.querySelectorAll('.dsa-it').forEach((r) => {
+            r.style.display = !q || (r.getAttribute('data-q') || '').indexOf(q) !== -1 ? '' : 'none';
+          });
+          card.querySelectorAll('.dsa-cathead').forEach((hd) => {
+            const box = hd.nextElementSibling;
+            const any = box && Array.prototype.some.call(box.querySelectorAll('.dsa-it'), (r) => r.style.display !== 'none');
+            hd.style.display = any || !q ? '' : 'none';
+          });
+        });
+        wrap.appendChild(sq);
+      }
       if (items.length > 1) {
         const hint = document.createElement('p');
         hint.className = 'dsa-hint2';
@@ -808,10 +843,29 @@ const guideSteps = [
       toast('দোকানের ক্রম সেভ হয়েছে ✓', 'success');
     }
 
+    // ---------- P1: ছাড় ও ট্যাগ ----------
+    const ITEM_TAGS = { popular: '🔥 জনপ্রিয়', spicy: '🌶️ ঝাল', new: '✨ নতুন' };
+
+    function setItemTags(arr) {
+      Array.prototype.forEach.call($('iTags').querySelectorAll('.dsa-tagchip'), (b) => {
+        b.setAttribute('aria-pressed', arr.indexOf(b.getAttribute('data-tag')) !== -1 ? 'true' : 'false');
+      });
+    }
+    function getItemTags() {
+      return Array.prototype.filter.call($('iTags').querySelectorAll('.dsa-tagchip'), (b) => b.getAttribute('aria-pressed') === 'true')
+        .map((b) => b.getAttribute('data-tag'));
+    }
+    $('iTags').addEventListener('click', (e) => {
+      const b = e.target.closest('.dsa-tagchip');
+      if (!b) return;
+      b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    });
+
     function itemRow(s, it) {
       const row = document.createElement('div');
       row.className = 'dsa-it' + (it.is_available ? '' : ' off');
       row.setAttribute('data-id', it.id);
+      row.setAttribute('data-q', ((it.name || '') + ' ' + (it.description || '')).toLowerCase());
 
       const main = document.createElement('button');
       main.type = 'button';
@@ -821,6 +875,13 @@ const guideSteps = [
       const nm = document.createElement('div');
       nm.className = 'dsa-itname';
       nm.textContent = it.name;
+      if (it.tags && it.tags.length) {
+        const tg = document.createElement('div');
+        it.tags.forEach((t) => {
+          if (ITEM_TAGS[t]) { const sp = document.createElement('span'); sp.className = 'dsa-tg'; sp.textContent = ITEM_TAGS[t]; tg.appendChild(sp); }
+        });
+        nm.appendChild(tg);
+      }
       main.appendChild(nm);
       main.addEventListener('click', () => openItem(s, it));
 
@@ -830,6 +891,14 @@ const guideSteps = [
       pr.setAttribute('aria-label', 'দাম বদলান');
       const pn = Number(it.price);
       pr.textContent = '৳' + bnNum(Number.isInteger(pn) ? pn : pn.toFixed(2));
+      if (Number(it.old_price) > pn) {
+        const od = document.createElement('span');
+        od.className = 'dsa-oldp';
+        od.textContent = '৳' + bnNum(Number(it.old_price));
+        pr.insertBefore(od, pr.firstChild);
+        pr.style.flexDirection = 'column';
+        pr.style.lineHeight = '1.15';
+      }
       pr.addEventListener('click', () => openItem(s, it));
 
       const sw = document.createElement('button');
@@ -1233,6 +1302,8 @@ const guideSteps = [
       $('iSort').value = String(it ? (it.sort_order || 0) : nextItemSort(shop.id));
       fillItemCats(shop.id, it ? it.category_id : ((menuFilter[shop.id] && menuFilter[shop.id] !== 'all' && menuFilter[shop.id] !== 'none') ? menuFilter[shop.id] : ''));
       $('iDesc').value = it && it.description ? it.description : '';
+      $('iOld').value = it && it.old_price ? String(Number(it.old_price)) : '';
+      setItemTags(it && it.tags ? it.tags : []);
       itemImg.reset(it ? it.image_url : null);
       $('delItemBtn').style.display = it ? '' : 'none';
       openSheet('itemOverlay');
@@ -1247,6 +1318,9 @@ const guideSteps = [
       const price = parseFloat($('iPrice').value);
       if (isNaN(price) || price < 0 || price > 1000000) return showErr('itemErr', 'দাম ০ থেকে ১০,০০,০০০ টাকার মধ্যে দিন।');
       const sort = parseInt($('iSort').value, 10);
+      const oldRaw = $('iOld').value.trim();
+      const oldPrice = oldRaw === '' ? null : parseFloat(oldRaw);
+      if (oldPrice !== null && (isNaN(oldPrice) || oldPrice <= price || oldPrice > 1000000)) return showErr('itemErr', 'আগের দাম নতুন দামের চেয়ে বেশি হতে হবে।');
 
       const payload = {
         shop_id: itemShop.id,
@@ -1255,6 +1329,8 @@ const guideSteps = [
         is_available: getSwitch($('iAvail')),
         description: $('iDesc').value.trim() || null,
         category_id: $('iCat').value || null,
+        old_price: oldPrice === null ? null : Math.round(oldPrice * 100) / 100,
+        tags: getItemTags(),
         sort_order: Number.isFinite(sort) ? sort : 0,
       };
 

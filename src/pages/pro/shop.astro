@@ -126,6 +126,14 @@ const guideSteps = [
           <input class="ps-in" id="psItName" maxlength="120" placeholder="যেমন: কাচ্চি বিরিয়ানি" required />
           <label class="ps-lbl" for="psItPrice">দাম (৳) <span class="ps-req">*</span></label>
           <input class="ps-in" id="psItPrice" type="number" inputmode="decimal" min="0" max="1000000" step="any" placeholder="যেমন: 350" required />
+          <label class="ps-lbl" for="psItOld">আগের দাম (ঐচ্ছিক, ছাড় দেখাতে)</label>
+          <input class="ps-in" id="psItOld" type="number" inputmode="decimal" min="0" max="1000000" step="any" placeholder="যেমন: 400" />
+          <div class="ps-lbl">ট্যাগ</div>
+          <div class="ps-tagrow" id="psItTags">
+            <button type="button" class="ps-tagchip" data-tag="popular" aria-pressed="false">🔥 জনপ্রিয়</button>
+            <button type="button" class="ps-tagchip" data-tag="spicy" aria-pressed="false">🌶️ ঝাল</button>
+            <button type="button" class="ps-tagchip" data-tag="new" aria-pressed="false">✨ নতুন</button>
+          </div>
           <label class="ps-lbl" for="psItCat">ক্যাটাগরি</label>
           <select class="ps-in" id="psItCat"></select>
           <label class="ps-lbl" for="psItDesc">বিবরণ (ঐচ্ছিক)</label>
@@ -332,6 +340,12 @@ const guideSteps = [
     .ps-cathead { font-size: 13px; font-weight: 700; color: #5B6B86; margin: 10px 0 0; }
     @media (max-width: 380px) { .ps-two { grid-template-columns: 1fr; } }
 
+    .ps-tagrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .ps-tagchip { min-height: 44px; border: 1.5px solid #D5DCE8; border-radius: 22px; background: #fff; padding: 0 14px; font: inherit; font-weight: 600; font-size: 14px; color: #1B2A4A; cursor: pointer; }
+    .ps-tagchip[aria-pressed="true"] { border-color: #FF6B35; background: #FFF6F1; }
+    .ps-tg { display: inline-block; font-size: 11.5px; font-weight: 700; border-radius: 8px; padding: 1px 7px; margin: 3px 4px 0 0; background: #FFF0EA; color: #C2410C; }
+    .ps-old { display: block; font-size: 12px; color: #8FA0BC; text-decoration: line-through; font-weight: 600; }
+    .ps-itp { text-align: right; }
     @media print {
       body * { visibility: hidden !important; }
       #psReceipt, #psReceipt * { visibility: visible !important; }
@@ -657,7 +671,7 @@ const guideSteps = [
       const hasCache = !!(cached && Array.isArray(cached.items));
       if (hasCache && !force) { menu = cached.items; menuCats = cached.cats || []; renderMenu(); }
       const [ir, cr] = await Promise.all([
-        supabase.from('delivery_shop_items').select('id, name, price, image_url, is_available, sort_order, description, category_id').eq('shop_id', shop.id).order('sort_order', { ascending: true }).order('name', { ascending: true }),
+        supabase.from('delivery_shop_items').select('id, name, price, image_url, is_available, sort_order, description, category_id, old_price, tags').eq('shop_id', shop.id).order('sort_order', { ascending: true }).order('name', { ascending: true }),
         supabase.from('delivery_shop_categories').select('id, name, sort_order').eq('shop_id', shop.id).order('sort_order', { ascending: true }).order('name', { ascending: true }),
       ]);
       if (ir.error || cr.error) { if (!hasCache) toast('মেনু লোড হয়নি, আবার চেষ্টা করুন', 'error'); return; }
@@ -699,15 +713,24 @@ const guideSteps = [
     function menuRow(it) {
       const row = h('div', 'ps-it' + (it.is_available ? '' : ' off'));
       row.setAttribute('data-id', it.id);
+      row.setAttribute('data-q', ((it.name || '') + ' ' + (it.description || '')).toLowerCase());
       const tile = h('div', 'ps-tile');
       if (it.image_url) { const im = document.createElement('img'); im.alt = ''; im.loading = 'lazy'; im.src = it.image_url; tile.appendChild(im); }
       else tile.textContent = (it.name || '?').charAt(0);
       row.appendChild(tile);
       const nm = h('div', 'ps-itn', it.name);
+      if (it.tags && it.tags.length) {
+        const tg = document.createElement('div');
+        it.tags.forEach((t) => { if (PS_TAGS[t]) tg.appendChild(h('span', 'ps-tg', PS_TAGS[t])); });
+        nm.appendChild(tg);
+      }
       nm.style.cursor = 'pointer';
       nm.addEventListener('click', () => openItem(it));
       row.appendChild(nm);
-      row.appendChild(h('div', 'ps-itp', money(it.price)));
+      const pEl = h('div', 'ps-itp');
+      if (Number(it.old_price) > Number(it.price)) pEl.appendChild(h('span', 'ps-old', money(it.old_price)));
+      pEl.appendChild(document.createTextNode(money(it.price)));
+      row.appendChild(pEl);
       const ed = h('button', 'ps-edit');
       ed.type = 'button';
       ed.setAttribute('aria-label', it.name + ' এডিট');
@@ -742,6 +765,16 @@ const guideSteps = [
       addBtn.type = 'button';
       addBtn.addEventListener('click', () => openItem(null));
       card.appendChild(addBtn);
+      if (menu.length > 6) {
+        const sq = document.createElement('input');
+        sq.type = 'search';
+        sq.className = 'ps-in';
+        sq.placeholder = 'মেনুতে খুঁজুন (নাম বা বিবরণ)';
+        sq.setAttribute('aria-label', 'মেনুতে খুঁজুন');
+        sq.value = menuQ;
+        sq.addEventListener('input', () => { menuQ = sq.value; applyMenuFilter(card); });
+        card.appendChild(sq);
+      }
 
       const groups = menuGroups();
       const bar = h('div', 'ps-catbar');
@@ -772,6 +805,7 @@ const guideSteps = [
         card.appendChild(box);
         if (g.items.length > 1) makeSortable(box, { itemSelector: '.ps-it', onChange: saveOrder });
       });
+      applyMenuFilter(card);
       pane.appendChild(card);
     }
 
@@ -797,6 +831,37 @@ const guideSteps = [
 
     function itErr(m) { const e = $('psItErr'); e.textContent = m || ''; e.style.display = m ? 'block' : 'none'; }
 
+    // ---------- P1: ছাড় ও ট্যাগ, মেনু সার্চ ----------
+    const PS_TAGS = { popular: '🔥 জনপ্রিয়', spicy: '🌶️ ঝাল', new: '✨ নতুন' };
+    let menuQ = '';
+
+    function setTagChips(arr) {
+      Array.prototype.forEach.call($('psItTags').querySelectorAll('.ps-tagchip'), (b) => {
+        b.setAttribute('aria-pressed', arr.indexOf(b.getAttribute('data-tag')) !== -1 ? 'true' : 'false');
+      });
+    }
+    function getTagChips() {
+      return Array.prototype.filter.call($('psItTags').querySelectorAll('.ps-tagchip'), (b) => b.getAttribute('aria-pressed') === 'true')
+        .map((b) => b.getAttribute('data-tag'));
+    }
+    $('psItTags').addEventListener('click', (e) => {
+      const b = e.target.closest('.ps-tagchip');
+      if (!b) return;
+      b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    });
+
+    function applyMenuFilter(card) {
+      const q = menuQ.trim().toLowerCase();
+      card.querySelectorAll('.ps-it').forEach((r) => {
+        r.style.display = !q || (r.getAttribute('data-q') || '').indexOf(q) !== -1 ? '' : 'none';
+      });
+      card.querySelectorAll('.ps-cathead').forEach((hd) => {
+        const box = hd.nextElementSibling;
+        const any = box && Array.prototype.some.call(box.querySelectorAll('.ps-it'), (r) => r.style.display !== 'none');
+        hd.style.display = any || !q ? '' : 'none';
+      });
+    }
+
     function openItem(it) {
       itEdit = it; itImage = it ? it.image_url : null; itBlob = null; itDelArmed = false;
       $('psItTitle').textContent = it ? 'আইটেম এডিট' : 'নতুন আইটেম';
@@ -804,6 +869,8 @@ const guideSteps = [
       $('psItPrice').value = it ? String(it.price) : '';
       fillItCats(it ? it.category_id : (menuFilter !== 'all' && menuFilter !== 'none' ? menuFilter : ''));
       $('psItDesc').value = it && it.description ? it.description : '';
+      $('psItOld').value = it && it.old_price ? String(Number(it.old_price)) : '';
+      setTagChips(it && it.tags ? it.tags : []);
       setSw($('psItAvail'), it ? !!it.is_available : true);
       $('psItDel').style.display = it ? '' : 'none';
       $('psItDel').textContent = 'আইটেম মুছুন';
@@ -881,7 +948,7 @@ const guideSteps = [
           uploaded = path;
           url = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
         }
-        const { data, error } = await supabase.rpc('shop_save_item2', {
+        const { data, error } = await supabase.rpc('shop_save_item3', {
           p_shop_id: shop.id,
           p_item_id: itEdit ? itEdit.id : null,
           p_name: name,
@@ -891,10 +958,12 @@ const guideSteps = [
           p_sort: null,
           p_description: $('psItDesc').value.trim() || null,
           p_category_id: $('psItCat').value || null,
+          p_old_price: $('psItOld').value.trim() === '' ? null : Number($('psItOld').value),
+          p_tags: getTagChips(),
         });
         if (error || !data || !data.ok) {
           if (uploaded) await removeImage(supabase.storage.from(BUCKET).getPublicUrl(uploaded).data.publicUrl);
-          const rs = { name_required: 'আইটেমের নাম লিখুন।', bad_price: 'সঠিক দাম লিখুন।', bad_image: 'ছবিটি ঠিক নেই, আবার বাছুন।', too_many: 'একটি দোকানে সর্বোচ্চ ২০০টি আইটেম রাখা যায়।', bad_category: 'ক্যাটাগরিটি ঠিক নেই, আবার বাছুন।' };
+          const rs = { name_required: 'আইটেমের নাম লিখুন।', bad_price: 'সঠিক দাম লিখুন।', bad_old_price: 'আগের দাম নতুন দামের চেয়ে বেশি হতে হবে।', bad_image: 'ছবিটি ঠিক নেই, আবার বাছুন।', too_many: 'একটি দোকানে সর্বোচ্চ ২০০টি আইটেম রাখা যায়।', bad_category: 'ক্যাটাগরিটি ঠিক নেই, আবার বাছুন।' };
           itErr((data && rs[data.reason]) || ('সেভ হয়নি, আবার চেষ্টা করুন'));
           return;
         }

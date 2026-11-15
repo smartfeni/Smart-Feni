@@ -67,7 +67,7 @@ export async function fetchDeliveryShops() {
   const ids = shops.map((s) => s.id);
   const { data: items, error: itemsError } = await supabase
     .from('delivery_shop_items')
-    .select('id, shop_id, name, price, image_url, is_available, sort_order, description, category_id')
+    .select('id, shop_id, name, price, image_url, is_available, sort_order, description, category_id, old_price, tags')
     .in('shop_id', ids)
     .eq('is_available', true)
     .order('sort_order', { ascending: true })
