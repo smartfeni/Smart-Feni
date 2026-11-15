@@ -3,7 +3,7 @@
 //
 // housing / recycle / job / repair / tuition / sports: একটা স্ক্রিনশট
 //   = একটা লিস্টিং (single object)
-// blood: একটা স্ক্রিনশট = একাধিক ডোনার (array)
+// (ব্লাড ডোনার স্ক্রিনশট ইম্পোর্ট ১৫ নভে ২০২৬-এ বাদ — SF সিদ্ধান্ত)
 //
 // SUPPORTED_CATEGORIES হলো এই সিস্টেমের একমাত্র "সোর্স অফ ট্রুথ" —
 // telegram-webhook.js এবং admin/bot-chats.astro দুটোই এখান থেকে
@@ -125,25 +125,6 @@ const CATEGORY_CONFIG = {
       required: ['title', 'event_type', 'description'],
     },
   },
-  blood: {
-    instruction:
-      'এই স্ক্রিনশটটি একটি ব্লাড ডোনার লিস্ট/টেবিল থেকে নেওয়া, যেখানে একাধিক ডোনার থাকতে পারে। ' +
-      'প্রতিটা ডোনারের নাম, ব্লাড গ্রুপ এবং ফোন নম্বর বের করে JSON array আকারে দাও — একজন হলেও array এর ভেতরে একটা object হিসেবে দিবে। ' +
-      'যাদের ফোন নম্বর নাই বা অস্পষ্ট, তাদেরও বাদ দিবে না, phone ফিল্ড null রাখবে।',
-    isArray: true,
-    schema: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          blood_group: { type: 'string', description: 'যেমন: "O+", "A-", "AB+", "B+" ইত্যাদি' },
-          phone: { type: 'string', nullable: true },
-        },
-        required: ['name', 'blood_group'],
-      },
-    },
-  },
   // ডাক্তার প্রোফাইল: একটা স্ক্রিনশট = একাধিক ডাক্তার (array), প্রতিজনের চেম্বার ও দিনভিত্তিক সময় সহ।
   // telegram-webhook.js এটা শুধু স্পষ্টভাবে অনুমোদিত চ্যাটে দেখায়। স্পেশালিটির slug তালিকা
   // (specialties টেবিল থেকে) extraInstruction হিসেবে যোগ হয়।
@@ -225,7 +206,6 @@ const CATEGORY_META = {
   repair: { label: 'রিপেয়ার সার্ভিস', emoji: '🔧' },
   tuition: { label: 'টিউশন', emoji: '📚' },
   sports: { label: 'খেলাধুলা ও ইভেন্টস', emoji: '⚽' },
-  blood: { label: 'ব্লাড ডোনার', emoji: '🩸' },
   menu: { label: 'ডেলিভারি মেনু', emoji: '🍽️' },
   doctor: { label: 'ডাক্তার প্রোফাইল', emoji: '🩺' },
 };
@@ -386,23 +366,6 @@ export function buildListingRowFromExtraction(extracted, category, upazila, imag
   }
 
   throw new Error(`buildListingRowFromExtraction: অসমর্থিত ক্যাটাগরি ${category}`);
-}
-
-/**
- * blood: extract হওয়া array + কমন উপজিলা/ক্লাব নাম -> `manual_blood_donors` rows
- */
-export function buildBloodDonorRows(extractedArray, upazila, clubNameRaw) {
-  return extractedArray
-    .filter((d) => d.phone)
-    .map((d) => ({
-      name: d.name,
-      phone: d.phone,
-      blood_group: d.blood_group,
-      upazila,
-      club_name_raw: clubNameRaw,
-      status: 'pending',
-      source: 'screenshot-import',
-    }));
 }
 
 /**

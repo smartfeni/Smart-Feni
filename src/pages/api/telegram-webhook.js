@@ -20,7 +20,6 @@ import { randomUUID } from 'node:crypto';
 import {
   extractListingFromScreenshot,
   buildListingRowFromExtraction,
-  buildBloodDonorRows,
   normalizeMenuItems,
   normalizeDoctors,
   doctorSpecialtyInstruction,
@@ -242,84 +241,11 @@ async function handlePhotoMessage(message) {
   });
 }
 
-// ---------- টেক্সট হ্যান্ডলিং (ক্লাবের নাম) ----------
+// ---------- টেক্সট হ্যান্ডলিং ----------
+// ব্লাড ডোনার ইম্পোর্ট (ক্লাবের নাম টেক্সট-রিপ্লাই) ১৫ নভে ২০২৬-এ বাদ (SF সিদ্ধান্ত)।
+// এখন কোনো ফ্লো টেক্সট রিপ্লাই চায় না; কলারের জন্য ফাংশনটি রাখা হলো।
 async function handleTextMessage(message) {
-  const chatId = String(message.chat.id);
-  const chatConfig = await getChatConfig(chatId, senderDisplayName(message.from));
-  if (!chatConfig) return;
-
-  const session = await getActiveSession(chatId);
-  if (!session || session.step !== 'awaiting_club_name') return;
-
-  const clubNameRaw = message.text.trim();
-
-  await tg('sendMessage', { chat_id: chatId, text: `⏳ "${clubNameRaw}" ক্লাব হিসেবে প্রসেস হচ্ছে...` });
-
-  try {
-    const { base64, mimeType } = await downloadTelegramPhoto(session.file_id);
-    const extractedArray = await extractListingFromScreenshot({ imageBase64: base64, mimeType, category: 'blood' });
-
-    const rawRows = buildBloodDonorRows(extractedArray, session.upazila, clubNameRaw).map((row) => ({
-      ...row,
-      submitted_via_label: session.submitted_via_label,
-    }));
-
-    const dedupedMap = new Map();
-    rawRows.forEach((row) => dedupedMap.set(row.phone, row));
-    let rows = Array.from(dedupedMap.values());
-
-    const duplicateCount = rawRows.length - rows.length;
-    const skipped = extractedArray.length - rawRows.length;
-
-    if (rows.length === 0) {
-      await tg('sendMessage', { chat_id: chatId, text: '❌ কোনো ভ্যালিড ফোন নম্বর সহ ডোনার পাওয়া যায়নি।' });
-      await supabase.from('screenshot_imports').update({ step: 'done' }).eq('id', session.id);
-      return;
-    }
-
-    const phones = rows.map((r) => r.phone);
-    const { data: existingRows } = await supabase
-      .from('manual_blood_donors')
-      .select('phone, status')
-      .in('phone', phones);
-
-    const existingStatusMap = Object.fromEntries((existingRows || []).map((r) => [r.phone, r.status]));
-
-    let updatedCount = 0;
-    let newCount = 0;
-
-    rows = rows.map((row) => {
-      const existingStatus = existingStatusMap[row.phone];
-      if (existingStatus) {
-        updatedCount++;
-        return { ...row, status: existingStatus };
-      }
-      newCount++;
-      return row;
-    });
-
-    const { error } = await supabase.from('manual_blood_donors').upsert(rows, { onConflict: 'phone' });
-
-    if (error) {
-      await tg('sendMessage', { chat_id: chatId, text: `❌ সেভ করতে সমস্যা: ${error.message}` });
-      return;
-    }
-
-    await supabase
-      .from('screenshot_imports')
-      .update({ club_name_raw: clubNameRaw, step: 'done' })
-      .eq('id', session.id);
-
-    let summary = `✅ প্রসেস সম্পন্ন হয়েছে (${session.upazila}, ${clubNameRaw})\n`;
-    summary += `নতুন যোগ হয়েছে: ${newCount} জন (pending)\n`;
-    if (updatedCount > 0) summary += `আগে থেকে ছিল, তথ্য আপডেট হয়েছে (status অপরিবর্তিত): ${updatedCount} জন\n`;
-    if (skipped > 0) summary += `⚠️ ${skipped} জনের ফোন নম্বর পাওয়া যায়নি, বাদ পড়েছে।\n`;
-    if (duplicateCount > 0) summary += `⚠️ ${duplicateCount} জনের ফোন নম্বর ডুপ্লিকেট ছিল, একটাই রাখা হয়েছে।`;
-
-    await tg('sendMessage', { chat_id: chatId, text: summary.trim() });
-  } catch (err) {
-    await tg('sendMessage', { chat_id: chatId, text: `❌ প্রসেস করতে সমস্যা: ${err.message}` });
-  }
+  void message;
 }
 
 // ---------- Callback হ্যান্ডলিং ----------
@@ -668,6 +594,16 @@ async function handleMenuEnable(chatId, messageId, importId) {
 }
 
 async function handleCategorySelected(chatId, messageId, importId, category, chatConfig) {
+  if (category === 'blood') {
+    // পুরনো মেসেজের বাটন চাপলে — ব্লাড ডোনার ইম্পোর্ট আর চালু নেই
+    await supabase.from('screenshot_imports').update({ step: 'done' }).eq('id', importId);
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: '❌ ব্লাড ডোনার ইম্পোর্ট আর চালু নেই।',
+    });
+    return;
+  }
   if (category === DOCTOR_CATEGORY && !getAllowedCategories(chatConfig).includes(DOCTOR_CATEGORY)) {
     await tg('editMessageText', {
       chat_id: chatId,
@@ -701,16 +637,6 @@ async function handleUpazilaSelected(chatId, messageId, importId, upazilaIndex) 
 
   if (row.category === DOCTOR_CATEGORY) {
     await handleDoctorExtract(chatId, messageId, row, upazila);
-    return;
-  }
-
-  if (row.category === 'blood') {
-    await supabase.from('screenshot_imports').update({ step: 'awaiting_club_name' }).eq('id', importId);
-    await tg('editMessageText', {
-      chat_id: chatId,
-      message_id: messageId,
-      text: `উপজিলা: ${upazila} ✅\n\nকোন ক্লাব থেকে এই লিস্ট, নাম লিখে reply করুন।`,
-    });
     return;
   }
 
