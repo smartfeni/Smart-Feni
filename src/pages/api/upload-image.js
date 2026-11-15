@@ -3,35 +3,33 @@
 // API এন্ডপয়েন্ট: জেনেরিক ছবি আপলোড (/api/upload-image)
 // সাইটের যেকোনো জায়গার (club logo/cover, club posts, club members,
 // listing images, admin site images, shop images ইত্যাদি) ছবি
-// আপলোডের জন্য একটাই রিইউজেবল এন্ডপয়েন্ট। আগে প্রতিটা জায়গায়
-// আলাদাভাবে client-side supabase.storage.upload() কল করা হতো,
-// কিন্তু listing-images বাকেটে ইউজারের SELECT পলিসি না থাকায় Storage-এর
-// INSERT…RETURNING ফেইল করত ("new row violates row-level security policy"
-// — রোলব্যাক টেস্টে কনফার্ম, ২ নভে ২০২৬)। এই রুট service role key দিয়ে
-// সরাসরি আপলোড করে, তাই ইউজার-RLS বাইপাস হয়ে যায় (অথরাইজেশন সার্ভারেই হয়)।
-//
-// আপডেট: আপলোডের সময় cacheControl: '31536000' (১ বছর) সেট করা
-// হচ্ছে। আগে এটা না দেওয়ায় Supabase ডিফল্ট max-age=3600 (১ ঘণ্টা)
-// বসাতো, ফলে প্রতি ঘণ্টায় ব্রাউজার ছবি re-fetch করত। যেহেতু
-// ক্লায়েন্ট সাইডে ইতিমধ্যে ?t=updated_at cache-busting query param
-// ব্যবহার হয় (ছবি বদলালে URL-ই বদলে যায়), তাই লম্বা cache
-// নিরাপদ — নতুন ছবি আপলোড হলে নতুন URL-এর সাথে আবার fresh fetch
-// হবে, পুরনো URL cache-এই থেকে যাবে (ক্ষতি নেই)।
+// আপলোডের জন্য একটাই রিইউজেবল এন্ডপয়েন্ট। listing-images বাকেটে
+// ইউজারের SELECT পলিসি না থাকায় ক্লায়েন্ট-সাইড আপলোড ফেইল করত, তাই
+// এই রুট service role key দিয়ে আপলোড করে (অথরাইজেশন সার্ভারেই হয়)।
 //
 // ক্লায়েন্ট থেকে পাঠাতে হবে (multipart/form-data):
 //   - file: আপলোড করার ফাইল/ব্লব
-//   - path: বাকেটের ভেতরের সম্পূর্ণ পাথ (যেমন "clubs/xxx-logo-123.jpg")
-//   - contentType (ঐচ্ছিক): নির্দিষ্ট mime type দিতে চাইলে (Blob-এর জন্য)
+//   - path: বাকেটের ভেতরের পাথ (যেমন "clubs/xxx-logo-123.jpg")
+//   - contentType (ঐচ্ছিক): এখন উপেক্ষা করা হয়, আসল ধরন বাইট দেখে ঠিক হয়
 //
-// নিরাপত্তা: Authorization header-এর access token সার্ভার নিজে
-// যাচাই করে ইউজার আইডি বের করে (ক্লায়েন্টের দাবি বিশ্বাস করা হয় না)।
-// 'site/' দিয়ে শুরু হওয়া পাথ শুধু admin/moderator আপলোড করতে
-// পারবে — এটা আগের storage RLS পলিসির (restrict_site_folder_writes)
-// সমতুল্য নিয়ম, শুধু এখন সার্ভার-সাইডে চেক করা হচ্ছে।
+// আপডেট (ব্যাচ ১, ১৫ নভে ২০২৬ অডিট — আপলোড লক):
+//   - শুধু অনুমোদিত ফোল্ডার (uploadGuard.js), পাথে শুধু নিরাপদ অক্ষর
+//   - ফাইলের আসল বাইট দেখে jpeg/png/webp/gif ছাড়া সব reject; content-type
+//     ক্লায়েন্টের নয়, বাইট থেকে ঠিক হয়; এক্সটেনশন আসল ধরনের সাথে মেলানো
+//   - সাইজ সীমা ৪MB
+//   - 'site/' ছাড়া upsert বন্ধ (অন্যের ছবি ওভাররাইট বন্ধ)। retry-তে "আগেই আছে"
+//     এলে সফল ধরা হয় (আসল ফাইল বদলায় না)
+//   - 'site/' ফোল্ডার শুধু images.manage পারমিশনের জন্য (আগের মতোই)
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
 import { callerCan } from '../../lib/serverPermission.js';
+import {
+  MAX_UPLOAD_BYTES,
+  sniffImageType,
+  validateUploadPath,
+  withExtension,
+} from '../../lib/uploadGuard.js';
 // এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
 import { reportServerError } from '../../lib/serverErrorReporter.js';
 
@@ -78,61 +76,81 @@ export async function POST({ request }) {
 
     const formData = await request.formData();
     const file = formData.get('file');
-    const path = formData.get('path');
+    const rawPath = formData.get('path');
     const explicitContentType = formData.get('contentType');
 
     if (!file || typeof file === 'string') {
       return json({ error: 'ফাইল পাওয়া যায়নি' }, 400);
     }
-    if (!path || typeof path !== 'string') {
+    if (!rawPath || typeof rawPath !== 'string') {
       return json({ error: 'পাথ পাওয়া যায়নি' }, 400);
-    }
-    if (path.includes('..')) {
-      return json({ error: 'অবৈধ পাথ' }, 400);
     }
 
     // HEIC/HEIF ব্লক: কাঁচা iPhone ছবি (৪MB+) egress অনেক বাড়ায় আর Android ব্রাউজারে দেখাও যায় না
     const mimeHint = String(file.type || '') + ' ' + String(explicitContentType || '');
-    if (/heic|heif/i.test(mimeHint) || /\.(heic|heif)$/i.test(path)) {
+    if (/heic|heif/i.test(mimeHint) || /\.(heic|heif)$/i.test(rawPath)) {
       return json({ error: 'HEIC ছবি চলে না, ছবি JPEG বা PNG করে দিন' }, 415);
     }
 
-    // 'site/' ফোল্ডার শুধু admin/moderator-এর জন্য — বাকি সব ফোল্ডার
-    // (avatars, clubs, club-posts, club-members, listing ইত্যাদি)
-    // যেকোনো লগইন করা ইউজারের জন্য উন্মুক্ত
-    if (path.startsWith('site/')) {
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
+    // সাইজ সীমা (বাইট পড়ার আগেই)
+    if (typeof file.size === 'number' && file.size > MAX_UPLOAD_BYTES) {
+      return json({ error: 'ছবি ৪MB-এর বেশি, ছোট করে দিন' }, 413);
+    }
 
+    const arrayBuffer = await file.arrayBuffer();
+    if (arrayBuffer.byteLength > MAX_UPLOAD_BYTES) {
+      return json({ error: 'ছবি ৪MB-এর বেশি, ছোট করে দিন' }, 413);
+    }
+
+    // আসল ধরন বাইট দেখে: jpeg/png/webp/gif ছাড়া কিছু নয়
+    const sniffed = sniffImageType(new Uint8Array(arrayBuffer, 0, Math.min(16, arrayBuffer.byteLength)));
+    if (!sniffed) {
+      return json({ error: 'শুধু JPG, PNG, WEBP বা GIF ছবি আপলোড করা যায়' }, 415);
+    }
+
+    // 'site/'-এর বাইরে এক্সটেনশন আসল ধরনের সাথে মেলানো (ইউজারের ফাইলের নাম থেকে আসা
+    // অদ্ভুত এক্সটেনশন এখানে ঠিক হয়)। 'site/'-এর ফিক্সড নাম (logo.png ইত্যাদি) অপরিবর্তিত।
+    const looksSite = rawPath.startsWith('site/');
+    const path = looksSite ? rawPath : withExtension(rawPath, sniffed.ext);
+
+    const check = validateUploadPath(path);
+    if (!check.ok) {
+      return json({ error: check.error }, 400);
+    }
+
+    // 'site/' ফোল্ডার শুধু images.manage পারমিশনের জন্য — বাকি অনুমোদিত ফোল্ডার
+    // যেকোনো লগইন ইউজারের জন্য উন্মুক্ত
+    if (check.isSite) {
       if (!(await callerCan(supabaseAdmin, userId, 'images.manage'))) {
         return json({ error: 'এই ফোল্ডারে আপলোড করার অনুমতি নেই' }, 403);
       }
     }
 
-    const contentType = (typeof explicitContentType === 'string' && explicitContentType) || file.type || 'application/octet-stream';
-    const arrayBuffer = await file.arrayBuffer();
-
     const { error: uploadError } = await supabaseAdmin.storage
       .from('listing-images')
       .upload(path, arrayBuffer, {
-        upsert: true,
-        contentType,
+        // ওভাররাইট শুধু অ্যাডমিনের site/ ফাইলে (লোগো, হেডার ইত্যাদির ফিক্সড নাম)
+        upsert: check.isSite,
+        contentType: sniffed.type,
         cacheControl: '31536000',
       });
 
     if (uploadError) {
-      console.error('upload-image error:', uploadError.message);
-      await reportServerError(reportDb, {
-        route: '/api/upload-image',
-        action: 'upload_image_storage',
-        title: 'ছবি আপলোড (Storage) ব্যর্থ',
-        message: uploadError.message,
-        status: 500,
-      });
-      return json({ error: 'আপলোড ব্যর্থ: ' + uploadError.message }, 500);
+      const dup =
+        String(uploadError.statusCode || '') === '409' ||
+        /already exists|duplicate/i.test(String(uploadError.message || ''));
+      if (!dup) {
+        console.error('upload-image error:', uploadError.message);
+        await reportServerError(reportDb, {
+          route: '/api/upload-image',
+          action: 'upload_image_storage',
+          title: 'ছবি আপলোড (Storage) ব্যর্থ',
+          message: uploadError.message,
+          status: 500,
+        });
+        return json({ error: 'আপলোড ব্যর্থ: ' + uploadError.message }, 500);
+      }
+      // dup: আগের চেষ্টাতেই আপলোড হয়েছিল (রেসপন্স হারিয়েছে), আসল ফাইল অক্ষত — সফল ধরা হলো
     }
 
     const { data: publicData } = supabaseAdmin.storage.from('listing-images').getPublicUrl(path);

@@ -15,6 +15,8 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
+// ব্যাচ ১ (১৫ নভে ২০২৬ অডিট): লগইন বাধ্যতামূলক
+import { getAuthedUser } from '../../lib/deliverySupabase.js';
 // এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
 import { reportServerError } from '../../lib/serverErrorReporter.js';
 
@@ -38,6 +40,15 @@ export async function POST({ request }) {
   // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
   let reportDb = null;
   try {
+    // লগইন ছাড়া সেভ নয় (আগে যে কেউ নাম বসাতে পারত → stored XSS ঝুঁকি)
+    const { error: authError } = await getAuthedUser(request);
+    if (authError) {
+      return new Response(JSON.stringify({ error: authError }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const body = await request.json();
     const name = (body?.name || '').trim();
     const lat = Number(body?.lat);
@@ -45,6 +56,14 @@ export async function POST({ request }) {
 
     if (!name || name.length < 2 || name.length > 60) {
       return new Response(JSON.stringify({ error: 'নাম ২-৬০ অক্ষরের মধ্যে হতে হবে' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // HTML/কন্ট্রোল ক্যারেক্টার নয় (পরে ড্রপডাউনে দেখানো হয়)
+    if (/[<>"`\u0000-\u001F\u007F]/.test(name)) {
+      return new Response(JSON.stringify({ error: 'নামে অবৈধ চিহ্ন আছে' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });

@@ -342,14 +342,22 @@ const {
   }
 
   // কাস্টমার ম্যাপ-পিনের সাথে নাম দিলে fire-and-forget সেভ করা
-  function saveLocationSuggestion(name: string, lat: number, lng: number) {
-    fetch('/api/save-location-suggestion', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, lat, lng }),
-    }).catch(() => {
-      /* ব্যর্থ হলেও মূল ফ্লো আটকাবে না — নীরবে ইগনোর */
-    });
+  async function saveLocationSuggestion(name: string, lat: number, lng: number) {
+    try {
+      // সার্ভার এখন লগইন চায় (ব্যাচ ১ অডিট); লগইন না থাকলে সেভ হবে না, মূল ফ্লো চলবে
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+      fetch('/api/save-location-suggestion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name, lat, lng }),
+      }).catch(() => {
+        /* ব্যর্থ হলেও মূল ফ্লো আটকাবে না — নীরবে ইগনোর */
+      });
+    } catch {
+      /* নীরবে ইগনোর */
+    }
   }
 
   // "ফুলগাজী উপজেলা · মুন্সিরহাট ইউনিয়ন"
@@ -955,14 +963,14 @@ const {
 
       function renderSuggestItem(item: any) {
         const thumb = item.image_url
-          ? `<img src="${item.image_url}" class="lp-suggest-thumb" alt="" loading="lazy" />`
+          ? `<img src="${esc(item.image_url)}" class="lp-suggest-thumb" alt="" loading="lazy" />`
           : `<div class="lp-suggest-thumb lp-suggest-thumb-fallback"><i class="fas fa-location-dot"></i></div>`;
-        const sub = item.upazila ? `<span class="lp-suggest-sub">${item.upazila}</span>` : '';
+        const sub = item.upazila ? `<span class="lp-suggest-sub">${esc(item.upazila)}</span>` : '';
         return `
-          <div class="lp-suggest-item" data-lat="${item.lat}" data-lng="${item.lng}" data-name="${(item.name || '').replace(/"/g, '&quot;')}">
+          <div class="lp-suggest-item" data-lat="${esc(item.lat)}" data-lng="${esc(item.lng)}" data-name="${esc(item.name)}">
             ${thumb}
             <div class="lp-suggest-text">
-              <span class="lp-suggest-name">${item.name}</span>
+              <span class="lp-suggest-name">${esc(item.name)}</span>
               ${sub}
             </div>
           </div>
@@ -1044,7 +1052,7 @@ const {
         searchResults.innerHTML = results
           .map(
             (r: any, i: number) =>
-              `<div class="lp-search-item" data-idx="${i}"><i class="fas fa-location-dot"></i> ${r.display_name}</div>`
+              `<div class="lp-search-item" data-idx="${i}"><i class="fas fa-location-dot"></i> ${esc(r.display_name)}</div>`
           )
           .join('');
         setSearchResultsVisible(true);
