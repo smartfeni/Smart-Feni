@@ -106,7 +106,7 @@ export async function POST({ request }) {
       );
     }
 
-    const { data: losingOffers, error: losingOffersError } = await client
+    const { data: losingOffers, error: losingOffersError } = await (getAdminClient().client || client)
       .from('delivery_offers')
       .select('rider_profile_id, profiles!delivery_offers_rider_profile_id_fkey(telegram_chat_id)')
       .eq('request_id', requestId)

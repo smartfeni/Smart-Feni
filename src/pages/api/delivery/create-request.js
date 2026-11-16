@@ -375,7 +375,7 @@ export async function POST({ request }) {
     // ম্যাচিং হিরোদের (category + upazila + vehicle অনুযায়ী) Telegram
     // নোটিফিকেশন — যাদের telegram_chat_id লিংক করা আছে তাদেরই যাবে,
     // অনলাইন/অফলাইন টগল নির্বিশেষে (আগের সিদ্ধান্ত অনুযায়ী)
-    let heroQuery = client
+    let heroQuery = (getAdminClient().client || client)
       .from('delivery_riders')
       .select('profile_id, profiles!delivery_riders_profile_id_fkey(telegram_chat_id)')
       .eq('verification_status', 'approved')
