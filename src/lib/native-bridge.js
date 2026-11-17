@@ -310,6 +310,7 @@ export async function initBackButtonHandler() {
 
   hideSplashWhenReady();
   initNotificationHandlers();
+  resumePendingTap();
   initOfflineBanner();
   initOfflineWriteGuard();
   initSafeLinkNavigation();
@@ -763,6 +764,43 @@ function rememberTapHandled(key) {
   }
 }
 
+// Pro অ্যাপে ট্যাপের গন্তব্য মনে রাখা: ট্যাপের পর অন্য পেজ (যেমন /pro-র "শেষ রোলে" রিডাইরেক্ট) পেজ
+// বদলে ফেললে নেভিগেশন হারিয়ে যেত। এখন গন্তব্য sessionStorage-এ থাকে, পরের পেজ লোডে
+// resumePendingTap() আবার সেখানে নিয়ে যায় (সর্বোচ্চ ১২ সেকেন্ড, ২ বার চেষ্টা)।
+const TAP_PENDING_KEY = 'sf_tap_pending';
+const TAP_PENDING_TTL_MS = 12000;
+
+function setPendingTap(key, target) {
+  try {
+    sessionStorage.setItem(TAP_PENDING_KEY, JSON.stringify({ k: key, target, t: Date.now(), n: 0 }));
+  } catch (err) {
+    // সেভ না হলে আগের আচরণ
+  }
+}
+
+function resumePendingTap() {
+  try {
+    const raw = sessionStorage.getItem(TAP_PENDING_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    if (!p || !p.target || Date.now() - Number(p.t) > TAP_PENDING_TTL_MS || Number(p.n) >= 2) {
+      sessionStorage.removeItem(TAP_PENDING_KEY);
+      return;
+    }
+    const want = new URL(p.target, window.location.origin);
+    if (window.location.pathname === want.pathname) {
+      sessionStorage.removeItem(TAP_PENDING_KEY); // গন্তব্যে পৌঁছে গেছি
+      return;
+    }
+    p.n = Number(p.n) + 1;
+    sessionStorage.setItem(TAP_PENDING_KEY, JSON.stringify(p));
+    navigatingAway = true;
+    safeNavigate(p.target, { retries: 6 });
+  } catch (err) {
+    // ফেইল করলে অ্যাপ যেমন আছে তেমনই
+  }
+}
+
 // পুশে ট্যাপ → সঠিক পেজ (ওয়েবের sw.js এর মতো: action_url এর পাথ + ?notif=<id>,
 // যাতে নোটিফিকেশন ড্রয়ার ওই পেজে গিয়ে নোটিফিকেশনটা খুলে দেখায়)
 function handleNotificationTap(event) {
@@ -802,6 +840,7 @@ function handleNotificationTap(event) {
       target = url.pathname + url.search;
     }
 
+    if (document.documentElement.hasAttribute('data-pro-app')) setPendingTap(tapKey, target);
     safeNavigate(target, { retries: 6 });
   } catch (err) {
     // ট্যাপ হ্যান্ডলিং ফেইল করলে অ্যাপ যেমন খুলেছে তেমনই থাকবে
