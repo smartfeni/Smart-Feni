@@ -13,4 +13,11 @@ export const chatFeatures = [
     browseUrl: '/clubs',
     urlPattern: 'প্রতিটা ক্লাবের নিজস্ব পেজ থাকে রুট লেভেলে, যেমন smartfeni.com/[club-slug]',
   },
+  {
+    name: 'গাড়ি ভাড়া',
+    description:
+      'দিনের বা ট্রিপের জন্য গাড়ি ভাড়ার লিস্টিং (সিএনজি, কার, মাইক্রোবাস, পিকআপ, ট্রাক, অ্যাম্বুলেন্স)। এটা লোকাল রাইড সার্ভিসের ভেতরের একটা অপশন; ড্রাইভার/মালিকের সাথে সরাসরি ফোনে ভাড়া ঠিক করা যায়।',
+    browseUrl: '/services/car-rental',
+    urlPattern: 'প্রতিটা লিস্টিংয়ের নিজস্ব পেজ: smartfeni.com/listing/[id]',
+  },
 ];

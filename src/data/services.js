@@ -2,9 +2,9 @@ export const categories = [
   { id: 'housing', name: 'বাসা ভাড়া', icon: 'fa-house', desc: 'বাসা ভাড়া খোঁজা ও দেওয়া', slug: 'housing' },
   { id: 'job', name: 'চাকরির খবর', icon: 'fa-briefcase', desc: 'চাকরির খবর ও আবেদন', slug: 'job' },
   { id: 'repair', name: 'রিপেয়ার সার্ভিস', icon: 'fa-screwdriver-wrench', desc: 'মেরামত সার্ভিস', slug: 'repair' },
-  { id: 'car-rental', name: 'গাড়ি ভাড়া সার্ভিস', icon: 'fa-car', desc: 'গাড়ি ভাড়া নেওয়া/দেওয়া', slug: 'car-rental' },
+  { id: 'car-rental', name: 'গাড়ি ভাড়া সার্ভিস', icon: 'fa-car', desc: 'গাড়ি ভাড়া নেওয়া/দেওয়া', slug: 'car-rental', hidden: true }, // লোকাল রাইডের ভেতরে অপশন (/services/local-ride); পেজ/URL আগের মতোই
   { id: 'courier', name: 'ডেলিভারি হিরো', icon: 'fa-truck-fast', desc: 'কুরিয়ার ও ডেলিভারি', slug: 'courier' },
-  { id: 'local-ride', name: 'লোকাল রাইড', icon: 'fa-van-shuttle', desc: 'নিজের এলাকার সিএনজি, অটো ও গাড়ি', slug: 'local-ride' },
+  { id: 'local-ride', name: 'লোকাল রাইড', icon: 'fa-van-shuttle', desc: 'সিএনজি, অটো, গাড়ি ও গাড়ি ভাড়া', slug: 'local-ride' },
   { id: 'emergency', name: 'ইমার্জেন্সি কন্টাক্ট', icon: 'fa-phone-volume', desc: 'জরুরি যোগাযোগ নম্বর', slug: 'emergency', hidden: true },
   { id: 'blood', name: 'ব্লাড ডোনার', icon: 'fa-droplet', desc: 'রক্তদাতা খোঁজা', slug: 'blood' },
   { id: 'home-food', name: 'হোম মেস ফুড', icon: 'fa-utensils', desc: 'বাসার তৈরি খাবার', slug: 'home-food', hidden: true },
