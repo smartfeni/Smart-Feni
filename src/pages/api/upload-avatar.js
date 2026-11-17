@@ -15,6 +15,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { reportServerError } from '../../lib/serverErrorReporter.js';
+import { r2Configured, r2Put, r2PublicUrl } from '../../lib/r2.js';
 
 export const prerender = false;
 
@@ -69,6 +70,20 @@ export async function POST({ request }) {
     const fileExt = (file.name || 'jpg').split('.').pop();
     const filePath = `avatars/${userId}-${Date.now()}.${fileExt}`;
     const arrayBuffer = await file.arrayBuffer();
+
+    // R2 (Cloudflare): নতুন প্রোফাইল ছবি এখানে যায় (egress ফ্রি); ব্যর্থ হলে নিচে Supabase-এ ফলব্যাক
+    if (r2Configured()) {
+      try {
+        const ct = /^image\/(jpeg|png|webp|gif)$/.test(String(file.type || '')) ? file.type : 'image/jpeg';
+        const r2 = await r2Put(filePath, new Uint8Array(arrayBuffer), ct);
+        if (r2.ok || r2.dup) {
+          return json({ url: r2PublicUrl(filePath) }, 200);
+        }
+        console.error('avatar R2 upload status:', r2.status);
+      } catch (r2Err) {
+        console.error('avatar R2 upload error:', r2Err && r2Err.message);
+      }
+    }
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from('listing-images')

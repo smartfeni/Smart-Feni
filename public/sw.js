@@ -63,7 +63,10 @@ function isStaticAsset(pathname) {
 }
 
 function isSupabaseImage(url) {
-  return url.hostname.endsWith(".supabase.co") && url.pathname.includes("/storage/v1/object/public/listing-images/");
+  return (
+    (url.hostname.endsWith(".supabase.co") && url.pathname.includes("/storage/v1/object/public/listing-images/")) ||
+    url.hostname === "img.smartfeni.com"
+  );
 }
 
 async function trimCache(cacheName, maxItems) {
