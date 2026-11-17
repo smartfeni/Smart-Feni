@@ -25,7 +25,7 @@
 //      তাই HTML ক্যাশ করাই যথেষ্ট — আলাদা ডেটা-ক্যাশ লাগে না) — অফলাইনে
 //      সবচেয়ে বেশি দরকার, tel: লিংক নেট ছাড়াও কাজ করে
 // ============================================================
-const CACHE_NAME = "smartfeni-v3";
+const CACHE_NAME = "smartfeni-v4";
 const IMAGE_CACHE_NAME = "smartfeni-images-v1";
 const MAX_IMAGE_CACHE_ITEMS = 60;
 const NETWORK_TIMEOUT_MS = 4000;
@@ -58,6 +58,7 @@ function isStaticAsset(pathname) {
   return (
     pathname.startsWith("/_astro/") ||
     pathname.startsWith("/fonts/") ||
+    pathname.startsWith("/categories/") ||
     /\.(?:js|css|woff2?|ttf|ico)$/.test(pathname)
   );
 }
@@ -170,6 +171,9 @@ self.addEventListener("install", (event) => {
     caches.open(CACHE_NAME).then(async (cache) => {
       await cache.add(OFFLINE_URL).catch(() => {});
       await Promise.all(PRECACHE_PAGES.map((url) => cache.add(url).catch(() => {})));
+      // হোমপেজের ক্যাটাগরি ছবি আগেই ক্যাশে (v নম্বর CategoryGrid.astro-র সাথে মিলিয়ে রাখো)
+      const CAT_SLUGS = ["blood","car-rental","clubs","courier","doctor-directory","health","housing","job","local-ride","online-shop","recycle","repair","ride","sports","tuition"];
+      await Promise.all(CAT_SLUGS.map((s) => cache.add("/categories/" + s + ".webp?v=1").catch(() => {})));
     })
   );
 });
