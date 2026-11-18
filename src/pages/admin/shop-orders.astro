@@ -188,6 +188,37 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         c.appendChild(box);
       }
 
+      if (r.payment_method) {
+        const pm = el('div', 'vw-meta');
+        const expected = (Number(r.items_total) || 0) + (Number(r.delivery_fee) || 0);
+        const st = { cod: 'ক্যাশ অন ডেলিভারি', submitted: 'যাচাইয়ের অপেক্ষায়', verified: 'যাচাই হয়েছে', mismatch: 'অঙ্ক মেলেনি' }[r.payment_status] || r.payment_status || '';
+        pm.textContent = '💳 ' + (r.payment_method === 'bkash' ? 'বিকাশ' : 'COD') + ' · ' + st
+          + ' · মোট ৳' + bn(expected) + ' (চার্জ ৳' + bn(Number(r.delivery_fee) || 0) + ')'
+          + (r.payment_trx ? ' · TrxID ' + r.payment_trx : '') + (r.payment_last4 ? ' · শেষ ৪: ' + r.payment_last4 : '');
+        c.appendChild(pm);
+        if (r.payment_method === 'bkash' && (r.payment_status === 'submitted' || r.payment_status === 'mismatch')) {
+          const w = el('div', 'vw-meta');
+          const inp = document.createElement('input');
+          inp.type = 'number'; inp.inputMode = 'numeric'; inp.placeholder = 'কত টাকা এসেছে'; inp.value = String(expected || '');
+          inp.setAttribute('aria-label', 'প্রাপ্ত অঙ্ক'); inp.style.cssText = 'width:130px;padding:6px 8px;border:1px solid #ccd;border-radius:8px;margin-right:8px';
+          const bt = document.createElement('button');
+          bt.type = 'button'; bt.textContent = 'পেমেন্ট যাচাই করুন';
+          bt.style.cssText = 'padding:7px 12px;border:0;border-radius:8px;background:#FF6B35;color:#fff;font-weight:700;cursor:pointer';
+          bt.addEventListener('click', async () => {
+            const amt = Number(inp.value);
+            if (!(amt > 0)) { if (window.showToast) window.showToast('অঙ্ক দিন', 'error'); return; }
+            bt.disabled = true;
+            const { data: rr, error: ee } = await supabase.rpc('market_admin_verify_days_payment', { p_order_id: r.id, p_amount: amt });
+            bt.disabled = false;
+            if (ee) { if (window.showToast) window.showToast('যাচাই হয়নি (অনুমতি নেই?)', 'error'); return; }
+            if (window.showToast) window.showToast(rr && rr.ok ? 'যাচাই হয়েছে, অর্ডার কনফার্ম' : 'অঙ্ক কম, মেলেনি', rr && rr.ok ? 'success' : 'error');
+            loadList();
+          });
+          w.appendChild(inp); w.appendChild(bt);
+          c.appendChild(w);
+        }
+      }
+
       if (r.status === 'cancelled') {
         const by = BY_LABEL[r.cancelled_by] || r.cancelled_by || '';
         const txt = 'বাতিল' + (by ? ' (' + by + ')' : '') + (r.cancelled_at ? ' · ' + fmtTime(r.cancelled_at) : '')
@@ -214,7 +245,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const r = currentRange();
       const { data, error } = await supabase
         .from('orders')
-        .select('id, status, created_at, customer_name, customer_phone, customer_address, cancelled_by, cancelled_at, cancel_reason, shops(name), order_items(title, price, quantity)')
+        .select('id, status, created_at, customer_name, customer_phone, customer_address, cancelled_by, cancelled_at, cancel_reason, payment_method, payment_status, payment_trx, payment_last4, payment_claimed, payment_verified_amount, delivery_fee, items_total, shops(name), order_items(title, price, quantity)')
         .gte('created_at', r.fromIso)
         .lt('created_at', r.toIso)
         .order('created_at', { ascending: false })
