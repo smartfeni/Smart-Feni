@@ -130,7 +130,7 @@ export async function POST({ request }) {
     // কুইক ডেলিভারিতে এই ধাপ নেই (অগ্রিম যাচাই + কাস্টমারের দাম কনফার্মই যথেষ্ট); শুধু দাম কনফার্ম হয়ে থাকতে হবে
     if (reqRow.is_market && reqRow.market_stage !== 'quote_confirmed') {
       return new Response(
-        JSON.stringify({ error: 'আগে কেনার দাম পাঠান এবং কাস্টমারকে কনফার্ম করতে দিন', code: 'QUOTE_NOT_CONFIRMED' }),
+        JSON.stringify({ error: 'কাস্টমারের পেমেন্ট যাচাই হওয়ার আগে পিকআপ করা যায় না', code: 'QUOTE_NOT_CONFIRMED' }),
         { status: 409, headers: { 'Content-Type': 'application/json' } }
       );
     }
