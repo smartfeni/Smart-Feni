@@ -64,7 +64,7 @@
             <option>ফেনী সদর</option><option>ছাগলনাইয়া</option><option>দাগনভূঞা</option><option>পরশুরাম</option><option>ফুলগাজী</option><option>সোনাগাজী</option>
           </select>
         </label>
-        <label class="mls-f"><span>ইউনিয়ন</span><input type="text" id="mlsWUn" maxlength="60" placeholder="ইউনিয়নের নাম" /></label>
+        <label class="mls-f"><span>ইউনিয়ন / পৌরসভা</span><select id="mlsWUn"></select></label>
       </div>
       <label class="mls-f"><span>বাজার বা এলাকার নাম</span><input type="text" id="mlsWArea" maxlength="80" placeholder="যেমন: বাজার, পাড়া, মহল্লা" /></label>
       <label class="mls-f"><span>বাসা, রাস্তা ও ল্যান্ডমার্ক</span><textarea id="mlsWHouse" maxlength="200" placeholder="বাসা নম্বর, রাস্তার নাম, কাছের পরিচিত জায়গা"></textarea></label>
@@ -143,7 +143,7 @@
   import { getCurrentPosition } from '../../lib/native-bridge.js';
   import {
     UPAZILAS, BORDER_COLORS, getUnionUpazilaId, loadFeniGeo, findAreaAt, getFeniBounds,
-    getUpazilaBorders, getDistrictBorder, getLabelPoints, getUnionBn,
+    getUpazilaBorders, getDistrictBorder, getLabelPoints, getUnionBn, getUnionsOfUpazilaName,
   } from '../../data/feniAreas.js';
 
   const $ = (id) => document.getElementById(id);
@@ -159,6 +159,26 @@
   function showErr(id, msg) { const e = $(id); if (!e) return; e.textContent = msg || ''; e.hidden = !msg; }
   function hasAddress() { try { return !!getDrop(); } catch (e) { return false; } }
   function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  // লিখিত ঠিকানা: উপজেলা বাছলে তার ইউনিয়ন/পৌরসভা ড্রপডাউনে আসে
+  function fillUnions(selected) {
+    const sel = $('mlsWUn');
+    sel.textContent = '';
+    const first = document.createElement('option');
+    first.value = ''; first.textContent = 'বেছে নিন';
+    sel.appendChild(first);
+    getUnionsOfUpazilaName($('mlsWUp').value).forEach((n) => {
+      const o = document.createElement('option');
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    });
+    if (selected) {
+      const hit = Array.from(sel.options).find((o) => o.value === selected || o.value.replace(/\s*(ইউনিয়ন|পৌরসভা)$/, '') === String(selected).replace(/\s*(ইউনিয়ন|পৌরসভা)$/, ''));
+      if (hit) sel.value = hit.value;
+    }
+  }
+  $('mlsWUp').addEventListener('change', () => fillUnions(''));
+  fillUnions('');
+
   function upColor(id) { const u = UPAZILAS.find((x) => x.id === id); return u ? u.color : '#64748b'; }
 
   function loadLeaflet() {
@@ -386,7 +406,7 @@
   });
 
   // ধাপ ১ → ৩: লিখিত ঠিকানা
-  $('mlsBtnText').addEventListener('click', () => { picked = null; $('mlsWPinOk').hidden = true; go(3); $('mlsWUn').focus(); });
+  $('mlsBtnText').addEventListener('click', () => { picked = null; $('mlsWPinOk').hidden = true; go(3); $('mlsWUp').focus(); });
   $('mlsWPin').addEventListener('click', () => {
     picked = null; clearPin();
     $('mlsSave4').disabled = true;
@@ -402,14 +422,15 @@
     ok.hidden = false;
     const sel = $('mlsWUp');
     Array.from(sel.options).forEach((o) => { if (o.value === picked.upazila) sel.value = o.value; });
-    if (picked.union && !$('mlsWUn').value) $('mlsWUn').value = picked.union;
+    fillUnions(picked.union || '');
     go(3);
   });
   $('mlsSave3').addEventListener('click', () => {
     const up = $('mlsWUp').value.trim(), un = $('mlsWUn').value.trim();
     const area = $('mlsWArea').value.trim(), house = $('mlsWHouse').value.trim();
+    if (!un) { showErr('mlsErr3', 'ইউনিয়ন / পৌরসভা বেছে নিন।'); return; }
     if (!area && !house) { showErr('mlsErr3', 'বাজার/এলাকার নাম অথবা বাসা ও রাস্তার ঠিকানা লিখুন।'); return; }
-    const parts = [house, area, un ? un + ' ইউনিয়ন' : '', up].filter(Boolean);
+    const parts = [house, area, un + (/(ইউনিয়ন|পৌরসভা)$/.test(un) ? '' : ' ইউনিয়ন'), up].filter(Boolean);
     finish({
       address: parts.join(', '),
       lat: picked ? picked.lat : null,
