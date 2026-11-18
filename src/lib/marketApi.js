@@ -61,3 +61,26 @@ export function shopOpenState(shop, now = new Date()) {
 export function bnNum(n) {
   return String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
 }
+
+// ---------- ধাপ ৩-ক: একটা দোকান ও তার মেনু ----------
+export async function fetchShop(id) {
+  const { data, error } = await supabase
+    .from('delivery_shops')
+    .select('id, name, image_url, upazila, union_name, address, lat, lng, is_open, busy_until, market_category_ids, prep_minutes, opens_at, closes_at, weekly_off, is_test, is_active')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || !(data.is_active || data.is_test)) return null;
+  return data;
+}
+
+// ফেরত: { cats: [{id,name}], items: [{id,name,price,old_price,image_url,description,category_id,tags}] }
+export async function fetchShopMenu(shopId) {
+  const [c, i] = await Promise.all([
+    supabase.from('delivery_shop_categories').select('id, name, sort_order').eq('shop_id', shopId).order('sort_order', { ascending: true }),
+    supabase.from('delivery_shop_items').select('id, name, price, old_price, image_url, description, category_id, tags, sort_order, is_available').eq('shop_id', shopId).eq('is_available', true).order('sort_order', { ascending: true }).order('name', { ascending: true }),
+  ]);
+  if (c.error) throw c.error;
+  if (i.error) throw i.error;
+  return { cats: c.data || [], items: i.data || [] };
+}

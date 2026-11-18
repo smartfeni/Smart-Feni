@@ -12,6 +12,7 @@
 export const prerender = false;
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
+import MarketLocationSheet from '../components/market/MarketLocationSheet.astro';
 ---
 
 <BaseLayout title="মার্কেট | স্মার্ট ফেনী">
@@ -20,7 +21,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     <header class="mk-top">
       <div class="mk-loc-lbl">ডেলিভারি ঠিকানা</div>
-      <div class="mk-loc" id="mkLoc">ফেনী</div>
+      <button type="button" class="mk-loc" id="mkLoc" aria-label="ডেলিভারি ঠিকানা বদলান">ফেনী</button>
     </header>
 
     <label class="mk-search">
@@ -40,12 +41,18 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     <div id="mkBody"></div>
   </div>
 
+  <MarketLocationSheet />
+
   <style is:global>
     .mk-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #FFF4EC; min-height: 70vh; padding: 14px 16px 110px; max-width: 560px; margin: 0 auto; overflow-x: hidden; }
     .mk-page * { box-sizing: border-box; }
     .mk-page button, .mk-page input { font-family: inherit; }
     .mk-loc-lbl { font-size: 11.5px; font-weight: 600; color: #5B6B86; }
-    .mk-loc { font-size: 17px; font-weight: 700; }
+    .mk-loc { display: block; max-width: 100%; border: 0; background: none; padding: 0; text-align: left; font-family: inherit; color: #1B2A4A; font-size: 17px; font-weight: 700; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mk-loc::after { content: ' ▾'; color: #FF6B35; }
+    .mk-loc:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; border-radius: 6px; }
+    .mk-card { cursor: pointer; }
+    .mk-card:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
     .mk-search { display: flex; align-items: center; gap: 10px; margin: 12px 0; height: 50px; padding: 0 16px; border-radius: 16px; background: #fff; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.08); color: #5B6B86; }
     .mk-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font-size: 15px; font-weight: 500; color: #1B2A4A; }
     .mk-search:focus-within { box-shadow: 0 0 0 2px #1B2A4A; }
@@ -88,6 +95,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
   <script>
     import { supabase } from '../lib/supabase.js';
     import { fetchMarketCategories, fetchMarketShops, shopOpenState, bnNum } from '../lib/marketApi.js';
+    import { getDrop } from '../lib/marketCart.js';
 
     const $ = (id) => document.getElementById(id);
     const ANY = '__any__';
@@ -116,9 +124,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
 
     // ---------- ঠিকানা লাইন (ধাপ ২-তে শুধু বর্তমান উপজেলা) ----------
     function showLoc() {
+      const d = getDrop();
       let up = null;
       try { up = localStorage.getItem('smartfeni_upazila'); } catch (e) {}
-      $('mkLoc').textContent = up || 'ফেনী';
+      $('mkLoc').textContent = d ? d.address : (up || 'ঠিকানা সেট করুন');
     }
 
     // ---------- ক্যাটাগরি ট্যাব ----------
@@ -174,6 +183,12 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       info.appendChild(meta);
       card.appendChild(img);
       card.appendChild(info);
+      card.tabIndex = 0;
+      card.setAttribute('role', 'link');
+      card.setAttribute('aria-label', s.name + ' দোকান খুলুন');
+      const go = () => { location.href = '/market/shop?id=' + encodeURIComponent(s.id); };
+      card.addEventListener('click', go);
+      card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
       return card;
     }
 
@@ -228,6 +243,8 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     async function init() {
       showLoc();
       window.addEventListener('smartfeni:upazila-changed', showLoc);
+      window.addEventListener('smartfeni:market-drop-changed', showLoc);
+      $('mkLoc').addEventListener('click', () => window.SFMarketLocation.open());
       $('mkQ').addEventListener('input', (e) => { q = e.target.value; if (active !== ANY) renderBody(); });
       showMsg(document.createTextNode('লোড হচ্ছে...'));
 
