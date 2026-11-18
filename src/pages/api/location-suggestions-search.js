@@ -22,7 +22,6 @@ import { reportServerError } from '../../lib/serverErrorReporter.js';
 export const prerender = false;
 
 const FENI_CENTER = { lat: 23.0159, lng: 91.3976 };
-const FENI_RADIUS_METERS = 40000; // ৪০ কিমি — memory-র ফলব্যাক রেডিয়াসের সাথে মিলিয়ে
 
 function getAdminClient() {
   const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
@@ -75,6 +74,8 @@ async function searchPhoton(q) {
         const lng = Number(coordinates[0]);
         const lat = Number(coordinates[1]);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        // Keep fallback results inside the Feni service area.
+        if (lat < 22.65 || lat > 23.35 || lng < 91.0 || lng > 91.65) return null;
 
         const name = properties.name || properties.street || properties.locality ||
           properties.district || properties.city || properties.county;
