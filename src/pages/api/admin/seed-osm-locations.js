@@ -101,6 +101,11 @@ const GROUPS = [
     key: 'places',
     filters: [`nwr["place"~"^(city|town|village|suburb|hamlet|neighbourhood|quarter|locality)$"]`],
   },
+  {
+    key: 'roads',
+    // প্রধান নামযুক্ত সড়কগুলো — ছোট গলি/সার্ভিস রোড বাদ, যাতে ম্যাপে অতিরিক্ত লেবেল না হয়।
+    filters: [`nwr["highway"~"^(primary|secondary|tertiary)$"]`],
+  },
 ];
 
 function buildQuery(group) {
@@ -124,6 +129,7 @@ function nearestUpazila(lat, lng) {
 // শুধু রেসপন্সের পরিসংখ্যানের জন্য (ডাটাবেসে সেভ হয় না — টেবিলে kind কলাম নেই)
 function categorize(tags) {
   if (tags.place) return 'place';
+  if (tags.highway) return 'road';
   const a = tags.amenity;
   if (a) {
     if (/^(restaurant|fast_food|cafe)$/.test(a)) return 'food';
