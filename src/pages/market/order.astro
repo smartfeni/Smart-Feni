@@ -82,10 +82,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     import { bnNum } from '../../lib/marketApi.js';
     import { getSignedUrl } from '../../lib/storageSigned.js';
     import { compressImage } from '../../lib/imageCompress.js';
+    import { confirmBestPrice, updateAskingPrice, cancelRequest } from '../../lib/deliveryClient.js';
 
     const $ = (id) => document.getElementById(id);
     const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const COLS = 'id, order_no, status, is_market, order_type, market_stage, market_advance_mode, advance_verified, advance_verified_amount, purchase_total, cod_due, final_price, items_total, order_items, customer_profile_id, accepted_rider_id, shop_ids, drop_address, pickup_address, description, created_at, publish_status, cancel_reason';
+    const COLS = 'id, order_no, status, is_market, order_type, market_stage, market_advance_mode, advance_verified, advance_verified_amount, purchase_total, cod_due, final_price, items_total, order_items, customer_profile_id, accepted_rider_id, shop_ids, drop_address, pickup_address, description, created_at, publish_status, cancel_reason, customer_asking_price, initial_price';
 
     let uid = null;
     let reqId = '';
@@ -418,6 +419,79 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     }
 
     // ---------- পুরো স্ক্রিন ----------
+    // রাইডারের অপেক্ষা (open/negotiating): অফার, দাম বাড়ানো, সেরা অফারে নিশ্চিত, বাতিল — সব এই প্যানেলেই
+    async function offersCard() {
+      const c = mk('section', 'mo-card');
+      c.appendChild(mk('div', 'mo-h', 'রাইডারের অফার'));
+      const { data: offs } = await supabase.from('delivery_offers').select('offer_price').eq('request_id', R.id).eq('status', 'active').order('offer_price', { ascending: true });
+      const best = offs && offs.length ? Number(offs[0].offer_price) : null;
+      const asking = Number(R.customer_asking_price ?? R.initial_price) || 0;
+      c.appendChild(row('সেরা অফার', best !== null ? taka(best) : 'অপেক্ষায়...'));
+      c.appendChild(row('আপনার প্রস্তাব', taka(asking)));
+      c.appendChild(mk('p', 'mo-msg soft', best === null ? 'এখনো কোনো রাইডার সাড়া দেয়নি। একটু অপেক্ষা করুন, অথবা দাম বাড়ান।' : 'রাইডার বেছে নিলে পরের ধাপে অগ্রিম দিতে হবে।'));
+
+      const err = mk('p', 'mo-err'); err.hidden = true;
+      const show = (m) => { err.textContent = m || ''; err.hidden = !m; };
+
+      const ok = mk('button', 'mo-btn', best !== null ? 'সেরা অফারে (' + taka(best) + ') নিশ্চিত করুন' : 'নিশ্চিত করুন');
+      ok.type = 'button'; ok.disabled = best === null;
+      let armed = false;
+      ok.addEventListener('click', async () => {
+        if (!armed) { armed = true; ok.textContent = 'আবার চাপুন — ' + taka(best) + '-এ নিশ্চিত'; setTimeout(() => { armed = false; ok.textContent = 'সেরা অফারে (' + taka(best) + ') নিশ্চিত করুন'; }, 4000); return; }
+        ok.disabled = true; show('');
+        const { error } = await confirmBestPrice({ requestId: R.id });
+        if (error) { ok.disabled = false; show(String(error)); return; }
+        toast('রাইডার কনফার্ম হয়েছে', 'success');
+        await load();
+      });
+      c.appendChild(ok);
+
+      c.appendChild(mk('label', 'mo-lbl', 'দাম বাড়াতে চান? (শুধু বাড়ানো যায়)'));
+      const chips = mk('div', 'mo-chips');
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.className = 'mo-in'; inp.inputMode = 'numeric'; inp.placeholder = '৳' + bnNum(asking + 1) + ' বা বেশি'; inp.min = String(asking + 1);
+      inp.setAttribute('aria-label', 'নতুন দাম');
+      [5, 10, 20].forEach((n) => {
+        const b = mk('button', 'mo-chip', '+' + bnNum(n)); b.type = 'button';
+        b.addEventListener('click', () => { inp.value = String(asking + n); inp.focus(); });
+        chips.appendChild(b);
+      });
+      c.appendChild(chips); c.appendChild(inp);
+      const inc = mk('button', 'mo-btn alt', 'নতুন দাম পাঠান'); inc.type = 'button';
+      inc.addEventListener('click', async () => {
+        const v = Number(inp.value);
+        if (!v || v <= asking) { show('বর্তমান দামের (' + taka(asking) + ') চেয়ে বেশি দিন'); return; }
+        inc.disabled = true; show('');
+        const { error } = await updateAskingPrice({ requestId: R.id, newPrice: v });
+        inc.disabled = false;
+        if (error) { show(String(error)); return; }
+        toast('দাম বাড়ানো হয়েছে', 'success');
+        await load();
+      });
+      c.appendChild(inc);
+      c.appendChild(err);
+
+      const cx = mk('button', 'mo-link', 'রিকোয়েস্ট বাতিল করুন'); cx.type = 'button';
+      cx.style.cssText = 'display:block;margin-top:14px;background:none;border:0;padding:0;cursor:pointer;';
+      cx.addEventListener('click', () => {
+        const box = mk('div', 'mo-chips');
+        [['mistake', 'ভুলে অর্ডার দিয়েছি'], ['price', 'দাম বেশি লাগছে'], ['no_offer', 'কেউ অফার দিচ্ছে না / দেরি হচ্ছে'], ['not_needed', 'আর লাগবে না']].forEach(([code, label]) => {
+          const b = mk('button', 'mo-chip', label); b.type = 'button';
+          b.addEventListener('click', async () => {
+            box.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+            const { error } = await cancelRequest({ requestId: R.id, reasonCode: code });
+            if (error) { show(String(error)); box.querySelectorAll('button').forEach((x) => { x.disabled = false; }); return; }
+            toast('বাতিল হয়েছে', 'success');
+            await load();
+          });
+          box.appendChild(b);
+        });
+        cx.replaceWith(box);
+      });
+      c.appendChild(cx);
+      return c;
+    }
+
     function infoCard(title, text, linkText, href) {
       const c = mk('section', 'mo-card');
       if (title) c.appendChild(mk('div', 'mo-h', title));
@@ -449,6 +523,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         frag.appendChild(c);
       } else if (R.status === 'disputed') {
         frag.appendChild(infoCard('সমস্যা', 'এই অর্ডারে সমস্যা জানানো হয়েছে। অ্যাডমিন দেখছে।'));
+      } else if (R.status !== 'confirmed' && role === 'customer' && (R.status === 'open' || R.status === 'negotiating') && R.publish_status === 'published') {
+        frag.appendChild(await offersCard());
       } else if (R.status !== 'confirmed') {
         frag.appendChild(infoCard('রাইডারের অপেক্ষা', role === 'customer'
           ? 'অর্ডার যাচাই ও রাইডারের অফারের অপেক্ষায় আছে। অফার এলে "আমার অর্ডার" থেকে রাইডার কনফার্ম করুন। কনফার্মের পর এখানে অগ্রিম দিতে হবে।'

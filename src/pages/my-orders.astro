@@ -1677,7 +1677,7 @@ const ordersGuide = [
       // কুইক ডেলিভারি অর্ডার: অগ্রিম/দাম কনফার্ম/অবস্থা একই পেজে (/market/order)
       if (req.is_market) {
         const MSTAGE = { awaiting_advance: 'অগ্রিম দিন', advance_submitted: 'অগ্রিম যাচাইয়ের অপেক্ষায়', advance_verified: 'অগ্রিম যাচাই হয়েছে', payment_mismatch: 'অগ্রিমের অঙ্ক মেলেনি', quote_sent: 'রাইডারের পাঠানো দাম কনফার্ম করুন', quote_confirmed: 'দাম কনফার্ম হয়েছে' };
-        const stageTxt = req.status === 'confirmed' ? (MSTAGE[req.market_stage || 'awaiting_advance'] || '') : '';
+        const stageTxt = req.status === 'confirmed' ? (MSTAGE[req.market_stage || 'awaiting_advance'] || '') : ((req.status === 'open' || req.status === 'negotiating') ? 'অফার দেখুন ও রাইডার নিশ্চিত করুন' : '');
         bodyHtml += `<a href="/market/order?id=${encodeURIComponent(req.id)}" data-mk-order="${esc(req.id)}" class="btn-confirm-best-price" style="display:block;text-align:center;text-decoration:none;margin:10px 0;"><i class="fas fa-wallet"></i> কুইক ডেলিভারি: ${stageTxt ? esc(stageTxt) : 'পেমেন্ট ও অবস্থা দেখুন'}</a>`;
       }
 
@@ -1685,7 +1685,13 @@ const ordersGuide = [
         bodyHtml += dealBlockHtml(req);
       }
 
-      if (req.status === 'open' || req.status === 'negotiating') {
+      if (req.is_market && (req.status === 'open' || req.status === 'negotiating') && req.publish_status === 'published') {
+        // কুইক ডেলিভারি: অফার/দাম বাড়ানো/নিশ্চিত/বাতিল সব নতুন প্যানেলে (ওপরের বাটন)
+        const offs = (req.delivery_offers || []).filter((o) => o.status === 'active');
+        const bestO = offs.length ? Math.min(...offs.map((o) => Number(o.offer_price))) : null;
+        const minsLeft = formatMinutesLeft(req.expires_at);
+        bodyHtml += `<p class="delivery-desc" style="margin:6px 0;">${bestO !== null ? `${toBn(offs.length)}টি অফার এসেছে, সেরা ৳${toBn(bestO)}। বাটন চেপে রাইডার নিশ্চিত করুন।` : 'রাইডারের সাড়ার অপেক্ষায় আছে...'}${minsLeft ? ' · ' + minsLeft : ''}</p>`;
+      } else if (req.status === 'open' || req.status === 'negotiating') {
         const minutesLeft = formatMinutesLeft(req.expires_at);
         if (minutesLeft) {
           bodyHtml += `<span class="delivery-expiry-note"><i class="fas fa-hourglass-half"></i> ${minutesLeft}, ${req.is_asap === false ? 'রাইডার না পেলে শিডিউল সময়ে অটো বাতিল হবে' : 'তারপর অটো বাতিল হবে'}</span>`;
