@@ -115,10 +115,10 @@ async function searchPhoton(q) {
     }
   }
 
-  const normalizedQuery = q.toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
+  const normalizedQuery = q.toLocaleLowerCase().replace(/[\s\u200c\u200d]+/g, '');
   return [...collected.values()].sort((a, b) => {
-    const aName = String(a.name).toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
-    const bName = String(b.name).toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
+    const aName = String(a.name).toLocaleLowerCase().replace(/[\s\u200c\u200d]+/g, '');
+    const bName = String(b.name).toLocaleLowerCase().replace(/[\s\u200c\u200d]+/g, '');
     const score = (name) => name === normalizedQuery ? 0 : name.startsWith(normalizedQuery) ? 1 : name.includes(normalizedQuery) ? 2 : 3;
     return score(aName) - score(bName);
   });
@@ -160,10 +160,10 @@ export async function GET({ url }) {
     }
 
     // Put exact and partial name matches ahead of broad district/upazila entries.
-    const normalizedQuery = q.toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
+    const normalizedQuery = q.toLocaleLowerCase().replace(/[\s\u200c\u200d]+/g, '');
     results.sort((a, b) => {
       const score = (item) => {
-        const name = String(item.name || '').toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
+        const name = String(item.name || '').toLocaleLowerCase().replace(/[\s\u200c\u200d]+/g, '');
         return name === normalizedQuery ? 0 : name.startsWith(normalizedQuery) ? 1 : name.includes(normalizedQuery) ? 2 : 3;
       };
       return score(a) - score(b);
