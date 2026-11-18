@@ -92,7 +92,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     const $ = (id) => document.getElementById(id);
     const TABS = [
       ['payments', 'পেমেন্ট'], ['shops', 'শপ হিসাব'], ['riders', 'রাইডার হিসাব'],
-      ['profit', 'লাভ-লস'], ['online', 'অনলাইন শপ'], ['settings', 'সেটিংস'],
+      ['profit', 'লাভ-লস'], ['online', 'অনলাইন শপ'], ['settings', 'সেটিংস'], ['check', 'চেকলিস্ট'],
     ];
     let tab = 'payments';
     let sub = {};       // প্রতি ট্যাবের সাব-ফিল্টার
@@ -458,6 +458,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       ['freelancer_commission_pct', 'ফ্রিলান্সার রাইডারের ডেলিভারি চার্জ থেকে কোম্পানির কমিশন (%)', 'number'],
       ['company_rider_daily_cost', 'কোম্পানি রাইডারের দৈনিক খরচ (টাকা)', 'number'],
       ['market_max_pending', 'এক কাস্টমারের একসাথে সর্বোচ্চ অপেক্ষমাণ অর্ডার', 'number'],
+      ['marketplace_enabled', 'কুইক ডেলিভারি সবার জন্য চালু? (false = শুধু অ্যাডমিন/মডারেটর দেখে)', 'bool'],
     ];
     async function drawSettings(body) {
       const { data } = await supabase.from('site_settings').select('key, value').in('key', SET_FIELDS.map((f) => f[0]));
@@ -466,7 +467,15 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const inputs = {};
       SET_FIELDS.forEach(([k, l, t]) => {
         c.appendChild(mk('label', 'dmk-lbl', l));
-        const i = mk('input', 'dmk-in'); i.type = t === 'number' ? 'number' : 'text'; i.maxLength = 200; i.value = cur[k] || ''; i.setAttribute('aria-label', l);
+        let i;
+        if (t === 'bool') {
+          i = mk('select', 'dmk-in');
+          [['false', 'বন্ধ (শুধু স্টাফ)'], ['true', 'চালু (সবার জন্য)']].forEach(([v, tx]) => { const o = mk('option', null, tx); o.value = v; i.appendChild(o); });
+          i.value = String(cur[k] || 'false').replace(/"/g, '') === 'true' ? 'true' : 'false';
+          i.setAttribute('aria-label', l);
+        } else {
+          i = mk('input', 'dmk-in'); i.type = t === 'number' ? 'number' : 'text'; i.maxLength = 200; i.value = cur[k] || ''; i.setAttribute('aria-label', l);
+        }
         inputs[k] = i; c.appendChild(i);
       });
       const bt = mk('button', 'dmk-btn', 'সেভ করুন'); bt.type = 'button'; bt.style.marginTop = '12px'; bt.style.width = '100%';
@@ -482,6 +491,89 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       body.appendChild(c);
     }
 
+    // ============ ৭. টেস্ট চেকলিস্ট (টিক চিহ্ন এই ফোনেই সেভ থাকে) ============
+    const CHECK = [
+      ['প্রস্তুতি (একবার)', [
+        'সেটিংসে বিকাশ নম্বর, কমিশন (০ হলে ফ্রিল্যান্সার পুরো চার্জ পায়), নোট বসানো',
+        'ডেলিভারি দোকানে ম্যাপ পিন ও মার্কেট ক্যাটাগরি দেওয়া (পিন ছাড়া দোকান মার্কেটে আসে না)',
+        'অনলাইন শপে অ্যাডমিন থেকে মার্কেট ক্যাটাগরি দেওয়া',
+        'তিনটা টেস্ট অ্যাকাউন্ট: কাস্টমার, রাইডার, শপ মালিক',
+      ]],
+      ['অ্যাক্সেস (মেনুতে ⚡ কুইক ডেলিভারি)', [
+        'সুইচ বন্ধে সাধারণ ইউজারের মেনুতে বাটন নেই, /market খুললে "শিগগিরই চালু হচ্ছে"',
+        'অ্যাডমিন/মডারেটরের মেনুতে "কুইক ডেলিভারি" ও "কুইক ডেলিভারি অর্ডার" আছে',
+      ]],
+      ['ব্রাউজ ও কার্ট', [
+        'ঠিকানা বাটনে "বর্তমান লোকেশন" ও "লিখিত ঠিকানা" দুটো বাটন',
+        'ক্যাটাগরি ট্যাব, সার্চ, দোকান কার্ড ঠিক; অনলাইন শপ কার্ড নিজের পেজে যায়',
+        'দোকান পেজে মেনু, + / −, ভাসমান কার্ট বার, অন্য দোকানের কার্ট ডায়ালগ',
+      ]],
+      ['চেকআউট', [
+        'ঠিকানা সেট ছাড়া "অর্ডার পাঠান" চাপলে ঠিকানার শিট খোলে',
+        '"কখন লাগবে?" থেকে এখনই/পরে বাছতে হয়; ১২ ঘণ্টার টাইম পিকার ঠিক',
+        'ডেলিভারি চার্জ অটো আসে বা নিজে লেখা যায়; অর্ডার যায়; ৩য় pending অর্ডার আটকায়',
+        'অ্যাডমিন ডেলিভারি অর্ডারে pending দেখে পাবলিশ করে',
+      ]],
+      ['রাইডার', [
+        'রাইডার (ডেলিভারি হিরো, অনলাইন) অর্ডার দেখে দাম অফার দেয়',
+        'কাস্টমার /my-orders এ অফার কনফার্ম করে; কনফার্মের আগে শপ মালিক জানে না, পরে জানে',
+      ]],
+      ['অগ্রিম পেমেন্ট', [
+        'কাস্টমার অর্ডার পেজে বিকাশ নম্বর দেখে; শুধু চার্জ/পুরো পেমেন্ট বাছে',
+        'TrxID বা শেষ ৪ ডিজিট ছাড়া সাবমিট হয় না; স্ক্রিনশট ঐচ্ছিক; অঙ্ক লেখে',
+        'অ্যাডমিন পেমেন্ট ট্যাবে যাচাই করে (মিলে/মেলে না)',
+        'যাচাইয়ের পর কাস্টমার ও রাইডার নোটিফিকেশন পায়',
+      ]],
+      ['কোট ও ডেলিভারি', [
+        'রাইডার কেনার দামের লাইন পাঠায়, কাস্টমার কনফার্ম করে',
+        'COD = কেনা + চার্জ − অগ্রিম (ঠিক হিসাব)',
+        'ডেলিভারি সম্পন্ন; স্ট্যাটাস ঠিক',
+      ]],
+      ['হিসাব', [
+        'কন্ট্রাক্ট শপ: "রাইডারকে দিয়েছি" → পরিশোধযোগ্য → অ্যাডমিন পরিশোধ',
+        'ফ্রিল্যান্সার নিট = COD − কেনার টাকা − রাইডারের আয়; নিজস্ব রাইডারের আয় ০',
+        '"বুঝে নিলাম", "হিসাব শেষ", লাভ-লস ট্যাব ও ক্ষতি রেকর্ড ঠিক',
+      ]],
+      ['যেকোনো কিছু', [
+        'অর্ডার এনিথিং ফর্ম থেকে অর্ডার যায়',
+        'পাঠান/এনে দাও: ডিফল্ট নিজের ঠিকানা; "অন্য কারও ঠিকানায়" চাপলে প্রাপকের ঠিকানা ও ফোন চায়',
+      ]],
+      ['অনলাইন শপ ও নিরাপত্তা', [
+        'মালিক /my-shop এ ইনস্ট্যান্ট/১–৩ দিন বাছে; ১–৩ দিনে পণ্যে নোট আসে',
+        'অন্যের অর্ডার খুলে দেখা যায় না; <b>test</b> লিখলে টেক্সটই দেখায়',
+        'পুরনো ডেলিভারি/রাইড হিরো ও অনলাইন শপ অর্ডার আগের মতো চলে',
+      ]],
+      ['শেষে', [
+        'টেস্ট অর্ডার বাতিল, টেস্ট শপ বন্ধ',
+        'সব ঠিক হলে সেটিংসে "কুইক ডেলিভারি সবার জন্য চালু" করা',
+      ]],
+    ];
+    function drawCheck(body) {
+      let st = {};
+      try { st = JSON.parse(localStorage.getItem('dmk_check') || '{}') || {}; } catch (e) { st = {}; }
+      const save = () => { try { localStorage.setItem('dmk_check', JSON.stringify(st)); } catch (e) { /* ঠিক আছে */ } };
+      const prog = mk('p', 'dmk-muted'); body.appendChild(prog);
+      const total = CHECK.reduce((a, g) => a + g[1].length, 0);
+      const upd = () => { prog.textContent = Object.values(st).filter(Boolean).length + ' / ' + total + ' সম্পন্ন (টিক এই ফোনে সেভ থাকে)'; };
+      CHECK.forEach(([title, items], gi) => {
+        const c = mk('div', 'dmk-card');
+        c.appendChild(mk('div', 'dmk-lbl', title));
+        items.forEach((txt, ii) => {
+          const key = gi + '-' + ii;
+          const row = mk('label'); row.style.cssText = 'display:flex;gap:10px;align-items:flex-start;padding:7px 0;font-size:14px;line-height:1.5;cursor:pointer';
+          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!st[key]; cb.style.cssText = 'width:20px;height:20px;margin-top:2px;flex:none';
+          cb.addEventListener('change', () => { st[key] = cb.checked; save(); upd(); });
+          row.appendChild(cb); row.appendChild(mk('span', null, txt));
+          c.appendChild(row);
+        });
+        body.appendChild(c);
+      });
+      const rs = mk('button', 'dmk-btn', 'সব টিক মুছুন'); rs.type = 'button';
+      rs.addEventListener('click', () => { st = {}; save(); draw(); });
+      body.appendChild(rs);
+      upd();
+    }
+
     async function draw() {
       const body = $('dmkBody');
       body.textContent = '';
@@ -493,6 +585,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         else if (tab === 'riders') await drawRiders(frag);
         else if (tab === 'profit') await drawProfit(frag);
         else if (tab === 'online') await drawOnline(frag);
+        else if (tab === 'check') drawCheck(frag);
         else await drawSettings(frag);
       } catch (e) { report(e, 'dmk-draw'); frag.appendChild(mk('p', 'dmk-muted', 'লোড করা যায়নি।')); }
       body.textContent = '';
