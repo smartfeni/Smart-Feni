@@ -67,7 +67,7 @@ export async function POST({ request }) {
     }
     reportClient = client;
 
-    let {
+    const {
       category,
       upazila,
       pickupAddress,
@@ -97,9 +97,6 @@ export async function POST({ request }) {
       // কখন লাগবে: এখনই (isAsap=true) / পরে (isAsap=false + scheduledAt) — বাধ্যতামূলক
       isAsap,
       scheduledAt,
-      // মার্কেটপ্লেস (ঐচ্ছিক): isMarket=true হলে অর্ডার মার্কেট অর্ডার হিসেবে চিহ্নিত
-      isMarket,
-      orderType,
     } = await request.json();
 
     const finalCategory = VALID_CATEGORIES.includes(category) ? category : 'delivery';
@@ -140,49 +137,6 @@ export async function POST({ request }) {
     // বারবার ক্যান্সেল করা কাস্টমারদের জন্য সাময়িক ব্লক লজিক ছিল এখানে,
     // ইউজারের অনুরোধে আপাতত অফ করা হলো। দরকার হলে আবার চালু করা যাবে।
 
-    // ===== মার্কেটপ্লেস: চিহ্নিত অর্ডারের অতিরিক্ত নিয়ম =====
-    const MARKET_TYPES = ['shop_order', 'anything', 'send', 'errand'];
-    let marketType = null;
-    if (isMarket === true) {
-      marketType = MARKET_TYPES.includes(orderType) ? orderType : 'shop_order';
-      // এক কাস্টমারের একসাথে সর্বোচ্চ N টা অপেক্ষমাণ (open) মার্কেট অর্ডার (ডিফল্ট ২)
-      let maxPending = 2;
-      try {
-        const { data: ms } = await client.from('site_settings').select('value').eq('key', 'market_max_pending').maybeSingle();
-        const n = parseInt(ms && ms.value, 10);
-        if (Number.isFinite(n) && n > 0) maxPending = n;
-      } catch (e) { /* ডিফল্ট ২ */ }
-      const { count: pendingCount } = await client
-        .from('delivery_requests')
-        .select('id', { count: 'exact', head: true })
-        .eq('customer_profile_id', user.id)
-        .eq('is_market', true)
-        .eq('status', 'open');
-      if ((pendingCount || 0) >= maxPending) {
-        return new Response(
-          JSON.stringify({ error: 'আপনার ' + maxPending + 'টা অর্ডার এখনো রাইডারের অপেক্ষায় আছে। আগেরগুলো শেষ হলে নতুন অর্ডার দিন।', code: 'TOO_MANY_PENDING' }),
-          { status: 429, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-      // শপ অর্ডার: পিকআপ = দোকানের ম্যাপ পিন (সার্ভারের মান)
-      if (marketType === 'shop_order' && Array.isArray(orderItems) && orderItems.length > 0) {
-        const firstId = String((orderItems[0] && orderItems[0].item_id) || '');
-        const { data: it } = await client.from('delivery_shop_items').select('shop_id').eq('id', firstId).maybeSingle();
-        if (it && it.shop_id) {
-          const { data: shop } = await client
-            .from('delivery_shops')
-            .select('name, address, lat, lng, upazila, union_name')
-            .eq('id', it.shop_id)
-            .maybeSingle();
-          if (shop && shop.lat !== null && shop.lng !== null) {
-            pickupLat = Number(shop.lat);
-            pickupLng = Number(shop.lng);
-            pickupAddress = [shop.name, shop.address].filter(Boolean).join(' — ') || shop.name;
-          }
-        }
-      }
-    }
-
     if (!upazila || !pickupAddress || !dropAddress || !description || !askingPrice) {
       return new Response(
         JSON.stringify({ error: 'উপজেলা, পিকআপ/ড্রপ ঠিকানা, বিবরণ ও দাম আবশ্যক' }),
@@ -214,11 +168,6 @@ export async function POST({ request }) {
         }))
         .filter((it) => it.item_id);
       if (cleanItems.length > 0) extraColumns.order_items = cleanItems;
-    }
-
-    if (marketType) {
-      extraColumns.is_market = true;
-      extraColumns.order_type = marketType;
     }
 
     const price = Number(askingPrice);
