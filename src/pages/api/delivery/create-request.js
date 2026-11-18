@@ -314,7 +314,7 @@ export async function POST({ request }) {
     }
     if (market) {
       extraColumns.is_market = true;
-      extraColumns.order_type = 'shop';
+      extraColumns.order_type = 'shop_order';
       // market_stage গার্ড-সুরক্ষিত (কাস্টমার বসাতে পারে না); null = নতুন অর্ডার
       // স্টাফের অর্ডারও অ্যাডমিন গেটে থাকে; টেস্ট শপের অর্ডার কখনো নিজে পাবলিশ হয় না (আসল রাইডার পায় না)
       extraColumns.publish_status = 'pending';
