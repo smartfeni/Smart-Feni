@@ -54,106 +54,61 @@ async function searchLocalSuggestions(supabaseAdmin, q, limit = 8) {
   return data || [];
 }
 
-// Google Place Photo রেফারেন্স থেকে ছবি টেনে Supabase storage-এ আপলোড করা।
-// ব্যর্থ হলে null রিটার্ন করে — ছবি ছাড়াই এন্ট্রি সেভ হবে, পুরো রিকোয়েস্ট আটকাবে না।
-async function cachePhoto(supabaseAdmin, photoReference, placeId, apiKey) {
-  try {
-    const photoRes = await fetch(
-      `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${photoReference}&key=${apiKey}`
-    );
-    if (!photoRes.ok) return null;
-
-    const contentType = photoRes.headers.get('content-type') || 'image/jpeg';
-    const ext = contentType.includes('png') ? 'png' : 'jpg';
-    const buffer = await photoRes.arrayBuffer();
-    const path = `google/${placeId}.${ext}`;
-
-    const { error: uploadError } = await supabaseAdmin.storage
-      .from('location-images')
-      .upload(path, buffer, { contentType, upsert: true });
-
-    if (uploadError) return null;
-
-    const { data: publicUrlData } = supabaseAdmin.storage
-      .from('location-images')
-      .getPublicUrl(path);
-
-    return publicUrlData?.publicUrl || null;
-  } catch {
-    return null;
-  }
-}
-
-async function fallbackGooglePlaces(supabaseAdmin, q, apiKey) {
+// Photon (OpenStreetMap-based) search fallback. No Google Places key or billing required.
+async function searchPhoton(q) {
   try {
     const params = new URLSearchParams({
-      query: `${q}, Feni, Bangladesh`,
-      location: `${FENI_CENTER.lat},${FENI_CENTER.lng}`,
-      radius: String(FENI_RADIUS_METERS),
-      key: apiKey,
+      q: `${q}, Feni, Bangladesh`,
+      limit: '8',
     });
-    const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`);
-    const data = await res.json();
+    const response = await fetch(`https://photon.komoot.io/api/?${params.toString()}`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!response.ok) return [];
 
-    if (data.status !== 'OK' || !Array.isArray(data.results)) {
-      // ZERO_RESULTS স্বাভাবিক; বাকি স্ট্যাটাস (REQUEST_DENIED, OVER_QUERY_LIMIT ইত্যাদি) আসল সমস্যা
-      if (data.status && data.status !== 'ZERO_RESULTS') {
-        await reportServerError(supabaseAdmin, {
-          route: '/api/location-suggestions-search',
-          action: 'location_search_google',
-          title: 'লোকেশন সার্চ: Google Places ব্যর্থ',
-          message: 'Google Places status: ' + data.status,
-          status: 200,
-        });
-      }
-      return [];
-    }
+    const payload = await response.json();
+    return (payload.features || [])
+      .map((feature) => {
+        const properties = feature.properties || {};
+        const coordinates = feature.geometry?.coordinates || [];
+        const lng = Number(coordinates[0]);
+        const lat = Number(coordinates[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
-    const candidates = data.results.slice(0, 5);
-    const saved = [];
+        const name = properties.name || properties.street || properties.locality ||
+          properties.district || properties.city || properties.county;
+        if (!name) return null;
 
-    for (const place of candidates) {
-      if (!place.place_id || !place.geometry?.location) continue;
+        const addressParts = [
+          properties.name,
+          properties.street,
+          properties.neighbourhood,
+          properties.suburb,
+          properties.village,
+          properties.hamlet,
+          properties.town,
+          properties.city,
+          properties.county,
+          properties.district,
+          properties.state,
+          properties.country,
+        ].filter((value, index, all) => value && all.indexOf(value) === index);
 
-      let imageUrl = null;
-      const photoReference = place.photos?.[0]?.photo_reference;
-      if (photoReference) {
-        imageUrl = await cachePhoto(supabaseAdmin, photoReference, place.place_id, apiKey);
-      }
-
-      // একই জায়গা আগেই কেউ সার্চ করে ক্যাশ করেছে কিনা চেক (external_id ইউনিক)
-      const { data: upserted, error: upsertError } = await supabaseAdmin
-        .from('location_suggestions')
-        .upsert(
-          {
-            external_id: place.place_id,
-            name: place.name,
-            lat: place.geometry.location.lat,
-            lng: place.geometry.location.lng,
-            upazila: null,
-            image_url: imageUrl,
-            source: 'google',
-          },
-          { onConflict: 'external_id', ignoreDuplicates: false }
-        )
-        .select('id, name, lat, lng, upazila, image_url, source')
-        .single();
-
-      if (upsertError) {
-        await reportServerError(supabaseAdmin, {
-          route: '/api/location-suggestions-search',
-          action: 'location_search_cache_upsert',
-          title: 'লোকেশন সার্চ: Google রেজাল্ট DB-তে ক্যাশ করা ব্যর্থ',
-          message: upsertError.message,
-          code: upsertError.code,
-          status: 200,
-        });
-      }
-      if (!upsertError && upserted) saved.push(upserted);
-    }
-
-    return saved;
+        return {
+          id: `photon-${properties.osm_type || 'place'}-${properties.osm_id || lat + '-' + lng}`,
+          name,
+          lat,
+          lng,
+          upazila: properties.county || properties.district || null,
+          image_url: null,
+          source: 'photon',
+          display_name: addressParts.join(', '),
+        };
+      })
+      .filter(Boolean);
   } catch {
+    // Photon is a public community service; a temporary outage must not break local search.
     return [];
   }
 }
@@ -181,19 +136,26 @@ export async function GET({ url }) {
 
     let results = await searchLocalSuggestions(supabaseAdmin, q);
 
-    const googleApiKey = import.meta.env.GOOGLE_PLACES_API_KEY;
-    if (results.length < 5 && googleApiKey) {
-      const googleResults = await fallbackGooglePlaces(supabaseAdmin, q, googleApiKey);
-      // ডুপ্লিকেট বাদ দিয়ে merge করা (id ধরে)
-      const existingIds = new Set(results.map((r) => r.id));
-      for (const g of googleResults) {
-        if (!existingIds.has(g.id)) results.push(g);
+    // Local Smart Feni entries always rank first; Photon fills gaps with OSM place data.
+    if (results.length < 8) {
+      const photonResults = await searchPhoton(q);
+      const seen = new Set(results.map((item) => `${Number(item.lat).toFixed(5)},${Number(item.lng).toFixed(5)}`));
+      for (const item of photonResults) {
+        const key = `${Number(item.lat).toFixed(5)},${Number(item.lng).toFixed(5)}`;
+        if (!seen.has(key)) {
+          results.push(item);
+          seen.add(key);
+        }
+        if (results.length >= 8) break;
       }
     }
 
     return new Response(JSON.stringify({ results: results.slice(0, 8) }), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=300',
+      },
     });
   } catch (err) {
     await reportServerError(reportDb, {
