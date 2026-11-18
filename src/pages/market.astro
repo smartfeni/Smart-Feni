@@ -37,6 +37,12 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     <div id="qdBody" class="qd-body"></div>
   </div>
 
+  <a class="qd-live" id="qdLive" hidden href="/market">
+    <img src="/market/icons/scooter.webp" alt="" aria-hidden="true" />
+    <span><b id="qdLiveT">চলমান অর্ডার</b><small id="qdLiveS"></small></span>
+    <em>দেখুন ›</em>
+  </a>
+
   <MarketLocationSheet />
 
   <style is:global>
@@ -141,6 +147,16 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     .qd-any-card b { font-size: 16px; margin-top: 8px; }
     .qd-any-card span { font-size: 12.5px; color: #4A5568; line-height: 1.45; margin-top: 2px; }
     .qd-any-go:focus-visible, .qd-any-card:focus-visible, .qd-loc:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    .qd-live { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(78px + env(safe-area-inset-bottom)); width: calc(100% - 28px); max-width: 572px; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 18px; background: #1B2A4A; color: #fff; text-decoration: none; z-index: 997; box-shadow: 0 10px 26px rgba(27,42,74,.35); font-family: 'Hind Siliguri', system-ui, sans-serif; }
+    .qd-live[hidden] { display: none; }
+    .qd-live img { width: 40px; height: 40px; object-fit: contain; animation: qdBob 1.8s ease-in-out infinite; }
+    @keyframes qdBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+    @media (prefers-reduced-motion: reduce) { .qd-live img { animation: none; } }
+    .qd-live span { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+    .qd-live b { font-size: 15px; }
+    .qd-live small { font-size: 12.5px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .qd-live em { font-style: normal; font-weight: 700; font-size: 14px; color: #FFB48F; }
+    .qd-live:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
     @media (min-width: 560px) { .qd-slide { width: 520px; } }
   </style>
 
@@ -473,6 +489,31 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       body.appendChild(node);
     }
 
+    // চলমান কুইক অর্ডার থাকলে নিচে ভাসমান পিল
+    async function showLive(uid) {
+      try {
+        const { data } = await supabase
+          .from('delivery_requests')
+          .select('id, status, publish_status, pickup_done_at, order_items, order_no')
+          .eq('customer_profile_id', uid)
+          .eq('is_market', true)
+          .in('status', ['open', 'confirmed'])
+          .order('created_at', { ascending: false })
+          .limit(5);
+        const list = (data || []);
+        if (!list.length) return;
+        const r = list[0];
+        let st = 'রাইডার খোঁজা হচ্ছে';
+        if (r.publish_status === 'pending' || r.publish_status === 'hold') st = 'যাচাই হচ্ছে';
+        if (r.status === 'confirmed') st = r.pickup_done_at ? 'রাইডার পথে আছেন' : 'রাইডার দোকানে যাচ্ছেন';
+        const it = Array.isArray(r.order_items) && r.order_items[0];
+        $('qdLiveT').textContent = list.length > 1 ? bnNum(list.length) + 'টি চলমান অর্ডার' : 'চলমান অর্ডার';
+        $('qdLiveS').textContent = st + (it && it.shop_name ? ' · ' + it.shop_name : '');
+        $('qdLive').href = list.length > 1 ? '/my-orders' : '/market/order?id=' + encodeURIComponent(r.id);
+        $('qdLive').hidden = false;
+      } catch (e) { /* পিল না দেখালেও চলবে */ }
+    }
+
     async function init() {
       showLoc();
       $('qdLoc').addEventListener('click', openLoc);
@@ -501,6 +542,8 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
         return;
       }
       if (!access.enabled) toast('টেস্ট মোড: কুইক ডেলিভারি এখনো সবার জন্য বন্ধ');
+
+      showLive(session.user.id);
 
       // প্রথমবার: ঠিকানা না দিলে হোম দেখা যাবে না
       if (!getDrop()) openLoc();
