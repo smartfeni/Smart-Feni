@@ -1,0 +1,549 @@
+---
+// path: src/pages/market/order.astro
+// ============================================================
+// মার্কেটপ্লেস (ব্রান্চ: marketplace) — অর্ডারের অবস্থা ও টাকার ধাপ: /market/order?id=<request uuid>
+// এক পেজ, ভূমিকা-ভিত্তিক:
+//   কাস্টমার: রাইডারের অপেক্ষা → (রাইডার কনফার্ম) → অগ্রিম (শুধু ডেলিভারি চার্জ / ফুল) →
+//             অ্যাডমিনের যাচাই → রাইডারের পাঠানো কেনার দাম ইনবক্সে কনফার্ম → ডেলিভারি (COD বাকি)
+//   রাইডার:  অগ্রিম যাচাইয়ের পর কেনার দাম (একাধিক এমাউন্ট + ঐচ্ছিক রিসিট) পাঠানো, পরে টাকা মেটানোর নির্দেশ
+// রাইডার বাছাই/অফার, চ্যাট, পিকআপ/ডেলিভারি ধাপ বিদ্যমান পেজেই (my-orders, delivery-hero)।
+// সব লেখা RPC দিয়ে (market_submit_payment, market_rider_submit_quote, market_customer_decide_quote);
+// সব টেক্সট textContent দিয়ে (এস্কেপ)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="অর্ডার | স্মার্ট ফেনী">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="mo-page">
+    <header class="mo-top">
+      <a class="mo-back" href="/market/orders" aria-label="অর্ডার তালিকা"><i class="fas fa-arrow-left" aria-hidden="true"></i></a>
+      <h1 id="moTitle">অর্ডার</h1>
+    </header>
+    <div id="moBody"></div>
+  </div>
+
+  <style is:global>
+    .mo-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #FFF4EC; min-height: 70vh; padding: 14px 16px 120px; max-width: 560px; margin: 0 auto; }
+    .mo-page * { box-sizing: border-box; }
+    .mo-page button, .mo-page input, .mo-page select { font-family: inherit; }
+    .mo-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .mo-top h1 { margin: 0; font-size: 19px; font-weight: 700; }
+    .mo-back { width: 40px; height: 40px; border-radius: 50%; background: #fff; color: #1B2A4A; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.15); text-decoration: none; }
+    .mo-card { background: #fff; border-radius: 18px; padding: 14px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.07); }
+    .mo-h { margin: 0 0 8px; font-size: 14px; font-weight: 700; color: #5B6B86; }
+    .mo-steps { display: flex; gap: 4px; margin: 0 0 4px; padding: 0; list-style: none; }
+    .mo-step { flex: 1; text-align: center; font-size: 10.5px; line-height: 1.25; color: #8793A8; font-weight: 600; }
+    .mo-step i { display: block; width: 26px; height: 26px; line-height: 26px; margin: 0 auto 4px; border-radius: 50%; background: #EEF0F4; font-style: normal; font-size: 12px; }
+    .mo-step.done { color: #1F7A4D; }
+    .mo-step.done i { background: #1F7A4D; color: #fff; }
+    .mo-step.now { color: #1B2A4A; }
+    .mo-step.now i { background: #FF6B35; color: #fff; }
+    .mo-row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 14.5px; }
+    .mo-row small { color: #5B6B86; }
+    .mo-row.tot { border-top: 1.5px dashed #EADBCF; margin-top: 6px; padding-top: 10px; font-weight: 700; font-size: 16px; }
+    .mo-msg { margin: 0; font-size: 14.5px; line-height: 1.6; }
+    .mo-msg.soft { color: #5B6B86; }
+    .mo-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 9px; background: #FFE9DA; color: #8A3B12; }
+    .mo-opts { display: grid; gap: 8px; margin: 6px 0 10px; }
+    .mo-opt { text-align: left; border: 1.5px solid #EADBCF; background: #fff; border-radius: 14px; padding: 11px 12px; cursor: pointer; color: #1B2A4A; }
+    .mo-opt[aria-pressed='true'] { border-color: #FF6B35; background: #FFF4EC; }
+    .mo-opt b { display: block; font-size: 15px; }
+    .mo-opt span { font-size: 12.5px; color: #5B6B86; }
+    .mo-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+    .mo-chip { border: 1.5px solid #EADBCF; background: #fff; color: #1B2A4A; border-radius: 18px; padding: 7px 14px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+    .mo-chip[aria-pressed='true'] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+    .mo-lbl { display: block; margin: 8px 0 4px; font-size: 13px; font-weight: 700; }
+    .mo-in { width: 100%; border: 1.5px solid #EADBCF; border-radius: 12px; padding: 10px 12px; font-size: 15px; color: #1B2A4A; background: #fff; }
+    .mo-in:focus { outline: 0; border-color: #1B2A4A; }
+    .mo-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mo-pay { background: #FFF4EC; border-radius: 12px; padding: 10px 12px; font-size: 13.5px; line-height: 1.55; margin: 6px 0; }
+    .mo-pay b { font-size: 15px; }
+    .mo-btn { width: 100%; height: 50px; margin-top: 12px; border: 0; border-radius: 14px; background: #FF6B35; color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
+    .mo-btn.alt { background: #fff; color: #1B2A4A; border: 1.5px solid #1B2A4A; margin-top: 8px; }
+    .mo-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .mo-btn:focus-visible, .mo-chip:focus-visible, .mo-opt:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    .mo-err { margin: 10px 0 0; color: #B42318; font-size: 13.5px; font-weight: 600; }
+    .mo-link { display: inline-block; margin-top: 10px; color: #1B2A4A; font-weight: 700; }
+    .mo-line { display: grid; grid-template-columns: 1fr 96px 34px; gap: 6px; margin-bottom: 6px; }
+    .mo-x { border: 1.5px solid #EADBCF; background: #fff; border-radius: 10px; color: #B42318; cursor: pointer; }
+    .mo-add { border: 1.5px dashed #1B2A4A; background: none; color: #1B2A4A; border-radius: 12px; height: 40px; width: 100%; font-weight: 700; cursor: pointer; margin: 2px 0 6px; }
+    .mo-thumb { display: block; max-width: 100%; max-height: 220px; border-radius: 12px; margin-top: 8px; }
+    .mo-note { font-size: 12.5px; color: #5B6B86; line-height: 1.5; margin: 8px 0 0; }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { bnNum } from '../../lib/marketApi.js';
+    import { getSignedUrl } from '../../lib/storageSigned.js';
+    import { compressImage } from '../../lib/imageCompress.js';
+
+    const $ = (id) => document.getElementById(id);
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const COLS = 'id, order_no, status, is_market, order_type, market_stage, market_advance_mode, advance_verified, advance_verified_amount, purchase_total, cod_due, final_price, items_total, order_items, customer_profile_id, accepted_rider_id, shop_ids, drop_address, pickup_address, description, created_at, publish_status, cancel_reason';
+
+    let uid = null;
+    let reqId = '';
+    let R = null;       // delivery_requests রো
+    let role = null;    // 'customer' | 'rider'
+    let quote = null;   // সর্বশেষ কেনার দাম (pending বা সর্বশেষ)
+    let contracted = false;
+    let settings = {};
+    let local = { mode: 'charge', method: 'bkash' };
+    let timer = null;
+    let busy = false;
+
+    function mk(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined && text !== null) e.textContent = text;
+      return e;
+    }
+    function taka(n) { return '৳' + bnNum(Math.round(Number(n) || 0)); }
+    function toast(m, t) { if (window.showToast) window.showToast(m, t); }
+    function msgOf(err) {
+      const m = (err && err.message) ? String(err.message) : '';
+      return m && !/^(PGRST|JWT)/.test(m) ? m : 'কিছু একটা সমস্যা হয়েছে। আবার চেষ্টা করুন।';
+    }
+    function report(err, where) { if (window.SFReportError) { try { window.SFReportError(err, where); } catch (e) {} } }
+
+    // ---------- ধাপ ----------
+    function stageIndex() {
+      if (R.status === 'completed') return 6;
+      if (R.status !== 'confirmed') return 1;
+      const st = R.market_stage || 'awaiting_advance';
+      if (st === 'quote_confirmed') return 5;
+      if (st === 'quote_sent' || st === 'advance_verified') return 4;
+      return 3;
+    }
+    const STEPS = ['অর্ডার', 'রাইডার কনফার্ম', 'অগ্রিম', 'কেনা ও দাম', 'ডেলিভারি'];
+
+    function stepsCard() {
+      const c = mk('section', 'mo-card');
+      const ul = mk('ul', 'mo-steps');
+      const idx = stageIndex();
+      STEPS.forEach((t, i) => {
+        // idx: ১ = রাইডারের অপেক্ষা, ৩ = অগ্রিম, ৪ = কেনা, ৫ = ডেলিভারি, ৬ = শেষ
+        const pos = i + 1;
+        const doneAt = [1, 2, 3, 5, 6][i]; // এই ধাপ শেষ ধরা হয় যখন idx >= doneAt+(i==0?0:0)
+        let cls = '';
+        if (R.status === 'cancelled') cls = '';
+        else if (i === 0) cls = 'done';
+        else if (i === 1) cls = idx >= 3 ? 'done' : 'now';
+        else if (i === 2) cls = idx >= 4 ? 'done' : (idx === 3 ? 'now' : '');
+        else if (i === 3) cls = idx >= 5 ? 'done' : (idx === 4 ? 'now' : '');
+        else cls = idx >= 6 ? 'done' : (idx === 5 ? 'now' : '');
+        void pos; void doneAt;
+        const li = mk('li', 'mo-step ' + cls);
+        const dot = mk('i', null, cls === 'done' ? '✓' : String(i + 1));
+        li.appendChild(dot);
+        li.appendChild(document.createTextNode(t));
+        ul.appendChild(li);
+      });
+      c.appendChild(ul);
+      return c;
+    }
+
+    function row(l, v, cls) {
+      const r = mk('div', 'mo-row' + (cls ? ' ' + cls : ''));
+      r.appendChild(mk('span', null, l));
+      r.appendChild(mk('span', null, v));
+      return r;
+    }
+
+    function detailsCard() {
+      const c = mk('section', 'mo-card');
+      c.appendChild(mk('div', 'mo-h', 'অর্ডারের বিবরণ'));
+      const items = Array.isArray(R.order_items) ? R.order_items : [];
+      if (items.length) {
+        const sn = items[0] && items[0].shop_name;
+        if (sn) c.appendChild(mk('div', 'mo-msg', sn));
+        items.forEach((it) => {
+          const r = mk('div', 'mo-row');
+          r.appendChild(mk('span', null, String(it.name || 'আইটেম') + ' × ' + bnNum(it.qty || 1)));
+          r.appendChild(mk('span', null, taka((Number(it.price) || 0) * (Number(it.qty) || 1))));
+          c.appendChild(r);
+        });
+        c.appendChild(row('আইটেমের আনুমানিক দাম', taka(R.items_total)));
+      } else {
+        c.appendChild(mk('p', 'mo-msg soft', R.description || ''));
+      }
+      if (R.final_price) c.appendChild(row('ডেলিভারি চার্জ', taka(R.final_price)));
+      c.appendChild(mk('p', 'mo-note', 'ঠিকানা: ' + (R.drop_address || '')));
+      return c;
+    }
+
+    // ---------- কাস্টমার: অগ্রিম ফর্ম ----------
+    function advanceCard() {
+      const c = mk('section', 'mo-card');
+      c.appendChild(mk('div', 'mo-h', 'অগ্রিম পেমেন্ট'));
+      if (R.market_stage === 'payment_mismatch') {
+        c.appendChild(mk('p', 'mo-err', 'আপনার আগের পেমেন্ট মিলছে না। সঠিক তথ্য দিয়ে আবার জমা দিন।'));
+      }
+      c.appendChild(mk('p', 'mo-msg soft', 'রাইডার কনফার্ম হয়েছে। কেনাকাটা শুরুর আগে অগ্রিম দিন। কোনটা দেবেন বেছে নিন:'));
+      const charge = Number(R.final_price) || 0;
+      const full = charge + (Number(R.items_total) || 0);
+      const opts = mk('div', 'mo-opts');
+      [
+        ['charge', 'শুধু ডেলিভারি চার্জ', taka(charge) + ' — বাকি টাকা জিনিস হাতে পেয়ে'],
+        ['full', 'ফুল পেমেন্ট', 'আনুমানিক ' + taka(full) + ' — পার্থক্য থাকলে ডেলিভারিতে মিলিয়ে নেওয়া হবে'],
+      ].forEach((o) => {
+        const b = mk('button', 'mo-opt');
+        b.type = 'button';
+        b.setAttribute('aria-pressed', local.mode === o[0] ? 'true' : 'false');
+        b.appendChild(mk('b', null, o[1]));
+        b.appendChild(mk('span', null, o[2]));
+        b.addEventListener('click', () => { local.mode = o[0]; const a = $('moAmt'); if (a) a.value = String(o[0] === 'charge' ? charge : full); markOpts(opts); });
+        opts.appendChild(b);
+      });
+      c.appendChild(opts);
+
+      c.appendChild(mk('label', 'mo-lbl', 'কোন মাধ্যমে পাঠিয়েছেন'));
+      const chips = mk('div', 'mo-chips');
+      [['bkash', 'bKash'], ['nagad', 'Nagad'], ['rocket', 'Rocket'], ['other', 'অন্য']].forEach((m) => {
+        const b = mk('button', 'mo-chip', m[1]);
+        b.type = 'button';
+        b.setAttribute('aria-pressed', local.method === m[0] ? 'true' : 'false');
+        b.addEventListener('click', () => { local.method = m[0]; chips.querySelectorAll('.mo-chip').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false')); payInfo.textContent = ''; fillPayInfo(payInfo); });
+        chips.appendChild(b);
+      });
+      c.appendChild(chips);
+      const payInfo = mk('div', 'mo-pay');
+      fillPayInfo(payInfo);
+      c.appendChild(payInfo);
+
+      c.appendChild(mk('label', 'mo-lbl', 'কত টাকা পাঠিয়েছেন'));
+      const amt = mk('input', 'mo-in'); amt.id = 'moAmt'; amt.type = 'number'; amt.min = '1'; amt.inputMode = 'numeric';
+      amt.value = String(local.mode === 'charge' ? charge : full);
+      amt.setAttribute('aria-label', 'পাঠানো টাকা');
+      c.appendChild(amt);
+
+      c.appendChild(mk('label', 'mo-lbl', 'TrxID অথবা প্রেরক নম্বরের শেষ ৪ ডিজিট (যেকোনো একটা বাধ্যতামূলক)'));
+      const two = mk('div', 'mo-2');
+      const trx = mk('input', 'mo-in'); trx.id = 'moTrx'; trx.placeholder = 'TrxID'; trx.maxLength = 20; trx.autocomplete = 'off'; trx.setAttribute('aria-label', 'TrxID');
+      const l4 = mk('input', 'mo-in'); l4.id = 'moL4'; l4.placeholder = 'শেষ ৪ ডিজিট'; l4.maxLength = 4; l4.inputMode = 'numeric'; l4.setAttribute('aria-label', 'প্রেরক নম্বরের শেষ ৪ ডিজিট');
+      two.appendChild(trx); two.appendChild(l4);
+      c.appendChild(two);
+
+      c.appendChild(mk('label', 'mo-lbl', 'স্ক্রিনশট (ঐচ্ছিক)'));
+      const file = mk('input', 'mo-in'); file.id = 'moShot'; file.type = 'file'; file.accept = 'image/*'; file.setAttribute('aria-label', 'পেমেন্টের স্ক্রিনশট');
+      c.appendChild(file);
+
+      const err = mk('p', 'mo-err'); err.id = 'moErr'; err.hidden = true;
+      c.appendChild(err);
+      const btn = mk('button', 'mo-btn', 'পেমেন্ট জমা দিন');
+      btn.type = 'button';
+      btn.addEventListener('click', submitPayment);
+      c.appendChild(btn);
+      c.appendChild(mk('p', 'mo-note', 'অ্যাডমিন যাচাই করার পর রাইডার কেনাকাটা শুরু করবে।'));
+      return c;
+    }
+    function markOpts(box) {
+      const labels = ['charge', 'full'];
+      box.querySelectorAll('.mo-opt').forEach((b, i) => b.setAttribute('aria-pressed', local.mode === labels[i] ? 'true' : 'false'));
+    }
+    function fillPayInfo(box) {
+      const num = local.method === 'bkash' ? settings.market_payment_bkash : local.method === 'nagad' ? settings.market_payment_nagad : '';
+      if (num) {
+        box.appendChild(document.createTextNode('এই নম্বরে Send Money করুন: '));
+        box.appendChild(mk('b', null, num));
+        box.appendChild(document.createElement('br'));
+      }
+      box.appendChild(document.createTextNode(settings.market_payment_note || 'Send Money করুন, তারপর TrxID বা প্রেরক নম্বরের শেষ ৪ ডিজিট দিন।'));
+    }
+    function showErr(m) { const e = $('moErr'); if (!e) return; e.textContent = m || ''; e.hidden = !m; }
+
+    async function uploadShot(inputId, prefix) {
+      const inp = $(inputId);
+      const f = inp && inp.files && inp.files[0];
+      if (!f) return null;
+      const small = await compressImage(f, { maxDimension: 1800, quality: 0.9 });
+      const path = reqId + '/' + prefix + '-' + Date.now() + '.jpg';
+      const { error } = await supabase.storage.from('delivery-proofs').upload(path, small);
+      if (error) { report(error, 'market-proof-upload'); throw new Error('ছবি আপলোড হয়নি। ছবি ছাড়াই জমা দিতে পারেন।'); }
+      return path;
+    }
+
+    async function submitPayment() {
+      if (busy) return;
+      showErr('');
+      const amount = Number($('moAmt').value);
+      const trx = $('moTrx').value.trim();
+      const l4 = $('moL4').value.trim();
+      if (!(amount > 0)) { showErr('কত টাকা পাঠিয়েছেন লিখুন।'); return; }
+      if (!trx && !l4) { showErr('TrxID অথবা প্রেরক নম্বরের শেষ ৪ ডিজিট দিন।'); return; }
+      busy = true;
+      try {
+        let shot = null;
+        try { shot = await uploadShot('moShot', 'pay'); } catch (e) { showErr(e.message); busy = false; return; }
+        const { error } = await supabase.rpc('market_submit_payment', {
+          p_request: reqId, p_mode: local.mode, p_method: local.method, p_claimed: amount,
+          p_trx: trx || null, p_last4: l4 || null, p_screenshot: shot,
+        });
+        if (error) { showErr(msgOf(error)); report(error, 'market-submit-payment'); return; }
+        toast('পেমেন্ট জমা হয়েছে। যাচাইয়ের অপেক্ষা করুন।', 'success');
+        await load();
+      } finally { busy = false; }
+    }
+
+    // ---------- কেনার দাম (কাস্টমার দেখে, রাইডার পাঠায়) ----------
+    async function quoteCard(forCustomer) {
+      const c = mk('section', 'mo-card');
+      c.appendChild(mk('div', 'mo-h', 'কেনার দাম'));
+      const q = quote;
+      if (q) {
+        (Array.isArray(q.lines) ? q.lines : []).forEach((l) => {
+          c.appendChild(row(l.label ? String(l.label) : 'কেনার দাম', taka(l.amount)));
+        });
+        c.appendChild(row('মোট কেনার দাম', taka(q.total), 'tot'));
+        if (q.receipt_url) {
+          const img = document.createElement('img');
+          img.className = 'mo-thumb'; img.alt = 'রিসিট/জিনিসের ছবি';
+          getSignedUrl(supabase, 'delivery-proofs', q.receipt_url).then((u) => { if (u) img.src = u; });
+          c.appendChild(img);
+        }
+        if (forCustomer && q.status === 'pending') {
+          const adv = Number(R.advance_verified_amount) || 0;
+          const charge = Number(R.final_price) || 0;
+          const cod = Number(q.total) + charge - adv;
+          c.appendChild(mk('div', 'mo-h', 'হিসাব'));
+          c.appendChild(row('কেনার দাম', taka(q.total)));
+          c.appendChild(row('ডেলিভারি চার্জ', taka(charge)));
+          c.appendChild(row('অগ্রিম দেওয়া (যাচাই-করা)', '− ' + taka(adv)));
+          c.appendChild(row(cod >= 0 ? 'ডেলিভারিতে দিতে হবে (COD)' : 'ডেলিভারিতে ফেরত পাবেন', taka(Math.abs(cod)), 'tot'));
+          const ok = mk('button', 'mo-btn', 'কনফার্ম, কিনুন');
+          ok.type = 'button';
+          ok.addEventListener('click', () => decide(true));
+          const no = mk('button', 'mo-btn alt', 'এই দাম মানছি না');
+          no.type = 'button';
+          no.addEventListener('click', () => decide(false));
+          c.appendChild(ok); c.appendChild(no);
+          c.appendChild(mk('p', 'mo-note', 'কনফার্ম করলে রাইডার দোকানে টাকা মিটিয়ে জিনিস আনবে। না মানলে রাইডারকে আবার দাম পাঠাতে হবে।'));
+        }
+      }
+      return c;
+    }
+
+    async function decide(accept) {
+      if (busy || !quote) return;
+      busy = true;
+      try {
+        const { error } = await supabase.rpc('market_customer_decide_quote', { p_quote: quote.id, p_accept: accept });
+        if (error) { toast(msgOf(error), 'error'); report(error, 'market-decide-quote'); return; }
+        toast(accept ? 'দাম কনফার্ম হয়েছে।' : 'রাইডারকে জানানো হয়েছে।', 'success');
+        await load();
+      } finally { busy = false; }
+    }
+
+    // ---------- রাইডার: দাম পাঠানোর ফর্ম ----------
+    let lines = [{ label: '', amount: '' }];
+    function riderQuoteForm() {
+      const c = mk('section', 'mo-card');
+      c.appendChild(mk('div', 'mo-h', 'কেনার দাম পাঠান'));
+      if (quote && quote.status === 'rejected') c.appendChild(mk('p', 'mo-err', 'কাস্টমার আগের দাম মানেনি। কাস্টমারের সাথে কথা বলে সঠিক দাম পাঠান।'));
+      c.appendChild(mk('p', 'mo-msg soft', 'দোকানে যা দাম দিতে হবে সেটা লিখুন। একাধিক এমাউন্ট হলে আলাদা লাইনে (যেমন: খাবার, প্যাকেজিং)। রিসিটের ছবি ঐচ্ছিক।'));
+      const box = mk('div'); box.id = 'moLines';
+      c.appendChild(box);
+      const add = mk('button', 'mo-add', '+ আরেকটা এমাউন্ট');
+      add.type = 'button';
+      add.addEventListener('click', () => { if (lines.length < 10) { syncLines(); lines.push({ label: '', amount: '' }); drawLines(); } });
+      c.appendChild(add);
+      const tot = mk('div', 'mo-row tot'); tot.id = 'moLinesTot';
+      c.appendChild(tot);
+      c.appendChild(mk('label', 'mo-lbl', 'রিসিট/জিনিসের ছবি (ঐচ্ছিক)'));
+      const f = mk('input', 'mo-in'); f.id = 'moRcpt'; f.type = 'file'; f.accept = 'image/*'; f.setAttribute('aria-label', 'রিসিটের ছবি');
+      c.appendChild(f);
+      const err = mk('p', 'mo-err'); err.id = 'moErr'; err.hidden = true;
+      c.appendChild(err);
+      const btn = mk('button', 'mo-btn', 'কাস্টমারকে দাম পাঠান');
+      btn.type = 'button';
+      btn.addEventListener('click', submitQuote);
+      c.appendChild(btn);
+      setTimeout(drawLines, 0);
+      return c;
+    }
+    function syncLines() {
+      const box = $('moLines');
+      if (!box) return;
+      lines = Array.from(box.querySelectorAll('.mo-line')).map((r) => ({
+        label: r.children[0].value, amount: r.children[1].value,
+      }));
+    }
+    function drawLines() {
+      const box = $('moLines');
+      if (!box) return;
+      box.textContent = '';
+      lines.forEach((l, i) => {
+        const r = mk('div', 'mo-line');
+        const a = mk('input', 'mo-in'); a.placeholder = 'কিসের দাম (ঐচ্ছিক)'; a.maxLength = 60; a.value = l.label; a.setAttribute('aria-label', 'লাইন ' + (i + 1) + ' বিবরণ');
+        const b = mk('input', 'mo-in'); b.type = 'number'; b.inputMode = 'numeric'; b.min = '1'; b.placeholder = 'টাকা'; b.value = l.amount; b.setAttribute('aria-label', 'লাইন ' + (i + 1) + ' টাকা');
+        b.addEventListener('input', totalLines);
+        const x = mk('button', 'mo-x', '✕'); x.type = 'button'; x.setAttribute('aria-label', 'লাইন মুছুন');
+        x.addEventListener('click', () => { syncLines(); if (lines.length > 1) { lines.splice(i, 1); drawLines(); } });
+        r.appendChild(a); r.appendChild(b); r.appendChild(x);
+        box.appendChild(r);
+      });
+      totalLines();
+    }
+    function totalLines() {
+      const box = $('moLines'); const t = $('moLinesTot');
+      if (!box || !t) return;
+      let sum = 0;
+      box.querySelectorAll('.mo-line').forEach((r) => { sum += Number(r.children[1].value) || 0; });
+      t.textContent = '';
+      t.appendChild(mk('span', null, 'মোট'));
+      t.appendChild(mk('span', null, taka(sum)));
+    }
+    async function submitQuote() {
+      if (busy) return;
+      showErr('');
+      syncLines();
+      const clean = lines.map((l) => ({ label: String(l.label || '').trim(), amount: Number(l.amount) })).filter((l) => l.amount > 0);
+      if (!clean.length) { showErr('কমপক্ষে ১টা এমাউন্ট লিখুন।'); return; }
+      busy = true;
+      try {
+        let rc = null;
+        try { rc = await uploadShot('moRcpt', 'rcpt'); } catch (e) { showErr(e.message); busy = false; return; }
+        const { error } = await supabase.rpc('market_rider_submit_quote', { p_request: reqId, p_lines: clean, p_receipt: rc });
+        if (error) { showErr(msgOf(error)); report(error, 'market-submit-quote'); return; }
+        toast('কাস্টমারকে দাম পাঠানো হয়েছে।', 'success');
+        lines = [{ label: '', amount: '' }];
+        await load();
+      } finally { busy = false; }
+    }
+
+    // ---------- পুরো স্ক্রিন ----------
+    function infoCard(title, text, linkText, href) {
+      const c = mk('section', 'mo-card');
+      if (title) c.appendChild(mk('div', 'mo-h', title));
+      c.appendChild(mk('p', 'mo-msg', text));
+      if (linkText) {
+        const a = document.createElement('a');
+        a.className = 'mo-link'; a.href = href; a.textContent = linkText;
+        c.appendChild(a);
+      }
+      return c;
+    }
+
+    async function render() {
+      const body = $('moBody');
+      // টাইপ করা ফর্ম হারানো এড়াতে: ইনপুট ফোকাসে থাকলে পুনঃআঁকা এড়াও
+      const ae = document.activeElement;
+      if (ae && body.contains(ae) && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) return;
+      const frag = document.createDocumentFragment();
+      $('moTitle').textContent = R.order_no ? 'অর্ডার ' + R.order_no : 'অর্ডার';
+      frag.appendChild(stepsCard());
+      frag.appendChild(detailsCard());
+      const st = R.market_stage || 'awaiting_advance';
+
+      if (R.status === 'cancelled') {
+        frag.appendChild(infoCard('বাতিল', 'এই অর্ডার বাতিল হয়েছে।' + (R.cancel_reason ? ' কারণ: ' + R.cancel_reason : '')));
+      } else if (R.status === 'completed') {
+        const c = infoCard('সম্পন্ন', 'এই অর্ডার সম্পন্ন হয়েছে।');
+        if (R.purchase_total) c.appendChild(row('কেনার দাম', taka(R.purchase_total)));
+        frag.appendChild(c);
+      } else if (R.status === 'disputed') {
+        frag.appendChild(infoCard('সমস্যা', 'এই অর্ডারে সমস্যা জানানো হয়েছে। অ্যাডমিন দেখছে।'));
+      } else if (R.status !== 'confirmed') {
+        frag.appendChild(infoCard('রাইডারের অপেক্ষা', role === 'customer'
+          ? 'অর্ডার যাচাই ও রাইডারের অফারের অপেক্ষায় আছে। অফার এলে "আমার অর্ডার" থেকে রাইডার কনফার্ম করুন। কনফার্মের পর এখানে অগ্রিম দিতে হবে।'
+          : 'এই অর্ডার এখনো কনফার্ম হয়নি।', role === 'customer' ? 'আমার অর্ডার ও অফার দেখুন' : null, '/my-orders'));
+      } else if (role === 'customer') {
+        if (!R.advance_verified && (st === 'awaiting_advance' || st === 'payment_mismatch')) {
+          frag.appendChild(advanceCard());
+        } else if (st === 'advance_submitted') {
+          frag.appendChild(infoCard('অগ্রিম যাচাই চলছে', 'আপনার পেমেন্ট জমা হয়েছে। অ্যাডমিন যাচাই করলে নোটিফিকেশন পাবেন।'));
+        } else if (st === 'advance_verified') {
+          frag.appendChild(infoCard('কেনাকাটা চলছে', 'অগ্রিম যাচাই হয়েছে (' + taka(R.advance_verified_amount) + ')। রাইডার দোকানে গিয়ে কেনার দাম পাঠালে এখানে দেখতে পাবেন ও কনফার্ম করবেন।'));
+          if (quote && quote.status === 'rejected') frag.appendChild(infoCard(null, 'আপনি আগের দাম মানেননি। রাইডার আবার দাম পাঠাবে।'));
+        } else if (st === 'quote_sent') {
+          frag.appendChild(await quoteCard(true));
+        } else if (st === 'quote_confirmed') {
+          const c = infoCard('দাম কনফার্ম হয়েছে', 'রাইডার দোকানে টাকা মিটিয়ে জিনিস নিয়ে আসছে।');
+          c.appendChild(row('কেনার দাম', taka(R.purchase_total)));
+          c.appendChild(row(Number(R.cod_due) >= 0 ? 'ডেলিভারিতে দিতে হবে (COD)' : 'ডেলিভারিতে ফেরত পাবেন', taka(Math.abs(Number(R.cod_due) || 0)), 'tot'));
+          frag.appendChild(c);
+        }
+        frag.appendChild(infoCard(null, 'রাইডারের সাথে চ্যাট বা সমস্যা জানাতে:', 'আমার অর্ডার', '/my-orders'));
+      } else if (role === 'rider') {
+        if (!R.advance_verified) {
+          frag.appendChild(infoCard('অগ্রিমের অপেক্ষা', st === 'advance_submitted'
+            ? 'কাস্টমার অগ্রিম দিয়েছে, অ্যাডমিন যাচাই করছে। যাচাই হলে আপনি নোটিফিকেশন পাবেন। তার আগে দোকানে কিছু কিনবেন না।'
+            : 'কাস্টমার অগ্রিম দিচ্ছে। যাচাই হলে নোটিফিকেশন পাবেন। তার আগে দোকানে কিছু কিনবেন না।'));
+        } else if (st === 'advance_verified') {
+          frag.appendChild(riderQuoteForm());
+        } else if (st === 'quote_sent') {
+          frag.appendChild(infoCard('কাস্টমারের কনফার্মের অপেক্ষা', 'কাস্টমারকে দাম পাঠানো হয়েছে। কনফার্ম করলে নোটিফিকেশন পাবেন।'));
+          frag.appendChild(await quoteCard(false));
+        } else if (st === 'quote_confirmed') {
+          const c = mk('section', 'mo-card');
+          c.appendChild(mk('div', 'mo-h', 'এখন করণীয়'));
+          c.appendChild(mk('p', 'mo-msg', contracted
+            ? 'এটা চুক্তিবদ্ধ দোকান: জিনিস নিন, দোকানে টাকা দিতে হবে না (কোম্পানি পরে মেটাবে)।'
+            : 'দোকানে ' + taka(R.purchase_total) + ' মিটিয়ে জিনিস নিন (আপনার টাকায়)।'));
+          c.appendChild(row('কাস্টমার থেকে নিতে হবে (COD)', taka(Math.max(Number(R.cod_due) || 0, 0)), 'tot'));
+          if (Number(R.cod_due) < 0) c.appendChild(row('কাস্টমারকে ফেরত দিতে হবে', taka(Math.abs(Number(R.cod_due)))));
+          c.appendChild(mk('p', 'mo-note', 'পিকআপ/ডেলিভারি ধাপের বাটন ডেলিভারি হিরো পেজে।'));
+          const a = document.createElement('a'); a.className = 'mo-link'; a.href = '/delivery-hero'; a.textContent = 'ডেলিভারি হিরো পেজ';
+          c.appendChild(a);
+          frag.appendChild(c);
+        }
+      }
+      body.textContent = '';
+      body.appendChild(frag);
+    }
+
+    async function load() {
+      const { data, error } = await supabase.from('delivery_requests').select(COLS).eq('id', reqId).maybeSingle();
+      if (error || !data || !data.is_market) {
+        $('moBody').textContent = '';
+        $('moBody').appendChild(mk('p', 'mo-msg soft', 'অর্ডার পাওয়া যায়নি।'));
+        return;
+      }
+      R = data;
+      role = R.customer_profile_id === uid ? 'customer' : 'rider';
+      if (role === 'rider') {
+        const { data: rr } = await supabase.from('delivery_riders').select('id').eq('profile_id', uid).maybeSingle();
+        if (!rr || rr.id !== R.accepted_rider_id) {
+          $('moBody').textContent = '';
+          $('moBody').appendChild(mk('p', 'mo-msg soft', 'এই অর্ডার আপনার নয়।'));
+          return;
+        }
+      }
+      const { data: qs } = await supabase.from('delivery_price_quotes').select('id, lines, total, receipt_url, status, created_at').eq('request_id', reqId).order('created_at', { ascending: false }).limit(1);
+      quote = qs && qs[0] ? qs[0] : null;
+      contracted = false;
+      if (role === 'rider' && R.shop_ids && R.shop_ids.length) {
+        const { data: sh } = await supabase.from('delivery_shops').select('owner_id').eq('id', R.shop_ids[0]).maybeSingle();
+        contracted = !!(sh && sh.owner_id);
+      }
+      await render();
+    }
+
+    async function init() {
+      reqId = new URLSearchParams(location.search).get('id') || '';
+      const body = $('moBody');
+      if (!UUID.test(reqId)) { body.appendChild(mk('p', 'mo-msg soft', 'অর্ডার পাওয়া যায়নি।')); return; }
+      body.appendChild(mk('p', 'mo-msg soft', 'লোড হচ্ছে...'));
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        body.textContent = '';
+        const p = mk('p', 'mo-msg soft', 'অর্ডার দেখতে ');
+        const a = document.createElement('a'); a.href = '/login'; a.textContent = 'লগইন করুন'; a.className = 'mo-link';
+        p.appendChild(a);
+        body.appendChild(p);
+        return;
+      }
+      uid = session.user.id;
+      const { data: st } = await supabase.from('site_settings').select('key, value').in('key', ['market_payment_bkash', 'market_payment_nagad', 'market_payment_note']);
+      (st || []).forEach((x) => { settings[x.key] = x.value; });
+      await load();
+      timer = setInterval(() => { if (!document.hidden && !busy) load(); }, 15000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+    }
+    init();
+  </script>
+</BaseLayout>
