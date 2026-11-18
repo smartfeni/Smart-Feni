@@ -32,6 +32,7 @@ import {
 } from '../../lib/uploadGuard.js';
 // এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
 import { reportServerError } from '../../lib/serverErrorReporter.js';
+import { r2Configured, r2Put, r2PublicUrl } from '../../lib/r2.js';
 
 export const prerender = false;
 
@@ -123,6 +124,35 @@ export async function POST({ request }) {
     if (check.isSite) {
       if (!(await callerCan(supabaseAdmin, userId, 'images.manage'))) {
         return json({ error: 'এই ফোল্ডারে আপলোড করার অনুমতি নেই' }, 403);
+      }
+    }
+
+    // R2 (Cloudflare): 'site/' ছাড়া সব নতুন ছবি এখানে যায়, egress ফ্রি।
+    // R2 ব্যর্থ হলে নিচের Supabase আপলোডে ফলব্যাক, যাতে ইউজারের আপলোড কখনো আটকে না যায়।
+    if (!check.isSite && r2Configured()) {
+      try {
+        const r2 = await r2Put(path, new Uint8Array(arrayBuffer), sniffed.type);
+        if (r2.ok || r2.dup) {
+          // dup: আগের চেষ্টাতেই আপলোড হয়েছিল, আসল ফাইল অক্ষত — সফল ধরা হলো
+          return json({ url: r2PublicUrl(path), path }, 200);
+        }
+        console.error('upload-image R2 status:', r2.status);
+        await reportServerError(reportDb, {
+          route: '/api/upload-image',
+          action: 'upload_image_r2_fallback',
+          title: 'ছবি আপলোড: R2 ব্যর্থ, Supabase-এ ফলব্যাক',
+          message: 'R2 status ' + r2.status,
+          status: 500,
+        });
+      } catch (r2Err) {
+        console.error('upload-image R2 error:', r2Err && r2Err.message);
+        await reportServerError(reportDb, {
+          route: '/api/upload-image',
+          action: 'upload_image_r2_fallback',
+          title: 'ছবি আপলোড: R2 ব্যর্থ, Supabase-এ ফলব্যাক',
+          message: r2Err && r2Err.message,
+          status: 500,
+        });
       }
     }
 

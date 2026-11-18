@@ -59,7 +59,7 @@ const GEMINI_RETRY_TIMEOUT_MS = 6000; // ২য় চেষ্টা (503/ট�
 const STATS_CACHE_MS = 10 * 60 * 1000;
 
 // বট যেসব লিংক দিতে পারবে (ক্যাটাগরি স্লাগ ছাড়া)। নতুন রুট এলে এখানে যোগ করুন।
-const EXTRA_ALLOWED_LINKS = ['/clubs', '/delivery-hero', '/ride-hero', '/refer', '/shop', '/about'];
+const EXTRA_ALLOWED_LINKS = ['/clubs', '/delivery-hero', '/ride-hero', '/refer', '/shop', '/about', '/services/car-rental'];
 
 // ============================================================
 // ১) ক্যাটাগরি লিস্ট — services.js থেকে অটোমেটিক জেনারেট
