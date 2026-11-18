@@ -74,7 +74,7 @@ export async function POST({ request }) {
 
     const { data: reqRow, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, accepted_rider_id, pickup_done_at, order_confirmed_at, shop_ids, is_market, market_stage, advance_verified')
+      .select('id, status, accepted_rider_id, pickup_done_at, order_confirmed_at, shop_ids')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -111,14 +111,6 @@ export async function POST({ request }) {
       );
     }
 
-    // কুইক ডেলিভারি (মার্কেট) অর্ডার: অগ্রিম যাচাই ছাড়া কেনা/পিকআপ শুরু নয়
-    if (reqRow.is_market && !reqRow.advance_verified) {
-      return new Response(
-        JSON.stringify({ error: 'আগে কাস্টমারের অগ্রিম পেমেন্ট অ্যাডমিন যাচাই করতে হবে', code: 'ADVANCE_NOT_VERIFIED' }),
-        { status: 409, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
     if (reqRow.pickup_done_at) {
       return new Response(
         JSON.stringify({ error: 'পিকআপ ইতিমধ্যে সম্পন্ন হিসেবে মার্ক করা আছে' }),
@@ -127,15 +119,7 @@ export async function POST({ request }) {
     }
 
     // শপ-অর্ডারে রাইডার "অর্ডার কনফার্ম" না করলে পিকআপ নয় (সুইচ ON থাকলে)
-    // কুইক ডেলিভারিতে এই ধাপ নেই (অগ্রিম যাচাই + কাস্টমারের দাম কনফার্মই যথেষ্ট); শুধু দাম কনফার্ম হয়ে থাকতে হবে
-    if (reqRow.is_market && reqRow.market_stage !== 'quote_confirmed') {
-      return new Response(
-        JSON.stringify({ error: 'কাস্টমারের পেমেন্ট যাচাই হওয়ার আগে পিকআপ করা যায় না', code: 'QUOTE_NOT_CONFIRMED' }),
-        { status: 409, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    if (!reqRow.is_market && !reqRow.order_confirmed_at && Array.isArray(reqRow.shop_ids) && reqRow.shop_ids.length > 0) {
+    if (!reqRow.order_confirmed_at && Array.isArray(reqRow.shop_ids) && reqRow.shop_ids.length > 0) {
       const { data: swRow } = await client
         .from('site_settings')
         .select('value')

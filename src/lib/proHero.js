@@ -14,7 +14,6 @@ export const HERO_TABS = {
   delivery: { label: 'ডিরেক্ট অর্ডার', icon: 'fa-bolt', href: '/pro/hero/delivery' },
   offline: { label: 'অফলাইন অর্ডার', icon: 'fa-clipboard-list', href: '/pro/hero/offline' },
   ride: { label: 'রাইড', icon: 'fa-motorcycle', href: '/pro/hero/ride' },
-  history: { label: 'অর্ডার হিস্টোরি', icon: 'fa-clock-rotate-left', href: '/pro/hero/history' },
 };
 
 export async function getHeroTabs() {
