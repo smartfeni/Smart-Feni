@@ -1,67 +1,150 @@
 ---
 // path: src/components/market/MarketLocationSheet.astro
 // ============================================================
-// মার্কেটপ্লেস (ব্রান্চ: marketplace) ধাপ ৩-ক — ড্রপ-অফ লোকেশন সেট করার বটম শিট।
-// দুই বাটন পাশাপাশি:
-//   ১. "বর্তমান লোকেশন" — ম্যাপে অটো সিলেক্ট (বিদ্যমান LocationPicker-এর ম্যাপ, অটো-লোকেট চালু)
-//   ২. "লিখিত ঠিকানা" — প্রবাসে/অন্য কাউকে পাঠাতে বিস্তারিত ঠিকানা
-// ফলাফল marketCart.setDrop() দিয়ে ফোনে সংরক্ষিত হয়; ইভেন্ট: smartfeni:market-drop-changed।
+// কুইক ডেলিভারি — ঠিকানা সেটআপ, পুরো পেজ (ডিজাইন আর্টিফেক্ট "লোকেশন সেটআপ (প্রথম পেজ)" অনুসারে)।
+//   ধাপ ১: শুরু — দুই বাটন: "বর্তমান লোকেশন" ও "লিখিত ঠিকানা"
+//   ধাপ ২: বর্তমান লোকেশন — লাইভ ম্যাপে পিন (বিদ্যমান LocationPicker-এর ফুলস্ক্রিন ম্যাপ: GPS অটো-লোকেট,
+//          ড্র্যাগেবল পিন, ফেনীর সীমানা-চেক, উপজেলা/ইউনিয়ন) → উপজেলা/ইউনিয়ন দেখিয়ে "নিশ্চিত করুন"
+//   ধাপ ৩: লিখিত ঠিকানা — উপজেলা, ইউনিয়ন, বাজার, বাসা/রাস্তা; চাইলে ম্যাপে পিনও দেওয়া যায়
+// ফলাফল marketCart.setDrop() দিয়ে ফোনে সংরক্ষিত; ইভেন্ট: smartfeni:market-drop-changed।
 // ব্যবহার: window.SFMarketLocation.open(onDone?) — পেজে একবার <MarketLocationSheet /> বসাতে হবে।
-// বিদ্যমান LocationPicker কম্পোনেন্ট অপরিবর্তিত; এখানে শুধু ব্যবহার করা হয়েছে।
+// ঠিকানা সেট না থাকলে বন্ধ করার বাটন নেই (ঠিকানা ছাড়া চার্জ হিসাব হয় না)।
+// বিদ্যমান LocationPicker কম্পোনেন্ট অপরিবর্তিত; এখানে শুধু ব্যবহার করা হয়েছে (লুকানো, ম্যাপ ওভারলে চালানোর জন্য)।
 // ============================================================
 import LocationPicker from '../delivery/LocationPicker.astro';
 ---
 
-<div class="mls-root" id="mlsRoot" hidden>
-  <div class="mls-back" id="mlsBack"></div>
-  <div class="mls-sheet" role="dialog" aria-modal="true" aria-labelledby="mlsTitle">
+<div class="mls-root" id="mlsRoot" hidden role="dialog" aria-modal="true" aria-labelledby="mlsTitle">
+  <svg class="mls-map" aria-hidden="true" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice"><rect width="390" height="844" fill="#FFE9DA"/><rect x="-10" y="100" width="130" height="80" rx="14" fill="#FFDCC4"/><rect x="260" y="70" width="150" height="100" rx="14" fill="#FFDCC4"/><rect x="20" y="260" width="110" height="90" rx="14" fill="#D9EBD3"/><rect x="270" y="240" width="130" height="110" rx="14" fill="#FFDCC4"/><rect x="-10" y="420" width="140" height="90" rx="14" fill="#FFDCC4"/><rect x="250" y="430" width="160" height="100" rx="14" fill="#D9EBD3"/><path d="M-10 200 C90 170 160 240 400 190" stroke="#fff" stroke-width="14" fill="none"/><path d="M130 -10 C150 150 120 400 180 860" stroke="#fff" stroke-width="10" fill="none"/><path d="M260 -10 C240 150 290 400 250 860" stroke="#fff" stroke-width="8" fill="none"/><path d="M-10 380 C120 350 200 420 400 370" stroke="#fff" stroke-width="8" fill="none"/><path d="M-10 560 C100 540 220 600 400 540" stroke="#fff" stroke-width="8" fill="none"/></svg>
+
+  <header class="mls-top">
+    <button type="button" class="mls-round" id="mlsBack" aria-label="পেছনে যান" hidden><i class="fas fa-arrow-left" aria-hidden="true"></i></button>
+    <button type="button" class="mls-round" id="mlsClose" aria-label="বন্ধ করুন" hidden><i class="fas fa-xmark" aria-hidden="true"></i></button>
+    <div class="mls-brand" id="mlsBrand">
+      <span class="mls-logo" aria-hidden="true"><i class="fas fa-location-dot"></i></span>
+      <span class="mls-brand-t"><b>স্মার্ট ফেনী</b><small>কুইক ডেলিভারি</small></span>
+    </div>
+  </header>
+
+  <div class="mls-pin" id="mlsPin" aria-hidden="true">
+    <span class="mls-ring r2"></span><span class="mls-ring r1"></span>
+    <span class="mls-dot"><span></span></span>
+    <span class="mls-tag" id="mlsPinTag">আপনার ঠিকানা</span>
+  </div>
+
+  <div class="mls-sheet" id="mlsSheet">
     <div class="mls-grab" aria-hidden="true"></div>
-    <h2 class="mls-title" id="mlsTitle">কোথায় পৌঁছে দেব?</h2>
-    <div class="mls-btns">
-      <button type="button" class="mls-btn" id="mlsBtnMap">
-        <span class="mls-btn-ic"><i class="fas fa-location-crosshairs" aria-hidden="true"></i></span>
-        <span class="mls-btn-t">বর্তমান লোকেশন</span>
-        <span class="mls-btn-d">ম্যাপ থেকে অটো সিলেক্ট</span>
-      </button>
-      <button type="button" class="mls-btn" id="mlsBtnText">
-        <span class="mls-btn-ic"><i class="fas fa-pen-to-square" aria-hidden="true"></i></span>
-        <span class="mls-btn-t">লিখিত ঠিকানা</span>
-        <span class="mls-btn-d">প্রবাসে/অন্য কাউকে পাঠাতে বিস্তারিত ঠিকানা</span>
-      </button>
-    </div>
 
-    <div class="mls-picker" id="mlsPicker" data-mode="map">
-      <LocationPicker id="mkdrop" label="ড্রপ-অফ ঠিকানা" allowAutoLocate={true} placeholder="যেমন: ধলিয়া বাজার, ফেনী সদর" />
-    </div>
+    <!-- ধাপ ১ -->
+    <section class="mls-step" id="mlsS1">
+      <h2 class="mls-title" id="mlsTitle">কোথায় পৌঁছে দেব?</h2>
+      <p class="mls-cur" id="mlsCur" hidden></p>
+      <div class="mls-btns">
+        <button type="button" class="mls-btn dark" id="mlsBtnMap">
+          <span class="mls-btn-ic"><i class="fas fa-location-crosshairs" aria-hidden="true"></i></span>
+          <span class="mls-btn-tx"><b>বর্তমান লোকেশন</b><small>ম্যাপে অটো সিলেক্ট</small></span>
+        </button>
+        <button type="button" class="mls-btn" id="mlsBtnText">
+          <span class="mls-btn-ic"><i class="fas fa-pen" aria-hidden="true"></i></span>
+          <span class="mls-btn-tx"><b>লিখিত ঠিকানা</b><small>প্রবাস/অন্যের জন্য</small></span>
+        </button>
+      </div>
+    </section>
 
-    <p class="mls-err" id="mlsErr" hidden></p>
-    <button type="button" class="mls-save" id="mlsSave">ঠিকানা সেভ করুন</button>
-    <button type="button" class="mls-close" id="mlsClose">বন্ধ করুন</button>
+    <!-- ধাপ ২ -->
+    <section class="mls-step" id="mlsS2" hidden>
+      <div class="mls-ok" id="mlsOk"><i class="fas fa-circle-check" aria-hidden="true"></i> <span id="mlsOkT">লোকেশন খোঁজা হচ্ছে...</span></div>
+      <div class="mls-tiles">
+        <div class="mls-tile"><small>উপজেলা</small><b id="mlsUp">—</b></div>
+        <div class="mls-tile"><small>ইউনিয়ন</small><b id="mlsUn">—</b></div>
+      </div>
+      <p class="mls-addr" id="mlsAddr" hidden></p>
+      <label class="mls-f"><span>ঐচ্ছিক নির্দেশনা</span><input type="text" id="mlsIns" maxlength="200" placeholder="বাজার বা এলাকার নাম লিখুন" /></label>
+      <button type="button" class="mls-link" id="mlsRepin">ম্যাপে পিন আবার বসান</button>
+      <p class="mls-err" id="mlsErr2" hidden></p>
+      <button type="button" class="mls-save" id="mlsSave2">এই লোকেশন নিশ্চিত করুন</button>
+    </section>
+
+    <!-- ধাপ ৩ -->
+    <section class="mls-step" id="mlsS3" hidden>
+      <h2 class="mls-title">ঠিকানা লিখে দিন</h2>
+      <div class="mls-two">
+        <label class="mls-f"><span>উপজেলা</span>
+          <select id="mlsWUp">
+            <option>ফেনী সদর</option><option>ছাগলনাইয়া</option><option>দাগনভূঞা</option><option>পরশুরাম</option><option>ফুলগাজী</option><option>সোনাগাজী</option>
+          </select>
+        </label>
+        <label class="mls-f"><span>ইউনিয়ন</span><input type="text" id="mlsWUn" maxlength="60" placeholder="ইউনিয়নের নাম" /></label>
+      </div>
+      <label class="mls-f"><span>বাজার বা এলাকার নাম</span><input type="text" id="mlsWArea" maxlength="80" placeholder="যেমন: বাজার, পাড়া, মহল্লা" /></label>
+      <label class="mls-f"><span>বাসা, রাস্তা ও ল্যান্ডমার্ক</span><textarea id="mlsWHouse" maxlength="200" placeholder="বাসা নম্বর, রাস্তার নাম, কাছের পরিচিত জায়গা"></textarea></label>
+      <button type="button" class="mls-link" id="mlsWPin"><i class="fas fa-map-pin" aria-hidden="true"></i> ম্যাপে পিন দিন (ঐচ্ছিক, চার্জ সঠিক হিসাবে সাহায্য করে)</button>
+      <p class="mls-note" id="mlsWPinOk" hidden></p>
+      <p class="mls-err" id="mlsErr3" hidden></p>
+      <button type="button" class="mls-save" id="mlsSave3">এই ঠিকানা নিশ্চিত করুন</button>
+    </section>
+  </div>
+
+  <!-- লাইভ ম্যাপ-পিনের জন্য বিদ্যমান LocationPicker (লুকানো; ফুলস্ক্রিন ম্যাপ ওভারলে এখান থেকেই খোলে) -->
+  <div class="mls-hidden-picker" id="mlsPicker" aria-hidden="false">
+    <LocationPicker id="mkdrop" label="ড্রপ-অফ ঠিকানা" allowAutoLocate={true} placeholder="যেমন: ধলিয়া বাজার, ফেনী সদর" />
   </div>
 </div>
 
 <style is:global>
-  .mls-root { position: fixed; inset: 0; z-index: 9000; font-family: 'Hind Siliguri', system-ui, sans-serif; }
+  .mls-root { position: fixed; inset: 0; z-index: 9000; background: #FFE9DA; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; overflow: hidden; }
   .mls-root[hidden] { display: none; }
-  .mls-back { position: absolute; inset: 0; background: rgba(27, 42, 74, 0.5); }
-  .mls-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-width: 560px; margin: 0 auto; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 24px 24px 0 0; padding: 10px 18px 22px; color: #1B2A4A; }
-  .mls-grab { width: 44px; height: 5px; border-radius: 3px; background: #D9DEE7; margin: 0 auto 12px; }
-  .mls-title { margin: 0 0 14px; font-size: 19px; font-weight: 700; }
+  .mls-map { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .mls-top { position: absolute; left: 0; right: 0; top: 0; padding: 20px 18px 0; display: flex; align-items: center; gap: 12px; z-index: 2; }
+  .mls-round { width: 44px; height: 44px; border: 0; border-radius: 22px; background: #fff; color: #1B2A4A; font-size: 17px; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.14); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .mls-round[hidden] { display: none; }
+  .mls-brand { display: flex; align-items: center; gap: 10px; }
+  .mls-logo { width: 38px; height: 38px; border-radius: 12px; background: #1B2A4A; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 17px; }
+  .mls-brand-t { display: flex; flex-direction: column; line-height: 1.15; }
+  .mls-brand-t b { font-size: 18px; font-weight: 700; }
+  .mls-brand-t small { font-size: 11px; font-weight: 500; color: #4A5568; }
+  .mls-pin { position: absolute; left: 50%; top: 36%; width: 0; height: 0; z-index: 1; transition: top 0.25s; }
+  .mls-pin[data-step='2'] { top: 24%; }
+  .mls-pin[data-step='3'] { top: 17%; }
+  .mls-ring { position: absolute; border-radius: 50%; border: 2px solid #FF6B35; }
+  .mls-ring.r2 { left: -84px; top: -84px; width: 168px; height: 168px; opacity: 0.28; }
+  .mls-ring.r1 { left: -52px; top: -52px; width: 104px; height: 104px; opacity: 0.5; background: rgba(255, 107, 53, 0.12); }
+  .mls-dot { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; background: #FF6B35; border: 4px solid #fff; box-sizing: border-box; box-shadow: 0 6px 16px rgba(27, 42, 74, 0.28); display: flex; align-items: center; justify-content: center; }
+  .mls-dot span { width: 10px; height: 10px; border-radius: 50%; background: #fff; }
+  .mls-tag { position: absolute; left: -70px; top: -72px; width: 140px; height: 30px; border-radius: 15px; background: #1B2A4A; color: #fff; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .mls-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-width: 560px; margin: 0 auto; max-height: 78vh; overflow-y: auto; background: #fff; border-radius: 28px 28px 0 0; box-shadow: 0 -8px 32px rgba(27, 42, 74, 0.14); padding: 12px 20px calc(22px + env(safe-area-inset-bottom)); z-index: 3; }
+  .mls-grab { width: 40px; height: 4px; border-radius: 2px; background: #E6D8CC; margin: 0 auto 14px; }
+  .mls-step[hidden] { display: none; }
+  .mls-title { margin: 0 0 12px; font-size: 22px; font-weight: 700; }
+  .mls-cur { margin: -4px 0 12px; font-size: 13px; color: #4A5568; }
   .mls-btns { display: flex; gap: 10px; }
-  .mls-btn { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 12px; border-radius: 16px; background: #FFF4EC; border: 1.5px solid #EADBCF; cursor: pointer; font-family: inherit; color: #1B2A4A; }
-  .mls-btn[aria-pressed='true'] { border-color: #FF6B35; background: #FFE9DA; }
-  .mls-btn-ic { width: 38px; height: 38px; border-radius: 12px; background: #1B2A4A; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-  .mls-btn-t { font-size: 15px; font-weight: 700; }
-  .mls-btn-d { font-size: 11.5px; line-height: 1.35; color: #5B6B86; }
-  .mls-btn:focus-visible, .mls-save:focus-visible, .mls-close:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
-  .mls-picker { margin-top: 14px; }
-  /* "বর্তমান লোকেশন" মোডে লিখিত ঠিকানার সারি লুকানো; বাছাই হয়ে গেলে ঠিকানা দেখায় */
-  .mls-picker[data-mode='map'] .lp-address-row { display: none; }
-  .mls-picker .lp-label { display: none; }
-  .mls-err { margin: 10px 0 0; color: #B42318; font-size: 13px; font-weight: 600; }
-  .mls-save { width: 100%; margin-top: 14px; height: 52px; border: 0; border-radius: 16px; background: #FF6B35; color: #fff; font-family: inherit; font-size: 16px; font-weight: 700; cursor: pointer; }
-  .mls-save:disabled { opacity: 0.6; }
-  .mls-close { width: 100%; margin-top: 8px; height: 44px; border: 0; background: none; color: #5B6B86; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .mls-btn { flex: 1; min-width: 0; height: 58px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 16px; background: #fff; color: #1B2A4A; border: 1.5px solid #1B2A4A; text-align: left; font-family: inherit; cursor: pointer; }
+  .mls-btn.dark { background: #1B2A4A; color: #fff; }
+  .mls-btn-ic { font-size: 18px; flex: none; width: 22px; text-align: center; }
+  .mls-btn-tx { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+  .mls-btn-tx b { font-size: 14.5px; font-weight: 700; white-space: nowrap; }
+  .mls-btn-tx small { font-size: 11px; font-weight: 500; color: #4A5568; white-space: nowrap; }
+  .mls-btn.dark small { color: #E6EAF2; }
+  .mls-ok { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: #1F7A4D; }
+  .mls-ok.wait { color: #5B6B86; }
+  .mls-tiles { display: flex; gap: 10px; margin: 12px 0; }
+  .mls-tile { flex: 1; background: #FFF4EC; border-radius: 14px; padding: 10px 14px; }
+  .mls-tile small { display: block; font-size: 11.5px; font-weight: 600; color: #4A5568; }
+  .mls-tile b { font-size: 16px; font-weight: 700; }
+  .mls-addr { margin: 0 0 10px; font-size: 13px; line-height: 1.5; color: #4A5568; }
+  .mls-two { display: flex; gap: 10px; }
+  .mls-f { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; margin-top: 10px; }
+  .mls-f span { font-size: 12px; font-weight: 600; color: #4A5568; }
+  .mls-f select, .mls-f input, .mls-f textarea { box-sizing: border-box; width: 100%; height: 48px; border: 1.5px solid #E6D8CC; border-radius: 14px; padding: 0 14px; font: 500 15px 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #FFFBF8; }
+  .mls-f textarea { height: 72px; padding: 10px 14px; resize: none; }
+  .mls-f select:focus, .mls-f input:focus, .mls-f textarea:focus, .mls-btn:focus-visible, .mls-save:focus-visible, .mls-round:focus-visible, .mls-link:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+  .mls-link { display: block; width: 100%; margin-top: 10px; padding: 10px 0; border: 0; background: none; color: #1B2A4A; font: 700 13.5px 'Hind Siliguri', system-ui, sans-serif; text-align: left; cursor: pointer; text-decoration: underline; }
+  .mls-note { margin: 0; font-size: 12.5px; color: #1F7A4D; font-weight: 600; }
+  .mls-err { margin: 8px 0 0; color: #B42318; font-size: 13px; font-weight: 600; }
+  .mls-save { width: 100%; margin-top: 14px; height: 56px; border: 0; border-radius: 16px; background: #FF6B35; color: #1B2A4A; font-family: inherit; font-size: 16px; font-weight: 700; cursor: pointer; }
+  .mls-save:disabled { opacity: 0.55; cursor: not-allowed; }
+  /* লুকানো পিকার: শুধু তার ফুলস্ক্রিন ম্যাপ ওভারলে (position:fixed) দেখা যায় */
+  .mls-hidden-picker { position: absolute; left: 0; top: 0; width: 0; height: 0; overflow: hidden; }
 </style>
 
 <script>
@@ -72,19 +155,27 @@ import LocationPicker from '../delivery/LocationPicker.astro';
   const wrap = root.querySelector('[data-lp-id="mkdrop"]');
   const q = (c) => wrap.querySelector(c);
   let onDone = null;
-  let lastSource = 'text';
+  let step = 1;
+  let picked = null;      // LocationPicker থেকে পাওয়া { lat, lng, address, upazila, union, source }
+  let pickFor = 'gps';    // কোন ধাপের জন্য ম্যাপ খুলেছি: 'gps' | 'written'
 
-  function showErr(msg) {
-    const e = $('mlsErr');
-    e.textContent = msg || '';
-    e.hidden = !msg;
-  }
+  function setText(id, t) { const e = $(id); if (e) e.textContent = t; }
+  function showErr(id, msg) { const e = $(id); if (!e) return; e.textContent = msg || ''; e.hidden = !msg; }
 
-  function setMode(mode) {
-    $('mlsPicker').dataset.mode = mode;
-    $('mlsBtnMap').setAttribute('aria-pressed', mode === 'map' ? 'true' : 'false');
-    $('mlsBtnText').setAttribute('aria-pressed', mode === 'text' ? 'true' : 'false');
-    showErr('');
+  function hasAddress() { try { return !!getDrop(); } catch (e) { return false; } }
+
+  function go(n) {
+    step = n;
+    $('mlsS1').hidden = n !== 1;
+    $('mlsS2').hidden = n !== 2;
+    $('mlsS3').hidden = n !== 3;
+    $('mlsPin').dataset.step = String(n);
+    setText('mlsPinTag', n === 1 ? 'আপনার ঠিকানা' : n === 2 ? 'আপনি এখানে' : 'পিন এখানে বসবে');
+    // ধাপ ২/৩-এ পেছনের তীর (ধাপ ১-এ ফেরা); ধাপ ১-এ শুধু ঠিকানা সেট থাকলে ✕
+    $('mlsBack').hidden = n === 1;
+    $('mlsClose').hidden = !(n === 1 && hasAddress());
+    $('mlsBrand').hidden = n !== 1;
+    showErr('mlsErr2', ''); showErr('mlsErr3', '');
   }
 
   function close() {
@@ -94,19 +185,19 @@ import LocationPicker from '../delivery/LocationPicker.astro';
 
   function open(cb) {
     onDone = typeof cb === 'function' ? cb : null;
+    picked = null;
     root.hidden = false;
     document.body.style.overflow = 'hidden';
-    setMode('map');
-    // আগের সেভ করা ঠিকানা থাকলে বক্সে বসাও (বদলানো যাবে)
     const d = getDrop();
-    const input = q('.lp-address-input');
-    if (d && input && !input.value) input.value = d.address;
-    $('mlsSave').focus();
+    const cur = $('mlsCur');
+    if (d && d.address) { cur.textContent = 'বর্তমান ঠিকানা: ' + d.address; cur.hidden = false; } else { cur.hidden = true; }
+    go(1);
+    $('mlsBtnMap').focus();
   }
 
   function finish(detail) {
     const addr = (detail.address || '').trim();
-    if (!addr) { showErr('ঠিকানা দিন বা ম্যাপ থেকে সিলেক্ট করুন।'); return false; }
+    if (!addr) return false;
     const lat = parseFloat(detail.lat);
     const lng = parseFloat(detail.lng);
     setDrop({
@@ -124,44 +215,81 @@ import LocationPicker from '../delivery/LocationPicker.astro';
     return true;
   }
 
-  function readOut() {
-    return {
-      address: q('.lp-out-address').value || q('.lp-address-input').value,
-      lat: q('.lp-out-lat').value,
-      lng: q('.lp-out-lng').value,
-      upazila: q('.lp-out-upazila').value,
-      union: q('.lp-out-union').value,
-      instructions: q('.lp-out-instructions').value || q('.lp-instructions-input').value,
-      source: lastSource,
-    };
+  // লাইভ ম্যাপ ওভারলে খোলা (GPS অটো-লোকেট, ড্র্যাগেবল পিন, ফেনীর সীমানা-চেক)
+  function openMap(forWhat) {
+    pickFor = forWhat;
+    const b = q('.lp-map-select-btn');
+    if (b) b.click();
   }
 
-  // ম্যাপে "সেভ করুন" চাপলে LocationPicker এই ইভেন্ট দেয়; ম্যাপ বাছাই হলেই শিটে ঠিকানা দেখাও
+  // ম্যাপে "সেভ করুন" চাপলে LocationPicker এই ইভেন্ট দেয়
   wrap.addEventListener('lp:location-changed', (ev) => {
     const d = ev.detail || {};
     if (d.cleared) return;
-    lastSource = d.source === 'map' ? 'map' : (d.source || 'text');
-    const input = q('.lp-address-input');
-    if (d.address && input && !input.value) input.value = d.address;
-    // ম্যাপ বা সেভড ঠিকানা থেকে এলে সরাসরি দেখাও যাতে কাস্টমার নিশ্চিত হয়
-    if (d.source === 'map' || d.source === 'saved') $('mlsPicker').dataset.mode = 'text';
+    const lat = parseFloat(d.lat);
+    const lng = parseFloat(d.lng);
+    if (!isFinite(lat) || !isFinite(lng)) return;
+    picked = { lat, lng, address: d.address || '', upazila: d.upazila || '', union: d.union || '', source: d.source === 'map' ? 'map' : (d.source || 'map') };
+    if (pickFor === 'gps') {
+      setText('mlsOkT', 'আপনার লোকেশন পাওয়া গেছে');
+      $('mlsOk').classList.remove('wait');
+      setText('mlsUp', picked.upazila || '—');
+      setText('mlsUn', picked.union || '—');
+      const a = $('mlsAddr');
+      a.textContent = picked.address || '';
+      a.hidden = !picked.address;
+      $('mlsSave2').disabled = false;
+      go(2);
+    } else {
+      const ok = $('mlsWPinOk');
+      ok.textContent = 'পিন বসানো হয়েছে' + (picked.upazila ? ' · ' + picked.upazila : '') + (picked.union ? ' · ' + picked.union : '');
+      ok.hidden = false;
+      if (picked.upazila) { const sel = $('mlsWUp'); Array.from(sel.options).forEach((o) => { if (o.value === picked.upazila || o.text === picked.upazila) sel.value = o.value; }); }
+      if (picked.union && !$('mlsWUn').value) $('mlsWUn').value = picked.union;
+    }
   });
 
+  // ধাপ ১ → ২: বর্তমান লোকেশন
   $('mlsBtnMap').addEventListener('click', () => {
-    setMode('map');
-    const b = q('.lp-map-select-btn');
-    if (b) b.click(); // ম্যাপ ওভারলে খোলে, অটো-লোকেট চালু
+    picked = null;
+    setText('mlsOkT', 'লোকেশন খোঁজা হচ্ছে...');
+    $('mlsOk').classList.add('wait');
+    setText('mlsUp', '—'); setText('mlsUn', '—');
+    $('mlsAddr').hidden = true;
+    $('mlsSave2').disabled = true;
+    go(2);
+    openMap('gps');
   });
-  $('mlsBtnText').addEventListener('click', () => {
-    setMode('text');
-    lastSource = 'text';
-    const i = q('.lp-address-input');
-    if (i) i.focus();
+  $('mlsRepin').addEventListener('click', () => openMap('gps'));
+  $('mlsSave2').addEventListener('click', () => {
+    if (!picked) { showErr('mlsErr2', 'আগে ম্যাপে লোকেশন বেছে নিন।'); return; }
+    finish({ ...picked, instructions: $('mlsIns').value.trim() });
   });
-  $('mlsSave').addEventListener('click', () => { finish(readOut()); });
+
+  // ধাপ ১ → ৩: লিখিত ঠিকানা
+  $('mlsBtnText').addEventListener('click', () => { picked = null; $('mlsWPinOk').hidden = true; go(3); $('mlsWUn').focus(); });
+  $('mlsWPin').addEventListener('click', () => openMap('written'));
+  $('mlsSave3').addEventListener('click', () => {
+    const up = $('mlsWUp').value.trim();
+    const un = $('mlsWUn').value.trim();
+    const area = $('mlsWArea').value.trim();
+    const house = $('mlsWHouse').value.trim();
+    if (!area && !house) { showErr('mlsErr3', 'বাজার/এলাকার নাম অথবা বাসা ও রাস্তার ঠিকানা লিখুন।'); return; }
+    const parts = [house, area, un ? un + ' ইউনিয়ন' : '', up].filter(Boolean);
+    finish({
+      address: parts.join(', '),
+      lat: picked ? picked.lat : null,
+      lng: picked ? picked.lng : null,
+      upazila: up,
+      union: un,
+      instructions: '',
+      source: picked ? 'map' : 'text',
+    });
+  });
+
+  $('mlsBack').addEventListener('click', () => go(1));
   $('mlsClose').addEventListener('click', close);
-  $('mlsBack').addEventListener('click', close);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !root.hidden) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !root.hidden && step === 1 && hasAddress()) close(); });
 
   window.SFMarketLocation = { open, close };
 </script>

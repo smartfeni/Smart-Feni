@@ -1360,7 +1360,7 @@ const riderGuideSteps = [
       const shopSwP = supabase.from('site_settings').select('value').eq('key', 'shop_notify_on_rider_confirm').maybeSingle();
       const { data: rawRequests } = await supabase
         .from('delivery_requests')
-        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, updated_at, is_asap, scheduled_at, release_requested_at, order_confirmed_at, shop_ids, is_market, order_type, advance_verified, market_stage, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, updated_at, is_asap, scheduled_at, release_requested_at, order_confirmed_at, shop_ids, is_market, order_type, advance_verified, market_stage, order_items, purchase_total, cod_due, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
         .eq('accepted_rider_id', riderId)
         .in('status', ['confirmed', 'delivered', 'completed'])
         .order('created_at', { ascending: false });
@@ -1385,29 +1385,78 @@ const riderGuideSteps = [
 
       riderActiveDeliverySection.style.display = 'block';
 
+      // কুইক ডেলিভারি কার্ডে "দোকানে টাকা দিতে হবে কি না" জানতে: চুক্তিবদ্ধ (মালিকসহ) দোকান
+      const contractedShops = new Set();
+      try {
+        const mkIds = Array.from(new Set(activeRequests.filter((r) => r.is_market && Array.isArray(r.shop_ids) && r.shop_ids.length).map((r) => r.shop_ids[0])));
+        if (mkIds.length) {
+          const { data: shs } = await supabase.from('delivery_shops').select('id, owner_id').in('id', mkIds);
+          (shs || []).forEach((x) => { if (x.owner_id) contractedShops.add(x.id); });
+        }
+      } catch (e) { /* না পেলে ধরে নেওয়া হয় দোকানে টাকা মেটাতে হবে */ }
+
       activeRequests.forEach((req) => {
         const card = document.createElement('div');
         card.className = 'dh-active-card';
         card.dataset.reqId = req.id;
 
-        // কুইক ডেলিভারি: সিম্পল কার্ড, ট্যাপ করলে প্যানেল (পিকআপ/ডেলিভারি/চ্যাট/কল/রিপোর্ট/ছাড়া সব ভেতরে)
+        // কুইক ডেলিভারি কার্ড (ডিজাইন আর্টিফেক্ট "আমার কাজ" অনুসারে): শিরোনাম, অবস্থা, করণীয়, টাকার হিসাব, একটা বড় বাটন।
+        // বাকি সব (দাম পাঠানো, চ্যাট, কল, নেভিগেট, রিপোর্ট, ছাড়া) কার্ড ট্যাপ করে খোলা প্যানেলে।
         if (req.is_market) {
-          let mLine;
-          if (req.status === 'completed') mLine = 'ডেলিভারি সম্পন্ন হয়েছে';
-          else if (req.status === 'delivered') mLine = 'ডেলিভারি সম্পন্ন মার্ক করুন';
-          else if (!req.advance_verified) mLine = req.market_stage === 'advance_submitted' ? 'অগ্রিম যাচাই চলছে, কিছু কিনবেন না' : 'কাস্টমারের অগ্রিমের অপেক্ষা';
-          else if (req.market_stage === 'quote_sent') mLine = 'কাস্টমারের দাম কনফার্মের অপেক্ষা';
-          else if (req.market_stage !== 'quote_confirmed') mLine = 'কেনার দাম পাঠান';
-          else mLine = req.pickup_done_at ? 'ডেলিভারি দিয়ে সম্পন্ন করুন' : 'জিনিস কিনে পিকআপ মার্ক করুন';
+          const mItems = Array.isArray(req.order_items) ? req.order_items : [];
+          const mShopName = (mItems[0] && mItems[0].shop_name) || 'অর্ডার এনিথিং';
+          const mContracted = Array.isArray(req.shop_ids) && req.shop_ids.length > 0 && contractedShops.has(req.shop_ids[0]);
+          const mSt = req.market_stage || 'awaiting_advance';
           const mDone = req.status === 'completed';
+          const mQuoteOk = req.status === 'confirmed' && mSt === 'quote_confirmed';
+          const mDeliver = req.status === 'delivered' || (mQuoteOk && !!req.pickup_done_at);
+          const mPickup = mQuoteOk && !req.pickup_done_at;
+          let chip; let chipCss = 'background:#E6EAF2;';
+          if (mDone) { chip = 'সম্পন্ন হয়েছে'; chipCss = 'background:#E3F3EA;'; }
+          else if (req.status === 'delivered') chip = 'সম্পন্নের অপেক্ষা';
+          else if (!req.advance_verified) chip = mSt === 'advance_submitted' ? 'অগ্রিম যাচাই চলছে' : 'অগ্রিমের অপেক্ষা';
+          else if (mSt === 'quote_sent') chip = 'কাস্টমারের কনফার্মের অপেক্ষা';
+          else if (!mQuoteOk) chip = 'কেনার দাম পাঠান';
+          else { chip = 'দাম কনফার্ম হয়েছে'; chipCss = 'background:#E3F3EA;'; }
+          const mRow = (l, v) => `<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:3px 0;"><span style="color:#4A5568;">${l}</span><span style="font-weight:600;">${v}</span></div>`;
+          let mBody = '';
+          if (mQuoteOk || mDeliver) {
+            mBody += `<div style="font-size:13.5px;font-weight:600;margin-bottom:8px;">${mContracted ? 'দোকানে টাকা দিতে হবে না, শুধু পণ্য নিন' : 'দোকানে পুরো টাকা মিটিয়ে পণ্য নিন'}</div>`;
+            mBody += mRow(mContracted ? 'দোকানে দেবেন' : 'দোকানে মেটাবেন', '৳' + (mContracted ? 0 : Math.round(Number(req.purchase_total) || 0)));
+            mBody += mRow('কাস্টমার থেকে নেবেন (COD)', '৳' + Math.round(Math.max(Number(req.cod_due) || 0, 0)));
+          } else if (!mDone) {
+            mBody += `<div style="font-size:13.5px;font-weight:600;margin-bottom:4px;">${!req.advance_verified ? 'অগ্রিম যাচাই হওয়ার আগে দোকানে কিছু কিনবেন না' : (mSt === 'quote_sent' ? 'কাস্টমার দাম কনফার্ম করলে নোটিফিকেশন পাবেন' : 'দোকানে গিয়ে কেনার দাম পাঠান')}</div>`;
+          }
+          const btnCss = 'display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin-top:10px;border:0;border-radius:16px;background:#FF6B35;color:#1B2A4A;font-weight:700;font-size:15px;font-family:inherit;cursor:pointer;text-decoration:none;box-sizing:border-box;';
+          const openLink = (label, strong) => `<a href="/market/order?id=${huEsc(req.id)}" data-mk-order="${huEsc(req.id)}" style="${strong ? btnCss : 'display:block;margin-top:10px;text-align:center;font-weight:700;font-size:13.5px;color:#1B2A4A;text-decoration:underline;'}">${label}</a>`;
+          let mAct = '';
+          if (mPickup) mAct = `<button type="button" data-mk-act="pickup" style="${btnCss}">${mContracted ? 'পণ্য নিয়েছি' : 'টাকা মিটিয়েছি, পণ্য নিয়েছি'}</button>`;
+          else if (mDeliver) mAct = `<button type="button" data-mk-act="deliver" style="${btnCss}">ডেলিভারি সম্পন্ন করুন</button>`;
+          else if (!mDone && req.advance_verified && mSt === 'advance_verified') mAct = openLink('কেনার দাম পাঠান', true);
           card.innerHTML = `
-            <a href="/market/order?id=${huEsc(req.id)}" data-mk-order="${huEsc(req.id)}" style="display:block;color:inherit;text-decoration:none;">
-              <p class="dh-active-status"><i class="fas fa-bolt"></i> কুইক ডেলিভারি</p>
-              ${req.order_no ? `<span style="display:inline-block;font-size:0.72rem;font-weight:800;color:#1B2A4A;background:#EEF3F9;padding:2px 9px;border-radius:7px;margin-bottom:6px;letter-spacing:0.3px;">#${huEsc(req.order_no)}</span>` : ''}
-              <p class="dh-req-desc">${huEsc(req.description || '')}</p>
-              <p class="dh-active-price">৳${Number(req.final_price) || 0}</p>
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:12px;padding:10px 12px;font-weight:700;font-size:0.9rem;${mDone ? 'background:#E6F4EC;color:#1F7A4D;' : 'background:#FFF1E8;color:#B4400E;'}"><span>${huEsc(mLine)}</span><span aria-hidden="true" style="font-size:1.2rem;">›</span></div>
-            </a>`;
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+              <div style="font-size:16px;font-weight:700;">${req.order_no ? '#' + huEsc(req.order_no) + ' · ' : ''}${huEsc(mShopName)}</div>
+              <span style="${chipCss}font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:10px;white-space:nowrap;">${huEsc(chip)}</span>
+            </div>
+            ${mBody}
+            <p class="mk-act-err" hidden style="margin:8px 0 0;color:#B42318;font-size:13px;font-weight:600;"></p>
+            ${mAct}
+            ${openLink('বিস্তারিত, চ্যাট, কল ও নেভিগেট ›', false)}`;
+          const mkErr = card.querySelector('.mk-act-err');
+          [['pickup', markPickupDone, 'আবার চাপুন, নিশ্চিত?'], ['deliver', confirmDelivery, 'আবার চাপুন, নিশ্চিত? বদলানো যাবে না']].forEach(([act, fn, ask]) => {
+            const b = card.querySelector(`[data-mk-act="${act}"]`);
+            if (!b) return;
+            const orig = b.textContent;
+            let armed = false; let t = null;
+            b.addEventListener('click', async () => {
+              if (b.disabled) return;
+              if (!armed) { armed = true; b.textContent = ask; t = setTimeout(() => { armed = false; b.textContent = orig; }, 4000); return; }
+              clearTimeout(t); armed = false; b.disabled = true;
+              const { error } = await fn({ requestId: req.id });
+              if (error) { mkErr.textContent = String(error); mkErr.hidden = false; b.disabled = false; b.textContent = orig; return; }
+              loadRiderSection({ silent: true });
+            });
+          });
           riderActiveDeliveryList.appendChild(card);
           return;
         }
