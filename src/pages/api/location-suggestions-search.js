@@ -21,7 +21,6 @@ import { reportServerError } from '../../lib/serverErrorReporter.js';
 
 export const prerender = false;
 
-const FENI_CENTER = { lat: 23.0159, lng: 91.3976 };
 
 function getAdminClient() {
   const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
