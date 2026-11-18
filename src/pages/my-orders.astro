@@ -1658,6 +1658,39 @@ const ordersGuide = [
       const pickupText = req.pickup_address || req.area_detail || '';
       const dropText = req.drop_address || '';
 
+      // কুইক ডেলিভারি: সিম্পল কার্ড, পুরোটা ট্যাপ করলে নতুন প্যানেল (/market/order) খোলে। সব কাজ (চ্যাট, কল, রিপোর্ট, রিভিউ ইত্যাদি) প্যানেলের ভেতরে।
+      if (req.is_market) {
+        const MSTAGE = { awaiting_advance: 'অগ্রিম দিন', advance_submitted: 'অগ্রিম যাচাইয়ের অপেক্ষায়', advance_verified: 'অগ্রিম যাচাই হয়েছে, রাইডার কিনছে', payment_mismatch: 'অগ্রিমের অঙ্ক মেলেনি, আবার দিন', quote_sent: 'রাইডারের পাঠানো দাম কনফার্ম করুন', quote_confirmed: 'দাম কনফার্ম হয়েছে, রাইডার জিনিস আনছে' };
+        let line = '';
+        let tone = 'now';
+        if (req.status === 'completed') { line = req.__hasReview ? 'ডেলিভারি সম্পন্ন হয়েছে' : 'ডেলিভারি সম্পন্ন, রাইডারকে রেটিং দিন'; tone = 'ok'; }
+        else if (req.status === 'cancelled') { line = 'অর্ডারটি বাতিল হয়েছে'; tone = 'off'; }
+        else if (req.status === 'disputed') { line = 'সমস্যা জানানো হয়েছে, অ্যাডমিন দেখছে'; tone = 'off'; }
+        else if (req.status === 'delivered') line = 'ডেলিভারি হয়েছে, সম্পন্নের অপেক্ষায়';
+        else if (req.status === 'confirmed') line = req.pickup_done_at ? 'রাইডার জিনিস নিয়ে আপনার পথে' : (MSTAGE[req.market_stage || 'awaiting_advance'] || 'অর্ডার চলছে');
+        else if (req.publish_status === 'pending' || req.publish_status === 'hold') line = 'অ্যাডমিন অর্ডার দেখছেন';
+        else {
+          const offs = (req.delivery_offers || []).filter((o) => o.status === 'active');
+          const bestO = offs.length ? Math.min(...offs.map((o) => Number(o.offer_price))) : null;
+          line = bestO !== null ? `${toBn(offs.length)}টি অফার এসেছে, সেরা ৳${toBn(bestO)}, রাইডার নিশ্চিত করুন` : 'রাইডারের সাড়ার অপেক্ষায় আছে';
+        }
+        const showSteps = req.status !== 'cancelled' && req.status !== 'disputed';
+        const toneCss = tone === 'ok' ? 'background:#E6F4EC;color:#1F7A4D;' : tone === 'off' ? 'background:#F3F4F6;color:#5B6B86;' : 'background:#FFF1E8;color:#B4400E;';
+        card.innerHTML = `
+          <a href="/market/order?id=${encodeURIComponent(req.id)}" data-mk-order="${esc(req.id)}" style="display:block;color:inherit;text-decoration:none;">
+            <div class="order-top-row">
+              <div>
+                <p class="order-shop-name"><span class="shop-icon-badge delivery-icon"><i class="fas fa-bolt"></i></span> কুইক ডেলিভারি</p>
+                <p class="order-date">${req.order_no ? `<b style="color:#1B2A4A;letter-spacing:0.3px;">#${esc(req.order_no)}</b> · ` : ''}${formatDate(req.created_at)}</p>
+              </div>
+            </div>
+            ${showSteps ? marketStepperHtml(req) : ''}
+            <p class="delivery-desc" style="margin:4px 0 8px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${esc(req.description || '')}</p>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:12px;padding:10px 12px;font-weight:700;font-size:0.9rem;${toneCss}"><span>${esc(line)}</span><span aria-hidden="true" style="font-size:1.2rem;">›</span></div>
+          </a>`;
+        return card;
+      }
+
       let bodyHtml = `
         <div class="order-top-row">
           <div>
