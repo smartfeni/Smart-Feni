@@ -18,11 +18,11 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
 import MarketLocationSheet from '../../components/market/MarketLocationSheet.astro';
 ---
 
-<BaseLayout title="যেকোনো কিছু | স্মার্ট ফেনী">
+<BaseLayout title="কুইক ডেলিভারি | স্মার্ট ফেনী">
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <div class="ma-page">
     <header class="ma-top">
-      <a class="ma-back" href="/market" aria-label="মার্কেটে ফিরুন"><i class="fas fa-arrow-left" aria-hidden="true"></i></a>
+      <a class="ma-back" href="/market" aria-label="কুইক ডেলিভারিতে ফিরুন"><i class="fas fa-arrow-left" aria-hidden="true"></i></a>
       <h1 id="maTitle">যেকোনো কিছু</h1>
     </header>
 
@@ -37,7 +37,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         <div class="ma-h" id="maPickH">কোথা থেকে নেব?</div>
         <LocationPicker id="mapick" label="পিকআপ লোকেশন" allowAutoLocate={true} placeholder="যেমন: দোকানের নাম, বাজার, এলাকা" />
         <div id="maSendFrom" hidden>
-          <label class="ma-lbl" for="maFromPhone">পাঠানোর জায়গার ফোন নম্বর</label>
+          <label class="ma-lbl" for="maFromPhone">পিকআপ জায়গার ফোন নম্বর</label>
           <input class="ma-in" id="maFromPhone" inputmode="tel" maxlength="11" placeholder="01XXXXXXXXX" />
         </div>
       </section>
@@ -46,10 +46,12 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         <div class="ma-h">ডেলিভারি ঠিকানা</div>
         <div class="ma-addr" id="maDropAddr"></div>
         <button type="button" class="ma-chg" id="maDropChg">ঠিকানা বদলান</button>
+        <button type="button" class="ma-chg" id="maOther" hidden>অন্য কারও ঠিকানায় পাঠান</button>
       </section>
 
       <section class="ma-card" id="maDropSend" hidden>
         <div class="ma-h">প্রাপকের ঠিকানা</div>
+        <button type="button" class="ma-chg" id="maSelf" style="margin:0 0 10px">নিজের ঠিকানায় ফিরুন</button>
         <LocationPicker id="madrop" label="প্রাপকের ঠিকানা" allowAutoLocate={false} placeholder="যেমন: ফেনী কলেজ রোড" />
         <label class="ma-lbl" for="maToPhone">প্রাপকের ফোন নম্বর</label>
         <input class="ma-in" id="maToPhone" inputmode="tel" maxlength="11" placeholder="01XXXXXXXXX" />
@@ -102,19 +104,21 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
   <script>
     import { supabase } from '../../lib/supabase.js';
     import { getDrop } from '../../lib/marketCart.js';
+    import { marketEnabledForMe } from '../../lib/marketApi.js';
     import { fetchDeliveryFare } from '../../lib/fareCalc.js';
     import { createServiceRequest } from '../../lib/deliveryClient.js';
 
     const $ = (id) => document.getElementById(id);
     const TYPES = {
       anything: { title: 'অর্ডার এনিথিং', what: 'কী কিনে আনতে হবে?', hint: 'জিনিসের নাম, পরিমাণ, পছন্দ লিখুন। রাইডার দোকানে গিয়ে আসল দাম পাঠাবে, আপনি কনফার্ম করলে তবেই কিনবে।', pick: 'কোথা থেকে কিনবে? (দোকান/বাজার)', ph: 'যেমন: ২ কেজি চাল, ১ লিটার তেল' },
-      send: { title: 'পাঠান', what: 'কী পাঠাচ্ছেন?', hint: 'পার্সেলের বিবরণ ও সাইজ (ছোট/মাঝারি/বড়) লিখুন।', pick: 'কোথা থেকে নেব?', ph: 'যেমন: ছোট প্যাকেট, কাগজপত্র' },
-      errand: { title: 'এনে দাও', what: 'কী এনে দিতে হবে?', hint: 'কোথা থেকে কী আনতে হবে লিখুন (যেমন বাসা/অফিসে ফেলে আসা জিনিস)।', pick: 'কোথা থেকে আনবে?', ph: 'যেমন: অফিসের টেবিলে রাখা চার্জার' },
+      send: { title: 'পাঠান / এনে দাও', what: 'কী পাঠাবেন বা আনাবেন?', hint: 'জিনিসের বিবরণ ও সাইজ (ছোট/মাঝারি/বড়) লিখুন। ডিফল্টে আপনার ঠিকানায় আসবে; অন্য কাউকে পাঠাতে চাইলে নিচে ঠিকানা বদলান।', pick: 'কোথা থেকে নেব?', ph: 'যেমন: ছোট প্যাকেট, অফিসে ফেলে আসা চার্জার' },
     };
     let type = new URLSearchParams(location.search).get('type');
+    if (type === 'errand') type = 'send';
     if (!TYPES[type]) type = 'anything';
     const T = TYPES[type];
     let busy = false;
+    let other = false; // send: অন্য কারও ঠিকানায়?
 
     function mk(tag, cls, text) {
       const e = document.createElement(tag);
@@ -147,7 +151,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
     async function refreshFare() {
       const pk = lpv('mapick');
       let drop = null;
-      if (type === 'send') { const d = lpv('madrop'); if (isFinite(d.lat) && isFinite(d.lng)) drop = { lat: d.lat, lng: d.lng }; }
+      if (type === 'send' && other) { const d = lpv('madrop'); if (isFinite(d.lat) && isFinite(d.lng)) drop = { lat: d.lat, lng: d.lng }; }
       else { const d = getDrop(); if (d && d.lat !== null) drop = { lat: d.lat, lng: d.lng }; }
       if (!isFinite(pk.lat) || !isFinite(pk.lng) || !drop) return;
       const f = await fetchDeliveryFare({ pickup: { lat: pk.lat, lng: pk.lng }, drop, dropUnion: '' });
@@ -167,9 +171,11 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       $('maAdvNote').textContent = type === 'anything' ? 'অগ্রিম: শুধু ডেলিভারি চার্জ। কেনার দাম রাইডার পরে পাঠাবে।' : 'অগ্রিম: শুধু ডেলিভারি চার্জ।';
       document.title = T.title + ' | স্মার্ট ফেনী';
       if (type === 'send') {
-        $('maDropOwn').hidden = true;
-        $('maDropSend').hidden = false;
         $('maSendFrom').hidden = false;
+        $('maOther').hidden = false;
+        const setOther = (v) => { other = v; $('maDropOwn').hidden = v; $('maDropSend').hidden = !v; refreshFare(); };
+        $('maOther').addEventListener('click', () => setOther(true));
+        $('maSelf').addEventListener('click', () => setOther(false));
       }
       showDrop();
       $('maDropChg').addEventListener('click', () => window.SFMarketLocation.open());
@@ -189,10 +195,14 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       if (!pk.address) { showErr('পিকআপের ঠিকানা দিন বা ম্যাপ থেকে সিলেক্ট করুন।'); return; }
       let drop; let toPhone = ''; let fromPhone = '';
       if (type === 'send') {
+        fromPhone = $('maFromPhone').value.trim();
+        if (!okPhone(fromPhone)) { showErr('পিকআপ জায়গার সঠিক মোবাইল নম্বর দিন (01XXXXXXXXX)।'); return; }
+      }
+      if (type === 'send' && other) {
         drop = lpv('madrop');
         if (!drop.address) { showErr('প্রাপকের ঠিকানা দিন।'); return; }
-        toPhone = $('maToPhone').value.trim(); fromPhone = $('maFromPhone').value.trim();
-        if (!okPhone(toPhone) || !okPhone(fromPhone)) { showErr('দুই জায়গার সঠিক মোবাইল নম্বর দিন (01XXXXXXXXX)।'); return; }
+        toPhone = $('maToPhone').value.trim();
+        if (!okPhone(toPhone)) { showErr('প্রাপকের সঠিক মোবাইল নম্বর দিন (01XXXXXXXXX)।'); return; }
       } else {
         const d = getDrop();
         if (!d) { window.SFMarketLocation.open(() => submit(ev)); return; }
@@ -208,9 +218,9 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
 
       busy = true;
       const btn = $('maSubmit'); btn.disabled = true; btn.textContent = 'পাঠানো হচ্ছে...';
-      const label = type === 'anything' ? 'অর্ডার এনিথিং' : type === 'send' ? 'পাঠান' : 'এনে দাও';
-      let description = 'মার্কেট (' + label + ') — ' + what;
-      if (type === 'send') description += ' | পাঠানোর ফোন: ' + fromPhone + ' | প্রাপকের ফোন: ' + toPhone;
+      const label = type === 'anything' ? 'অর্ডার এনিথিং' : 'পাঠান/এনে দাও';
+      let description = 'কুইক ডেলিভারি (' + label + ') — ' + what;
+      if (type === 'send') description += ' | পিকআপ ফোন: ' + fromPhone + (other ? ' | প্রাপকের ফোন: ' + toPhone : '');
       const lat = (v) => (isFinite(v) ? v : null);
       const res = await createServiceRequest({
         category: 'delivery',
@@ -256,6 +266,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
     }
 
     async function init() {
+      if (!(await marketEnabledForMe())) { location.replace('/market'); return; }
       setup();
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {

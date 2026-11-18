@@ -111,3 +111,19 @@ export async function fetchOnlineShopsForMarket() {
       is_open: true,
     }));
 }
+
+// ---------- মার্কেট চালু-সুইচ (site_settings.marketplace_enabled) ----------
+// 'true' হলে সবার জন্য খোলা; নইলে শুধু অ্যাডমিন/মডারেটর (টেস্টের জন্য) ঢুকতে পারে।
+export async function marketEnabledForMe() {
+  try {
+    const { data } = await supabase.from('site_settings').select('value').eq('key', 'marketplace_enabled').maybeSingle();
+    const v = data && data.value;
+    if (v === true || String(v).replace(/"/g, '') === 'true') return true;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return false;
+    const { data: p } = await supabase.from('profiles').select('role').eq('id', session.user.id).maybeSingle();
+    return !!p && (p.role === 'admin' || p.role === 'moderator');
+  } catch (e) {
+    return false;
+  }
+}
