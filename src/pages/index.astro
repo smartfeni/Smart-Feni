@@ -8,25 +8,11 @@ import FeaturedPhotos from '../components/ui/FeaturedPhotos.astro';
 import CategoryGrid from '../components/ui/CategoryGrid.astro';
 import { supabase } from '../lib/supabase.js';
 
-// ============================================================
-// আপডেট: no-store বদলে stale-while-revalidate ব্যবহার করা হলো —
-// CDN ৬০ সেকেন্ড পর্যন্ত পেজ cache রাখবে (দ্রুত লোডিং), তারপর
-// background-এ ফ্রেশ ভার্সন fetch করবে। ফলে সব ভিজিটর দ্রুত পেজ
-// পাবে, আর ক্যাটাগরি/কনটেন্ট আপডেট সর্বোচ্চ ~৬০-৯০ সেকেন্ডে
-// রিফ্লেক্ট হবে (আগের no-store এ প্রতিটা ভিজিটে সার্ভার লোড হতো,
-// যেটা ট্রাফিক বাড়লে খরচ/স্পিডে প্রভাব ফেলতো)।
-// ============================================================
 Astro.response.headers.set(
   'Cache-Control',
   'public, max-age=0, s-maxage=60, stale-while-revalidate=600'
 );
 
-// আপডেট (হোমপেজ সেকশন অর্ডার — ৩ অপশন): site_settings টেবিলের
-// 'homepage_section_order' কী দিয়ে ঠিক হয় Featured Photos কোথায়
-// বসবে — Popular ও General ক্যাটাগরি গ্রিডের উপরে, মাঝখানে, নাকি
-// নিচে। Popular সবসময় General-এর আগে থাকে (fix), শুধু Photos-এর
-// পজিশন বদলায়। অ্যাডমিন প্যানেল /admin/categories থেকে নিয়ন্ত্রিত।
-// fetch ব্যর্থ হলে ডিফল্ট 'photos_first' (আগের আচরণ) হিসেবে থাকবে।
 let sectionOrder = 'photos_first';
 try {
   const { data, error } = await supabase
@@ -35,58 +21,133 @@ try {
     .eq('key', 'homepage_section_order')
     .maybeSingle();
   if (!error && data?.value) {
-    // পুরনো ২-অপশন ভ্যালু থাকলে নতুন সিস্টেমে ম্যাপ করা হচ্ছে
-    if (data.value === 'category_first') {
-      sectionOrder = 'photos_last';
-    } else if (['photos_first', 'photos_middle', 'photos_last'].includes(data.value)) {
-      sectionOrder = data.value;
-    }
+    if (data.value === 'category_first') sectionOrder = 'photos_last';
+    else if (['photos_first', 'photos_middle', 'photos_last'].includes(data.value)) sectionOrder = data.value;
   }
 } catch (e) {
-  // fallback: photos_first
+  // Keep the homepage usable if settings cannot be fetched.
 }
 ---
 
 <BaseLayout title="স্মার্ট ফেনী - আপনার শহরের ডিজিটাল সেবা" showChatWidget={true} showFooter={true}>
-  <Hero />
-  <ScratchCard />
-  {sectionOrder === 'photos_first' && (
-    <>
-      <FeaturedPhotos />
-      <CategoryGrid part="popular" />
-      <CategoryGrid part="general" />
-    </>
-  )}
-  {sectionOrder === 'photos_middle' && (
-    <>
-      <CategoryGrid part="popular" />
-      <FeaturedPhotos />
-      <CategoryGrid part="general" />
-    </>
-  )}
-  {sectionOrder === 'photos_last' && (
-    <>
-      <CategoryGrid part="popular" />
-      <CategoryGrid part="general" />
-      <FeaturedPhotos />
-    </>
-  )}
+  <main class="sf-home">
+    <section class="sf-welcome">
+      <div class="sf-welcome-copy">
+        <span class="sf-eyebrow"><span class="sf-live-dot"></span> YOUR CITY, ONE SMART APP</span>
+        <h1>ফেনীর সব প্রয়োজন,<br /><em>এখন এক জায়গায়।</em></h1>
+        <p>কেনাকাটা, খাবার, জরুরি সেবা কিংবা দৈনন্দিন প্রয়োজন—খুঁজে নিন সহজেই।</p>
+      </div>
+      <div class="sf-welcome-art" aria-hidden="true">
+        <span class="sf-orbit sf-orbit-one"></span>
+        <span class="sf-orbit sf-orbit-two"></span>
+        <span class="sf-art-home">⌂</span>
+        <span class="sf-art-spark">✦</span>
+        <span class="sf-art-pin">⌖</span>
+      </div>
+    </section>
+
+    <div class="sf-search-area">
+      <div class="sf-section-kicker">DISCOVER SMART FENI</div>
+      <Hero />
+    </div>
+
+    <ScratchCard />
+
+    <section class="sf-quick-links" aria-label="জনপ্রিয় সেবা">
+      <div class="sf-section-heading">
+        <div><span class="sf-section-kicker">QUICK ACCESS</span><h2>দ্রুত প্রয়োজনীয় সেবা</h2></div>
+        <span class="sf-heading-mark">ফেনী</span>
+      </div>
+      <div class="sf-quick-grid">
+        <a href="/services/blood" class="sf-quick-card sf-blood"><span class="sf-quick-icon">♥</span><span><b>রক্তদাতা</b><small>জরুরি রক্ত খুঁজুন</small></span><span class="sf-arrow">↗</span></a>
+        <a href="/services/housing" class="sf-quick-card sf-home-rent"><span class="sf-quick-icon">⌂</span><span><b>বাসা ভাড়া</b><small>বাসা ও মেস খুঁজুন</small></span><span class="sf-arrow">↗</span></a>
+        <a href="/services/repair" class="sf-quick-card sf-repair"><span class="sf-quick-icon">⚙</span><span><b>রিপেয়ার সার্ভিস</b><small>দক্ষ মিস্ত্রি খুঁজুন</small></span><span class="sf-arrow">↗</span></a>
+        <a href="/services/tuition" class="sf-quick-card sf-tuition"><span class="sf-quick-icon">✎</span><span><b>টিউশন</b><small>শিক্ষক ও শিক্ষার্থী</small></span><span class="sf-arrow">↗</span></a>
+      </div>
+    </section>
+
+    <section class="sf-content-section">
+      <div class="sf-section-heading sf-category-heading">
+        <div><span class="sf-section-kicker">EXPLORE LOCAL</span><h2>আপনার প্রয়োজনীয় সব সেবা</h2></div>
+        <span class="sf-heading-note">এক অ্যাপেই</span>
+      </div>
+      {sectionOrder === 'photos_first' && (
+        <>
+          <FeaturedPhotos />
+          <CategoryGrid part="popular" />
+          <CategoryGrid part="general" />
+        </>
+      )}
+      {sectionOrder === 'photos_middle' && (
+        <>
+          <CategoryGrid part="popular" />
+          <FeaturedPhotos />
+          <CategoryGrid part="general" />
+        </>
+      )}
+      {sectionOrder === 'photos_last' && (
+        <>
+          <CategoryGrid part="popular" />
+          <CategoryGrid part="general" />
+          <FeaturedPhotos />
+        </>
+      )}
+    </section>
+  </main>
 </BaseLayout>
 
 <style is:global>
-  /* হোমপেজ-অনলি: উষ্ণ কমলা-টিন্ট ব্যাকগ্রাউন্ড, কোনো ডট/গ্রেডিয়েন্ট নেই।
-     BaseLayout/Footer-এর গ্লোবাল স্টাইল (সব পেজের জন্য) অপরিবর্তিত থাকে। */
-  html body {
-    background-color: #FFF4EC;
-    background-image: none;
+  html body { background: #F5F8F6; background-image: none; }
+  .sf-home { --sf-navy:#1B2A4A; --sf-green:#07845B; --sf-mint:#E5F5EE; --sf-orange:#FF6B35; color:var(--sf-navy); padding-bottom:18px; overflow:hidden; }
+  .sf-welcome { position:relative; isolation:isolate; display:flex; align-items:center; justify-content:space-between; min-height:172px; margin:12px 16px 20px; padding:24px 22px; overflow:hidden; border-radius:26px; color:#fff; background:linear-gradient(115deg,#142541 0%,#1B3B55 58%,#087B59 130%); box-shadow:0 12px 30px rgba(27,42,74,.14); }
+  .sf-welcome:after { content:""; position:absolute; z-index:-1; width:230px; height:230px; right:-78px; top:-110px; border-radius:50%; background:rgba(111,224,174,.12); }
+  .sf-welcome-copy { position:relative; z-index:2; max-width:76%; }
+  .sf-eyebrow,.sf-section-kicker { display:flex; align-items:center; gap:7px; font-size:10px; font-weight:800; letter-spacing:1.45px; color:#8CE0B8; }
+  .sf-live-dot { width:7px; height:7px; border-radius:50%; background:#65DDA4; box-shadow:0 0 0 4px rgba(101,221,164,.13); }
+  .sf-welcome h1 { margin:12px 0 7px; color:#fff; font-size:clamp(23px,6vw,31px); line-height:1.28; letter-spacing:-.7px; font-weight:850; }
+  .sf-welcome h1 em { color:#8CE0B8; font-style:normal; }
+  .sf-welcome p { max-width:285px; margin:0; color:rgba(255,255,255,.76); font-size:12px; line-height:1.7; }
+  .sf-welcome-art { position:absolute; width:145px; height:145px; right:0; bottom:-7px; opacity:.95; }
+  .sf-orbit { position:absolute; border:1px solid rgba(171,241,207,.27); border-radius:50%; }
+  .sf-orbit-one { width:125px;height:125px;right:-14px;top:10px; }
+  .sf-orbit-two { width:92px;height:92px;right:3px;top:27px; }
+  .sf-art-home { position:absolute; right:34px;top:25px;display:grid;place-items:center;width:68px;height:68px;border-radius:23px;background:linear-gradient(145deg,#B7F2D2,#5CCB9A);color:#07563F;font-size:55px;font-weight:900;box-shadow:0 12px 25px rgba(0,0,0,.2);transform:rotate(8deg); }
+  .sf-art-spark { position:absolute;right:13px;top:12px;color:#FFD27A;font-size:25px; }
+  .sf-art-pin { position:absolute;right:100px;bottom:15px;color:#B7F2D2;font-size:27px; }
+  .sf-search-area { margin:0 0 8px; }
+  .sf-search-area > .sf-section-kicker { margin:0 20px 5px; color:#648071; }
+  .sf-home .hero { padding-top:0; }
+  .sf-home .hero .container { padding-left:16px;padding-right:16px; }
+  .sf-home .search-card { border:1px solid #E2ECE6!important; border-radius:18px!important; box-shadow:0 5px 18px rgba(21,65,48,.07)!important; }
+  .sf-home .sc-teaser { margin:12px 16px 20px; }
+  .sf-quick-links { margin:20px 16px 24px; }
+  .sf-section-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin:0 2px 13px; }
+  .sf-section-heading h2 { margin:4px 0 0; color:#1B2A4A; font-size:18px; line-height:1.35; font-weight:850; }
+  .sf-section-heading .sf-section-kicker { color:#07845B; font-size:9px; }
+  .sf-heading-mark,.sf-heading-note { padding:6px 10px; border-radius:30px; background:#E5F5EE; color:#087B59; font-size:10px; font-weight:800; white-space:nowrap; }
+  .sf-quick-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .sf-quick-card { min-width:0; display:flex; align-items:center; gap:10px; padding:12px 10px; border:1px solid #E7EEE9; border-radius:17px; background:#fff; text-decoration:none!important; color:#1B2A4A!important; box-shadow:0 4px 13px rgba(25,55,42,.035); transition:transform .18s ease,box-shadow .18s ease; }
+  .sf-quick-card:active { transform:scale(.98); }
+  .sf-quick-icon { flex:0 0 37px; width:37px;height:37px;display:grid;place-items:center;border-radius:13px;background:#E5F5EE;color:#07845B;font-size:23px;font-weight:800; }
+  .sf-blood .sf-quick-icon { background:#FFF0EF;color:#D94C4C; }
+  .sf-repair .sf-quick-icon { background:#FFF4E9;color:#D87925; }
+  .sf-tuition .sf-quick-icon { background:#EEF1FF;color:#596AC4; }
+  .sf-quick-card b,.sf-quick-card small { display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .sf-quick-card b { font-size:12px;font-weight:800; }
+  .sf-quick-card small { margin-top:3px;color:#829087;font-size:9px; }
+  .sf-arrow { margin-left:auto;color:#A0B0A6;font-size:16px; }
+  .sf-content-section { margin-top:24px; }
+  .sf-category-heading { margin:0 18px 8px; }
+  .sf-content-section .category-section { padding-top:8px; }
+  .sf-content-section .popular-label { color:#087B59; }
+  html body footer { background:linear-gradient(160deg,#E8F5EE 0%,#D8EDE2 100%); }
+  @media(min-width:700px) {
+    .sf-home { max-width:900px;margin:0 auto; }
+    .sf-welcome { min-height:220px;margin:22px 24px 25px;padding:34px 36px; }
+    .sf-welcome-art { transform:scale(1.25);right:28px;bottom:12px; }
+    .sf-quick-links { margin-left:24px;margin-right:24px; }
+    .sf-quick-grid { grid-template-columns:repeat(4,1fr); }
+    .sf-content-section { margin-top:34px; }
   }
-
-  /* ফুটার: পেজের সাথে মেলানো — একটু গাঢ় পিচ গ্রেডিয়েন্ট, ডট নেই */
-  html body footer {
-    background:
-      radial-gradient(circle at 90% 5%, rgba(255, 107, 53, 0.14) 0%, transparent 42%),
-      radial-gradient(circle at 5% 95%, rgba(27, 42, 74, 0.06) 0%, transparent 42%),
-      linear-gradient(160deg, #FFE9D8 0%, #F6D3B6 100%);
-    background-size: auto;
-  }
+  @media(prefers-reduced-motion:reduce) { .sf-quick-card { transition:none; } }
 </style>
