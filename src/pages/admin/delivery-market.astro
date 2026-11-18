@@ -1,0 +1,511 @@
+---
+// path: src/pages/admin/delivery-market.astro
+// ============================================================
+// অ্যাডমিন: মার্কেটপ্লেস হিসাব ও পেমেন্ট (/admin/delivery-market) — ব্রান্চ: marketplace
+// ট্যাব (লিংক ?tab=payments|shops|riders|profit|online|settings):
+//   ১. পেমেন্ট: কাস্টমারের অগ্রিম যাচাই (কনফার্ম করুন / মিলছে না) — RPC market_admin_verify_payment
+//   ২. শপ হিসাব: চুক্তিবদ্ধ শপকে কোম্পানির দেয় টাকা — RPC market_admin_pay_shop
+//   ৩. রাইডার হিসাব: দিন বেছে রাইডার-ভিত্তিক COD/কেনা/আয়/নেট; "বুঝে নিলাম" (অর্ডার) ও "হিসাব শেষ" (দিন)
+//   ৪. লাভ-লস: কোম্পানি রাইডার ও ফ্রিলান্সার আলাদা, ক্ষতি আলাদা লাইনে
+//   ৫. অনলাইন শপ: মার্কেট ক্যাটাগরি বসানো (শুধু অ্যাডমিন), ডেলিভারি ধরন দেখা
+//   ৬. সেটিংস: পেমেন্ট নম্বর, কমিশন %, কোম্পানি রাইডারের দৈনিক খরচ
+// অনুমতি: delivery_orders.view (দেখা) / delivery_orders.manage (লেখা, DB-তে যাচাই হয়)।
+// সব টেক্সট textContent দিয়ে (এস্কেপ)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="মার্কেট হিসাব | স্মার্ট ফেনী">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="dmk-page">
+
+    <div id="adminLoadingState" class="dmk-loading">
+      <div class="dmk-spinner"></div>
+      <p>যাচাই করা হচ্ছে...</p>
+    </div>
+
+    <div id="adminGuardedContent" style="display:none;">
+      <div class="dmk-head">
+        <div class="dmk-head-in">
+          <a href="/admin" class="dmk-round" aria-label="অ্যাডমিন হোম"><i class="fas fa-arrow-left" aria-hidden="true"></i></a>
+          <h1 class="dmk-title">মার্কেট হিসাব</h1>
+        </div>
+      </div>
+      <div class="dmk-tabs" id="dmkTabs" role="tablist" aria-label="বিভাগ"></div>
+      <div class="dmk-body" id="dmkBody"></div>
+    </div>
+  </div>
+
+  <style is:global>
+    .dmk-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; min-height: 60vh; padding-bottom: 90px; overflow-x: hidden; background: #F8FAFC; }
+    .dmk-page * { box-sizing: border-box; }
+    .dmk-page button, .dmk-page input, .dmk-page select { font-family: inherit; }
+    .dmk-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5B6B86; font-weight: 600; }
+    .dmk-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: dmkSpin 0.8s linear infinite; }
+    @keyframes dmkSpin { to { transform: rotate(360deg); } }
+    .dmk-head { position: relative; left: 50%; width: 100vw; margin-left: -50vw; background: #1B2A4A; color: #fff; }
+    .dmk-head-in { max-width: 560px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 10px; min-height: 68px; }
+    .dmk-title { flex: 1; margin: 0; font-size: 19px; font-weight: 700; color: #fff; }
+    .dmk-round { width: 44px; height: 44px; border-radius: 22px; background: rgba(255, 255, 255, 0.14); color: #fff; display: flex; align-items: center; justify-content: center; text-decoration: none; }
+    .dmk-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 12px 14px 4px; max-width: 560px; margin: 0 auto; scrollbar-width: none; }
+    .dmk-tabs::-webkit-scrollbar { display: none; }
+    .dmk-tab { flex: none; border: 1.5px solid #D5DCE8; background: #fff; color: #1B2A4A; border-radius: 18px; padding: 8px 14px; font-size: 13.5px; font-weight: 700; cursor: pointer; min-height: 40px; }
+    .dmk-tab[aria-selected='true'] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+    .dmk-tab:focus-visible, .dmk-btn:focus-visible, .dmk-sub:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    .dmk-body { max-width: 560px; margin: 0 auto; padding: 8px 14px; display: flex; flex-direction: column; gap: 12px; }
+    .dmk-sub-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .dmk-sub { border: 1.5px solid #D5DCE8; background: #fff; border-radius: 14px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; color: #1B2A4A; }
+    .dmk-sub[aria-pressed='true'] { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+    .dmk-card { background: #fff; border-radius: 18px; box-shadow: 0 2px 12px rgba(27, 42, 74, 0.08); padding: 14px; }
+    .dmk-r1 { display: flex; justify-content: space-between; gap: 10px; font-weight: 700; font-size: 15.5px; }
+    .dmk-r2 { margin-top: 4px; font-size: 13px; line-height: 1.5; color: #5B6B86; word-break: break-word; }
+    .dmk-kv { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 14px; }
+    .dmk-kv.tot { border-top: 1.5px dashed #D5DCE8; margin-top: 6px; padding-top: 8px; font-weight: 700; font-size: 15.5px; }
+    .dmk-chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 8px; background: #EEF0F4; color: #4A5568; white-space: nowrap; }
+    .dmk-chip.ok { background: #E3F3EA; color: #1F7A4D; }
+    .dmk-chip.warn { background: #FFE9DA; color: #8A3B12; }
+    .dmk-chip.bad { background: #FDE8E7; color: #B42318; }
+    .dmk-lbl { display: block; margin: 8px 0 4px; font-size: 12.5px; font-weight: 600; color: #5B6B86; }
+    .dmk-in { width: 100%; border: 1.5px solid #D5DCE8; border-radius: 12px; background: #fff; padding: 9px 12px; font-size: 15px; min-height: 44px; color: #1B2A4A; }
+    .dmk-in:focus { outline: 0; border-color: #FF6B35; }
+    .dmk-acts { display: flex; gap: 8px; margin-top: 10px; }
+    .dmk-btn { flex: 1; height: 44px; border: 0; border-radius: 12px; background: #FF6B35; color: #fff; font-weight: 700; font-size: 14.5px; cursor: pointer; }
+    .dmk-btn.alt { background: #fff; color: #B42318; border: 1.5px solid #B42318; }
+    .dmk-btn.navy { background: #1B2A4A; }
+    .dmk-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .dmk-muted { font-size: 14px; color: #5B6B86; padding: 8px 2px; line-height: 1.6; }
+    .dmk-thumb { display: block; max-width: 100%; max-height: 240px; border-radius: 12px; margin-top: 8px; }
+    .dmk-h { margin: 6px 2px 0; font-size: 15px; font-weight: 700; }
+    .dmk-pos { color: #B42318; }
+    .dmk-neg { color: #1F7A4D; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { getSignedUrl } from '../../lib/storageSigned.js';
+    import { bnNum } from '../../lib/marketApi.js';
+
+    const $ = (id) => document.getElementById(id);
+    const TABS = [
+      ['payments', 'পেমেন্ট'], ['shops', 'শপ হিসাব'], ['riders', 'রাইডার হিসাব'],
+      ['profit', 'লাভ-লস'], ['online', 'অনলাইন শপ'], ['settings', 'সেটিংস'],
+    ];
+    let tab = 'payments';
+    let sub = {};       // প্রতি ট্যাবের সাব-ফিল্টার
+    let busy = false;
+    let access = null;
+
+    function mk(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined && text !== null) e.textContent = text;
+      return e;
+    }
+    function taka(n) { const v = Math.round(Number(n) || 0); return (v < 0 ? '−' : '') + '৳' + bnNum(Math.abs(v)); }
+    function toast(m, t) { if (window.showToast) window.showToast(m, t); }
+    function report(err, w) { if (window.SFReportError) { try { window.SFReportError(err, w); } catch (e) {} } }
+    function msgOf(err) { const m = err && err.message ? String(err.message) : ''; return m && !/^(PGRST|JWT)/.test(m) ? m : 'সমস্যা হয়েছে, আবার চেষ্টা করুন।'; }
+    function kv(l, v, cls) { const r = mk('div', 'dmk-kv' + (cls ? ' ' + cls : '')); r.appendChild(mk('span', null, l)); const s = mk('span', null, v); r.appendChild(s); return r; }
+    function fmtTime(t) { try { return new Date(t).toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } }
+    function dhakaToday() { return new Date(Date.now() + 6 * 3600 * 1000).toISOString().slice(0, 10); }
+    function dayRange(day) { const s = new Date(day + 'T00:00:00+06:00'); return [s.toISOString(), new Date(s.getTime() + 86400000).toISOString()]; }
+    function canManage() { return !access || access.can('delivery_orders.manage'); }
+
+    function subRow(key, opts, def) {
+      const row = mk('div', 'dmk-sub-row');
+      const cur = sub[key] || def;
+      opts.forEach(([v, l]) => {
+        const b = mk('button', 'dmk-sub', l);
+        b.type = 'button';
+        b.setAttribute('aria-pressed', cur === v ? 'true' : 'false');
+        b.addEventListener('click', () => { sub[key] = v; draw(); });
+        row.appendChild(b);
+      });
+      return row;
+    }
+
+    function renderTabs() {
+      const box = $('dmkTabs');
+      box.textContent = '';
+      TABS.forEach(([k, l]) => {
+        const b = mk('button', 'dmk-tab', l);
+        b.type = 'button';
+        b.setAttribute('role', 'tab');
+        b.setAttribute('aria-selected', k === tab ? 'true' : 'false');
+        b.addEventListener('click', () => { tab = k; history.replaceState(null, '', '?tab=' + k); renderTabs(); draw(); });
+        box.appendChild(b);
+      });
+    }
+
+    async function nameMap(profileIds) {
+      const ids = Array.from(new Set(profileIds.filter(Boolean)));
+      const m = {};
+      if (!ids.length) return m;
+      const { data } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+      (data || []).forEach((p) => { m[p.id] = p.full_name || 'নামহীন'; });
+      return m;
+    }
+    async function riderMap(riderIds) {
+      const ids = Array.from(new Set(riderIds.filter(Boolean)));
+      const m = {};
+      if (!ids.length) return m;
+      const { data } = await supabase.from('delivery_riders').select('id, profile_id, is_own').in('id', ids);
+      const names = await nameMap((data || []).map((r) => r.profile_id));
+      (data || []).forEach((r) => { m[r.id] = { name: names[r.profile_id] || 'রাইডার', own: !!r.is_own }; });
+      return m;
+    }
+
+    // ============ ১. পেমেন্ট ============
+    async function drawPayments(body) {
+      const st = sub.pay || 'pending';
+      body.appendChild(subRow('pay', [['pending', 'যাচাই বাকি'], ['verified', 'হয়েছে'], ['mismatch', 'মেলেনি']], 'pending'));
+      const { data, error } = await supabase
+        .from('delivery_payments')
+        .select('id, request_id, user_id, mode, method, claimed_amount, trx_id, sender_last4, screenshot_url, status, verified_amount, admin_note, created_at, request:delivery_requests(order_no, final_price, items_total, accepted_rider_id)')
+        .eq('status', st).order('created_at', { ascending: false }).limit(50);
+      if (error) { body.appendChild(mk('p', 'dmk-muted', 'লোড করা যায়নি।')); report(error, 'dmk-pay-load'); return; }
+      if (!data.length) { body.appendChild(mk('p', 'dmk-muted', 'কিছু নেই।')); return; }
+      const names = await nameMap(data.map((p) => p.user_id));
+      const riders = await riderMap(data.map((p) => p.request && p.request.accepted_rider_id));
+      data.forEach((p) => {
+        const c = mk('div', 'dmk-card');
+        const r1 = mk('div', 'dmk-r1');
+        r1.appendChild(mk('span', null, 'অর্ডার ' + (p.request && p.request.order_no ? p.request.order_no : '')));
+        r1.appendChild(mk('span', 'dmk-chip ' + (p.status === 'verified' ? 'ok' : p.status === 'mismatch' ? 'bad' : 'warn'), p.status === 'verified' ? 'যাচাই হয়েছে' : p.status === 'mismatch' ? 'মেলেনি' : 'যাচাই বাকি'));
+        c.appendChild(r1);
+        c.appendChild(mk('div', 'dmk-r2', 'কাস্টমার: ' + (names[p.user_id] || '') + ' · রাইডার: ' + ((riders[p.request && p.request.accepted_rider_id] || {}).name || '—') + ' · ' + fmtTime(p.created_at)));
+        c.appendChild(kv('কাস্টমারের লেখা টাকা', taka(p.claimed_amount)));
+        c.appendChild(kv('ধরন', p.mode === 'full' ? 'ফুল পেমেন্ট' : 'শুধু ডেলিভারি চার্জ'));
+        c.appendChild(kv('ডেলিভারি চার্জ / আইটেম (আনুমানিক)', taka(p.request && p.request.final_price) + ' / ' + taka(p.request && p.request.items_total)));
+        c.appendChild(kv('মাধ্যম', { bkash: 'bKash', nagad: 'Nagad', rocket: 'Rocket', other: 'অন্য' }[p.method] || p.method));
+        if (p.trx_id) c.appendChild(kv('TrxID', p.trx_id));
+        if (p.sender_last4) c.appendChild(kv('প্রেরক নম্বরের শেষ ৪ ডিজিট', p.sender_last4));
+        if (p.status === 'verified') c.appendChild(kv('যাচাই-করা টাকা', taka(p.verified_amount), 'tot'));
+        if (p.admin_note) c.appendChild(mk('div', 'dmk-r2', 'নোট: ' + p.admin_note));
+        if (p.screenshot_url) {
+          const img = document.createElement('img');
+          img.className = 'dmk-thumb'; img.alt = 'পেমেন্ট স্ক্রিনশট';
+          getSignedUrl(supabase, 'delivery-proofs', p.screenshot_url).then((u) => { if (u) img.src = u; });
+          c.appendChild(img);
+        }
+        if (p.status === 'pending' && canManage()) {
+          c.appendChild(mk('label', 'dmk-lbl', 'যাচাই-করা টাকা (আপনার অ্যাকাউন্টে যা এসেছে)'));
+          const a = mk('input', 'dmk-in'); a.type = 'number'; a.min = '1'; a.inputMode = 'numeric'; a.value = String(p.claimed_amount); a.setAttribute('aria-label', 'যাচাই-করা টাকা');
+          c.appendChild(a);
+          c.appendChild(mk('label', 'dmk-lbl', 'নোট (ঐচ্ছিক)'));
+          const n = mk('input', 'dmk-in'); n.maxLength = 120; n.setAttribute('aria-label', 'নোট');
+          c.appendChild(n);
+          const acts = mk('div', 'dmk-acts');
+          const ok = mk('button', 'dmk-btn', 'কনফার্ম করুন'); ok.type = 'button';
+          const no = mk('button', 'dmk-btn alt', 'মিলছে না'); no.type = 'button';
+          ok.addEventListener('click', () => verify(p.id, true, Number(a.value), n.value, [ok, no]));
+          no.addEventListener('click', () => verify(p.id, false, null, n.value, [ok, no]));
+          acts.appendChild(ok); acts.appendChild(no);
+          c.appendChild(acts);
+        }
+        body.appendChild(c);
+      });
+    }
+    async function verify(id, ok, amount, note, btns) {
+      if (busy) return;
+      if (ok && !(amount > 0)) { toast('যাচাই-করা টাকা দিন', 'error'); return; }
+      busy = true; btns.forEach((b) => { b.disabled = true; });
+      const { error } = await supabase.rpc('market_admin_verify_payment', { p_payment: id, p_ok: ok, p_amount: amount, p_note: note || null });
+      busy = false;
+      if (error) { btns.forEach((b) => { b.disabled = false; }); toast(msgOf(error), 'error'); report(error, 'dmk-verify'); return; }
+      toast(ok ? 'অগ্রিম কনফার্ম হয়েছে' : 'মিলছে না জানানো হয়েছে', 'success');
+      draw();
+    }
+
+    // ============ ২. শপ হিসাব ============
+    async function drawShops(body) {
+      body.appendChild(mk('p', 'dmk-muted', 'চুক্তিবদ্ধ (ওনারওয়ালা) শপের কাছ থেকে কেনা জিনিসের টাকা কোম্পানি পরে শপকে দেয়। শপ "রাইডারকে দিয়েছি" চাপলে এখানে "দেয়" হিসেবে ওঠে।'));
+      body.appendChild(subRow('shopf', [['due', 'দেওয়া বাকি'], ['paid', 'মিটেছে']], 'due'));
+      const due = (sub.shopf || 'due') === 'due';
+      let q = supabase.from('delivery_shop_settlements').select('id, request_id, shop_id, amount, status, handed_at, paid_at, created_at, shop:delivery_shops(name), request:delivery_requests(order_no, market_completed_at)');
+      q = due ? q.in('status', ['payable', 'awaiting_handover']) : q.eq('status', 'paid');
+      const { data, error } = await q.order('created_at', { ascending: false }).limit(100);
+      if (error) { body.appendChild(mk('p', 'dmk-muted', 'লোড করা যায়নি।')); report(error, 'dmk-shops'); return; }
+      if (!data.length) { body.appendChild(mk('p', 'dmk-muted', 'কিছু নেই।')); return; }
+      const byShop = {};
+      data.forEach((s) => { (byShop[s.shop_id] = byShop[s.shop_id] || []).push(s); });
+      Object.keys(byShop).forEach((sid) => {
+        const list = byShop[sid];
+        const c = mk('div', 'dmk-card');
+        const total = list.reduce((n, s) => n + Number(s.amount), 0);
+        const r1 = mk('div', 'dmk-r1');
+        r1.appendChild(mk('span', null, (list[0].shop && list[0].shop.name) || 'শপ'));
+        r1.appendChild(mk('span', null, taka(total)));
+        c.appendChild(r1);
+        list.forEach((s) => {
+          const r = mk('div', 'dmk-kv');
+          const left = mk('span', null, 'অর্ডার ' + ((s.request && s.request.order_no) || '') + ' · ' + (s.status === 'awaiting_handover' ? 'শপ এখনো জানায়নি' : s.status === 'payable' ? 'দেয়' : 'মিটেছে'));
+          const right = mk('span', null, taka(s.amount));
+          r.appendChild(left); r.appendChild(right);
+          c.appendChild(r);
+          if (due && canManage()) {
+            const b = mk('button', 'dmk-btn navy', 'পরিশোধ করলাম'); b.type = 'button'; b.style.marginBottom = '6px';
+            b.addEventListener('click', () => paidShop(s.id, b));
+            c.appendChild(b);
+          }
+        });
+        body.appendChild(c);
+      });
+    }
+    async function paidShop(id, btn) {
+      if (busy) return; busy = true; btn.disabled = true;
+      const { error } = await supabase.rpc('market_admin_pay_shop', { p_settlement: id });
+      busy = false;
+      if (error) { btn.disabled = false; toast(msgOf(error), 'error'); return; }
+      toast('মিটেছে', 'success'); draw();
+    }
+
+    // ============ ৩. রাইডার হিসাব ============
+    async function completedOrders(fromISO, toISO) {
+      const { data, error } = await supabase.from('delivery_requests')
+        .select('id, order_no, accepted_rider_id, final_price, purchase_total, rider_cod_collected, rider_purchase_paid, rider_earning, rider_settled_at, market_completed_at')
+        .eq('is_market', true).not('market_completed_at', 'is', null)
+        .gte('market_completed_at', fromISO).lt('market_completed_at', toISO)
+        .order('market_completed_at', { ascending: true }).limit(1000);
+      if (error) throw error;
+      return data || [];
+    }
+    const netOf = (o) => (Number(o.rider_cod_collected) || 0) - (Number(o.rider_purchase_paid) || 0) - (Number(o.rider_earning) || 0);
+
+    async function drawRiders(body) {
+      const day = sub.day || dhakaToday();
+      const typ = sub.rtype || 'all';
+      const dr = mk('div', 'dmk-card');
+      dr.appendChild(mk('label', 'dmk-lbl', 'দিন'));
+      const di = mk('input', 'dmk-in'); di.type = 'date'; di.value = day; di.setAttribute('aria-label', 'দিন বাছুন');
+      di.addEventListener('change', () => { sub.day = di.value || dhakaToday(); draw(); });
+      dr.appendChild(di);
+      body.appendChild(dr);
+      body.appendChild(subRow('rtype', [['all', 'সব'], ['own', 'কোম্পানি রাইডার'], ['free', 'ফ্রিলান্সার']], 'all'));
+      const [a, b] = dayRange(day);
+      let orders;
+      try { orders = await completedOrders(a, b); } catch (e) { body.appendChild(mk('p', 'dmk-muted', 'লোড করা যায়নি।')); report(e, 'dmk-riders'); return; }
+      const rm = await riderMap(orders.map((o) => o.accepted_rider_id));
+      const groups = {};
+      orders.forEach((o) => {
+        const r = rm[o.accepted_rider_id]; if (!r) return;
+        if (typ === 'own' && !r.own) return;
+        if (typ === 'free' && r.own) return;
+        (groups[o.accepted_rider_id] = groups[o.accepted_rider_id] || []).push(o);
+      });
+      const ids = Object.keys(groups);
+      if (!ids.length) { body.appendChild(mk('p', 'dmk-muted', 'এই দিনে কোনো সম্পন্ন মার্কেট অর্ডার নেই।')); return; }
+      let sumCod = 0, sumNet = 0;
+      ids.forEach((rid) => groups[rid].forEach((o) => { sumCod += Number(o.rider_cod_collected) || 0; sumNet += o.rider_settled_at ? 0 : netOf(o); }));
+      const top = mk('div', 'dmk-card');
+      top.appendChild(kv('মোট COD আদায়', taka(sumCod)));
+      top.appendChild(kv(sumNet >= 0 ? 'রাইডাররা জমা দেবে (বাকি)' : 'কোম্পানি দেবে (বাকি)', taka(Math.abs(sumNet)), 'tot'));
+      body.appendChild(top);
+      ids.forEach((rid) => {
+        const list = groups[rid];
+        const r = rm[rid];
+        const c = mk('div', 'dmk-card');
+        const net = list.reduce((n, o) => n + (o.rider_settled_at ? 0 : netOf(o)), 0);
+        const r1 = mk('div', 'dmk-r1');
+        r1.appendChild(mk('span', null, r.name));
+        r1.appendChild(mk('span', 'dmk-chip ' + (r.own ? 'ok' : 'warn'), r.own ? 'কোম্পানি' : 'ফ্রিলান্সার'));
+        c.appendChild(r1);
+        list.forEach((o) => {
+          c.appendChild(mk('div', 'dmk-r2', 'অর্ডার ' + (o.order_no || '') + (o.rider_settled_at ? ' · মেটানো হয়েছে' : '')));
+          c.appendChild(kv('COD আদায় / কেনায় খরচ / রাইডারের আয়', taka(o.rider_cod_collected) + ' / ' + taka(o.rider_purchase_paid) + ' / ' + taka(o.rider_earning)));
+          if (!o.rider_settled_at && canManage()) {
+            const bt = mk('button', 'dmk-btn navy', 'বুঝে নিলাম (' + taka(Math.abs(netOf(o))) + ')'); bt.type = 'button'; bt.style.marginBottom = '6px';
+            bt.addEventListener('click', () => settleOrder(o.id, bt));
+            c.appendChild(bt);
+          }
+        });
+        c.appendChild(kv(net >= 0 ? 'রাইডার জমা দেবে' : 'কোম্পানি রাইডারকে দেবে', taka(Math.abs(net)), 'tot'));
+        if (net !== 0 || list.some((o) => !o.rider_settled_at)) {
+          if (canManage()) {
+            const bt = mk('button', 'dmk-btn', 'হিসাব শেষ'); bt.type = 'button';
+            bt.addEventListener('click', () => closeDay(rid, day, bt));
+            c.appendChild(bt);
+          }
+        }
+        body.appendChild(c);
+      });
+    }
+    async function settleOrder(id, btn) {
+      if (busy) return; busy = true; btn.disabled = true;
+      const { error } = await supabase.rpc('market_admin_settle_rider_order', { p_request: id });
+      busy = false;
+      if (error) { btn.disabled = false; toast(msgOf(error), 'error'); return; }
+      toast('মেটানো হয়েছে', 'success'); draw();
+    }
+    async function closeDay(rid, day, btn) {
+      if (busy) return; busy = true; btn.disabled = true;
+      const { data, error } = await supabase.rpc('market_admin_close_day', { p_rider: rid, p_day: day });
+      busy = false;
+      if (error) { btn.disabled = false; toast(msgOf(error), 'error'); return; }
+      toast(bnNum(data || 0) + 'টা অর্ডারের হিসাব শেষ', 'success'); draw();
+    }
+
+    // ============ ৪. লাভ-লস ============
+    async function drawProfit(body) {
+      const range = sub.prange || 'today';
+      body.appendChild(subRow('prange', [['today', 'আজ'], ['week', '৭ দিন'], ['month', '৩০ দিন']], 'today'));
+      const days = range === 'today' ? 1 : range === 'week' ? 7 : 30;
+      const end = new Date(dayRange(dhakaToday())[1]);
+      const start = new Date(end.getTime() - days * 86400000);
+      let orders;
+      try { orders = await completedOrders(start.toISOString(), end.toISOString()); } catch (e) { body.appendChild(mk('p', 'dmk-muted', 'লোড করা যায়নি।')); return; }
+      const rm = await riderMap(orders.map((o) => o.accepted_rider_id));
+      const { data: st } = await supabase.from('site_settings').select('key, value').in('key', ['company_rider_daily_cost']);
+      const dailyCost = Number(((st || [])[0] || {}).value) || 0;
+      const { data: losses } = await supabase.from('market_losses').select('amount, created_at').gte('created_at', start.toISOString()).lt('created_at', end.toISOString());
+      let incOwn = 0, incFree = 0, nOwn = 0, nFree = 0;
+      const ownDays = new Set();
+      orders.forEach((o) => {
+        const r = rm[o.accepted_rider_id]; if (!r) return;
+        const fp = Number(o.final_price) || 0;
+        if (r.own) { incOwn += fp; nOwn++; ownDays.add(o.accepted_rider_id + '|' + new Date(new Date(o.market_completed_at).getTime() + 6 * 3600000).toISOString().slice(0, 10)); }
+        else { incFree += fp - (Number(o.rider_earning) || 0); nFree++; }
+      });
+      const cost = ownDays.size * dailyCost;
+      const loss = (losses || []).reduce((n, l) => n + Number(l.amount), 0);
+      const net = incOwn + incFree - cost - loss;
+
+      const c1 = mk('div', 'dmk-card');
+      c1.appendChild(mk('div', 'dmk-h', 'কোম্পানি রাইডার'));
+      c1.appendChild(kv('অর্ডার', bnNum(nOwn) + 'টা'));
+      c1.appendChild(kv('ডেলিভারি চার্জ থেকে আয়', taka(incOwn)));
+      c1.appendChild(kv('দৈনিক খরচ (' + bnNum(ownDays.size) + ' রাইডার-দিন × ' + taka(dailyCost) + ')', '− ' + taka(cost)));
+      body.appendChild(c1);
+      const c2 = mk('div', 'dmk-card');
+      c2.appendChild(mk('div', 'dmk-h', 'ফ্রিলান্সার রাইডার'));
+      c2.appendChild(kv('অর্ডার', bnNum(nFree) + 'টা'));
+      c2.appendChild(kv('কমিশন থেকে আয়', taka(incFree)));
+      body.appendChild(c2);
+      const c3 = mk('div', 'dmk-card');
+      c3.appendChild(kv('ক্ষতি (কাস্টমার না নেওয়া ইত্যাদি)', '− ' + taka(loss)));
+      c3.appendChild(kv('নেট লাভ/ক্ষতি', taka(net), 'tot'));
+      body.appendChild(c3);
+
+      if (canManage()) {
+        const lc = mk('div', 'dmk-card');
+        lc.appendChild(mk('div', 'dmk-h', 'ক্ষতি লিখুন'));
+        lc.appendChild(mk('label', 'dmk-lbl', 'টাকা'));
+        const la = mk('input', 'dmk-in'); la.type = 'number'; la.min = '1'; la.inputMode = 'numeric'; la.setAttribute('aria-label', 'ক্ষতির টাকা');
+        lc.appendChild(la);
+        lc.appendChild(mk('label', 'dmk-lbl', 'কারণ'));
+        const ln = mk('input', 'dmk-in'); ln.maxLength = 120; ln.setAttribute('aria-label', 'কারণ');
+        lc.appendChild(ln);
+        const bt = mk('button', 'dmk-btn navy', 'ক্ষতি যোগ করুন'); bt.type = 'button'; bt.style.marginTop = '10px'; bt.style.width = '100%';
+        bt.addEventListener('click', async () => {
+          if (busy || !(Number(la.value) > 0)) { toast('টাকা দিন', 'error'); return; }
+          busy = true; bt.disabled = true;
+          const { error } = await supabase.rpc('market_admin_record_loss', { p_request: null, p_amount: Number(la.value), p_note: ln.value || null });
+          busy = false;
+          if (error) { bt.disabled = false; toast(msgOf(error), 'error'); return; }
+          toast('যোগ হয়েছে', 'success'); draw();
+        });
+        lc.appendChild(bt);
+        body.appendChild(lc);
+      }
+    }
+
+    // ============ ৫. অনলাইন শপ ============
+    async function drawOnline(body) {
+      body.appendChild(mk('p', 'dmk-muted', 'অনলাইন শপ (/shop-এর দোকান) মার্কেটের ক্যাটাগরিতে দেখাতে এখানে ক্যাটাগরি বসান। শুধু অ্যাডমিন বসাতে পারে। ডেলিভারির ধরন (ইনস্ট্যান্ট / ১–৩ দিন) শপ ওনার নিজে বাছে।'));
+      const [{ data: shops, error }, { data: cats }] = await Promise.all([
+        supabase.from('shops').select('id, name, is_active, is_published, delivery_mode, market_category_id').order('name', { ascending: true }).limit(300),
+        supabase.from('delivery_market_categories').select('id, name').eq('is_active', true).order('sort_order', { ascending: true }),
+      ]);
+      if (error) { body.appendChild(mk('p', 'dmk-muted', 'লোড করা যায়নি।')); report(error, 'dmk-online'); return; }
+      body.appendChild(subRow('onf', [['all', 'সব'], ['none', 'ক্যাটাগরি নেই']], 'all'));
+      let list = shops || [];
+      if ((sub.onf || 'all') === 'none') list = list.filter((s) => !s.market_category_id);
+      if (!list.length) { body.appendChild(mk('p', 'dmk-muted', 'কিছু নেই।')); return; }
+      list.forEach((s) => {
+        const c = mk('div', 'dmk-card');
+        const r1 = mk('div', 'dmk-r1');
+        r1.appendChild(mk('span', null, s.name));
+        r1.appendChild(mk('span', 'dmk-chip ' + (s.delivery_mode === 'days_1_3' ? 'warn' : 'ok'), s.delivery_mode === 'days_1_3' ? '১–৩ দিন' : 'ইনস্ট্যান্ট'));
+        c.appendChild(r1);
+        if (!s.is_active || !s.is_published) c.appendChild(mk('div', 'dmk-r2', 'এই শপ এখন সবার জন্য চালু নয়।'));
+        const sel = mk('select', 'dmk-in'); sel.setAttribute('aria-label', s.name + ' ক্যাটাগরি');
+        const o0 = mk('option', null, '— ক্যাটাগরি নেই —'); o0.value = ''; sel.appendChild(o0);
+        (cats || []).forEach((k) => { const o = mk('option', null, k.name); o.value = k.id; sel.appendChild(o); });
+        sel.value = s.market_category_id || '';
+        sel.disabled = !(access ? access.can('shops.manage') : true);
+        sel.addEventListener('change', async () => {
+          sel.disabled = true;
+          const { error: e2 } = await supabase.from('shops').update({ market_category_id: sel.value || null }).eq('id', s.id);
+          sel.disabled = false;
+          if (e2) { toast(msgOf(e2), 'error'); sel.value = s.market_category_id || ''; return; }
+          s.market_category_id = sel.value || null;
+          toast('সেভ হয়েছে', 'success');
+        });
+        c.appendChild(sel);
+        body.appendChild(c);
+      });
+    }
+
+    // ============ ৬. সেটিংস ============
+    const SET_FIELDS = [
+      ['market_payment_bkash', 'bKash নম্বর (কাস্টমার এখানে Send Money করবে)', 'text'],
+      ['market_payment_nagad', 'Nagad নম্বর', 'text'],
+      ['market_payment_note', 'পেমেন্ট নির্দেশনা (কাস্টমারকে দেখাবে)', 'text'],
+      ['freelancer_commission_pct', 'ফ্রিলান্সার রাইডারের ডেলিভারি চার্জ থেকে কোম্পানির কমিশন (%)', 'number'],
+      ['company_rider_daily_cost', 'কোম্পানি রাইডারের দৈনিক খরচ (টাকা)', 'number'],
+      ['market_max_pending', 'এক কাস্টমারের একসাথে সর্বোচ্চ অপেক্ষমাণ অর্ডার', 'number'],
+    ];
+    async function drawSettings(body) {
+      const { data } = await supabase.from('site_settings').select('key, value').in('key', SET_FIELDS.map((f) => f[0]));
+      const cur = {}; (data || []).forEach((r) => { cur[r.key] = r.value; });
+      const c = mk('div', 'dmk-card');
+      const inputs = {};
+      SET_FIELDS.forEach(([k, l, t]) => {
+        c.appendChild(mk('label', 'dmk-lbl', l));
+        const i = mk('input', 'dmk-in'); i.type = t === 'number' ? 'number' : 'text'; i.maxLength = 200; i.value = cur[k] || ''; i.setAttribute('aria-label', l);
+        inputs[k] = i; c.appendChild(i);
+      });
+      const bt = mk('button', 'dmk-btn', 'সেভ করুন'); bt.type = 'button'; bt.style.marginTop = '12px'; bt.style.width = '100%';
+      bt.addEventListener('click', async () => {
+        if (busy) return; busy = true; bt.disabled = true;
+        const rows = SET_FIELDS.map(([k]) => ({ key: k, value: String(inputs[k].value || '').trim() }));
+        const { error } = await supabase.from('site_settings').upsert(rows, { onConflict: 'key' });
+        busy = false; bt.disabled = false;
+        if (error) { toast('সেভ হয়নি (অনুমতি নেই?)', 'error'); report(error, 'dmk-settings'); return; }
+        toast('সেভ হয়েছে', 'success');
+      });
+      c.appendChild(bt);
+      body.appendChild(c);
+    }
+
+    async function draw() {
+      const body = $('dmkBody');
+      body.textContent = '';
+      body.appendChild(mk('p', 'dmk-muted', 'লোড হচ্ছে...'));
+      const frag = mk('div'); frag.style.cssText = 'display:flex;flex-direction:column;gap:12px';
+      try {
+        if (tab === 'payments') await drawPayments(frag);
+        else if (tab === 'shops') await drawShops(frag);
+        else if (tab === 'riders') await drawRiders(frag);
+        else if (tab === 'profit') await drawProfit(frag);
+        else if (tab === 'online') await drawOnline(frag);
+        else await drawSettings(frag);
+      } catch (e) { report(e, 'dmk-draw'); frag.appendChild(mk('p', 'dmk-muted', 'লোড করা যায়নি।')); }
+      body.textContent = '';
+      body.appendChild(frag);
+    }
+
+    window.addEventListener('smartfeni:admin-ready', (ev) => {
+      access = (ev && ev.detail && ev.detail.access) || null;
+      const t = new URLSearchParams(location.search).get('tab');
+      if (t && TABS.some((x) => x[0] === t)) tab = t;
+      renderTabs();
+      draw();
+    });
+    initAdminGuard();
+  </script>
+</BaseLayout>

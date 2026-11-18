@@ -1,0 +1,146 @@
+---
+// path: src/pages/market/orders.astro
+// ============================================================
+// মার্কেটপ্লেস (ব্রান্চ: marketplace) — মার্কেট অর্ডারের তালিকা: /market/orders
+// কাস্টমার: নিজের মার্কেট অর্ডার; রাইডার: অ্যাসাইন-হওয়া মার্কেট অর্ডার;
+// শপ ওনার/স্টাফ: চুক্তিবদ্ধ শপের হিসাব ("রাইডারকে দিয়েছি" বাটন, RPC market_shop_mark_handed)।
+// সব টেক্সট textContent দিয়ে (এস্কেপ)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="কুইক ডেলিভারি অর্ডার | স্মার্ট ফেনী">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="ml-page">
+    <header class="ml-top">
+      <a class="ml-back" href="/market" aria-label="কুইক ডেলিভারিতে ফিরুন"><i class="fas fa-arrow-left" aria-hidden="true"></i></a>
+      <h1>কুইক ডেলিভারি অর্ডার</h1>
+    </header>
+    <div id="mlBody"></div>
+  </div>
+
+  <style is:global>
+    .ml-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #FFF4EC; min-height: 70vh; padding: 14px 16px 110px; max-width: 560px; margin: 0 auto; }
+    .ml-page * { box-sizing: border-box; }
+    .ml-page button { font-family: inherit; }
+    .ml-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .ml-top h1 { margin: 0; font-size: 20px; font-weight: 700; }
+    .ml-back { width: 40px; height: 40px; border-radius: 50%; background: #fff; color: #1B2A4A; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.15); text-decoration: none; }
+    .ml-sec { margin: 16px 2px 8px; font-size: 16px; font-weight: 700; }
+    .ml-card { display: block; background: #fff; border-radius: 16px; padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.07); color: #1B2A4A; text-decoration: none; }
+    .ml-card:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    .ml-r1 { display: flex; justify-content: space-between; gap: 10px; font-weight: 700; font-size: 15px; }
+    .ml-r2 { margin-top: 4px; font-size: 12.5px; color: #5B6B86; line-height: 1.45; }
+    .ml-chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 8px; background: #FFE9DA; color: #8A3B12; white-space: nowrap; }
+    .ml-btn { margin-top: 8px; height: 40px; padding: 0 16px; border: 0; border-radius: 12px; background: #FF6B35; color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; }
+    .ml-btn:disabled { opacity: 0.6; }
+    .ml-empty { padding: 28px 8px; text-align: center; font-size: 14px; color: #5B6B86; line-height: 1.6; }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { bnNum } from '../../lib/marketApi.js';
+
+    const $ = (id) => document.getElementById(id);
+    function mk(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined && text !== null) e.textContent = text;
+      return e;
+    }
+    function taka(n) { return '৳' + bnNum(Math.round(Number(n) || 0)); }
+    function when(t) {
+      try { return new Date(t).toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; }
+    }
+    const STATUS = { open: 'অপেক্ষায়', confirmed: 'চলছে', completed: 'সম্পন্ন', cancelled: 'বাতিল', disputed: 'সমস্যা', delivered: 'ডেলিভারি হয়েছে' };
+    const STAGE = {
+      awaiting_advance: 'অগ্রিম বাকি', payment_mismatch: 'পেমেন্ট মেলেনি', advance_submitted: 'অগ্রিম যাচাই চলছে',
+      advance_verified: 'কেনাকাটা চলছে', quote_sent: 'দাম কনফার্ম বাকি', quote_confirmed: 'ডেলিভারির পথে',
+    };
+    function stateLabel(r) {
+      if (r.status === 'confirmed') return STAGE[r.market_stage || 'awaiting_advance'] || 'চলছে';
+      return STATUS[r.status] || r.status;
+    }
+
+    function orderCard(r) {
+      const a = document.createElement('a');
+      a.className = 'ml-card';
+      a.href = '/market/order?id=' + encodeURIComponent(r.id);
+      const r1 = mk('div', 'ml-r1');
+      r1.appendChild(mk('span', null, r.order_no ? 'অর্ডার ' + r.order_no : 'অর্ডার'));
+      r1.appendChild(mk('span', 'ml-chip', stateLabel(r)));
+      const items = Array.isArray(r.order_items) ? r.order_items : [];
+      const shopName = items[0] && items[0].shop_name ? items[0].shop_name : '';
+      const r2 = mk('div', 'ml-r2', [shopName, items.length ? bnNum(items.length) + 'টা আইটেম' : '', when(r.created_at)].filter(Boolean).join(' · '));
+      a.appendChild(r1); a.appendChild(r2);
+      return a;
+    }
+
+    async function init() {
+      const body = $('mlBody');
+      body.appendChild(mk('p', 'ml-empty', 'লোড হচ্ছে...'));
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        body.textContent = '';
+        const p = mk('p', 'ml-empty', 'অর্ডার দেখতে ');
+        const a = document.createElement('a'); a.href = '/login'; a.textContent = 'লগইন করুন';
+        p.appendChild(a); body.appendChild(p);
+        return;
+      }
+      const uid = session.user.id;
+      const COLS = 'id, order_no, status, market_stage, order_items, created_at';
+      const [mine, rider, shopSet] = await Promise.all([
+        supabase.from('delivery_requests').select(COLS).eq('is_market', true).eq('customer_profile_id', uid).order('created_at', { ascending: false }).limit(30),
+        supabase.from('delivery_riders').select('id').eq('profile_id', uid).maybeSingle(),
+        supabase.from('delivery_shop_settlements').select('id, request_id, amount, status, created_at, shop:delivery_shops(name)').in('status', ['awaiting_handover']).order('created_at', { ascending: false }).limit(30),
+      ]);
+      let asRider = [];
+      if (rider.data && rider.data.id) {
+        const rr = await supabase.from('delivery_requests').select(COLS).eq('is_market', true).eq('accepted_rider_id', rider.data.id).order('created_at', { ascending: false }).limit(30);
+        asRider = rr.data || [];
+      }
+      body.textContent = '';
+      let any = false;
+
+      if (mine.data && mine.data.length) {
+        any = true;
+        body.appendChild(mk('h2', 'ml-sec', 'আমার অর্ডার'));
+        mine.data.forEach((r) => body.appendChild(orderCard(r)));
+      }
+      if (asRider.length) {
+        any = true;
+        body.appendChild(mk('h2', 'ml-sec', 'ডেলিভারি (রাইডার)'));
+        asRider.forEach((r) => body.appendChild(orderCard(r)));
+      }
+      // শপ ওনার: RLS শুধু নিজের শপের হিসাব দেয়
+      if (shopSet.data && shopSet.data.length) {
+        any = true;
+        body.appendChild(mk('h2', 'ml-sec', 'শপ: রাইডারকে জিনিস দিয়েছেন?'));
+        shopSet.data.forEach((s) => {
+          const c = mk('div', 'ml-card');
+          const r1 = mk('div', 'ml-r1');
+          r1.appendChild(mk('span', null, s.shop && s.shop.name ? s.shop.name : 'শপ'));
+          r1.appendChild(mk('span', null, taka(s.amount)));
+          c.appendChild(r1);
+          c.appendChild(mk('div', 'ml-r2', when(s.created_at)));
+          const b = mk('button', 'ml-btn', 'রাইডারকে দিয়েছি');
+          b.type = 'button';
+          b.addEventListener('click', async () => {
+            b.disabled = true;
+            const { error } = await supabase.rpc('market_shop_mark_handed', { p_request: s.request_id });
+            if (error) { b.disabled = false; if (window.showToast) window.showToast('সমস্যা হয়েছে, আবার চেষ্টা করুন।', 'error'); return; }
+            if (window.showToast) window.showToast('জানানো হয়েছে।', 'success');
+            c.remove();
+          });
+          c.appendChild(b);
+          body.appendChild(c);
+        });
+      }
+      if (!any) body.appendChild(mk('p', 'ml-empty', 'এখনো কোনো কুইক ডেলিভারি অর্ডার নেই।'));
+    }
+    init();
+  </script>
+</BaseLayout>

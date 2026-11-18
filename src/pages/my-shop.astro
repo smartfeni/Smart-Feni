@@ -71,6 +71,11 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
               <span class="ov-switch"><input type="checkbox" id="ovPause" /><i></i></span>
             </label>
           </div>
+          <div class="ov-dlv" id="ovDlv" role="group" aria-label="ডেলিভারি সময়">
+            <span class="ov-dlv-t">ডেলিভারি সময়</span>
+            <button type="button" class="ov-dlv-b" data-mode="instant" aria-pressed="true">ইনস্ট্যান্ট</button>
+            <button type="button" class="ov-dlv-b" data-mode="days_1_3" aria-pressed="false">১–৩ দিন</button>
+          </div>
         </div>
 
         <div class="myshop-tabs" id="myshopTabs">
@@ -357,6 +362,11 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
       line-height: 1.4;
     }
 
+    .ov-dlv { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .ov-dlv-t { font-size: 13px; font-weight: 700; color: #1B2A4A; margin-right: 4px; }
+    .ov-dlv-b { border: 1.5px solid #D5DCE8; background: #fff; color: #1B2A4A; border-radius: 16px; padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; min-height: 36px; }
+    .ov-dlv-b[aria-pressed='true'] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+    .ov-dlv-b:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
     .ov-pause {
       display: flex;
       align-items: center;
@@ -972,6 +982,7 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
 
       ovPending.textContent = bn(pending);
       ovPause.checked = ov.paused;
+      setDlv(shop.delivery_mode || 'instant');
 
       // আজকের শুরু (বাংলাদেশ সময় UTC+6)
       const DHAKA = 6 * 3600 * 1000;
@@ -989,6 +1000,23 @@ import ModeratorsTab from '../components/shop-dashboard/ModeratorsTab.astro';
 
       refreshLiveStatus();
     }
+
+    // ডেলিভারি সময়: ইনস্ট্যান্ট / ১–৩ দিন (মার্কেটে কার্ট বাটনের নিচে ছোট লাইন হিসেবে দেখায়)
+    function setDlv(mode) {
+      document.querySelectorAll('#ovDlv .ov-dlv-b').forEach((b) => b.setAttribute('aria-pressed', b.dataset.mode === mode ? 'true' : 'false'));
+    }
+    document.querySelectorAll('#ovDlv .ov-dlv-b').forEach((b) => {
+      b.addEventListener('click', async () => {
+        if (!ov.shopId || b.getAttribute('aria-pressed') === 'true') return;
+        const mode = b.dataset.mode;
+        document.querySelectorAll('#ovDlv .ov-dlv-b').forEach((x) => { x.disabled = true; });
+        const { error } = await supabase.from('shops').update({ delivery_mode: mode }).eq('id', ov.shopId);
+        document.querySelectorAll('#ovDlv .ov-dlv-b').forEach((x) => { x.disabled = false; });
+        if (error) { window.showToast?.('সেভ হয়নি, আবার চেষ্টা করুন', 'error'); return; }
+        setDlv(mode);
+        window.showToast?.('ডেলিভারি সময় সেভ হয়েছে', 'success');
+      });
+    });
 
     ovPause?.addEventListener('change', async () => {
       if (!ov.shopId) return;
