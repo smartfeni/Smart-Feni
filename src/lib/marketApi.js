@@ -32,6 +32,25 @@ export async function fetchMarketShops() {
   return (data || []).filter((s) => (s.is_active || s.is_test) && s.lat !== null && s.lng !== null);
 }
 
+// কুইক ডেলিভারি সুইচ: site_settings.marketplace_enabled ('true' | 'false')।
+// বন্ধ থাকলে শুধু স্টাফ (delivery_shops.view) ঢুকতে পারে, টেস্টের জন্য।
+// ফেরত: { enabled, staff, allowed }
+export async function marketAccess() {
+  let enabled = false;
+  let staff = false;
+  try {
+    const { data } = await supabase.from('site_settings').select('value').eq('key', 'marketplace_enabled').maybeSingle();
+    enabled = !!(data && String(data.value).toLowerCase() === 'true');
+  } catch (_) { enabled = false; }
+  if (!enabled) {
+    try {
+      const { data } = await supabase.rpc('has_permission', { p_key: 'delivery_shops.view' });
+      staff = data === true;
+    } catch (_) { staff = false; }
+  }
+  return { enabled, staff, allowed: enabled || staff };
+}
+
 function minutesOf(t) {
   // 'HH:MM' বা 'HH:MM:SS' → দিনের মিনিট
   const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ''));
