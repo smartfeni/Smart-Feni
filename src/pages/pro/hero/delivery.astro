@@ -1359,7 +1359,7 @@ const riderGuideSteps = [
       const shopSwP = supabase.from('site_settings').select('value').eq('key', 'shop_notify_on_rider_confirm').maybeSingle();
       const { data: rawRequests } = await supabase
         .from('delivery_requests')
-        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, updated_at, is_asap, scheduled_at, release_requested_at, order_confirmed_at, shop_ids, is_market, advance_verified, cod_due, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
+        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, pickup_done_at, final_price, status, updated_at, is_asap, scheduled_at, release_requested_at, order_confirmed_at, shop_ids, is_market, advance_verified, advance_verified_amount, cod_due, order_items, items_total, customer_profile_id, profiles!delivery_requests_customer_profile_id_fkey(full_name, phone)')
         .eq('accepted_rider_id', riderId)
         .eq('category', 'delivery')
         .in('status', ['confirmed', 'delivered', 'completed'])
@@ -1375,6 +1375,16 @@ const riderGuideSteps = [
         if (req.status !== 'completed') return true;
         return Date.now() - new Date(req.updated_at).getTime() <= oneHourMs;
       });
+
+      // কুইক ডেলিভারি: দোকানে ওনার আছে কিনা (থাকলে রাইডার দোকানে টাকা দেয় না)
+      const qdShopInfo = {};
+      try {
+        const qdShopIds = [...new Set((activeRequests || []).filter((r) => r.is_market).flatMap((r) => r.shop_ids || []))];
+        if (qdShopIds.length) {
+          const { data: qs } = await supabase.from('delivery_shops').select('id, name, owner_id').in('id', qdShopIds);
+          (qs || []).forEach((x) => { qdShopInfo[x.id] = x; });
+        }
+      } catch (_) { /* না পেলে ওনার-বিহীন ধরা হবে */ }
 
       riderActiveDeliveryList.innerHTML = '';
 
@@ -1435,7 +1445,42 @@ const riderGuideSteps = [
           `;
         }
 
+        // ===== কুইক ডেলিভারি: আইটেম চেকলিস্ট + টাকার হিসাব =====
+        let qdHtml = '';
+        if (req.is_market) {
+          const qItems = Array.isArray(req.order_items) ? req.order_items.filter((it) => it && it.name) : [];
+          const qSum = Number(req.items_total) || qItems.reduce((a, it) => a + (Number(it.price) || 0) * (Number(it.qty) || 1), 0);
+          const qShop = qdShopInfo[(req.shop_ids || [])[0]] || {};
+          const hasOwner = !!qShop.owner_id;
+          let ticks = {};
+          try { ticks = JSON.parse(localStorage.getItem('sf_qd_tick_' + req.id) || '{}') || {}; } catch (_) { ticks = {}; }
+          const qBn = (n) => String(Math.round(Number(n) || 0)).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
+          const itemsList = qItems.map((it, i) => {
+            const q = Number(it.qty) || 1;
+            const on = !!ticks[i];
+            return `<label class="qd-tick${on ? ' on' : ''}" style="display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid #F0E4DA;cursor:pointer;"><input type="checkbox" data-qd-tick="${i}" ${on ? 'checked' : ''} style="width:22px;height:22px;accent-color:#16A34A;flex:none;" /><span style="flex:1;min-width:0;font-weight:700;color:#1B2A4A;${on ? 'text-decoration:line-through;opacity:.6;' : ''}">${huEsc(it.name)} × ${qBn(q)}</span><b style="color:#1B2A4A;">৳${qBn((Number(it.price) || 0) * q)}</b></label>`;
+          }).join('');
+          const verified = !!req.advance_verified;
+          const due = Number(req.cod_due);
+          const moneyRows = verified
+            ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-weight:600;color:#33415C;"><span>অগ্রিম পাওয়া গেছে</span><b style="color:#17663F;">৳${qBn(req.advance_verified_amount)}</b></div>
+               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding:12px 14px;border-radius:14px;background:#1B2A4A;color:#fff;"><span style="font-weight:700;">কাস্টমারের কাছে নেবেন</span><b style="font-size:1.45rem;">৳${qBn(isFinite(due) ? due : 0)}</b></div>`
+            : `<div style="padding:10px 12px;border-radius:12px;background:#FFF7ED;color:#9A3412;font-weight:700;font-size:0.88rem;">অগ্রিম যাচাইয়ের পর এখানে কাস্টমারের কাছে নেওয়ার টাকা দেখাবে।</div>`;
+          const shopPay = hasOwner
+            ? `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:#E8F7EE;color:#14693A;font-weight:700;font-size:0.88rem;"><i class="fas fa-store"></i> দোকানে টাকা দেবেন না, স্মার্ট ফেনী পরে মেটাবে। শুধু পণ্য নিন।</div>`
+            : `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:#FDECEA;color:#A3261B;font-weight:700;font-size:0.88rem;"><i class="fas fa-wallet"></i> দোকানে ৳${qBn(qSum)} দিয়ে কিনুন (রসিদ থাকলে রাখুন)।</div>`;
+          qdHtml = `
+            <div style="margin:10px 0;padding:14px;border-radius:18px;background:#FFF8F3;border:1.5px solid #FFD9C4;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><img src="/market/icons/food.webp" alt="" aria-hidden="true" style="width:28px;height:28px;object-fit:contain;" /><b style="flex:1;color:#1B2A4A;font-size:1rem;">${huEsc(qShop.name || (qItems[0] && qItems[0].shop_name) || 'দোকান')}</b><span style="font-size:0.78rem;font-weight:700;color:#5A6B85;">দোকানে মিলিয়ে টিক দিন</span></div>
+              ${itemsList}
+              <div style="display:flex;justify-content:space-between;padding:8px 2px 4px;font-weight:700;color:#1B2A4A;"><span>আইটেমের মোট</span><span>৳${qBn(qSum)}</span></div>
+              ${req.pickup_done_at ? '' : shopPay}
+              <div style="margin-top:10px;">${moneyRows}</div>
+            </div>`;
+        }
+
         card.innerHTML = `
+          ${req.is_market ? '<span style="display:inline-flex;align-items:center;gap:6px;margin-bottom:8px;padding:4px 11px;border-radius:999px;background:linear-gradient(135deg,#E8551C,#FF8A55);color:#fff;font-size:0.78rem;font-weight:800;letter-spacing:0.2px;"><i class="fas fa-bolt"></i> কুইক ডেলিভারি</span>' : ''}
           <p class="dh-active-status"><i class="fas fa-circle"></i> ${statusLabel}</p>
           ${orderTimeChip(req)}
           ${req.order_no ? `<span style="display:inline-block;font-size:0.72rem;font-weight:800;color:#1B2A4A;background:#EEF3F9;padding:2px 9px;border-radius:7px;margin-bottom:6px;letter-spacing:0.3px;">#${huEsc(req.order_no)}</span>` : ''}
@@ -1444,9 +1489,10 @@ const riderGuideSteps = [
             <div class="hu-trip-stop">${huEsc(req.pickup_address || req.area_detail || '') || '—'}<small>পিকআপ</small></div>
             <div class="hu-trip-stop">${huEsc(req.drop_address || '') || '—'}<small>ডেলিভারি</small></div>
           </div>
+          ${qdHtml}
           ${stageHtml}
           ${(req.status === 'confirmed' && !isPickupDone) ? `<div class="dh-pk-badge" data-pk-for="${huEsc(req.id)}" style="display:none;"></div>` : ''}
-          <p class="dh-active-price">৳${Number(req.final_price) || 0}</p>
+          <p class="dh-active-price">${req.is_market ? '<span style="display:block;font-size:0.75rem;font-weight:700;color:#5A6B85;">আপনার ডেলিভারি চার্জ</span>' : ''}৳${Number(req.final_price) || 0}</p>
           <div class="dh-customer-info">
             <span class="dh-customer-avatar"><i class="fas fa-user"></i></span>
             <span class="dh-customer-name">${huEsc(customerName)}</span>
@@ -1466,6 +1512,18 @@ const riderGuideSteps = [
 
         // ঠিকানা/নির্দেশনায় ম্যাপ লিংক থাকলে "নেভিগেট করুন" বাটন
         addNavButtons(card);
+
+        // কুইক ডেলিভারি চেকলিস্ট টিক (শুধু এই ফোনে মনে থাকে)
+        card.querySelectorAll('[data-qd-tick]').forEach((cb) => {
+          cb.addEventListener('change', () => {
+            let t = {};
+            try { t = JSON.parse(localStorage.getItem('sf_qd_tick_' + req.id) || '{}') || {}; } catch (_) { t = {}; }
+            t[cb.dataset.qdTick] = cb.checked;
+            try { localStorage.setItem('sf_qd_tick_' + req.id, JSON.stringify(t)); } catch (_) {}
+            const sp = cb.nextElementSibling;
+            if (sp) sp.style.cssText = sp.style.cssText.replace(/text-decoration:[^;]*;?|opacity:[^;]*;?/g, '') + (cb.checked ? 'text-decoration:line-through;opacity:.6;' : '');
+          });
+        });
 
         card.querySelectorAll('.dh-maps-btn').forEach((btn) => {
           btn.addEventListener('click', () => {
@@ -1572,7 +1630,10 @@ const riderGuideSteps = [
         // ভুল চাপ ঠেকাতে আগে জিজ্ঞেস করা হয়
         card.querySelector('.btn-confirm-delivery')?.addEventListener('click', async (e) => {
           const btn = e.currentTarget;
-          if (!window.confirm('ডেলিভারি সম্পন্ন হিসেবে মার্ক করবেন? এরপর আর বদলানো যাবে না।')) return;
+          const qdAsk = req.is_market && req.advance_verified
+            ? 'কাস্টমারের কাছ থেকে ৳' + Math.round(Number(req.cod_due) || 0) + ' নিয়েছেন? ডেলিভারি সম্পন্ন হিসেবে মার্ক করবেন? এরপর আর বদলানো যাবে না।'
+            : 'ডেলিভারি সম্পন্ন হিসেবে মার্ক করবেন? এরপর আর বদলানো যাবে না।';
+          if (!window.confirm(qdAsk)) return;
           btn.disabled = true;
           const { error } = await confirmDelivery({ requestId: req.id });
           if (error) {
@@ -1593,7 +1654,7 @@ const riderGuideSteps = [
 
       let query = supabase
         .from('delivery_requests')
-        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, customer_asking_price, vehicle_type, seat_count, order_items, items_total, is_asap, scheduled_at')
+        .select('id, order_no, description, upazila, area_detail, pickup_address, pickup_lat, pickup_lng, pickup_instructions, drop_address, drop_lat, drop_lng, drop_instructions, customer_asking_price, vehicle_type, seat_count, order_items, items_total, is_asap, scheduled_at, is_market')
         .eq('status', 'open')
         .eq('publish_status', 'published')
         .eq('category', 'delivery')
@@ -1737,9 +1798,12 @@ const riderGuideSteps = [
               <div class="dh-v2-ln dh-v2-total"><b>মোট</b><b>৳${itemsSum + customerPrice}</b></div>
             </div>`
           : '';
-        const noticeHtml = '<div class="dh-v2-notice">অগ্রিম পেমেন্ট লাগবে। ডেলিভারি চার্জ আগেই ফিক্স করে নিন।</div>';
+        const noticeHtml = req.is_market
+          ? '<div class="dh-v2-notice">কুইক ডেলিভারি: রাইডার কনফার্মের পর কাস্টমার অগ্রিম দেবে। অগ্রিম যাচাই হলেই অর্ডার কনফার্ম, তারপর পিকআপ।</div>'
+          : '<div class="dh-v2-notice">অগ্রিম পেমেন্ট লাগবে। ডেলিভারি চার্জ আগেই ফিক্স করে নিন।</div>';
 
         card.innerHTML = `
+          ${req.is_market ? '<span style="display:inline-flex;align-items:center;gap:6px;margin-bottom:8px;padding:4px 11px;border-radius:999px;background:linear-gradient(135deg,#E8551C,#FF8A55);color:#fff;font-size:0.78rem;font-weight:800;letter-spacing:0.2px;"><i class="fas fa-bolt"></i> কুইক ডেলিভারি</span>' : ''}
           ${orderTimeChip(req)}
           <div class="dh-req-top">
             <div class="dh-req-price-wrap">
