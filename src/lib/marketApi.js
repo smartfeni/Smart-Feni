@@ -84,3 +84,30 @@ export async function fetchShopMenu(shopId) {
   if (i.error) throw i.error;
   return { cats: c.data || [], items: i.data || [] };
 }
+
+// ---------- অনলাইন শপ (shops টেবিল) — মার্কেটের একই ক্যাটাগরিতে দেখানো ----------
+// শুধু যেগুলোতে অ্যাডমিন market_category_id বসিয়েছে, চালু ও সাময়িক-বন্ধ নয়।
+// ফেরত রো delivery-দোকানের মতো আকারে (market_category_ids, image_url) + _online=true।
+export async function fetchOnlineShopsForMarket() {
+  const { data, error } = await supabase
+    .from('shops')
+    .select('id, name, slug, logo_image, upazila, market_category_id, temporarily_closed, is_active, is_published')
+    .eq('is_active', true)
+    .eq('is_published', true)
+    .not('market_category_id', 'is', null)
+    .order('shop_order', { ascending: true })
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return (data || [])
+    .filter((s) => !s.temporarily_closed)
+    .map((s) => ({
+      id: 'online:' + s.id,
+      name: s.name,
+      image_url: s.logo_image || null,
+      upazila: s.upazila || '',
+      market_category_ids: [s.market_category_id],
+      _online: true,
+      _href: '/' + s.slug,
+      is_open: true,
+    }));
+}
