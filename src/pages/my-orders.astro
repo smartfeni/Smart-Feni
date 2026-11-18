@@ -1169,7 +1169,7 @@ const ordersGuide = [
   <script>
     import { supabase } from '../lib/supabase.js';
     import { orderTimeChip } from '../lib/orderTime.js';
-    import { bindMarketOrderSheet } from '../lib/marketOrderSheet.js';
+    import { bindMarketOrderSheet, openMarketOrderSheet } from '../lib/marketOrderSheet.js';
     bindMarketOrderSheet(document.body, () => { try { refreshOrders(); } catch (e) {} });
     import { compressImages } from '../lib/imageCompress.js';
     import { submitReview, uploadPaymentProof, cancelRequest, expireRequests, confirmBestPrice, updateAskingPrice } from '../lib/deliveryClient.js';
@@ -1623,6 +1623,24 @@ const ordersGuide = [
       return `<div class="deal-box" style="background:#FFF7ED;border:1.5px solid #FED7AA;border-radius:16px;padding:12px;margin:10px 0;">${inner}${chatBtn}</div>`;
     }
 
+    // কুইক ডেলিভারি অর্ডারের ৫ ধাপ (শুরু থেকেই): অর্ডার → রাইডার কনফার্ম → অগ্রিম → কেনা ও দাম → ডেলিভারি
+    function marketStepperHtml(req) {
+      const labels = ['অর্ডার', 'রাইডার কনফার্ম', 'অগ্রিম', 'কেনা ও দাম', 'ডেলিভারি'];
+      let now = 1;
+      if (req.status === 'completed') now = 5;
+      else if (req.status === 'delivered') now = 4;
+      else if (req.status === 'confirmed') {
+        const st = req.market_stage || 'awaiting_advance';
+        now = st === 'quote_confirmed' ? 4 : (st === 'quote_sent' || st === 'advance_verified') ? 3 : 2;
+      }
+      const cell = (l, i) => {
+        const cls = i < now ? 'background:#1F7A4D;color:#fff;' : i === now ? 'background:#FF6B35;color:#fff;' : 'background:#EEF0F4;color:#5B6B86;';
+        const txt = i < now ? '✓' : String(toBn(i + 1));
+        return `<div style="flex:1;text-align:center;font-size:10.5px;line-height:1.25;font-weight:600;color:${i <= now ? '#1B2A4A' : '#8793A8'};"><span style="display:block;width:26px;height:26px;line-height:26px;margin:0 auto 4px;border-radius:50%;font-size:12px;${cls}">${txt}</span>${l}</div>`;
+      };
+      return `<div style="display:flex;gap:4px;margin:10px 0;">${labels.map(cell).join('')}</div>`;
+    }
+
     function renderDeliveryCard(req) {
       const card = document.createElement('div');
       card.className = 'order-card';
@@ -1647,7 +1665,7 @@ const ordersGuide = [
             <p class="order-date">${req.order_no ? `<b style="color:#1B2A4A;letter-spacing:0.3px;">#${esc(req.order_no)}</b> · ` : ''}${formatDate(req.created_at)}</p>
           </div>
         </div>
-        ${renderDeliveryStepper(req)}
+        ${req.is_market ? marketStepperHtml(req) : renderDeliveryStepper(req)}
         ${orderTimeChip(req)}
         <p class="delivery-desc">${esc(req.description || '')}</p>
         <div class="hu-trip">
@@ -1715,6 +1733,7 @@ const ordersGuide = [
         // .dh-stage-box থেকে আলাদা .customer-stage-box ক্লাস ব্যবহার হলো
         const isPickupDone = !!req.pickup_done_at;
         const isRide = req.category === 'ride';
+        const hideOldStage = !!req.is_market && !req.advance_verified;
         const stageStatusText = isPickupDone
           ? (isRide ? 'হিরো আপনাকে নিয়ে গন্তব্যের পথে' : 'হিরো আপনার ডেলিভারি নিয়ে পথে')
           : 'হিরো পিকআপের পথে আসছে';
@@ -1725,7 +1744,7 @@ const ordersGuide = [
           ? new Date(req.pickup_done_at).toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' })
           : null;
 
-        bodyHtml += `
+        if (!hideOldStage) bodyHtml += `
           <div class="customer-stage-box ${isPickupDone ? 'stage-dropoff' : 'stage-pickup'}">
             <span class="customer-stage-status"><i class="fas fa-circle"></i> ${stageStatusText}</span>
             <span class="customer-stage-label">${stageTargetLabel}</span>
@@ -1825,6 +1844,7 @@ const ordersGuide = [
           return;
         }
         refreshOrders();
+        if (req.is_market) openMarketOrderSheet(req.id, () => refreshOrders());
       });
 
       // প্রস্তাবিত মূল্য বাড়ানো (শুধু বাড়ানো যাবে, কমানো যাবে না)
