@@ -103,6 +103,11 @@ import AddListingModal from '../ui/AddListingModal.astro';
       <div class="listing-chip-row" id="editCatChips"></div>
     </div>
 
+    <div id="editMktWrap" style="display:none;">
+      <label class="form-label">কুইক ডেলিভারি ক্যাটাগরি (কোন ক্যাটাগরি দিয়ে ঢুকলে এই পণ্য দেখাবে; ফাঁকা = সব)</label>
+      <div class="listing-chip-row" id="editMktChips"></div>
+    </div>
+
     <label class="form-label">ছবি</label>
     <input type="file" id="editImagesInput" accept="image/*" multiple hidden />
     <div class="listing-image-grid" id="editImageGrid"></div>
@@ -726,6 +731,8 @@ import AddListingModal from '../ui/AddListingModal.astro';
   let editingId = null;
   let editUnit = ''; // দামের একক ("কেজি" ইত্যাদি), খালি = কোনোটা না
   let editCat = ''; // শপের প্রোডাক্ট ক্যাটাগরির id, খালি = ক্যাটাগরি নেই
+  let editMkt = ''; // কুইক ডেলিভারি (মার্কেট) ক্যাটাগরির id, খালি = সব ক্যাটাগরিতে
+  let shopMktCats = []; // এই শপের মার্কেট ক্যাটাগরি [{id,name}] (অ্যাডমিন বসায়)
   let existingImageUrls = []; // ইতিমধ্যে আপলোড করা ছবি (URL) — রিমুভ করা যাবে
   let newImageFiles = []; // নতুন যোগ করা ছবি (কম্প্রেসড File) — সেভে আপলোড হবে
 
@@ -857,6 +864,25 @@ import AddListingModal from '../ui/AddListingModal.astro';
     const cats = window.__shopProductCategories || [];
     if (editCatWrap) editCatWrap.style.display = cats.length ? 'block' : 'none';
     mk(editCatChips, cats.map((c) => ({ value: c.id, label: c.name })), editCat, (v) => { editCat = v; });
+    const mw = document.getElementById('editMktWrap');
+    const mc = document.getElementById('editMktChips');
+    if (mw && mc) {
+      mw.style.display = shopMktCats.length > 1 ? 'block' : 'none';
+      mc.textContent = '';
+      mk(mc, shopMktCats.map((c) => ({ value: c.id, label: c.name })), editMkt, (v) => { editMkt = v; });
+    }
+  }
+
+  async function loadShopMktCats() {
+    shopMktCats = [];
+    if (!currentShopId) return;
+    try {
+      const { data: s } = await supabase.from('shops').select('market_category_ids').eq('id', currentShopId).maybeSingle();
+      const ids = (s && Array.isArray(s.market_category_ids)) ? s.market_category_ids : [];
+      if (!ids.length) return;
+      const { data: c } = await supabase.from('delivery_market_categories').select('id, name').in('id', ids);
+      shopMktCats = c || [];
+    } catch (e) { shopMktCats = []; }
   }
 
   // দামের বক্সে শুধু সংখ্যা: বাংলা অঙ্ক ইংরেজি হয়ে যায়, ৳/টাকা/কমা মুছে যায়
@@ -865,7 +891,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
     if (clean !== editPriceInput.value) editPriceInput.value = clean;
   });
 
-  function openEdit(product) {
+  async function openEdit(product) {
     editingId = product.id;
     editTitleInput.value = product.title || '';
     editDescInput.value = product.description || '';
@@ -874,6 +900,8 @@ import AddListingModal from '../ui/AddListingModal.astro';
     editPriceInput.value = parsedPrice.amount === null ? '' : String(Math.round(parsedPrice.amount));
     editUnit = product.price_unit || guessUnit(product.price);
     editCat = product.shop_category_id || '';
+    editMkt = product.market_category_id || '';
+    await loadShopMktCats();
     renderEditChips();
     existingImageUrls = [...(product.images || [])];
     newImageFiles = [];
@@ -930,6 +958,7 @@ import AddListingModal from '../ui/AddListingModal.astro';
         price: priceDigits,
         price_unit: editUnit || null,
         shop_category_id: editCat || null,
+        market_category_id: shopMktCats.some((c) => c.id === editMkt) ? editMkt : null,
         images: finalImages,
       })
       .eq('id', editingId);

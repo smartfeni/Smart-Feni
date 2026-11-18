@@ -78,7 +78,7 @@ export async function fetchShop(id) {
 export async function fetchShopMenu(shopId) {
   const [c, i] = await Promise.all([
     supabase.from('delivery_shop_categories').select('id, name, sort_order').eq('shop_id', shopId).order('sort_order', { ascending: true }),
-    supabase.from('delivery_shop_items').select('id, name, price, old_price, image_url, description, category_id, tags, sort_order, is_available').eq('shop_id', shopId).eq('is_available', true).order('sort_order', { ascending: true }).order('name', { ascending: true }),
+    supabase.from('delivery_shop_items').select('id, name, price, old_price, image_url, description, category_id, tags, sort_order, is_available, market_category_id').eq('shop_id', shopId).eq('is_available', true).order('sort_order', { ascending: true }).order('name', { ascending: true }),
   ]);
   if (c.error) throw c.error;
   if (i.error) throw i.error;
@@ -138,7 +138,7 @@ function priceOf(p) {
 export async function fetchDaysShopMenu(shopId) {
   const { data, error } = await supabase
     .from('listings')
-    .select('id, title, description, price, images, is_sold_out, shop_category_id')
+    .select('id, title, description, price, images, is_sold_out, shop_category_id, market_category_id')
     .eq('shop_id', shopId)
     .eq('status', 'active')
     .eq('is_disabled', false)
@@ -155,6 +155,7 @@ export async function fetchDaysShopMenu(shopId) {
       image_url: Array.isArray(l.images) && l.images.length ? l.images[0] : null,
       description: l.description ? String(l.description).slice(0, 140) : '',
       category_id: null,
+      market_category_id: l.market_category_id || null,
       tags: [],
     }));
   return { cats: [], items };
