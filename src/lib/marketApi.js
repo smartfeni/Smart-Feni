@@ -32,6 +32,33 @@ export async function fetchMarketShops() {
   return (data || []).filter((s) => (s.is_active || s.is_test) && s.lat !== null && s.lng !== null);
 }
 
+// সার্চ ও খাবারের ধরন ফিল্টারের জন্য আইটেমের নাম (দোকান পিছু)। ফেরত: { [shop_id]: 'নাম ট্যাগ ...' (ছোট হাতের) }
+export async function fetchMarketItemIndex() {
+  const { data, error } = await supabase
+    .from('delivery_shop_items')
+    .select('shop_id, name, tags')
+    .eq('is_available', true)
+    .limit(5000);
+  if (error) throw error;
+  const idx = {};
+  (data || []).forEach((it) => {
+    const t = [it.name || ''].concat(Array.isArray(it.tags) ? it.tags : []).join(' ').toLowerCase();
+    idx[it.shop_id] = (idx[it.shop_id] ? idx[it.shop_id] + ' ' : '') + t;
+  });
+  return idx;
+}
+
+// দুই বিন্দুর দূরত্ব (কিমি)। কোনো একটা না থাকলে null।
+export function distanceKm(aLat, aLng, bLat, bLng) {
+  const n = [aLat, aLng, bLat, bLng].map(Number);
+  if (n.some((x) => !isFinite(x)) || aLat === null || bLat === null) return null;
+  const R = 6371;
+  const dLat = ((n[2] - n[0]) * Math.PI) / 180;
+  const dLng = ((n[3] - n[1]) * Math.PI) / 180;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos((n[0] * Math.PI) / 180) * Math.cos((n[2] * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
 // কুইক ডেলিভারি সুইচ: site_settings.marketplace_enabled ('true' | 'false')।
 // বন্ধ থাকলে শুধু স্টাফ (delivery_shops.view) ঢুকতে পারে, টেস্টের জন্য।
 // ফেরত: { enabled, staff, allowed }
