@@ -3,13 +3,9 @@
 // শুধু Delivery Hero পিকআপ টেক্সট বক্সের অটোকমপ্লিট-এর জন্য।
 //
 // কীভাবে কাজ করে:
-// ১. প্রথমে নিজেদের location_suggestions টেবিলে ilike সার্চ (ফ্রি, দ্রুত)
-// ২. রেজাল্ট কম পেলে (৫টার কম) Google Places Text Search API দিয়ে
-//    ফেনী এলাকায় fallback সার্চ করে
-// ৩. Google থেকে পাওয়া নতুন জায়গা DB-তে ক্যাশ করে সেভ করে রাখা হয়
-//    (ছবি থাকলে সেটাও একবার fetch করে নিজেদের Supabase storage-এ
-//    আপলোড করে রাখা হয়) — পরের বার একই জায়গা খুঁজলে আর Google-কে
-//    কল করতে হবে না, ফ্রি নিজেদের DB থেকেই সার্ভ হবে।
+// ১. প্রথমে নিজেদের location_suggestions টেবিলে সার্চ (ফ্রি, দ্রুত)
+// ২. রেজাল্ট কম পেলে Photon (OpenStreetMap) থেকে লোকেশন খোঁজে;
+//    Feni-র কেন্দ্রকে bias হিসেবে ব্যবহার করে, query-তে জোর করে জেলা যোগ করে না।
 //
 // GET /api/location-suggestions-search?q=নবী+হোটেল
 // রেসপন্স: { results: [{ id, name, lat, lng, upazila, image_url, source }] }
@@ -52,33 +48,40 @@ async function searchLocalSuggestions(supabaseAdmin, q, limit = 8) {
   return data || [];
 }
 
-// Photon (OpenStreetMap-based) search fallback. No Google Places key or billing required.
+// Photon (OpenStreetMap-based) search fallback. Bias results toward Feni
+// without appending administrative text to the user's query (which can
+// otherwise cause Photon to return only district/upazila matches).
 async function searchPhoton(q) {
-  try {
-    const params = new URLSearchParams({
-      q: `${q}, Feni, Bangladesh`,
-      limit: '8',
-    });
-    const response = await fetch(`https://photon.komoot.io/api/?${params.toString()}`, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(7000),
-    });
-    if (!response.ok) return [];
+  const queries = [q, `${q} Feni`];
+  const collected = new Map();
 
-    const payload = await response.json();
-    return (payload.features || [])
-      .map((feature) => {
+  for (const searchText of queries) {
+    try {
+      const params = new URLSearchParams({
+        q: searchText,
+        lat: '23.0159',
+        lon: '91.3976',
+        limit: '15',
+      });
+      const response = await fetch(`https://photon.komoot.io/api/?${params.toString()}`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(7000),
+      });
+      if (!response.ok) continue;
+
+      const payload = await response.json();
+      for (const feature of payload.features || []) {
         const properties = feature.properties || {};
         const coordinates = feature.geometry?.coordinates || [];
         const lng = Number(coordinates[0]);
         const lat = Number(coordinates[1]);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
         // Keep fallback results inside the Feni service area.
-        if (lat < 22.65 || lat > 23.35 || lng < 91.0 || lng > 91.65) return null;
+        if (lat < 22.65 || lat > 23.35 || lng < 91.0 || lng > 91.65) continue;
 
         const name = properties.name || properties.street || properties.locality ||
           properties.district || properties.city || properties.county;
-        if (!name) return null;
+        if (!name) continue;
 
         const addressParts = [
           properties.name,
@@ -95,7 +98,7 @@ async function searchPhoton(q) {
           properties.country,
         ].filter((value, index, all) => value && all.indexOf(value) === index);
 
-        return {
+        const item = {
           id: `photon-${properties.osm_type || 'place'}-${properties.osm_id || lat + '-' + lng}`,
           name,
           lat,
@@ -105,12 +108,20 @@ async function searchPhoton(q) {
           source: 'photon',
           display_name: addressParts.join(', '),
         };
-      })
-      .filter(Boolean);
-  } catch {
-    // Photon is a public community service; a temporary outage must not break local search.
-    return [];
+        collected.set(item.id, item);
+      }
+    } catch {
+      // Continue with the next query if the public Photon endpoint is unavailable.
+    }
   }
+
+  const normalizedQuery = q.toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
+  return [...collected.values()].sort((a, b) => {
+    const aName = String(a.name).toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
+    const bName = String(b.name).toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
+    const score = (name) => name === normalizedQuery ? 0 : name.startsWith(normalizedQuery) ? 1 : name.includes(normalizedQuery) ? 2 : 3;
+    return score(aName) - score(bName);
+  });
 }
 
 export async function GET({ url }) {
@@ -136,19 +147,28 @@ export async function GET({ url }) {
 
     let results = await searchLocalSuggestions(supabaseAdmin, q);
 
-    // Local Smart Feni entries always rank first; Photon fills gaps with OSM place data.
-    if (results.length < 8) {
-      const photonResults = await searchPhoton(q);
-      const seen = new Set(results.map((item) => `${Number(item.lat).toFixed(5)},${Number(item.lng).toFixed(5)}`));
-      for (const item of photonResults) {
-        const key = `${Number(item.lat).toFixed(5)},${Number(item.lng).toFixed(5)}`;
-        if (!seen.has(key)) {
-          results.push(item);
-          seen.add(key);
-        }
-        if (results.length >= 8) break;
+    // Photon is queried even when the local DB has a few broad administrative
+    // matches, so a specific village/market/bridge can still appear.
+    const photonResults = await searchPhoton(q);
+    const seen = new Set(results.map((item) => `${Number(item.lat).toFixed(5)},${Number(item.lng).toFixed(5)}`));
+    for (const item of photonResults) {
+      const key = `${Number(item.lat).toFixed(5)},${Number(item.lng).toFixed(5)}`;
+      if (!seen.has(key)) {
+        results.push(item);
+        seen.add(key);
       }
     }
+
+    // Put exact and partial name matches ahead of broad district/upazila entries.
+    const normalizedQuery = q.toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
+    results.sort((a, b) => {
+      const score = (item) => {
+        const name = String(item.name || '').toLocaleLowerCase().replace(/[\\s\\u200c\\u200d]+/g, '');
+        return name === normalizedQuery ? 0 : name.startsWith(normalizedQuery) ? 1 : name.includes(normalizedQuery) ? 2 : 3;
+      };
+      return score(a) - score(b);
+    });
+    results = results.slice(0, 8);
 
     return new Response(JSON.stringify({ results: results.slice(0, 8) }), {
       status: 200,
