@@ -514,6 +514,66 @@ const {
     let unChips: Record<string, any> = {};
     let navCtrlEl: HTMLElement | null = null;
     let districtFitted = false;
+    // OpenStreetMap থেকে ইম্পোর্ট করা POI/গ্রাম/বাজার/প্রতিষ্ঠানের নাম
+    // জুম ১৫+ হলে বর্তমান map bounds অনুযায়ী Supabase cache থেকে দেখায়।
+    let osmLabelLayer: any = null;
+    let osmLabelTimer: ReturnType<typeof setTimeout> | null = null;
+    let osmLabelRequest = 0;
+    let osmLabelBoundsKey = '';
+
+    function renderOsmLabel(item: any) {
+      const name = String(item.name || '').trim();
+      if (!name) return null;
+      const html =
+        '<div style="transform:translate(-50%,-50%);white-space:nowrap;pointer-events:none;' +
+        'font:600 10px/1.2 system-ui,sans-serif;color:#24364b;background:rgba(255,255,255,.94);' +
+        'border:1px solid rgba(27,42,74,.28);border-radius:5px;padding:2px 5px;' +
+        'box-shadow:0 1px 3px rgba(0,0,0,.18);max-width:150px;overflow:hidden;text-overflow:ellipsis;">' +
+        esc(name) + '</div>';
+      return L.marker([Number(item.lat), Number(item.lng)], {
+        pane: 'lpOsmLabels',
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] }),
+      });
+    }
+
+    function refreshOsmLabels() {
+      if (!map || !osmLabelLayer) return;
+      if (map.getZoom() < 15) {
+        osmLabelLayer.clearLayers();
+        osmLabelBoundsKey = '';
+        return;
+      }
+      const b = map.getBounds();
+      const south = b.getSouth(), west = b.getWest(), north = b.getNorth(), east = b.getEast();
+      if (north - south > 0.12 || east - west > 0.12) return;
+      const key = [south, west, north, east].map((v) => v.toFixed(3)).join(',');
+      if (key === osmLabelBoundsKey) return;
+      osmLabelBoundsKey = key;
+      const requestId = ++osmLabelRequest;
+      fetch('/api/location-suggestions-nearby?' + new URLSearchParams({
+        south: String(south), west: String(west), north: String(north), east: String(east), limit: '120',
+      }))
+        .then((res) => res.ok ? res.json() : Promise.reject(new Error('OSM labels request failed')))
+        .then((payload) => {
+          if (requestId !== osmLabelRequest || !map || map.getZoom() < 15) return;
+          osmLabelLayer.clearLayers();
+          (payload.results || []).forEach((item: any) => {
+            const marker = renderOsmLabel(item);
+            if (marker) osmLabelLayer.addLayer(marker);
+          });
+        })
+        .catch(() => {
+          if (requestId === osmLabelRequest) osmLabelBoundsKey = '';
+        });
+    }
+
+    function scheduleOsmLabels() {
+      if (osmLabelTimer) clearTimeout(osmLabelTimer);
+      osmLabelTimer = setTimeout(refreshOsmLabels, 280);
+    }
+
 
     function markProgrammatic(ms = 800) {
       progUntil = Date.now() + ms;
@@ -822,6 +882,16 @@ const {
       void addBaseMap(L, map);
 
       drawFeniOverlay();
+
+      // OSM POI/স্থাননাম লেবেল আলাদা pane-এ, উপজেলা বাউন্ডারির উপরে দেখায়।
+      if (!map.getPane('lpOsmLabels')) {
+        map.createPane('lpOsmLabels');
+        map.getPane('lpOsmLabels').style.zIndex = '475';
+        map.getPane('lpOsmLabels').style.pointerEvents = 'none';
+      }
+      osmLabelLayer = L.layerGroup().addTo(map);
+      map.on('moveend zoomend', scheduleOsmLabels);
+      scheduleOsmLabels();
 
       // পলিগনের বাইরে (বা geojson ছাড়া) ট্যাপ করলে আগের মতোই পিন
       map.on('click', (e: any) => {
