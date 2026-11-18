@@ -57,6 +57,8 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
     .mc-empty a { color: #1B2A4A; font-weight: 700; }
     .mc-ok { text-align: center; padding: 30px 12px; }
     .mc-ok i { font-size: 44px; color: #1F7A4D; }
+    .mc-opt { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 15px; font-weight: 600; }
+    .mc-in { width: 100%; margin-top: 8px; border: 1.5px solid #EADBCF; border-radius: 12px; padding: 10px 12px; font-size: 14.5px; color: #1B2A4A; background: #fff; }
     .mc-ok h2 { margin: 12px 0 6px; font-size: 20px; }
     .mc-ok p { margin: 0 0 18px; font-size: 14.5px; line-height: 1.6; color: #5B6B86; }
     .mc-ok a { display: inline-block; padding: 12px 20px; border-radius: 14px; background: #1B2A4A; color: #fff; font-weight: 700; text-decoration: none; margin: 4px; }
@@ -67,7 +69,7 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
     import { hideHeaderInApp } from '../../lib/marketChrome.js';
     hideHeaderInApp();
     import { getCart, addItem, decItem, clearCart, cartTotal, getDrop } from '../../lib/marketCart.js';
-    import { marketEnabledForMe, fetchShop, shopOpenState, bnNum } from '../../lib/marketApi.js';
+    import { marketEnabledForMe, fetchShop, fetchDaysShop, isInstantShop, shopOpenState, bnNum } from '../../lib/marketApi.js';
     import { fetchDeliveryFare } from '../../lib/fareCalc.js';
     import { createServiceRequest } from '../../lib/deliveryClient.js';
 
@@ -75,6 +77,9 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
     let shop = null;
     let fare = null; // { fare, enabled, ... } | null
     let busy = false;
+    let isDays = false; // ১–৩ দিনের শপ: রাইডার ছাড়া, বিকাশ/COD
+    let pay = { method: 'bkash', trx: '', last4: '' };
+    let settings = {};
 
     function mk(tag, cls, text) {
       const e = document.createElement(tag);
@@ -120,9 +125,9 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
       const t = $('mcTotals');
       if (!t) return;
       t.textContent = '';
-      t.appendChild(row('আইটেমের আনুমানিক দাম', taka(items)));
+      t.appendChild(row(isDays ? 'আইটেমের দাম' : 'আইটেমের আনুমানিক দাম', taka(items)));
       t.appendChild(row('ডেলিভারি চার্জ', ch > 0 ? taka(ch) : '—'));
-      t.appendChild(row('আনুমানিক মোট', taka(items + ch), 'tot'));
+      t.appendChild(row(isDays ? 'মোট' : 'আনুমানিক মোট', taka(items + ch), 'tot'));
     }
 
     let timeEl = null; // OrderTimePicker-এর স্থায়ী নোড
@@ -184,14 +189,17 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
       b.appendChild(chg);
       body.appendChild(b);
 
-      // কখন লাগবে (বিদ্যমান কম্পোনেন্ট; নিচে ক্লোন করে বসানো হয়)
-      const tw = mk('section', 'mc-card');
-      tw.id = 'mcTimeHost';
-      body.appendChild(tw);
-      if (timeEl) tw.appendChild(timeEl); // একই নোড সরানো হয়, তাই বাছাই হারায় না
+      // কখন লাগবে (শুধু ইনস্ট্যান্ট/রাইডার ফ্লোতে)
+      if (!isDays) {
+        const tw = mk('section', 'mc-card');
+        tw.id = 'mcTimeHost';
+        body.appendChild(tw);
+        if (timeEl) tw.appendChild(timeEl); // একই নোড সরানো হয়, তাই বাছাই হারায় না
+      }
 
-      // নোট
+      // নোট (শুধু ইনস্ট্যান্ট ফ্লোতে)
       const n = mk('section', 'mc-card mc-note');
+      n.hidden = isDays;
       n.appendChild(mk('div', 'mc-h', 'দোকান/রাইডারের জন্য নোট (ঐচ্ছিক)'));
       const ta = document.createElement('textarea');
       ta.id = 'mcNote';
@@ -217,18 +225,120 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
         w.appendChild(inp);
         f.appendChild(w);
       }
-      f.appendChild(mk('p', 'mc-hint', 'দাম আনুমানিক। রাইডার দোকান থেকে কিনে আসল দাম আপনাকে পাঠাবে, আপনি কনফার্ম করলে তবেই কেনা হবে। রাইডার কনফার্ম হওয়ার পর অগ্রিম দিতে হবে।'));
+      f.appendChild(mk('p', 'mc-hint', isDays
+        ? 'ডেলিভারি ১–৩ দিনের মধ্যে। ডেলিভারি চার্জ আপনার ঠিকানার দূরত্ব অনুযায়ী অটো হিসাব হয়েছে।'
+        : 'দাম আনুমানিক। রাইডার দোকান থেকে কিনে আসল দাম আপনাকে পাঠাবে, আপনি কনফার্ম করলে তবেই কেনা হবে। রাইডার কনফার্ম হওয়ার পর অগ্রিম দিতে হবে।'));
       body.appendChild(f);
+
+      if (isDays) body.appendChild(payCard());
 
       const err = mk('p', 'mc-err'); err.id = 'mcErr'; err.hidden = true;
       body.appendChild(err);
-      const btn = mk('button', 'mc-btn', 'অর্ডার পাঠান');
+      const btn = mk('button', 'mc-btn', isDays && pay.method === 'bkash' ? 'পেমেন্ট করেছি, অর্ডার পাঠান' : 'অর্ডার পাঠান');
       btn.type = 'button'; btn.id = 'mcSubmit';
       btn.disabled = !st.open;
       btn.addEventListener('click', submit);
       body.appendChild(btn);
 
       updateTotals();
+    }
+
+    function payCard() {
+      const c = mk('section', 'mc-card');
+      c.appendChild(mk('div', 'mc-h', 'পেমেন্ট'));
+      const opts = [['bkash', 'বিকাশ (Send Money)'], ['cod', 'ক্যাশ অন ডেলিভারি']];
+      opts.forEach((o) => {
+        const lab = mk('label', 'mc-opt');
+        const r = document.createElement('input');
+        r.type = 'radio'; r.name = 'mcPay'; r.value = o[0]; r.checked = pay.method === o[0];
+        r.addEventListener('change', () => { pay.method = o[0]; render(); });
+        lab.appendChild(r);
+        lab.appendChild(document.createTextNode(' ' + o[1]));
+        c.appendChild(lab);
+      });
+      if (pay.method === 'bkash') {
+        const num = String(settings.market_payment_bkash || '').replace(/"/g, '').trim();
+        const total = cartTotal(getCart()) + chargeValue();
+        if (!num) {
+          c.appendChild(mk('p', 'mc-err', 'বিকাশ নম্বর এখনো সেট হয়নি। ক্যাশ অন ডেলিভারি বেছে নিন।'));
+        } else {
+          c.appendChild(mk('p', 'mc-hint', 'এই নম্বরে ' + taka(total) + ' Send Money করুন: ' + num + '। তারপর TrxID বা প্রেরক নম্বরের শেষ ৪ ডিজিট দিন। অ্যাডমিন যাচাই করলে অর্ডার কনফার্ম হবে।'));
+          const t1 = document.createElement('input');
+          t1.type = 'text'; t1.className = 'mc-in'; t1.placeholder = 'TrxID'; t1.maxLength = 20; t1.value = pay.trx;
+          t1.setAttribute('aria-label', 'TrxID');
+          t1.addEventListener('input', () => { pay.trx = t1.value; });
+          const t2 = document.createElement('input');
+          t2.type = 'text'; t2.className = 'mc-in'; t2.placeholder = 'অথবা প্রেরক নম্বরের শেষ ৪ ডিজিট'; t2.maxLength = 4; t2.inputMode = 'numeric'; t2.value = pay.last4;
+          t2.setAttribute('aria-label', 'প্রেরক নম্বরের শেষ ৪ ডিজিট');
+          t2.addEventListener('input', () => { pay.last4 = t2.value.replace(/\D/g, ''); });
+          c.appendChild(t1); c.appendChild(t2);
+        }
+      } else {
+        c.appendChild(mk('p', 'mc-hint', 'পণ্য হাতে পেয়ে টাকা দিন। দোকান মালিক কনফার্ম করলে অর্ডার চূড়ান্ত হবে।'));
+      }
+      return c;
+    }
+
+    async function submitDays() {
+      const c = getCart();
+      const d = getDrop();
+      if (!d) { window.SFMarketLocation.open(); return; }
+      if (d.lat === null || d.lng === null) { showErr('ম্যাপে ঠিকানার পিন দিন, নইলে ডেলিভারি চার্জ হিসাব হবে না।'); return; }
+      const st = shopOpenState(shop);
+      if (!st.open) { showErr('দোকান এখন ' + st.label + '।'); return; }
+      if (!(chargeValue() > 0)) { showErr('ডেলিভারি চার্জ হিসাব করা যায়নি। ঠিকানা আবার দিন।'); return; }
+      if (pay.method === 'bkash') {
+        if (!String(settings.market_payment_bkash || '').replace(/"/g, '').trim()) { showErr('বিকাশ এখন চালু নেই। ক্যাশ অন ডেলিভারি বেছে নিন।'); return; }
+        if (pay.trx.trim().length < 6 && pay.last4.length !== 4) { showErr('TrxID অথবা প্রেরক নম্বরের শেষ ৪ ডিজিট দিন।'); return; }
+      }
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data: prof } = await supabase.from('profiles').select('full_name, phone').eq('id', session.user.id).maybeSingle();
+      const name = (prof && prof.full_name) || 'কাস্টমার';
+      const phone = String((prof && prof.phone) || '').replace(/\D/g, '').replace(/^880/, '0');
+      if (!/^01[3-9][0-9]{8}$/.test(phone)) { showErr('প্রোফাইলে সঠিক মোবাইল নম্বর দিন (যেমন 01712345678), তারপর অর্ডার করুন।'); return; }
+      busy = true;
+      const btn = $('mcSubmit');
+      btn.disabled = true;
+      btn.textContent = 'পাঠানো হচ্ছে...';
+      const { data, error } = await supabase.rpc('market_place_days_order', {
+        p_shop_id: shop.id,
+        p_items: c.lines.map((l) => ({ id: l.id, qty: l.qty })),
+        p_name: name,
+        p_phone: phone,
+        p_address: d.address + (d.instructions ? ' (' + d.instructions + ')' : ''),
+        p_drop_lat: d.lat,
+        p_drop_lng: d.lng,
+        p_drop_union: d.union || null,
+        p_method: pay.method,
+        p_trx: pay.method === 'bkash' ? (pay.trx.trim() || null) : null,
+        p_last4: pay.method === 'bkash' ? (pay.last4 || null) : null,
+      });
+      busy = false;
+      if (error) {
+        btn.disabled = false;
+        btn.textContent = 'অর্ডার পাঠান';
+        const m = String(error.message || '');
+        if (m.indexOf('ITEM_UNAVAILABLE') !== -1) { clearCart(); toast('কিছু পণ্য এখন নেই। কার্ট খালি হয়েছে।'); setTimeout(() => history.back(), 800); return; }
+        if (m.indexOf('FARE_UNAVAILABLE') !== -1) { showErr('এই ঠিকানায় ডেলিভারি চার্জ হিসাব করা যায়নি।'); return; }
+        if (m.indexOf('SHOP_UNAVAILABLE') !== -1) { showErr('দোকান এখন অর্ডার নিচ্ছে না।'); return; }
+        if (m.indexOf('TRX_REQUIRED') !== -1) { showErr('TrxID অথবা প্রেরক নম্বরের শেষ ৪ ডিজিট দিন।'); return; }
+        if (m.indexOf('সন্দেহজনক') !== -1) { showErr(m); return; }
+        if (window.SFReportError) { try { window.SFReportError(error, 'market-days-order'); } catch (e) {} }
+        showErr('অর্ডার পাঠানো যায়নি। একটু পরে আবার চেষ্টা করুন।');
+        return;
+      }
+      clearCart();
+      const body = $('mcBody');
+      body.textContent = '';
+      const ok = mk('div', 'mc-ok');
+      const ic = document.createElement('i'); ic.className = 'fas fa-circle-check'; ic.setAttribute('aria-hidden', 'true');
+      ok.appendChild(ic);
+      ok.appendChild(mk('h2', null, 'অর্ডার পেয়েছি'));
+      ok.appendChild(mk('p', null, pay.method === 'bkash'
+        ? 'আপনার পেমেন্ট যাচাই হলে অর্ডার কনফার্ম হবে। ডেলিভারি ১–৩ দিনের মধ্যে। মোট ' + taka(data && data.grand_total) + '।'
+        : 'দোকান মালিক কনফার্ম করলে আপনাকে জানানো হবে। ডেলিভারি ১–৩ দিনের মধ্যে। পণ্য হাতে পেয়ে ' + taka(data && data.grand_total) + ' দিন।'));
+      ok.appendChild(link('আমার অর্ডার', '/my-orders'));
+      body.appendChild(ok);
     }
 
     function showErr(m) {
@@ -244,6 +354,7 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
       const c = getCart();
       const d = getDrop();
       if (!c.lines.length || !shop) { showErr('কার্ট খালি। দোকান থেকে আইটেম যোগ করুন।'); return; }
+      if (isDays) { await submitDays(); return; }
       if (!d) { window.SFMarketLocation.open(); return; }
       const st = shopOpenState(shop);
       if (!st.open) { showErr('দোকান এখন ' + st.label + '।'); return; }
@@ -314,9 +425,13 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
 
     async function loadFare() {
       const d = getDrop();
-      if (!shop || shop.lat === null) return null;
+      if (!shop) return null;
+      if (isDays && shop.delivery_fee_override !== null && shop.delivery_fee_override !== undefined) {
+        return { enabled: true, fare: Number(shop.delivery_fee_override), source: 'shop' };
+      }
+      if (!isDays && shop.lat === null) return null;
       return fetchDeliveryFare({
-        pickup: { lat: shop.lat, lng: shop.lng },
+        pickup: shop.lat !== null && shop.lat !== undefined ? { lat: shop.lat, lng: shop.lng } : null,
         drop: d && d.lat !== null ? { lat: d.lat, lng: d.lng } : null,
         dropUnion: d ? d.union : '',
       });
@@ -326,7 +441,10 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
       const c = getCart();
       if (!c.shopId) { shop = null; render(); return; }
       if (!shop || shop.id !== c.shopId) {
-        try { shop = await fetchShop(c.shopId); } catch (e) { shop = null; }
+        try {
+          isDays = !(await isInstantShop(c.shopId));
+          shop = isDays ? await fetchDaysShop(c.shopId) : await fetchShop(c.shopId);
+        } catch (e) { shop = null; }
       }
       fare = await loadFare();
       render();
@@ -347,6 +465,10 @@ import OrderTimePicker from '../../components/delivery/OrderTimePicker.astro';
         })());
         return;
       }
+      try {
+        const { data: st } = await supabase.from('site_settings').select('key, value').in('key', ['market_payment_bkash']);
+        (st || []).forEach((x) => { settings[x.key] = x.value; });
+      } catch (e) {}
       await refresh();
       window.addEventListener('smartfeni:market-cart-changed', () => {
         const c = getCart();

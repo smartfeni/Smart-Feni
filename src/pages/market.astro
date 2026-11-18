@@ -177,7 +177,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     }
 
     function shopCard(s) {
-      const st = s._online ? { open: true, label: '' } : shopOpenState(s);
+      const st = shopOpenState(s);
       const card = mk('article', 'mk-card' + (st.open ? '' : ' closed'));
       const img = mk('div', 'mk-img');
       if (s.image_url) {
@@ -194,13 +194,9 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       const cn = catNames(s);
       if (cn) info.appendChild(mk('div', 'mk-cats', cn));
       const meta = mk('div', 'mk-meta');
-      if (s._online) {
-        // অনলাইন শপ: কোনো সময়/খোলা ব্যাজ নেই (ডেলিভারির লাইন পণ্যের কার্ট বাটনের নিচে)
-        if (s.upazila) meta.appendChild(mk('span', null, s.upazila));
-      } else {
-        meta.appendChild(mk('span', 'mk-badge' + (st.open ? '' : ' off'), st.label));
-        if (st.open && s.prep_minutes) meta.appendChild(mk('span', null, 'প্রস্তুতি ~' + bnNum(s.prep_minutes) + ' মিনিট'));
-      }
+      meta.appendChild(mk('span', 'mk-badge' + (st.open ? '' : ' off'), st.label));
+      if (s._days) meta.appendChild(mk('span', null, 'ডেলিভারি ১–৩ দিনে'));
+      else if (st.open && s.prep_minutes) meta.appendChild(mk('span', null, 'প্রস্তুতি ~' + bnNum(s.prep_minutes) + ' মিনিট'));
       if (s.is_test) meta.appendChild(mk('span', 'mk-badge test', 'টেস্ট শপ'));
       info.appendChild(meta);
       card.appendChild(img);
@@ -208,7 +204,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       card.tabIndex = 0;
       card.setAttribute('role', 'link');
       card.setAttribute('aria-label', s.name + ' দোকান খুলুন');
-      const go = () => { location.href = s._online ? s._href : '/market/shop?id=' + encodeURIComponent(s.id); };
+      const go = () => { location.href = '/market/shop?id=' + encodeURIComponent(s.id); };
       card.addEventListener('click', go);
       card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
       return card;
@@ -242,7 +238,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       const term = q.trim().toLowerCase();
       let list = shops.filter((s) => Array.isArray(s.market_category_ids) && s.market_category_ids.indexOf(active) !== -1);
       if (term) list = list.filter((s) => (s.name || '').toLowerCase().indexOf(term) !== -1);
-      const openOf = (x) => (x._online ? 1 : Number(shopOpenState(x).open));
+      const openOf = (x) => Number(shopOpenState(x).open);
       list.sort((a, b) => openOf(b) - openOf(a));
       const h = mk('div', 'mk-sec');
       const cat = cats.find((c) => c.id === active);
@@ -294,7 +290,8 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
           fetchOnlineShopsForMarket().catch(() => []), // অনলাইন শপ না এলেও দোকান দেখাবে
         ]);
         cats = res[0];
-        shops = res[1].concat(res[2]);
+        const seen = new Set(res[1].map((x) => x.id));
+        shops = res[1].concat(res[2].filter((x) => !seen.has(x.id)));
       } catch (err) {
         if (window.SFReportError) { try { window.SFReportError(err, 'market-load'); } catch (e) {} }
         showMsg(document.createTextNode('লোড করতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।'));

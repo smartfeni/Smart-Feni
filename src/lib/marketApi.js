@@ -85,31 +85,79 @@ export async function fetchShopMenu(shopId) {
   return { cats: c.data || [], items: i.data || [] };
 }
 
-// ---------- অনলাইন শপ (shops টেবিল) — মার্কেটের একই ক্যাটাগরিতে দেখানো ----------
-// শুধু যেগুলোতে অ্যাডমিন market_category_id বসিয়েছে, চালু ও সাময়িক-বন্ধ নয়।
-// ফেরত রো delivery-দোকানের মতো আকারে (market_category_ids, image_url) + _online=true।
+// ---------- ১–৩ দিনের শপ (shops টেবিল) — মার্কেটের একই ক্যাটাগরিতে, একই কার্ড/শপ পেজ/চেকআউটে ----------
+// যেগুলোতে market_category_ids আছে (সর্বোচ্চ ৩), চালু ও প্রকাশিত। যে শপ delivery_shops-এও আছে (ইনস্ট্যান্ট/রাইডার ফ্লো)
+// সেগুলো এখানে বাদ; সেগুলো fetchMarketShops থেকে আসে। ফেরত রো: _days=true (অর্ডার = orders + বিকাশ/COD, রাইডার ছাড়া)।
 export async function fetchOnlineShopsForMarket() {
+  const [r, ds] = await Promise.all([
+    supabase
+      .from('shops')
+      .select('id, name, slug, logo_image, upazila, union_name, lat, lng, market_category_id, market_category_ids, temporarily_closed, is_active, is_published, is_test, prep_minutes, opens_at, closes_at, weekly_off, busy_until, is_popular')
+      .eq('is_active', true)
+      .eq('is_published', true)
+      .order('shop_order', { ascending: true })
+      .order('name', { ascending: true }),
+    supabase.from('delivery_shops').select('id'),
+  ]);
+  if (r.error) throw r.error;
+  const instantIds = new Set(((ds && ds.data) || []).map((x) => x.id));
+  return (r.data || [])
+    .filter((s) => !instantIds.has(s.id) && !s.temporarily_closed)
+    .map((s) => {
+      const ids = Array.isArray(s.market_category_ids) && s.market_category_ids.length ? s.market_category_ids : (s.market_category_id ? [s.market_category_id] : []);
+      return { ...s, image_url: s.logo_image || null, market_category_ids: ids, is_open: true, _days: true };
+    })
+    .filter((s) => s.market_category_ids.length > 0);
+}
+
+// কোনো শপ ইনস্ট্যান্ট (রাইডার ফ্লো) কিনা — delivery_shops-এ থাকলে হ্যাঁ।
+export async function isInstantShop(id) {
+  const { data } = await supabase.from('delivery_shops').select('id').eq('id', id).maybeSingle();
+  return !!data;
+}
+
+// ১–৩ দিনের শপ: shops টেবিল থেকে একটা শপ (প্রকাশিত, অথবা স্টাফ/মালিকের জন্য RLS যা দেয়)।
+export async function fetchDaysShop(id) {
   const { data, error } = await supabase
     .from('shops')
-    .select('id, name, slug, logo_image, upazila, market_category_id, temporarily_closed, is_active, is_published')
-    .eq('is_active', true)
-    .eq('is_published', true)
-    .not('market_category_id', 'is', null)
-    .order('shop_order', { ascending: true })
-    .order('name', { ascending: true });
+    .select('id, name, slug, logo_image, upazila, union_name, address, lat, lng, temporarily_closed, is_active, is_published, is_test, prep_minutes, opens_at, closes_at, weekly_off, busy_until, delivery_fee_override, market_category_ids')
+    .eq('id', id)
+    .maybeSingle();
   if (error) throw error;
-  return (data || [])
-    .filter((s) => !s.temporarily_closed)
-    .map((s) => ({
-      id: 'online:' + s.id,
-      name: s.name,
-      image_url: s.logo_image || null,
-      upazila: s.upazila || '',
-      market_category_ids: [s.market_category_id],
-      _online: true,
-      _href: '/' + s.slug,
-      is_open: true,
+  if (!data || !data.is_active || data.temporarily_closed) return null;
+  return { ...data, image_url: data.logo_image || null, is_open: true, _days: true };
+}
+
+function priceOf(p) {
+  const s = String(p == null ? '' : p).replace(/[০-৯]/g, (d) => '০১২৩৪৫৬৭৮৯'.indexOf(d)).replace(/,/g, '');
+  const m = /[0-9]+(\.[0-9]+)?/.exec(s);
+  return m ? parseFloat(m[0]) : 0;
+}
+
+// ১–৩ দিনের শপের পণ্য (listings) — ইনস্ট্যান্ট মেনুর মতো আকারে।
+export async function fetchDaysShopMenu(shopId) {
+  const { data, error } = await supabase
+    .from('listings')
+    .select('id, title, description, price, images, is_sold_out, shop_category_id')
+    .eq('shop_id', shopId)
+    .eq('status', 'active')
+    .eq('is_disabled', false)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  const items = (data || [])
+    .filter((l) => !l.is_sold_out && priceOf(l.price) > 0)
+    .map((l) => ({
+      id: l.id,
+      name: l.title,
+      price: priceOf(l.price),
+      old_price: null,
+      image_url: Array.isArray(l.images) && l.images.length ? l.images[0] : null,
+      description: l.description ? String(l.description).slice(0, 140) : '',
+      category_id: null,
+      tags: [],
     }));
+  return { cats: [], items };
 }
 
 // ---------- মার্কেট চালু-সুইচ (site_settings.marketplace_enabled) ----------
