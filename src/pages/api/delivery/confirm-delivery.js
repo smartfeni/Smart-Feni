@@ -82,7 +82,7 @@ export async function POST({ request }) {
     // রিকোয়েস্টটা এই রাইডারেরই কিনা এবং status delivered কিনা যাচাই
     const { data: deliveryRequest, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, accepted_rider_id, final_price, pickup_done_at')
+      .select('id, status, accepted_rider_id, final_price, pickup_done_at, is_market, order_type, market_stage, advance_verified')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -125,6 +125,23 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'আগে পিকআপ সম্পন্ন করুন, তারপর সম্পন্ন করা যাবে' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // কুইক ডেলিভারি (মার্কেট) অর্ডার: অগ্রিম যাচাই + (কেনা হলে) দাম কনফার্ম ছাড়া সম্পন্ন নয়
+    if (deliveryRequest.is_market) {
+      if (!deliveryRequest.advance_verified) {
+        return new Response(
+          JSON.stringify({ error: 'আগে কাস্টমারের অগ্রিম পেমেন্ট যাচাই হতে হবে', code: 'ADVANCE_NOT_VERIFIED' }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      const needsQuote = ['shop_order', 'anything'].includes(deliveryRequest.order_type);
+      if (needsQuote && deliveryRequest.market_stage !== 'quote_confirmed') {
+        return new Response(
+          JSON.stringify({ error: 'আগে কেনার দাম পাঠান ও কাস্টমারের কনফার্ম নিন, তারপর সম্পন্ন করুন', code: 'QUOTE_NOT_CONFIRMED' }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     const { client: adminClient, error: adminError } = getAdminClient();
