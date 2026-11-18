@@ -1,0 +1,144 @@
+---
+// path: src/pages/pro/hero/history.astro
+// ============================================================
+// Smart Feni Pro — রাইডারের অর্ডার হিস্টোরি (/pro/hero/history)
+// সম্পন্ন / বাতিল / ডিসপিউট অর্ডার এখানে; চলমান তালিকা পরিষ্কার থাকে।
+// ডেটা: delivery_requests (accepted_rider_id = নিজের রাইডার আইডি, RLS-এ নিজেরটা পড়া যায়)।
+// সব টেক্সট textContent দিয়ে (এস্কেপ)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../../components/layout/BaseLayout.astro';
+import HeroTabs from '../../../components/pro/HeroTabs.astro';
+---
+
+<BaseLayout title="অর্ডার হিস্টোরি | Smart Feni Pro">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <HeroTabs active="history" />
+  <div class="oh-page">
+    <h1 class="oh-title">অর্ডার হিস্টোরি</h1>
+    <div class="oh-sum" id="ohSum" hidden></div>
+    <div class="oh-filter" role="group" aria-label="ফিল্টার">
+      <button type="button" class="oh-f active" data-f="all">সব</button>
+      <button type="button" class="oh-f" data-f="completed">সম্পন্ন</button>
+      <button type="button" class="oh-f" data-f="cancelled">বাতিল</button>
+      <button type="button" class="oh-f" data-f="disputed">সমস্যা</button>
+    </div>
+    <div id="ohList" class="oh-list"><p class="oh-muted">লোড হচ্ছে...</p></div>
+  </div>
+
+  <style is:global>
+    .oh-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F8FAFC; min-height: 60vh; padding: 14px 14px 100px; max-width: 560px; margin: 0 auto; }
+    .oh-title { margin: 4px 0 12px; font-size: 20px; font-weight: 700; }
+    .oh-sum { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .oh-sum div { background: #fff; border-radius: 16px; padding: 12px; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.07); }
+    .oh-sum b { display: block; font-size: 22px; }
+    .oh-sum span { font-size: 12.5px; color: #5B6B86; }
+    .oh-filter { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; }
+    .oh-f { flex: none; border: 1.5px solid #D5DCE8; background: #fff; color: #1B2A4A; border-radius: 16px; padding: 7px 14px; font-size: 13.5px; font-weight: 700; cursor: pointer; font-family: inherit; min-height: 40px; }
+    .oh-f.active { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+    .oh-f:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    .oh-list { display: flex; flex-direction: column; gap: 10px; }
+    .oh-muted { color: #5B6B86; font-size: 14px; text-align: center; padding: 24px 0; }
+    .oh-card { background: #fff; border-radius: 16px; padding: 12px 14px; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.07); }
+    .oh-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .oh-no { font-weight: 700; font-size: 14.5px; }
+    .oh-badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 12px; background: #E8F7EE; color: #1F7A4D; }
+    .oh-badge.cancelled { background: #FDECEC; color: #B42318; }
+    .oh-badge.disputed { background: #FFF4E5; color: #B45309; }
+    .oh-addr { margin: 6px 0 0; font-size: 13.5px; line-height: 1.5; color: #3B4A66; word-break: break-word; }
+    .oh-meta { margin-top: 8px; font-size: 12.5px; color: #5B6B86; display: flex; justify-content: space-between; }
+    .oh-more { width: 100%; margin-top: 10px; height: 44px; border: 1.5px solid #1B2A4A; background: #fff; color: #1B2A4A; border-radius: 14px; font-weight: 700; font-family: inherit; cursor: pointer; }
+  </style>
+
+  <script>
+    import { supabase } from '../../../lib/supabase.js';
+
+    const $ = (id) => document.getElementById(id);
+    const PAGE = 20;
+    const LABEL = { completed: 'সম্পন্ন', cancelled: 'বাতিল', disputed: 'সমস্যা' };
+    let riderId = null;
+    let filter = 'all';
+    let rows = [];
+    let done = false;
+
+    const bn = (v) => String(v).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
+    function mk(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined && text !== null) e.textContent = text;
+      return e;
+    }
+    function fmt(d) {
+      try { return bn(new Date(d).toLocaleString('bn-BD', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })); } catch (e) { return ''; }
+    }
+
+    function render() {
+      const box = $('ohList');
+      box.textContent = '';
+      if (!rows.length) { box.appendChild(mk('p', 'oh-muted', 'এখনো কোনো অর্ডার নেই।')); return; }
+      rows.forEach((r) => {
+        const c = mk('div', 'oh-card');
+        const top = mk('div', 'oh-row');
+        top.appendChild(mk('span', 'oh-no', '#' + (r.order_no || '') + (r.is_market ? ' · কুইক ডেলিভারি' : '')));
+        top.appendChild(mk('span', 'oh-badge ' + r.status, LABEL[r.status] || r.status));
+        c.appendChild(top);
+        c.appendChild(mk('p', 'oh-addr', (r.pickup_address || '') + ' → ' + (r.drop_address || '')));
+        const meta = mk('div', 'oh-meta');
+        meta.appendChild(mk('span', null, fmt(r.updated_at)));
+        meta.appendChild(mk('span', null, r.final_price ? '৳' + bn(Math.round(Number(r.final_price))) : ''));
+        c.appendChild(meta);
+        box.appendChild(c);
+      });
+      if (!done) {
+        const m = mk('button', 'oh-more', 'আরও দেখুন'); m.type = 'button';
+        m.addEventListener('click', () => load(false));
+        box.appendChild(m);
+      }
+    }
+
+    async function load(reset) {
+      if (reset) { rows = []; done = false; }
+      let q = supabase.from('delivery_requests')
+        .select('id, order_no, status, final_price, pickup_address, drop_address, updated_at, is_market')
+        .eq('accepted_rider_id', riderId)
+        .order('updated_at', { ascending: false })
+        .range(rows.length, rows.length + PAGE - 1);
+      q = filter === 'all' ? q.in('status', ['completed', 'cancelled', 'disputed']) : q.eq('status', filter);
+      const { data, error } = await q;
+      if (error) { $('ohList').textContent = ''; $('ohList').appendChild(mk('p', 'oh-muted', 'লোড করা যায়নি।')); return; }
+      rows = rows.concat(data || []);
+      if (!data || data.length < PAGE) done = true;
+      render();
+    }
+
+    async function summary() {
+      const { count: c1 } = await supabase.from('delivery_requests').select('id', { count: 'exact', head: true }).eq('accepted_rider_id', riderId).eq('status', 'completed');
+      const { data: s } = await supabase.from('delivery_requests').select('final_price').eq('accepted_rider_id', riderId).eq('status', 'completed').limit(1000);
+      const sum = (s || []).reduce((a, x) => a + (Number(x.final_price) || 0), 0);
+      const box = $('ohSum');
+      box.textContent = '';
+      const a = mk('div'); a.appendChild(mk('b', null, bn(c1 || 0))); a.appendChild(mk('span', null, 'মোট সম্পন্ন'));
+      const b = mk('div'); b.appendChild(mk('b', null, '৳' + bn(Math.round(sum)))); b.appendChild(mk('span', null, 'মোট ডেলিভারি চার্জ'));
+      box.appendChild(a); box.appendChild(b);
+      box.hidden = false;
+    }
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { $('ohList').textContent = ''; $('ohList').appendChild(mk('p', 'oh-muted', 'লগইন করুন।')); return; }
+      const { data: rider } = await supabase.from('delivery_riders').select('id').eq('profile_id', session.user.id).maybeSingle();
+      if (!rider) { $('ohList').textContent = ''; $('ohList').appendChild(mk('p', 'oh-muted', 'রাইডার হিসেবে নিবন্ধিত নন।')); return; }
+      riderId = rider.id;
+      document.querySelectorAll('.oh-f').forEach((b) => b.addEventListener('click', () => {
+        document.querySelectorAll('.oh-f').forEach((x) => x.classList.toggle('active', x === b));
+        filter = b.dataset.f;
+        load(true);
+      }));
+      summary().catch(() => {});
+      load(true);
+    }
+    init();
+  </script>
+</BaseLayout>
