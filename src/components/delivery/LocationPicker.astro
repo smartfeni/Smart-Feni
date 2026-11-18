@@ -304,13 +304,37 @@ const {
     );
   }
 
+  function formatPhotonAddress(properties: any): string {
+    const parts = [
+      properties.name,
+      properties.street,
+      properties.neighbourhood,
+      properties.suburb,
+      properties.village,
+      properties.hamlet,
+      properties.town,
+      properties.city,
+      properties.county,
+      properties.district,
+      properties.state,
+      properties.country,
+    ].filter((value, index, all) => value && all.indexOf(value) === index);
+    return parts.join(', ');
+  }
+
   async function reverseGeocode(lat: number, lng: number): Promise<string> {
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=17&addressdetails=0`
-      );
+      const params = new URLSearchParams({
+        lat: String(lat),
+        lon: String(lng),
+        limit: '1',
+      });
+      const res = await fetch(`https://photon.komoot.io/reverse?${params.toString()}`);
+      if (!res.ok) throw new Error('Photon reverse geocoding failed');
       const data = await res.json();
-      return data.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      const feature = data.features?.[0];
+      const address = feature ? formatPhotonAddress(feature.properties || {}) : '';
+      return address || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
     } catch {
       return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
     }
@@ -318,12 +342,17 @@ const {
 
   async function searchPlaces(query: string) {
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-          query
-        )}&countrycodes=bd&limit=5&addressdetails=0`
-      );
-      return await res.json();
+      const res = await fetch(`/api/location-suggestions-search?q=${encodeURIComponent(query)}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.results || []).map((item: any) => ({
+        ...item,
+        lat: item.lat,
+        lon: item.lng,
+        display_name: item.display_name || [item.name, item.upazila, 'Feni', 'Bangladesh']
+          .filter(Boolean)
+          .join(', '),
+      }));
     } catch {
       return [];
     }
@@ -1028,7 +1057,7 @@ const {
       });
     }
 
-    // ============ সার্চ (ম্যাপ ওভারলের ভেতরের Nominatim সার্চ) ============
+    // ============ সার্চ (নিজস্ব DB + Photon geocoding API) ============
     function setSearchResultsVisible(visible: boolean) {
       searchResults.classList.toggle('active', visible);
     }
@@ -1043,7 +1072,7 @@ const {
         return;
       }
       searchTimer = setTimeout(async () => {
-        const results = await searchPlaces(q + ', Feni, Bangladesh');
+        const results = await searchPlaces(q);
         if (!results.length) {
           searchResults.innerHTML = '<div class="lp-search-empty">কিছু পাওয়া যায়নি</div>';
           setSearchResultsVisible(true);
@@ -1061,7 +1090,7 @@ const {
           el.addEventListener('click', () => {
             const idx = Number((el as HTMLElement).dataset.idx);
             const r = results[idx];
-            handleNewPosition(parseFloat(r.lat), parseFloat(r.lon), true);
+            handleNewPosition(parseFloat(r.lat), parseFloat(r.lon), true, r.display_name || r.name || '');
             setSearchResultsVisible(false);
             searchInput.value = '';
           });
