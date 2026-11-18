@@ -74,7 +74,7 @@ export async function POST({ request }) {
 
     const { data: reqRow, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, accepted_rider_id, pickup_done_at, order_confirmed_at, shop_ids')
+      .select('id, status, accepted_rider_id, pickup_done_at, order_confirmed_at, shop_ids, is_market, advance_verified')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -108,6 +108,14 @@ export async function POST({ request }) {
       return new Response(
         JSON.stringify({ error: 'এই রাইড এখন এই ধাপে নাই' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // কুইক ডেলিভারি (মার্কেট) অর্ডার: অগ্রিম যাচাই ছাড়া কেনা/পিকআপ শুরু নয়
+    if (reqRow.is_market && !reqRow.advance_verified) {
+      return new Response(
+        JSON.stringify({ error: 'আগে কাস্টমারের অগ্রিম পেমেন্ট অ্যাডমিন যাচাই করতে হবে', code: 'ADVANCE_NOT_VERIFIED' }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
