@@ -76,6 +76,32 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     .mo-x { border: 1.5px solid #EADBCF; background: #fff; border-radius: 10px; color: #B42318; cursor: pointer; }
     .mo-add { border: 1.5px dashed #1B2A4A; background: none; color: #1B2A4A; border-radius: 12px; height: 40px; width: 100%; font-weight: 700; cursor: pointer; margin: 2px 0 6px; }
     .mo-thumb { display: block; max-width: 100%; max-height: 220px; border-radius: 12px; margin-top: 8px; }
+    .mo-oid { font-size: 12px; font-weight: 600; color: #4A5568; }
+    .mo-head { margin: 0 0 8px; font-size: 22px; font-weight: 700; line-height: 1.3; }
+    .mo-tl { list-style: none; margin: 0 0 4px; padding: 0; }
+    .mo-ti { display: flex; align-items: center; gap: 12px; min-height: 34px; font-size: 14.5px; font-weight: 500; color: #6B7280; }
+    .mo-ti.done, .mo-ti.now { color: #1B2A4A; }
+    .mo-ti.now { font-weight: 700; }
+    .mo-td { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #CBD2DC; box-sizing: border-box; flex: none; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; }
+    .mo-ti.done .mo-td { background: #1F7A4D; border-color: #1F7A4D; }
+    .mo-ti.now .mo-td { border: 5px solid #FF6B35; }
+    .mo-fold { width: 100%; display: flex; justify-content: space-between; align-items: center; border: 0; background: none; padding: 0; font: 700 14px 'Hind Siliguri', system-ui, sans-serif; color: #5B6B86; cursor: pointer; }
+    .mo-fold-b { margin-top: 8px; }
+    .mo-fold-b[hidden] { display: none; }
+    .mo-btn.big { height: 62px; margin-top: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; line-height: 1.3; color: #1B2A4A; }
+    .mo-btn.big.navy { background: #1B2A4A; color: #fff; }
+    .mo-bt { font-size: 13px; font-weight: 600; }
+    .mo-bv { font-size: 18px; font-weight: 700; }
+    .mo-hero { background: #1B2A4A; color: #fff; text-align: center; }
+    .mo-hero-s { font-size: 12.5px; color: #E6EAF2; }
+    .mo-hero-v { font-size: 34px; font-weight: 700; }
+    .mo-opt { display: flex; align-items: center; gap: 12px; }
+    .mo-opt .mo-ov { font-size: 16px; font-weight: 700; color: #1B2A4A; }
+    .mo-pay-s { font-size: 12.5px; color: #4A5568; }
+    .mo-pay-r { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 6px; }
+    .mo-pay-n { font-size: 21px; font-weight: 700; letter-spacing: 1px; }
+    .mo-copy { height: 34px; padding: 0 14px; border: 1.5px solid #1B2A4A; border-radius: 12px; background: #fff; color: #1B2A4A; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .mo-or { text-align: center; font-size: 12px; font-weight: 600; color: #4A5568; margin: 8px 0 0; }
     .mo-soft { background: transparent; box-shadow: none; padding: 0 2px; }
     .mo-who { display: flex; align-items: center; gap: 12px; }
     .mo-av { width: 44px; height: 44px; border-radius: 50%; background: #FFE9DA; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 18px; flex: none; }
@@ -111,7 +137,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     let contact = null; // কাস্টমারের চোখে রাইডার, রাইডারের চোখে কাস্টমার {name, phone, vehicle}
     let reviewed = false;
     let settings = {};
-    let local = { mode: 'charge', method: 'bkash' };
+    let local = { mode: 'charge', method: 'bkash', payOpen: false };
     let timer = null;
     let busy = false;
 
@@ -130,40 +156,47 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     function report(err, where) { if (window.SFReportError) { try { window.SFReportError(err, where); } catch (e) {} } }
 
     // ---------- ধাপ ----------
-    function stageIndex() {
-      if (R.status === 'completed') return 6;
-      if (R.status === 'delivered') return 5;
-      if (R.status !== 'confirmed') return 1;
+    // ৬ ধাপ (ডিজাইন আর্টিফেক্ট): অর্ডার দিয়েছেন → রাইডার কনফার্ম → অগ্রিম পেমেন্ট → দাম নিশ্চিত করুন → কেনা ও ডেলিভারি → পৌঁছেছে
+    const STEPS = ['অর্ডার দিয়েছেন', 'রাইডার কনফার্ম হয়েছে', 'অগ্রিম পেমেন্ট', 'দাম নিশ্চিত করুন', 'কেনা ও ডেলিভারি', 'পৌঁছেছে'];
+    // এখনকার ধাপ (০-ভিত্তিক); ৬ = সব শেষ; -১ = বাতিল
+    function stepState() {
+      if (R.status === 'cancelled') return { cur: -1, head: 'অর্ডার বাতিল হয়েছে' };
+      if (R.status === 'completed') return { cur: 6, head: 'ডেলিভারি সম্পন্ন হয়েছে' };
+      if (R.status === 'disputed') return { cur: 4, head: 'সমস্যা জানানো হয়েছে' };
+      if (R.status === 'delivered') return { cur: 5, head: 'ডেলিভারি হয়েছে, সম্পন্নের অপেক্ষা' };
+      const cust = role === 'customer';
+      if (R.status !== 'confirmed') {
+        const offers = cust && (R.status === 'open' || R.status === 'negotiating') && R.publish_status === 'published';
+        return { cur: 1, head: offers ? 'অফার দেখে রাইডার কনফার্ম করুন' : 'রাইডারের অপেক্ষা' };
+      }
       const st = R.market_stage || 'awaiting_advance';
-      if (st === 'quote_confirmed') return 5;
-      if (st === 'quote_sent' || st === 'advance_verified') return 4;
-      return 3;
+      if (st === 'advance_submitted') return { cur: 2, head: cust ? 'অগ্রিম যাচাই চলছে' : 'অগ্রিম যাচাই চলছে, কিছু কিনবেন না' };
+      if (st === 'payment_mismatch') return { cur: 2, head: 'অগ্রিমের অঙ্ক মেলেনি' };
+      if (st === 'advance_verified') return { cur: 3, head: cust ? 'রাইডার কেনার দাম পাঠাবে' : 'কেনার দাম পাঠান' };
+      if (st === 'quote_sent') return { cur: 3, head: cust ? 'দাম নিশ্চিত করুন' : 'কাস্টমারের কনফার্মের অপেক্ষা' };
+      if (st === 'quote_confirmed') return { cur: 4, head: R.pickup_done_at ? 'জিনিস নিয়ে পথে আছে' : (cust ? 'রাইডার জিনিস সংগ্রহ করছে' : 'জিনিস কিনে পিকআপ করুন') };
+      return { cur: 2, head: cust ? 'অগ্রিম পেমেন্ট দিন' : 'কাস্টমারের অগ্রিমের অপেক্ষা' };
     }
-    const STEPS = ['অর্ডার', 'রাইডার কনফার্ম', 'অগ্রিম', 'কেনা ও দাম', 'ডেলিভারি'];
 
     function stepsCard() {
       const c = mk('section', 'mo-card');
-      const ul = mk('ul', 'mo-steps');
-      const idx = stageIndex();
+      const ss = stepState();
+      if (R.order_no) c.appendChild(mk('div', 'mo-oid', 'অর্ডার #' + R.order_no));
+      const h = mk('h2', 'mo-head', ss.head);
+      c.appendChild(h);
+      const ol = mk('ol', 'mo-tl');
       STEPS.forEach((t, i) => {
-        // idx: ১ = রাইডারের অপেক্ষা, ৩ = অগ্রিম, ৪ = কেনা, ৫ = ডেলিভারি, ৬ = শেষ
-        const pos = i + 1;
-        const doneAt = [1, 2, 3, 5, 6][i]; // এই ধাপ শেষ ধরা হয় যখন idx >= doneAt+(i==0?0:0)
-        let cls = '';
-        if (R.status === 'cancelled') cls = '';
-        else if (i === 0) cls = 'done';
-        else if (i === 1) cls = idx >= 3 ? 'done' : 'now';
-        else if (i === 2) cls = idx >= 4 ? 'done' : (idx === 3 ? 'now' : '');
-        else if (i === 3) cls = idx >= 5 ? 'done' : (idx === 4 ? 'now' : '');
-        else cls = idx >= 6 ? 'done' : (idx === 5 ? 'now' : '');
-        void pos; void doneAt;
-        const li = mk('li', 'mo-step ' + cls);
-        const dot = mk('i', null, cls === 'done' ? '✓' : String(i + 1));
+        const cls = ss.cur < 0 ? '' : (i < ss.cur ? 'done' : (i === ss.cur ? 'now' : ''));
+        const li = mk('li', 'mo-ti ' + cls);
+        const dot = mk('span', 'mo-td');
+        dot.setAttribute('aria-hidden', 'true');
+        dot.textContent = cls === 'done' ? '✓' : '';
         li.appendChild(dot);
         li.appendChild(document.createTextNode(t));
-        ul.appendChild(li);
+        if (cls === 'now') li.setAttribute('aria-current', 'step');
+        ol.appendChild(li);
       });
-      c.appendChild(ul);
+      c.appendChild(ol);
       return c;
     }
 
@@ -174,56 +207,106 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       return r;
     }
 
+    let detailsOpen = false;
     function detailsCard() {
       const c = mk('section', 'mo-card');
-      c.appendChild(mk('div', 'mo-h', 'অর্ডারের বিবরণ'));
+      const hd = mk('button', 'mo-fold');
+      hd.type = 'button';
+      hd.setAttribute('aria-expanded', detailsOpen ? 'true' : 'false');
+      hd.appendChild(mk('span', null, 'অর্ডারের বিবরণ'));
+      hd.appendChild(mk('span', 'mo-chev', detailsOpen ? '▴' : '▾'));
+      const bd = mk('div', 'mo-fold-b');
+      bd.hidden = !detailsOpen;
+      hd.addEventListener('click', () => {
+        detailsOpen = !detailsOpen;
+        bd.hidden = !detailsOpen;
+        hd.setAttribute('aria-expanded', detailsOpen ? 'true' : 'false');
+        hd.lastChild.textContent = detailsOpen ? '▴' : '▾';
+      });
+      c.appendChild(hd);
       const items = Array.isArray(R.order_items) ? R.order_items : [];
       if (items.length) {
         const sn = items[0] && items[0].shop_name;
-        if (sn) c.appendChild(mk('div', 'mo-msg', sn));
+        if (sn) bd.appendChild(mk('div', 'mo-msg', sn));
         items.forEach((it) => {
           const r = mk('div', 'mo-row');
           r.appendChild(mk('span', null, String(it.name || 'আইটেম') + ' × ' + bnNum(it.qty || 1)));
           r.appendChild(mk('span', null, taka((Number(it.price) || 0) * (Number(it.qty) || 1))));
-          c.appendChild(r);
+          bd.appendChild(r);
         });
-        c.appendChild(row('আইটেমের আনুমানিক দাম', taka(R.items_total)));
+        bd.appendChild(row('আইটেমের আনুমানিক দাম', taka(R.items_total)));
       } else {
-        c.appendChild(mk('p', 'mo-msg soft', R.description || ''));
+        bd.appendChild(mk('p', 'mo-msg soft', R.description || ''));
       }
-      if (R.final_price) c.appendChild(row('ডেলিভারি চার্জ', taka(R.final_price)));
-      c.appendChild(mk('p', 'mo-note', 'ঠিকানা: ' + (R.drop_address || '')));
+      if (R.final_price) bd.appendChild(row('ডেলিভারি চার্জ', taka(R.final_price)));
+      bd.appendChild(mk('p', 'mo-note', 'ঠিকানা: ' + (R.drop_address || '')));
+      c.appendChild(bd);
       return c;
     }
 
-    // ---------- কাস্টমার: অগ্রিম ফর্ম ----------
-    function advanceCard() {
+    // ---------- কাস্টমার: অগ্রিম (আর্টিফেক্ট: ট্র্যাকিংয়ে দুই বাটন → পেমেন্ট পেজ) ----------
+    function advanceAmounts() {
+      const charge = Number(R.final_price) || 0;
+      const full = charge + (Number(R.items_total) || 0);
+      return { charge, full };
+    }
+    function advanceChoiceCard() {
       const c = mk('section', 'mo-card');
-      c.appendChild(mk('div', 'mo-h', 'অগ্রিম পেমেন্ট'));
+      c.appendChild(mk('div', 'mo-h', 'কতটা অগ্রিম দেবেন?'));
       if (R.market_stage === 'payment_mismatch') {
         c.appendChild(mk('p', 'mo-err', 'আপনার আগের পেমেন্ট মিলছে না। সঠিক তথ্য দিয়ে আবার জমা দিন।'));
       }
-      c.appendChild(mk('p', 'mo-msg soft', 'রাইডার কনফার্ম হয়েছে। কেনাকাটা শুরুর আগে অগ্রিম দিন। কোনটা দেবেন বেছে নিন:'));
-      const charge = Number(R.final_price) || 0;
-      const full = charge + (Number(R.items_total) || 0);
+      const am = advanceAmounts();
+      const two = mk('div', 'mo-2');
+      [['charge', 'শুধু ডেলিভারি চার্জ', am.charge, 'mo-btn big'], ['full', 'ফুল পেমেন্ট', am.full, 'mo-btn big navy']].forEach((o) => {
+        const b = mk('button', o[3]);
+        b.type = 'button';
+        b.appendChild(mk('span', 'mo-bt', o[1]));
+        b.appendChild(mk('span', 'mo-bv', taka(o[2])));
+        b.addEventListener('click', () => { local.mode = o[0]; local.amt = String(o[2]); local.payOpen = true; render(); });
+        two.appendChild(b);
+      });
+      c.appendChild(two);
+      c.appendChild(mk('p', 'mo-note', 'শুধু চার্জ দিলে বাকি সব ডেলিভারিতে (COD)। ফুল পেমেন্টে জিনিসের দামসহ, বাকি মিলিয়ে নেওয়া হবে।'));
+      return c;
+    }
+
+    function advanceCard() {
+      const wrapEl = document.createDocumentFragment();
+      const am = advanceAmounts();
+      const cur = local.mode === 'full' ? am.full : am.charge;
+      const hero = mk('section', 'mo-card mo-hero');
+      hero.appendChild(mk('div', 'mo-hero-s', 'রাইডার কনফার্ম হয়েছে · কমপক্ষে পাঠান'));
+      hero.appendChild(mk('div', 'mo-hero-v', taka(am.charge)));
+      hero.appendChild(mk('div', 'mo-hero-s', 'ডেলিভারি চার্জ' + (R.order_no ? ' · অর্ডার #' + R.order_no : '')));
+      wrapEl.appendChild(hero);
+
+      const c = mk('section', 'mo-card');
+      const back = mk('button', 'mo-link', '← অগ্রিমের অপশনে ফিরুন');
+      back.type = 'button'; back.style.marginTop = '0';
+      back.addEventListener('click', () => { local.payOpen = false; render(); });
+      c.appendChild(back);
+      c.appendChild(mk('div', 'mo-h', 'কতটা অগ্রিম দেবেন?'));
       const opts = mk('div', 'mo-opts');
       [
-        ['charge', 'শুধু ডেলিভারি চার্জ', taka(charge) + ' — বাকি টাকা জিনিস হাতে পেয়ে'],
-        ['full', 'ফুল পেমেন্ট', 'আনুমানিক ' + taka(full) + ' — পার্থক্য থাকলে ডেলিভারিতে মিলিয়ে নেওয়া হবে'],
+        ['charge', 'শুধু ডেলিভারি চার্জ', 'বাকি সব ডেলিভারিতে (COD)', am.charge],
+        ['full', 'ফুল পেমেন্ট', 'জিনিসের দামসহ, বাকি মিলিয়ে নেওয়া হবে', am.full],
       ].forEach((o) => {
         const b = mk('button', 'mo-opt');
         b.type = 'button';
         b.setAttribute('aria-pressed', local.mode === o[0] ? 'true' : 'false');
-        b.appendChild(mk('b', null, o[1]));
-        b.appendChild(mk('span', null, o[2]));
-        b.addEventListener('click', () => { local.mode = o[0]; const a = $('moAmt'); if (a) a.value = String(o[0] === 'charge' ? charge : full); markOpts(opts); });
+        const l = mk('span'); l.style.flex = '1';
+        l.appendChild(mk('b', null, o[1]));
+        l.appendChild(mk('span', null, o[2]));
+        b.appendChild(l);
+        b.appendChild(mk('span', 'mo-ov', taka(o[3])));
+        b.addEventListener('click', () => { local.mode = o[0]; local.amt = String(o[3]); const a = $('moAmt'); if (a) a.value = local.amt; markOpts(opts); });
         opts.appendChild(b);
       });
       c.appendChild(opts);
 
-      c.appendChild(mk('label', 'mo-lbl', 'কোন মাধ্যমে পাঠিয়েছেন'));
       const chips = mk('div', 'mo-chips');
-      [['bkash', 'bKash'], ['nagad', 'Nagad'], ['rocket', 'Rocket'], ['other', 'অন্য']].forEach((m) => {
+      [['bkash', 'bKash'], ['nagad', 'Nagad']].forEach((m) => {
         const b = mk('button', 'mo-chip', m[1]);
         b.type = 'button';
         b.setAttribute('aria-pressed', local.method === m[0] ? 'true' : 'false');
@@ -235,18 +318,25 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       fillPayInfo(payInfo);
       c.appendChild(payInfo);
 
-      c.appendChild(mk('label', 'mo-lbl', 'কত টাকা পাঠিয়েছেন'));
+      c.appendChild(mk('label', 'mo-lbl', 'আপনি কত টাকা পাঠিয়েছেন? (৳)'));
       const amt = mk('input', 'mo-in'); amt.id = 'moAmt'; amt.type = 'number'; amt.min = '1'; amt.inputMode = 'numeric';
-      amt.value = String(local.mode === 'charge' ? charge : full);
+      amt.value = local.amt !== undefined ? local.amt : String(cur);
       amt.setAttribute('aria-label', 'পাঠানো টাকা');
+      amt.addEventListener('input', () => { local.amt = amt.value; });
       c.appendChild(amt);
 
-      c.appendChild(mk('label', 'mo-lbl', 'TrxID অথবা প্রেরক নম্বরের শেষ ৪ ডিজিট (যেকোনো একটা বাধ্যতামূলক)'));
-      const two = mk('div', 'mo-2');
-      const trx = mk('input', 'mo-in'); trx.id = 'moTrx'; trx.placeholder = 'TrxID'; trx.maxLength = 20; trx.autocomplete = 'off'; trx.setAttribute('aria-label', 'TrxID');
-      const l4 = mk('input', 'mo-in'); l4.id = 'moL4'; l4.placeholder = 'শেষ ৪ ডিজিট'; l4.maxLength = 4; l4.inputMode = 'numeric'; l4.setAttribute('aria-label', 'প্রেরক নম্বরের শেষ ৪ ডিজিট');
-      two.appendChild(trx); two.appendChild(l4);
-      c.appendChild(two);
+      c.appendChild(mk('label', 'mo-lbl', 'ট্রানজেকশন আইডি (TrxID)'));
+      const trx = mk('input', 'mo-in'); trx.id = 'moTrx'; trx.placeholder = 'যেমন: 8N7A6D5E4C'; trx.maxLength = 20; trx.autocomplete = 'off'; trx.setAttribute('aria-label', 'TrxID');
+      trx.value = local.trx || '';
+      trx.addEventListener('input', () => { local.trx = trx.value; });
+      c.appendChild(trx);
+      c.appendChild(mk('div', 'mo-or', 'অথবা'));
+      c.appendChild(mk('label', 'mo-lbl', 'প্রেরক নম্বরের শেষ ৪ ডিজিট'));
+      const l4 = mk('input', 'mo-in'); l4.id = 'moL4'; l4.placeholder = 'যেমন: 1234'; l4.maxLength = 4; l4.inputMode = 'numeric'; l4.setAttribute('aria-label', 'প্রেরক নম্বরের শেষ ৪ ডিজিট');
+      l4.value = local.l4 || '';
+      l4.addEventListener('input', () => { local.l4 = l4.value; });
+      c.appendChild(l4);
+      c.appendChild(mk('p', 'mo-note', 'TrxID বা শেষ ৪ ডিজিট, যেকোনো একটা দিতেই হবে।'));
 
       c.appendChild(mk('label', 'mo-lbl', 'স্ক্রিনশট (ঐচ্ছিক)'));
       const file = mk('input', 'mo-in'); file.id = 'moShot'; file.type = 'file'; file.accept = 'image/*'; file.setAttribute('aria-label', 'পেমেন্টের স্ক্রিনশট');
@@ -259,7 +349,8 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       btn.addEventListener('click', submitPayment);
       c.appendChild(btn);
       c.appendChild(mk('p', 'mo-note', 'অ্যাডমিন যাচাই করার পর রাইডার কেনাকাটা শুরু করবে।'));
-      return c;
+      wrapEl.appendChild(c);
+      return wrapEl;
     }
     function markOpts(box) {
       const labels = ['charge', 'full'];
@@ -268,11 +359,20 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     function fillPayInfo(box) {
       const num = local.method === 'bkash' ? settings.market_payment_bkash : local.method === 'nagad' ? settings.market_payment_nagad : '';
       if (num) {
-        box.appendChild(document.createTextNode('এই নম্বরে Send Money করুন: '));
-        box.appendChild(mk('b', null, num));
-        box.appendChild(document.createElement('br'));
+        box.appendChild(mk('div', 'mo-pay-s', 'এই নম্বরে Send Money করুন'));
+        const r = mk('div', 'mo-pay-r');
+        r.appendChild(mk('b', 'mo-pay-n', num));
+        const cp = mk('button', 'mo-copy', 'কপি');
+        cp.type = 'button';
+        cp.addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(String(num)); cp.textContent = 'কপি হয়েছে'; }
+          catch (e) { cp.textContent = 'নম্বর টিপে ধরুন'; }
+          setTimeout(() => { cp.textContent = 'কপি'; }, 2000);
+        });
+        r.appendChild(cp);
+        box.appendChild(r);
       }
-      box.appendChild(document.createTextNode(settings.market_payment_note || 'Send Money করুন, তারপর TrxID বা প্রেরক নম্বরের শেষ ৪ ডিজিট দিন।'));
+      box.appendChild(mk('div', 'mo-pay-s', settings.market_payment_note || 'Send Money করুন, তারপর TrxID বা প্রেরক নম্বরের শেষ ৪ ডিজিট দিন।'));
     }
     function showErr(m) { const e = $('moErr'); if (!e) return; e.textContent = m || ''; e.hidden = !m; }
 
@@ -652,7 +752,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       const er = mk('p', 'mo-err'); er.hidden = true; c.appendChild(er);
       const fail = (m) => { er.textContent = m; er.hidden = false; };
       if (!picked && !isDel) {
-        const b = mk('button', 'mo-btn', 'পিকআপ সম্পন্ন হয়েছে'); b.type = 'button';
+        const b = mk('button', 'mo-btn', contracted ? 'পণ্য নিয়েছি' : 'টাকা মিটিয়েছি, পণ্য নিয়েছি'); b.type = 'button';
         tapTwice(b, 'আবার চাপুন, নিশ্চিত?', withBusy(async (btn, orig) => {
           const { error } = await markPickupDone({ requestId: R.id });
           if (error) { fail(String(error)); btn.disabled = false; btn.textContent = orig; return; }
@@ -731,7 +831,6 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       $('moTitle').textContent = R.order_no ? 'অর্ডার ' + R.order_no : 'অর্ডার';
       frag.appendChild(stepsCard());
       if ((R.status === 'confirmed' || R.status === 'delivered') && contact) frag.appendChild(contactCard(role === 'customer' ? 'আপনার রাইডার' : 'কাস্টমার'));
-      frag.appendChild(detailsCard());
       const st = R.market_stage || 'awaiting_advance';
 
       if (R.status === 'cancelled') {
@@ -761,7 +860,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
           : 'এই অর্ডার এখনো কনফার্ম হয়নি।'));
       } else if (role === 'customer') {
         if (!R.advance_verified && (st === 'awaiting_advance' || st === 'payment_mismatch')) {
-          frag.appendChild(advanceCard());
+          if (local.payOpen) frag.appendChild(advanceCard()); else frag.appendChild(advanceChoiceCard());
         } else if (st === 'advance_submitted') {
           frag.appendChild(infoCard('অগ্রিম যাচাই চলছে', 'আপনার পেমেন্ট জমা হয়েছে। অ্যাডমিন যাচাই করলে নোটিফিকেশন পাবেন।'));
         } else if (st === 'advance_verified') {
@@ -789,10 +888,9 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
         } else if (st === 'quote_confirmed') {
           const c = mk('section', 'mo-card');
           c.appendChild(mk('div', 'mo-h', 'এখন করণীয়'));
-          c.appendChild(mk('p', 'mo-msg', contracted
-            ? 'এটা চুক্তিবদ্ধ দোকান: জিনিস নিন, দোকানে টাকা দিতে হবে না (কোম্পানি পরে মেটাবে)।'
-            : 'দোকানে ' + taka(R.purchase_total) + ' মিটিয়ে জিনিস নিন (আপনার টাকায়)।'));
-          c.appendChild(row('কাস্টমার থেকে নিতে হবে (COD)', taka(Math.max(Number(R.cod_due) || 0, 0)), 'tot'));
+          c.appendChild(mk('p', 'mo-msg', contracted ? 'দোকানে টাকা দিতে হবে না, শুধু পণ্য নিন' : 'দোকানে পুরো টাকা মিটিয়ে পণ্য নিন'));
+          c.appendChild(row(contracted ? 'দোকানে দেবেন' : 'দোকানে মেটাবেন', taka(contracted ? 0 : R.purchase_total)));
+          c.appendChild(row('কাস্টমার থেকে নেবেন (COD)', taka(Math.max(Number(R.cod_due) || 0, 0)), 'tot'));
           if (Number(R.cod_due) < 0) c.appendChild(row('কাস্টমারকে ফেরত দিতে হবে', taka(Math.abs(Number(R.cod_due)))));
           frag.appendChild(c);
           frag.appendChild(riderRunCard());
@@ -800,6 +898,9 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
         }
         frag.appendChild(reportCard());
       }
+      const det = detailsCard();
+      const softs = frag.querySelectorAll('.mo-soft');
+      if (softs.length) softs[softs.length - 1].before(det); else frag.appendChild(det);
       body.textContent = '';
       body.appendChild(frag);
     }
