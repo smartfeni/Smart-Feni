@@ -92,7 +92,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     const $ = (id) => document.getElementById(id);
     const TABS = [
       ['payments', 'পেমেন্ট'], ['shops', 'শপ হিসাব'], ['riders', 'রাইডার হিসাব'],
-      ['profit', 'লাভ-লস'], ['online', 'অনলাইন শপ'], ['settings', 'সেটিংস'], ['check', 'চেকলিস্ট'],
+      ['profit', 'লাভ-লস'], ['online', 'সব শপ'], ['settings', 'সেটিংস'], ['check', 'চেকলিস্ট'],
     ];
     let tab = 'payments';
     let sub = {};       // প্রতি ট্যাবের সাব-ফিল্টার
@@ -423,7 +423,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     // ============ ৫. অনলাইন শপ ============
     async function drawOnline(body) {
-      body.appendChild(mk('p', 'dmk-muted', 'অনলাইন/১–৩ দিনের শপ মার্কেটে দেখাতে ক্যাটাগরি বসান (সর্বোচ্চ ৩টা, যেমন গ্রোসারি + ওষুধ)। যে ক্যাটাগরি দিয়ে ঢুকবে, শপ সেই ক্যাটাগরিতেই দেখাবে। শুধু অ্যাডমিন বসাতে পারে।'));
+      body.appendChild(mk('p', 'dmk-muted', 'সব শপ (ইনস্ট্যান্ট ও ১–৩ দিন) এক জায়গায়, ফিল্টার দিয়ে আলাদা করা যায়। মার্কেটে দেখাতে ক্যাটাগরি বসান (সর্বোচ্চ ৩টা, যেমন গ্রোসারি + ওষুধ)। যে ক্যাটাগরি দিয়ে ঢুকবে, শপ সেই ক্যাটাগরিতেই দেখাবে। শুধু অ্যাডমিন বসাতে পারে।'));
       const [{ data: shops, error }, { data: cats }, { data: inst }] = await Promise.all([
         supabase.from('shops').select('id, name, is_active, is_published, is_test, market_category_id, market_category_ids').order('name', { ascending: true }).limit(400),
         supabase.from('delivery_market_categories').select('id, name').eq('is_active', true).order('sort_order', { ascending: true }),
@@ -432,8 +432,11 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       if (error) { body.appendChild(mk('p', 'dmk-muted', 'লোড করা যায়নি।')); report(error, 'dmk-online'); return; }
       const instantIds = new Set((inst || []).map((x) => x.id));
       const idsOf = (s) => (Array.isArray(s.market_category_ids) && s.market_category_ids.length ? s.market_category_ids : (s.market_category_id ? [s.market_category_id] : []));
-      body.appendChild(subRow('onf', [['all', 'সব'], ['none', 'ক্যাটাগরি নেই'], ['set', 'ক্যাটাগরি আছে']], 'all'));
-      let list = (shops || []).filter((s) => !instantIds.has(s.id));
+      body.appendChild(subRow('onf', [['all', 'সব'], ['instant', 'ইনস্ট্যান্ট'], ['days', '১–৩ দিন'], ['test', 'টেস্ট'], ['none', 'ক্যাটাগরি নেই'], ['set', 'ক্যাটাগরি আছে']], 'all'));
+      let list = (shops || []).slice();
+      if ((sub.onf || 'all') === 'instant') list = list.filter((s) => instantIds.has(s.id));
+      if ((sub.onf || 'all') === 'days') list = list.filter((s) => !instantIds.has(s.id));
+      if ((sub.onf || 'all') === 'test') list = list.filter((s) => s.is_test);
       if ((sub.onf || 'all') === 'none') list = list.filter((s) => !idsOf(s).length);
       if ((sub.onf || 'all') === 'set') list = list.filter((s) => idsOf(s).length);
       if (!list.length) { body.appendChild(mk('p', 'dmk-muted', 'কিছু নেই।')); return; }
@@ -442,9 +445,10 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const c = mk('div', 'dmk-card');
         const r1 = mk('div', 'dmk-r1');
         r1.appendChild(mk('span', null, s.name));
-        r1.appendChild(mk('span', 'dmk-chip warn', '১–৩ দিন'));
+        r1.appendChild(mk('span', 'dmk-chip ' + (instantIds.has(s.id) ? 'ok' : 'warn'), instantIds.has(s.id) ? 'ইনস্ট্যান্ট' : '১–৩ দিন'));
+        if (s.is_test) r1.appendChild(mk('span', 'dmk-chip', 'টেস্ট'));
         c.appendChild(r1);
-        if (!s.is_active || !s.is_published) c.appendChild(mk('div', 'dmk-r2', 'এই শপ এখন সবার জন্য চালু নয়।'));
+        if (!instantIds.has(s.id) && (!s.is_active || !s.is_published)) c.appendChild(mk('div', 'dmk-r2', 'এই শপ এখন সবার জন্য চালু নয়।'));
         const cur = idsOf(s).slice(0, 3);
         const sels = [];
         for (let n = 0; n < 3; n++) {
@@ -457,7 +461,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
             const vals = sels.map((x) => x.value).filter(Boolean);
             const uniq = vals.filter((v, i) => vals.indexOf(v) === i);
             sels.forEach((x) => { x.disabled = true; });
-            const { error: e2 } = await supabase.from('shops').update({ market_category_ids: uniq }).eq('id', s.id);
+            let { error: e2 } = await supabase.from('shops').update({ market_category_ids: uniq }).eq('id', s.id);
+            if (!e2 && instantIds.has(s.id)) { const r2 = await supabase.from('delivery_shops').update({ market_category_ids: uniq }).eq('id', s.id); e2 = r2.error; }
             sels.forEach((x) => { x.disabled = !canEdit; });
             if (e2) { toast(msgOf(e2), 'error'); sels.forEach((x, i) => { x.value = cur[i] || ''; }); return; }
             s.market_category_ids = uniq;
