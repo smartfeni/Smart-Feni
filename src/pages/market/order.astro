@@ -7,7 +7,7 @@
 //             অ্যাডমিনের যাচাই → রাইডারের পাঠানো কেনার দাম ইনবক্সে কনফার্ম → ডেলিভারি (COD বাকি)
 //   রাইডার:  অগ্রিম যাচাইয়ের পর কেনার দাম (একাধিক এমাউন্ট + ঐচ্ছিক রিসিট) পাঠানো, পরে টাকা মেটানোর নির্দেশ
 // রাইডার বাছাই/অফার, চ্যাট, পিকআপ/ডেলিভারি ধাপ বিদ্যমান পেজেই (my-orders, delivery-hero)।
-// সব লেখা RPC দিয়ে (market_submit_payment, market_rider_submit_quote, market_customer_decide_quote);
+// সব লেখা RPC দিয়ে (market_submit_payment, market_rider_submit_quote);
 // সব টেক্সট textContent দিয়ে (এস্কেপ)।
 // ============================================================
 
@@ -22,7 +22,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <div class="mo-page">
     <header class="mo-top">
-      <a class="mo-back" href="/my-orders" aria-label="আমার অর্ডার"><i class="fas fa-arrow-left" aria-hidden="true"></i></a>
+      <a class="mo-back" href="/market/orders" aria-label="আমার অর্ডার"><i class="fas fa-arrow-left" aria-hidden="true"></i></a>
       <h1 id="moTitle">অর্ডার</h1>
     </header>
     <div id="moBody"></div>
@@ -156,26 +156,26 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     function report(err, where) { if (window.SFReportError) { try { window.SFReportError(err, where); } catch (e) {} } }
 
     // ---------- ধাপ ----------
-    // ৬ ধাপ (ডিজাইন আর্টিফেক্ট): অর্ডার দিয়েছেন → রাইডার কনফার্ম → অগ্রিম পেমেন্ট → দাম নিশ্চিত করুন → কেনা ও ডেলিভারি → পৌঁছেছে
-    const STEPS = ['অর্ডার দিয়েছেন', 'রাইডার কনফার্ম হয়েছে', 'অগ্রিম পেমেন্ট', 'দাম নিশ্চিত করুন', 'কেনা ও ডেলিভারি', 'পৌঁছেছে'];
-    // এখনকার ধাপ (০-ভিত্তিক); ৬ = সব শেষ; -১ = বাতিল
+    // ৫ ধাপ (দাম নিশ্চিত করার আলাদা ধাপ নেই, SF-এর সিদ্ধান্ত): অর্ডার দিয়েছেন → রাইডার কনফার্ম → পেমেন্ট → কেনা ও ডেলিভারি → পৌঁছেছে
+    const STEPS = ['অর্ডার দিয়েছেন', 'রাইডার কনফার্ম হয়েছে', 'পেমেন্ট', 'কেনা ও ডেলিভারি', 'পৌঁছেছে'];
+    // এখনকার ধাপ (০-ভিত্তিক); ৫ = সব শেষ; -১ = বাতিল
     function stepState() {
       if (R.status === 'cancelled') return { cur: -1, head: 'অর্ডার বাতিল হয়েছে' };
-      if (R.status === 'completed') return { cur: 6, head: 'ডেলিভারি সম্পন্ন হয়েছে' };
-      if (R.status === 'disputed') return { cur: 4, head: 'সমস্যা জানানো হয়েছে' };
-      if (R.status === 'delivered') return { cur: 5, head: 'ডেলিভারি হয়েছে, সম্পন্নের অপেক্ষা' };
+      if (R.status === 'completed') return { cur: 5, head: 'ডেলিভারি সম্পন্ন হয়েছে' };
+      if (R.status === 'disputed') return { cur: 3, head: 'সমস্যা জানানো হয়েছে' };
+      if (R.status === 'delivered') return { cur: 4, head: 'ডেলিভারি হয়েছে, সম্পন্নের অপেক্ষা' };
       const cust = role === 'customer';
       if (R.status !== 'confirmed') {
         const offers = cust && (R.status === 'open' || R.status === 'negotiating') && R.publish_status === 'published';
         return { cur: 1, head: offers ? 'অফার দেখে রাইডার কনফার্ম করুন' : 'রাইডারের অপেক্ষা' };
       }
       const st = R.market_stage || 'awaiting_advance';
-      if (st === 'advance_submitted') return { cur: 2, head: cust ? 'অগ্রিম যাচাই চলছে' : 'অগ্রিম যাচাই চলছে, কিছু কিনবেন না' };
-      if (st === 'payment_mismatch') return { cur: 2, head: 'অগ্রিমের অঙ্ক মেলেনি' };
-      if (st === 'advance_verified') return { cur: 3, head: cust ? 'রাইডার কেনার দাম পাঠাবে' : 'কেনার দাম পাঠান' };
-      if (st === 'quote_sent') return { cur: 3, head: cust ? 'দাম নিশ্চিত করুন' : 'কাস্টমারের কনফার্মের অপেক্ষা' };
-      if (st === 'quote_confirmed') return { cur: 4, head: R.pickup_done_at ? 'জিনিস নিয়ে পথে আছে' : (cust ? 'রাইডার জিনিস সংগ্রহ করছে' : 'জিনিস কিনে পিকআপ করুন') };
-      return { cur: 2, head: cust ? 'অগ্রিম পেমেন্ট দিন' : 'কাস্টমারের অগ্রিমের অপেক্ষা' };
+      const any = R.order_type === 'anything';
+      if (st === 'advance_submitted') return { cur: 2, head: cust ? 'পেমেন্ট যাচাই চলছে' : 'পেমেন্ট যাচাই চলছে, কিছু কিনবেন না' };
+      if (st === 'payment_mismatch') return { cur: 2, head: 'পেমেন্টের অঙ্ক মেলেনি' };
+      if (st === 'quote_confirmed') return { cur: 3, head: R.pickup_done_at ? 'জিনিস নিয়ে পথে আছে' : (cust ? 'রাইডার জিনিস সংগ্রহ করছে' : 'জিনিস কিনে পিকআপ করুন') };
+      if (any && R.purchase_total == null) return { cur: 2, head: cust ? 'রাইডার পণ্যের দাম পাঠাবে' : 'পণ্যের দাম পাঠান' };
+      return { cur: 2, head: cust ? 'ডেলিভারি চার্জ বা ফুল পেমেন্ট দিন' : 'কাস্টমারের পেমেন্টের অপেক্ষা' };
     }
 
     function stepsCard() {
@@ -247,7 +247,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     // ---------- কাস্টমার: অগ্রিম (আর্টিফেক্ট: ট্র্যাকিংয়ে দুই বাটন → পেমেন্ট পেজ) ----------
     function advanceAmounts() {
       const charge = Number(R.final_price) || 0;
-      const full = charge + (Number(R.items_total) || 0);
+      const full = charge + (R.order_type === 'anything' ? (Number(R.purchase_total) || 0) : (Number(R.items_total) || 0));
       return { charge, full };
     }
     function advanceChoiceCard() {
@@ -425,37 +425,8 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
           getSignedUrl(supabase, 'delivery-proofs', q.receipt_url).then((u) => { if (u) img.src = u; });
           c.appendChild(img);
         }
-        if (forCustomer && q.status === 'pending') {
-          const adv = Number(R.advance_verified_amount) || 0;
-          const charge = Number(R.final_price) || 0;
-          const cod = Number(q.total) + charge - adv;
-          c.appendChild(mk('div', 'mo-h', 'হিসাব'));
-          c.appendChild(row('কেনার দাম', taka(q.total)));
-          c.appendChild(row('ডেলিভারি চার্জ', taka(charge)));
-          c.appendChild(row('অগ্রিম দেওয়া (যাচাই-করা)', '− ' + taka(adv)));
-          c.appendChild(row(cod >= 0 ? 'ডেলিভারিতে দিতে হবে (COD)' : 'ডেলিভারিতে ফেরত পাবেন', taka(Math.abs(cod)), 'tot'));
-          const ok = mk('button', 'mo-btn', 'কনফার্ম, কিনুন');
-          ok.type = 'button';
-          ok.addEventListener('click', () => decide(true));
-          const no = mk('button', 'mo-btn alt', 'এই দাম মানছি না');
-          no.type = 'button';
-          no.addEventListener('click', () => decide(false));
-          c.appendChild(ok); c.appendChild(no);
-          c.appendChild(mk('p', 'mo-note', 'কনফার্ম করলে রাইডার দোকানে টাকা মিটিয়ে জিনিস আনবে। না মানলে রাইডারকে আবার দাম পাঠাতে হবে।'));
-        }
       }
       return c;
-    }
-
-    async function decide(accept) {
-      if (busy || !quote) return;
-      busy = true;
-      try {
-        const { error } = await supabase.rpc('market_customer_decide_quote', { p_quote: quote.id, p_accept: accept });
-        if (error) { toast(msgOf(error), 'error'); report(error, 'market-decide-quote'); return; }
-        toast(accept ? 'দাম কনফার্ম হয়েছে।' : 'রাইডারকে জানানো হয়েছে।', 'success');
-        await load();
-      } finally { busy = false; }
     }
 
     // ---------- রাইডার: দাম পাঠানোর ফর্ম ----------
@@ -463,8 +434,8 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     function riderQuoteForm() {
       const c = mk('section', 'mo-card');
       c.appendChild(mk('div', 'mo-h', 'কেনার দাম পাঠান'));
-      if (quote && quote.status === 'rejected') c.appendChild(mk('p', 'mo-err', 'কাস্টমার আগের দাম মানেনি। কাস্টমারের সাথে কথা বলে সঠিক দাম পাঠান।'));
-      c.appendChild(mk('p', 'mo-msg soft', 'দোকানে যা দাম দিতে হবে সেটা লিখুন। একাধিক এমাউন্ট হলে আলাদা লাইনে (যেমন: খাবার, প্যাকেজিং)। রিসিটের ছবি ঐচ্ছিক।'));
+      if (R.purchase_total != null) c.appendChild(mk('p', 'mo-msg soft', 'আগে পাঠানো দাম: ' + taka(R.purchase_total) + '। ভুল হলে নতুন দাম পাঠান (কাস্টমারের পেমেন্টের আগে পর্যন্ত)।'));
+      c.appendChild(mk('p', 'mo-msg soft', 'পণ্যের মোট দাম লিখুন। কাস্টমার এই দাম দেখেই ডেলিভারি চার্জ বা ফুল পেমেন্ট দেবে, আলাদা কনফার্ম লাগবে না। একাধিক এমাউন্ট হলে আলাদা লাইনে (যেমন: খাবার, প্যাকেজিং)। রিসিটের ছবি ঐচ্ছিক।'));
       const box = mk('div'); box.id = 'moLines';
       c.appendChild(box);
       const add = mk('button', 'mo-add', '+ আরেকটা এমাউন্ট');
@@ -478,7 +449,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       c.appendChild(f);
       const err = mk('p', 'mo-err'); err.id = 'moErr'; err.hidden = true;
       c.appendChild(err);
-      const btn = mk('button', 'mo-btn', 'কাস্টমারকে দাম পাঠান');
+      const btn = mk('button', 'mo-btn', 'দাম পাঠান');
       btn.type = 'button';
       btn.addEventListener('click', submitQuote);
       c.appendChild(btn);
@@ -529,7 +500,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
         try { rc = await uploadShot('moRcpt', 'rcpt'); } catch (e) { showErr(e.message); busy = false; return; }
         const { error } = await supabase.rpc('market_rider_submit_quote', { p_request: reqId, p_lines: clean, p_receipt: rc });
         if (error) { showErr(msgOf(error)); report(error, 'market-submit-quote'); return; }
-        toast('কাস্টমারকে দাম পাঠানো হয়েছে।', 'success');
+        toast('দাম পাঠানো হয়েছে। কাস্টমার এবার পেমেন্ট দেবে।', 'success');
         lines = [{ label: '', amount: '' }];
         await load();
       } finally { busy = false; }
@@ -859,32 +830,32 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
           ? 'অর্ডার যাচাই ও রাইডারের অফারের অপেক্ষায় আছে। অফার এলে এখানেই দেখতে পাবেন, সেখান থেকে রাইডার কনফার্ম করবেন। তারপর অগ্রিম দিতে হবে।'
           : 'এই অর্ডার এখনো কনফার্ম হয়নি।'));
       } else if (role === 'customer') {
+        const noPrice = R.order_type === 'anything' && R.purchase_total == null;
         if (!R.advance_verified && (st === 'awaiting_advance' || st === 'payment_mismatch')) {
-          if (local.payOpen) frag.appendChild(advanceCard()); else frag.appendChild(advanceChoiceCard());
+          if (noPrice) frag.appendChild(infoCard('রাইডার দাম পাঠাবে', 'রাইডার পণ্যের দাম পাঠালে এখানে দেখতে পাবেন, তারপর ডেলিভারি চার্জ বা ফুল পেমেন্ট দেবেন।'));
+          else if (local.payOpen) frag.appendChild(advanceCard()); else frag.appendChild(advanceChoiceCard());
+          if (R.order_type === 'anything' && !noPrice) frag.appendChild(await quoteCard(true));
         } else if (st === 'advance_submitted') {
-          frag.appendChild(infoCard('অগ্রিম যাচাই চলছে', 'আপনার পেমেন্ট জমা হয়েছে। অ্যাডমিন যাচাই করলে নোটিফিকেশন পাবেন।'));
-        } else if (st === 'advance_verified') {
-          frag.appendChild(infoCard('কেনাকাটা চলছে', 'অগ্রিম যাচাই হয়েছে (' + taka(R.advance_verified_amount) + ')। রাইডার দোকানে গিয়ে কেনার দাম পাঠালে এখানে দেখতে পাবেন ও কনফার্ম করবেন।'));
-          if (quote && quote.status === 'rejected') frag.appendChild(infoCard(null, 'আপনি আগের দাম মানেননি। রাইডার আবার দাম পাঠাবে।'));
-        } else if (st === 'quote_sent') {
-          frag.appendChild(await quoteCard(true));
+          frag.appendChild(infoCard('পেমেন্ট যাচাই চলছে', 'আপনার পেমেন্ট জমা হয়েছে। অ্যাডমিন যাচাই করলে নোটিফিকেশন পাবেন।'));
         } else if (st === 'quote_confirmed') {
-          const c = infoCard(R.pickup_done_at ? 'জিনিস নিয়ে পথে আছে' : 'দাম কনফার্ম হয়েছে', R.pickup_done_at ? 'রাইডার জিনিস নিয়ে আপনার ঠিকানার পথে আছে।' : 'রাইডার দোকানে টাকা মিটিয়ে জিনিস নিয়ে আসছে।');
+          const c = infoCard(R.pickup_done_at ? 'জিনিস নিয়ে পথে আছে' : 'পেমেন্ট যাচাই হয়েছে', R.pickup_done_at ? 'রাইডার জিনিস নিয়ে আপনার ঠিকানার পথে আছে।' : 'রাইডার দোকান থেকে জিনিস নিয়ে আসছে।');
           c.appendChild(row('কেনার দাম', taka(R.purchase_total)));
           c.appendChild(row(Number(R.cod_due) >= 0 ? 'ডেলিভারিতে দিতে হবে (COD)' : 'ডেলিভারিতে ফেরত পাবেন', taka(Math.abs(Number(R.cod_due) || 0)), 'tot'));
           frag.appendChild(c);
         }
         frag.appendChild(reportCard());
       } else if (role === 'rider') {
-        if (!R.advance_verified) {
-          frag.appendChild(infoCard('অগ্রিমের অপেক্ষা', st === 'advance_submitted'
-            ? 'কাস্টমার অগ্রিম দিয়েছে, অ্যাডমিন যাচাই করছে। যাচাই হলে আপনি নোটিফিকেশন পাবেন। তার আগে দোকানে কিছু কিনবেন না।'
-            : 'কাস্টমার অগ্রিম দিচ্ছে। যাচাই হলে নোটিফিকেশন পাবেন। তার আগে দোকানে কিছু কিনবেন না।'));
-        } else if (st === 'advance_verified') {
+        if (st === 'advance_submitted') {
+          frag.appendChild(infoCard('পেমেন্ট যাচাই চলছে', 'কাস্টমার পেমেন্ট দিয়েছে, অ্যাডমিন যাচাই করছে। যাচাই হলে নোটিফিকেশন পাবেন। তার আগে দোকানে কিছু কিনবেন না।'));
+          if (R.purchase_total != null) frag.appendChild(await quoteCard(false));
+        } else if (R.order_type === 'anything' && st !== 'quote_confirmed') {
+          if (R.purchase_total != null) {
+            frag.appendChild(infoCard('কাস্টমারের পেমেন্টের অপেক্ষা', 'পণ্যের দাম পাঠানো হয়েছে। কাস্টমার পেমেন্ট দিলে ও যাচাই হলে নোটিফিকেশন পাবেন। তার আগে দোকানে টাকা মেটাবেন না।'));
+            frag.appendChild(await quoteCard(false));
+          }
           frag.appendChild(riderQuoteForm());
-        } else if (st === 'quote_sent') {
-          frag.appendChild(infoCard('কাস্টমারের কনফার্মের অপেক্ষা', 'কাস্টমারকে দাম পাঠানো হয়েছে। কনফার্ম করলে নোটিফিকেশন পাবেন।'));
-          frag.appendChild(await quoteCard(false));
+        } else if (st !== 'quote_confirmed') {
+          frag.appendChild(infoCard('কাস্টমারের পেমেন্টের অপেক্ষা', 'কাস্টমার পেমেন্ট দিচ্ছে। যাচাই হলে নোটিফিকেশন পাবেন। তার আগে দোকানে কিছু কিনবেন না।'));
         } else if (st === 'quote_confirmed') {
           const c = mk('section', 'mo-card');
           c.appendChild(mk('div', 'mo-h', 'এখন করণীয়'));
