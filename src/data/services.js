@@ -8,7 +8,7 @@ export const categories = [
   { id: 'emergency', name: 'ইমার্জেন্সি কন্টাক্ট', icon: 'fa-phone-volume', desc: 'জরুরি যোগাযোগ নম্বর', slug: 'emergency', hidden: true },
   { id: 'blood', name: 'ব্লাড ডোনার', icon: 'fa-droplet', desc: 'রক্তদাতা খোঁজা', slug: 'blood' },
   { id: 'home-food', name: 'হোম মেস ফুড', icon: 'fa-utensils', desc: 'বাসার তৈরি খাবার', slug: 'home-food', hidden: true },
-  { id: 'online-shop', name: 'অনলাইন শপ', icon: 'fa-store', desc: 'হোম মেড পণ্যের অনলাইন বাজার', slug: 'online-shop' },
+  { id: 'online-shop', name: 'অনলাইন শপ', icon: 'fa-store', desc: 'হোম মেড পণ্যের অনলাইন বাজার', slug: 'online-shop', hidden: true }, // কুইক ডেলিভারিতে একীভূত (নভে ২০২৬),
   { id: 'clubs', name: 'ক্লাব সমূহ', icon: 'fa-users', desc: 'ফেনীর ক্লাব ও সংগঠন', slug: 'clubs' },
   { id: 'recycle', name: 'রিসাইকেল মার্কেট', icon: 'fa-rotate-left', desc: 'পুরনো পণ্য কেনাবেচা', slug: 'recycle' },
   { id: 'tuition', name: 'টিউশন খুঁজুন', icon: 'fa-chalkboard-user', desc: 'টিউটর/স্টুডেন্ট খোঁজা', slug: 'tuition' },

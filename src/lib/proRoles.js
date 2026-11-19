@@ -24,7 +24,8 @@ export async function getMyProRoles() {
   if (!session) return { loggedIn: false, roles: [] };
   const { data, error } = await supabase.rpc('get_my_pro_roles');
   if (error) return { loggedIn: true, roles: [], error: error.message };
-  const roles = (Array.isArray(data) ? data : []).filter((r) => r && ROLE_META[r.role]);
+  // 'shop' (পুরনো অনলাইন শপ) বাদ — সেই দোকানগুলো এখন কুইক ডেলিভারির (instant_shop) দোকান
+  const roles = (Array.isArray(data) ? data : []).filter((r) => r && r.role !== 'shop' && ROLE_META[r.role]);
   return { loggedIn: true, roles };
 }
 
