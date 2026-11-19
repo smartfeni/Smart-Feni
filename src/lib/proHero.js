@@ -11,7 +11,7 @@ import { supabase } from './supabase.js';
 const KEY = 'sf_pro_hero_tab';
 
 export const HERO_TABS = {
-  delivery: { label: 'ডিরেক্ট অর্ডার', icon: 'fa-bolt', href: '/pro/hero/delivery' },
+  delivery: { label: 'কুইক ডেলিভারি', icon: 'fa-bolt', href: '/pro/hero/delivery' },
   offline: { label: 'অফলাইন অর্ডার', icon: 'fa-clipboard-list', href: '/pro/hero/offline' },
   ride: { label: 'রাইড', icon: 'fa-motorcycle', href: '/pro/hero/ride' },
 };

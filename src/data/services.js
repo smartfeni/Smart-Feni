@@ -3,7 +3,7 @@ export const categories = [
   { id: 'job', name: 'চাকরির খবর', icon: 'fa-briefcase', desc: 'চাকরির খবর ও আবেদন', slug: 'job' },
   { id: 'repair', name: 'রিপেয়ার সার্ভিস', icon: 'fa-screwdriver-wrench', desc: 'মেরামত সার্ভিস', slug: 'repair' },
   { id: 'car-rental', name: 'গাড়ি ভাড়া সার্ভিস', icon: 'fa-car', desc: 'গাড়ি ভাড়া নেওয়া/দেওয়া', slug: 'car-rental', hidden: true }, // লোকাল রাইডের ভেতরে অপশন (/services/local-ride); পেজ/URL আগের মতোই
-  { id: 'courier', name: 'ডেলিভারি হিরো', icon: 'fa-truck-fast', desc: 'কুরিয়ার ও ডেলিভারি', slug: 'courier' },
+  { id: 'courier', name: 'ডেলিভারি হিরো', icon: 'fa-truck-fast', desc: 'কুরিয়ার ও ডেলিভারি', slug: 'courier', hidden: true }, // কুইক ডেলিভারি চালুর পর কাস্টমারের জন্য লুকানো; পেজ (/services/courier) রাইডার রেজিস্ট্রেশন ও পুরনো লিংকের জন্য থাকছে
   { id: 'local-ride', name: 'লোকাল রাইড', icon: 'fa-van-shuttle', desc: 'সিএনজি, অটো, গাড়ি ও গাড়ি ভাড়া', slug: 'local-ride' },
   { id: 'emergency', name: 'ইমার্জেন্সি কন্টাক্ট', icon: 'fa-phone-volume', desc: 'জরুরি যোগাযোগ নম্বর', slug: 'emergency', hidden: true },
   { id: 'blood', name: 'ব্লাড ডোনার', icon: 'fa-droplet', desc: 'রক্তদাতা খোঁজা', slug: 'blood' },
