@@ -41,6 +41,7 @@ const AREA_BY_SEGMENT = {
   'delivery-orders': 'delivery_orders',
   'delivery-market-payments': 'delivery_orders',
   'delivery-market-accounts': 'delivery_orders',
+  'quick-delivery': 'delivery_orders',
   'blood-requests': 'blood',
   'shop-orders': 'shops',
   'delivery-disputes': 'disputes',
