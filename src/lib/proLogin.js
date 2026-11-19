@@ -8,6 +8,7 @@
 // ============================================================
 
 import { supabase } from './supabase.js';
+import { signInWithRecoveryEmail } from './emailLogin.js';
 
 const LAST_ROLE_KEY = 'sf_pro_last_role';
 
@@ -36,25 +37,22 @@ export async function loginWithIdentifier(identifier, password) {
   const id = String(identifier || '').trim();
   if (!id || !password) return { ok: false, error: 'ফোন নম্বর/ইমেইল ও পাসওয়ার্ড দিন' };
 
-  let loginEmail;
+  let data;
+  let error;
   if (id.indexOf('@') !== -1) {
-    const { data: resolved } = await supabase.rpc('auth_resolve_login', { p_email: id });
-    if (!resolved || resolved.status === 'none' || (!resolved.phone && resolved.status !== 'multiple')) {
-      return { ok: false, error: 'এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি' };
-    }
-    if (resolved.status === 'multiple') {
-      return { ok: false, error: 'একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন' };
-    }
-    loginEmail = phoneToEmail(resolved.phone);
+    // ইমেইল → ফোন খোঁজা ও পাসওয়ার্ড যাচাই সার্ভারে (/api/auth/email-login); ফোন নম্বর ব্রাউজারে আসে না
+    const emailRes = await signInWithRecoveryEmail(id, password);
+    if (emailRes.errorMessage) return { ok: false, error: emailRes.errorMessage };
+    data = emailRes.data;
+    error = null;
   } else {
-    loginEmail = phoneToEmail(id);
-  }
+    const loginEmail = phoneToEmail(id);
+    ({ data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password }));
 
-  let { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
-
-  // পুরনো অ্যাকাউন্ট 88… ফরম্যাটে তৈরি — ফলব্যাক
-  if (error && /^01\d{9}@smartfeni\.local$/.test(loginEmail)) {
-    ({ data, error } = await supabase.auth.signInWithPassword({ email: '88' + loginEmail, password }));
+    // পুরনো অ্যাকাউন্ট 88… ফরম্যাটে তৈরি — ফলব্যাক
+    if (error && /^01\d{9}@smartfeni\.local$/.test(loginEmail)) {
+      ({ data, error } = await supabase.auth.signInWithPassword({ email: '88' + loginEmail, password }));
+    }
   }
   if (error || !data || !data.user) {
     return { ok: false, error: 'লগইন ব্যর্থ: ফোন নাম্বার/ইমেইল অথবা পাসওয়ার্ড ভুল' };

@@ -733,6 +733,7 @@ const upazilas = [
 
 <script>
   import { supabase } from '../../lib/supabase.js';
+  import { signInWithRecoveryEmail } from '../../lib/emailLogin.js';
   import { compressImage } from '../../lib/imageCompress.js';
   import { applyPendingReferral } from '../../lib/referral.js';
   import { isNativeApp } from '../../lib/native-bridge.js';
@@ -1121,43 +1122,34 @@ const upazilas = [
 
     setLoading(loginSubmit, true, 'লগইন হচ্ছে...');
 
-    let loginEmail;
+    let data;
+    let error;
 
     if (identifier.includes('@')) {
-      // ইমেইল দিয়ে লগইন — recovery_email দিয়ে আগে ফোন নাম্বার
-      // লুকআপ করে সেই ফোন থেকে বানানো Auth ইমেইল বের করা হচ্ছে
-      const { data: resolved } = await supabase.rpc('auth_resolve_login', {
-        p_email: identifier.trim(),
-      });
-
-      if (!resolved || resolved.status === 'none' || (!resolved.phone && resolved.status !== 'multiple')) {
-        showMessage('এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি');
+      // ইমেইল দিয়ে লগইন — ইমেইল → ফোন খোঁজা ও পাসওয়ার্ড যাচাই সার্ভারে হয়
+      // (/api/auth/email-login), ব্রাউজারে ফোন নম্বর আসে না (অডিট P0, ১৯ নভে)
+      const emailRes = await signInWithRecoveryEmail(identifier, password);
+      if (emailRes.errorMessage) {
+        showMessage(emailRes.errorMessage);
         setLoading(loginSubmit, false);
         return;
       }
-
-      if (resolved.status === 'multiple') {
-        showMessage('একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন');
-        setLoading(loginSubmit, false);
-        return;
-      }
-
-      loginEmail = phoneToEmail(resolved.phone);
+      data = emailRes.data;
+      error = null;
     } else {
-      loginEmail = phoneToEmail(identifier);
-    }
-
-    let { data, error } = await supabase.auth.signInWithPassword({
-      email: loginEmail,
-      password,
-    });
-
-    // পুরনো অ্যাকাউন্ট 880XXXXXXXXXXX@smartfeni.local ফরম্যাটে তৈরি — ফলব্যাক
-    if (error && /^01\d{9}@smartfeni\.local$/.test(loginEmail)) {
+      const loginEmail = phoneToEmail(identifier);
       ({ data, error } = await supabase.auth.signInWithPassword({
-        email: '88' + loginEmail,
+        email: loginEmail,
         password,
       }));
+
+      // পুরনো অ্যাকাউন্ট 880XXXXXXXXXXX@smartfeni.local ফরম্যাটে তৈরি — ফলব্যাক
+      if (error && /^01\d{9}@smartfeni\.local$/.test(loginEmail)) {
+        ({ data, error } = await supabase.auth.signInWithPassword({
+          email: '88' + loginEmail,
+          password,
+        }));
+      }
     }
 
     if (error) {

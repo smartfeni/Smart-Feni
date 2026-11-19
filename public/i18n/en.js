@@ -3378,5 +3378,14 @@ window.SF_I18N_EN = {
 "স্মার্ট ফেনী রাইডার আপনার দোকান থেকে নিয়ে কাস্টমারকে দেবে। ডেলিভারি চার্জ আনুমানিক {} (কাস্টমার দেবেন)। রাইডার কাস্টমার থেকে মোট {} নেবে; পণ্যের টাকা আপনার \"হিসাব\"-এ পাওনা হিসেবে আসবে। পাঠাবেন?": "A Smart Feni rider will collect from your shop and deliver to the customer. Delivery charge approx. {} (paid by the customer). The rider collects a total of {} from the customer; the product money comes to your \"Accounts\" as receivable. Send?",
 "ব্যস্ত মোড — {} পর্যন্ত": "Busy mode — until {}",
 "অর্ডার #{}": "Order #{}",
-"ভাষা": "Language"
+"ভাষা": "Language",
+"অল্প সময়ে অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।": "Too many attempts in a short time. Please try again a little later.",
+"অল্প সময়ে অনেকবার চেষ্টা হয়েছে। এক ঘণ্টা পরে আবার চেষ্টা করুন।": "Too many attempts in a short time. Please try again in an hour.",
+"লগইন ব্যর্থ, আবার চেষ্টা করুন": "Login failed, please try again",
+"এই মুহূর্তে লগইন করা যাচ্ছে না, একটু পরে চেষ্টা করুন": "Login isn't available right now, please try again shortly",
+"ইমেইল ও পাসওয়ার্ড দিন": "Enter your email and password",
+"অপ্রত্যাশিত সমস্যা হয়েছে": "Something unexpected went wrong",
+"এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি": "No account was found with this email",
+"একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন": "This email is linked to more than one account, please log in with your phone number",
+"লগইন ব্যর্থ: ফোন নাম্বার/ইমেইল অথবা পাসওয়ার্ড ভুল": "Login failed: wrong phone number/email or password"
 };

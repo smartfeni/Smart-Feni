@@ -18,11 +18,20 @@
 import { createClient } from '@supabase/supabase-js';
 // এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
 import { reportServerError } from '../../lib/serverErrorReporter.js';
+// অডিট P0 (১৯ নভে ২০২৬): Google ফলব্যাক শুধু লগইন ইউজারের জন্য + রেট লিমিট (খরচ নিয়ন্ত্রণ)
+import { checkRateLimit, clientIpHash } from '../../lib/rateLimit.js';
 
 export const prerender = false;
 
 const FENI_CENTER = { lat: 23.0159, lng: 91.3976 };
 const FENI_RADIUS_METERS = 40000; // ৪০ কিমি — memory-র ফলব্যাক রেডিয়াসের সাথে মিলিয়ে
+
+// Google কলের সীমা (প্রতিটা Google সার্চে ১টা Text Search + সর্বোচ্চ ৫টা Photo কল যায়)
+const GOOGLE_PER_USER_HOUR = 20;
+const GOOGLE_PER_IP_HOUR = 40;
+const GOOGLE_GLOBAL_DAY = 300;
+// নিজেদের DB সার্চের সীমা (লগইন ছাড়াও চলে)
+const LOCAL_PER_IP_HOUR = 300;
 
 function getAdminClient() {
   const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
@@ -158,7 +167,7 @@ async function fallbackGooglePlaces(supabaseAdmin, q, apiKey) {
   }
 }
 
-export async function GET({ url }) {
+export async function GET({ url, request, clientAddress }) {
   // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
   let reportDb = null;
   try {
@@ -179,10 +188,39 @@ export async function GET({ url }) {
       });
     }
 
+    const serviceKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
+    const ipHash = await clientIpHash(request, clientAddress, serviceKey);
+    const ROUTE = '/api/location-suggestions-search';
+
+    const localOk = await checkRateLimit(supabaseAdmin, {
+      scope: 'loc_search_ip', subject: ipHash, windowMinutes: 60, limit: LOCAL_PER_IP_HOUR, route: ROUTE,
+    });
+    if (!localOk) {
+      return new Response(JSON.stringify({ results: [] }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     let results = await searchLocalSuggestions(supabaseAdmin, q);
 
     const googleApiKey = import.meta.env.GOOGLE_PLACES_API_KEY;
+    let googleAllowed = false;
     if (results.length < 5 && googleApiKey) {
+      // শুধু লগইন ইউজার (টোকেন যাচাই) + ইউজার/IP/সারাদিনের সীমার মধ্যে থাকলে
+      const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+      if (token) {
+        const { data: who } = await supabaseAdmin.auth.getUser(token).catch(() => ({ data: null }));
+        const uid = who?.user?.id;
+        if (uid) {
+          googleAllowed =
+            (await checkRateLimit(supabaseAdmin, { scope: 'loc_google_user', subject: uid, windowMinutes: 60, limit: GOOGLE_PER_USER_HOUR, route: ROUTE })) &&
+            (await checkRateLimit(supabaseAdmin, { scope: 'loc_google_ip', subject: ipHash, windowMinutes: 60, limit: GOOGLE_PER_IP_HOUR, route: ROUTE })) &&
+            (await checkRateLimit(supabaseAdmin, { scope: 'loc_google_global', subject: 'all', windowMinutes: 1440, limit: GOOGLE_GLOBAL_DAY, route: ROUTE }));
+        }
+      }
+    }
+    if (googleAllowed) {
       const googleResults = await fallbackGooglePlaces(supabaseAdmin, q, googleApiKey);
       // ডুপ্লিকেট বাদ দিয়ে merge করা (id ধরে)
       const existingIds = new Set(results.map((r) => r.id));

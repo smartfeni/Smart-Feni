@@ -16,6 +16,11 @@
 import { createClient } from '@supabase/supabase-js';
 // এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
 import { reportServerError } from '../../lib/serverErrorReporter.js';
+// অডিট P0 (১৯ নভে ২০২৬): রেট লিমিট — কারো ইমেইলে বারবার রিসেট মেইল/Resend কোটা শেষ হওয়া ঠেকাতে
+import { checkRateLimit, clientIpHash, sha256Hex } from '../../lib/rateLimit.js';
+
+const RESET_PER_PHONE_HOUR = 3;
+const RESET_PER_IP_HOUR = 10;
 
 export const prerender = false;
 
@@ -66,7 +71,7 @@ async function sendResetEmail(toEmail, actionLink, onFail) {
   }
 }
 
-export async function POST({ request }) {
+export async function POST({ request, clientAddress }) {
   // এরর রিপোর্টের client: service role client তৈরির পর সেট হয়
   let reportDb = null;
   try {
@@ -102,6 +107,22 @@ export async function POST({ request }) {
     });
     reportDb = supabaseAdmin;
 
+    // ===== রেট লিমিট (সীমা পার হলেও একই জেনেরিক উত্তর — নম্বর আছে কিনা ফাঁস হয় না) =====
+    const ipHash = await clientIpHash(request, clientAddress, serviceRoleKey);
+    const phoneHash = await sha256Hex(`${serviceRoleKey}|reset|${digitsOnly.slice(-10)}`);
+    const okIp = await checkRateLimit(supabaseAdmin, {
+      scope: 'pw_reset_ip', subject: ipHash, windowMinutes: 60, limit: RESET_PER_IP_HOUR, route: '/api/forgot-password',
+    });
+    const okPhone = okIp && (await checkRateLimit(supabaseAdmin, {
+      scope: 'pw_reset_phone', subject: phoneHash, windowMinutes: 60, limit: RESET_PER_PHONE_HOUR, route: '/api/forgot-password',
+    }));
+    if (!okIp || !okPhone) {
+      return new Response(JSON.stringify({ error: 'অল্প সময়ে অনেকবার চেষ্টা হয়েছে। এক ঘণ্টা পরে আবার চেষ্টা করুন।' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const dummyEmail = `${digitsOnly}@smartfeni.local`;
 
     // ===== ধাপ ১: রিকভারি টোকেন জেনারেট (এটাই existence check হিসেবেও কাজ করে) =====
@@ -123,7 +144,8 @@ export async function POST({ request }) {
     });
 
     if (linkError || !linkData?.user || !linkData?.properties?.hashed_token) {
-      console.error('generateLink ব্যর্থ (সম্ভবত এই নাম্বারে অ্যাকাউন্ট নাই):', linkError?.message);
+      // "ইউজার নেই" স্বাভাবিক ঘটনা — শুধু info লগ (Vercel এরর তালিকায় নয়েজ কমাতে)
+      console.info('generateLink: অ্যাকাউন্ট পাওয়া যায়নি বা লিংক তৈরি হয়নি:', linkError?.message);
       if (linkError && linkError.code !== 'user_not_found' && !/not found/i.test(String(linkError.message || ''))) {
         await reportServerError(reportDb, {
           route: '/api/forgot-password',
