@@ -321,6 +321,7 @@ const guideReview = [
 
 <script>
   import { supabase } from '../../lib/supabase.js';
+  import { loadLeaflet as sfLoadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
   import { splitMapLink, requestCurrentLocation } from '../../lib/mapLinks.js';
   import {
     UPAZILAS,
@@ -402,28 +403,9 @@ const guideReview = [
   let readyPromise = null;
   const maps = { drop: null, pickup: null };
 
+  // শেয়ার্ড লোডার (src/lib/leafletLoader.js): নিজেদের সাইট থেকে, ফেইল হলে রিট্রাই
   function ensureLeaflet() {
-    if (window.L) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      if (!document.querySelector('link[href*="leaflet.min.css"]')) {
-        const css = document.createElement('link');
-        css.rel = 'stylesheet';
-        css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
-        document.head.appendChild(css);
-      }
-      const existing = document.querySelector('script[src*="leaflet.min.js"]');
-      if (existing) {
-        if (window.L) return resolve();
-        existing.addEventListener('load', () => resolve());
-        existing.addEventListener('error', () => reject(new Error('Leaflet লোড ব্যর্থ')));
-        return;
-      }
-      const s = document.createElement('script');
-      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error('Leaflet লোড ব্যর্থ'));
-      document.head.appendChild(s);
-    });
+    return sfLoadLeaflet();
   }
 
   function ensureReady() {
@@ -555,13 +537,12 @@ const guideReview = [
     try {
       await ensureReady();
     } catch (e) {
+      // আগে একবার ফেইল হলে আর চেষ্টাই হতো না; এখন আবার চেষ্টার বাটন (ঠিকানা লিখে এগোনোও যায়)
       const el = $(kind === 'drop' ? 'sfoMap1' : 'sfoMap2');
-      if (el && !el.dataset.failed) {
-        el.dataset.failed = '1';
-        el.appendChild(h('div', 'sfo-mapfail', 'ম্যাপ লোড হয়নি — ঠিকানা লিখে এগিয়ে যান'));
-      }
+      mapRetryBox(el, () => ensureMapFor(kind), 'ম্যাপ লোড হয়নি। আবার চেষ্টা করুন, অথবা ঠিকানা লিখে এগিয়ে যান।');
       return;
     }
+    removeMapRetryBox($(kind === 'drop' ? 'sfoMap1' : 'sfoMap2'));
     if (!maps[kind]) {
       maps[kind] = makeMap(kind);
       const st = S[kind];

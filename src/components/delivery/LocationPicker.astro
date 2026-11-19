@@ -236,6 +236,7 @@ const {
 <script>
   import { getCurrentPosition } from '../../lib/native-bridge.js';
   import { supabase } from '../../lib/supabase.js';
+  import { loadLeaflet as sfLoadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
   import { getFreshToken } from '../../lib/authToken.js';
   import {
     UPAZILAS,
@@ -260,43 +261,14 @@ const {
   } from '../../lib/savedLocations.js';
 
   const FENI_CENTER = [23.0159, 91.3976];
-  let leafletLoadPromise: Promise<void> | null = null;
 
   // ফেনীর geojson — একবার লোড, সব instance শেয়ার করে। লোড না হলে null
   // থাকে এবং ওভারলে/ফেনী-চেক বন্ধ থাকে (অর্ডার আটকায় না)
   let geo: any = null;
 
+  // শেয়ার্ড লোডার (src/lib/leafletLoader.js): নিজেদের সাইট থেকে, ফেইল হলে রিট্রাই
   function loadLeaflet(): Promise<void> {
-    if ((window as any).L) return Promise.resolve();
-    if (leafletLoadPromise) return leafletLoadPromise;
-
-    leafletLoadPromise = new Promise<void>((resolve, reject) => {
-      // হেডারের LocationSelector আগেই CSS/JS বসিয়ে থাকলে রিইউজ
-      if (!document.querySelector('link[href*="leaflet.min.css"]')) {
-        const cssLink = document.createElement('link');
-        cssLink.rel = 'stylesheet';
-        cssLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
-        document.head.appendChild(cssLink);
-      }
-
-      const existing = document.querySelector('script[src*="leaflet.min.js"]');
-      if (existing) {
-        existing.addEventListener('load', () => resolve());
-        existing.addEventListener('error', () => reject(new Error('Leaflet লোড ব্যর্থ')));
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Leaflet লোড ব্যর্থ'));
-      document.head.appendChild(script);
-    }).catch((err) => {
-      leafletLoadPromise = null;
-      throw err;
-    });
-
-    return leafletLoadPromise;
+    return sfLoadLeaflet();
   }
 
   function esc(s: any): string {
@@ -1339,13 +1311,26 @@ const {
     if (!wraps.length) return;
 
     // Leaflet আর ফেনীর geojson একসাথে লোড। geojson ব্যর্থ হলেও পিকার চলবে (ওভারলে ছাড়া)
-    const [, g] = await Promise.all([
-      loadLeaflet(),
-      loadFeniGeo().catch((err: any) => {
-        console.error('[LocationPicker] ফেনীর geojson লোড ব্যর্থ — ওভারলে/ফেনী-চেক বন্ধ:', err);
-        return null;
-      }),
-    ]);
+    // Leaflet সব চেষ্টায় ব্যর্থ হলে প্রতিটা ম্যাপে "আবার চেষ্টা করুন" বক্স (আগে চিরকাল ফাঁকা থাকত)
+    let g: any = null;
+    try {
+      [, g] = await Promise.all([
+        loadLeaflet(),
+        loadFeniGeo().catch((err: any) => {
+          console.error('[LocationPicker] ফেনীর geojson লোড ব্যর্থ — ওভারলে/ফেনী-চেক বন্ধ:', err);
+          return null;
+        }),
+      ]);
+    } catch (err) {
+      console.warn('[LocationPicker] Leaflet লোড ব্যর্থ:', err);
+      wraps.forEach((wrap) => {
+        if (wrap.dataset.lpInitialized === '1') return;
+        const mapEl = wrap.querySelector<HTMLElement>('.lp-map');
+        mapRetryBox(mapEl, () => initAllPickers());
+      });
+      return;
+    }
+    wraps.forEach((wrap) => removeMapRetryBox(wrap.querySelector<HTMLElement>('.lp-map')));
     geo = g;
 
     wraps.forEach((wrap) => {

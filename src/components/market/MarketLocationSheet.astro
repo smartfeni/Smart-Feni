@@ -148,6 +148,7 @@
 <script>
   import { setDrop, getDrop } from '../../lib/marketCart.js';
   import { getCurrentPosition } from '../../lib/native-bridge.js';
+  import { loadLeaflet as sfLoadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
   import {
     UPAZILAS, BORDER_COLORS, getUnionUpazilaId, loadFeniGeo, findAreaAt, getFeniBounds,
     getUpazilaBorders, getDistrictBorder, getLabelPoints, getUnionBn, getUnionsOfUpazilaName,
@@ -189,23 +190,9 @@
 
   function upColor(id) { const u = UPAZILAS.find((x) => x.id === id); return u ? u.color : '#64748b'; }
 
+  // শেয়ার্ড লোডার (src/lib/leafletLoader.js): নিজেদের সাইট থেকে, ফেইল হলে রিট্রাই
   function loadLeaflet() {
-    if (window.L) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      if (!document.querySelector('link[href*="leaflet.min.css"]')) {
-        const l = document.createElement('link');
-        l.rel = 'stylesheet';
-        l.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
-        document.head.appendChild(l);
-      }
-      const ex = document.querySelector('script[src*="leaflet.min.js"]');
-      if (ex) { ex.addEventListener('load', () => resolve()); ex.addEventListener('error', () => reject(new Error('Leaflet'))); return; }
-      const sc = document.createElement('script');
-      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
-      sc.onload = () => resolve();
-      sc.onerror = () => reject(new Error('Leaflet'));
-      document.head.appendChild(sc);
-    });
+    return sfLoadLeaflet();
   }
 
   function chip(text, color, size, alpha, active) {
@@ -370,7 +357,14 @@
     const cur = $('mlsCur');
     if (d && d.address) { cur.textContent = 'বর্তমান ঠিকানা: ' + d.address; cur.hidden = false; } else cur.hidden = true;
     go(1);
-    try { await initMap(); } catch (e) { return; }
+    try {
+      await initMap();
+      removeMapRetryBox($('mlsMap'));
+    } catch (e) {
+      // আগে চুপচাপ ফাঁকা ম্যাপ থাকত; এখন আবার চেষ্টার বাটন
+      mapRetryBox($('mlsMap'), () => { initMap().then(() => { clearPin(); map.invalidateSize(); fitAll(); }).catch(() => mapRetryBox($('mlsMap'), () => location.reload())); });
+      return;
+    }
     clearPin();
     map.invalidateSize();
     fitAll();

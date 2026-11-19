@@ -640,6 +640,7 @@
 
 <script>
   import { supabase } from '../../lib/supabase.js';
+  import { loadLeaflet as sfLoadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
   import { trackEvent } from '../../lib/analytics.js';
   import { getCurrentPosition } from '../../lib/native-bridge.js';
   import {
@@ -743,7 +744,7 @@
   // ------------------------------------------------------------
   function setUpazila(
     id: string,
-    { save = true, syncProfile = false, union = null as string | null } = {}
+    { save = true, syncProfile = false, union = null as string | null, track = true } = {}
   ) {
     const upazila = UPAZILAS.find((u: any) => u.id === id) || UPAZILAS.find((u: any) => u.id === DEFAULT_UPAZILA)!;
     label.textContent = upazila.name;
@@ -765,7 +766,8 @@
       localStorage.setItem(STORAGE_KEY, upazila.id);
       if (validUnion) localStorage.setItem(UNION_KEY, validUnion);
       else localStorage.removeItem(UNION_KEY);
-      trackEvent('upazila_selected', { upazila: upazila.id, union: validUnion || '' });
+      // শুধু ইউজার নিজে বাছলে ইভেন্ট; পেজ লোডে প্রোফাইল থেকে বসানো হলে নয় (track:false)
+      if (track) trackEvent('upazila_selected', { upazila: upazila.id, union: validUnion || '' });
     }
 
     if (syncProfile) {
@@ -819,40 +821,10 @@
   }
 
   // ------------------------------------------------------------
-  // Leaflet লোড (LocationPicker-এর মতোই cdnjs, আগে থেকে লোড থাকলে রিইউজ)
+  // Leaflet লোড — শেয়ার্ড লোডার (src/lib/leafletLoader.js): নিজেদের সাইট থেকে, ফেইল হলে রিট্রাই
   // ------------------------------------------------------------
-  let leafletLoadPromise: Promise<void> | null = null;
-
   function loadLeaflet(): Promise<void> {
-    if ((window as any).L) return Promise.resolve();
-    if (leafletLoadPromise) return leafletLoadPromise;
-
-    leafletLoadPromise = new Promise<void>((resolve, reject) => {
-      if (!document.querySelector('link[href*="leaflet.min.css"]')) {
-        const cssLink = document.createElement('link');
-        cssLink.rel = 'stylesheet';
-        cssLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
-        document.head.appendChild(cssLink);
-      }
-
-      const existing = document.querySelector('script[src*="leaflet.min.js"]');
-      if (existing) {
-        existing.addEventListener('load', () => resolve());
-        existing.addEventListener('error', () => reject(new Error('Leaflet লোড ব্যর্থ')));
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Leaflet লোড ব্যর্থ'));
-      document.head.appendChild(script);
-    }).catch((err) => {
-      leafletLoadPromise = null;
-      throw err;
-    });
-
-    return leafletLoadPromise;
+    return sfLoadLeaflet();
   }
 
   // ------------------------------------------------------------
@@ -1487,7 +1459,18 @@
   async function resolveInitialUpazila() {
     const { data: { session } } = await supabase.auth.getSession();
 
+    // এই ব্রাউজার সেশনে প্রোফাইলের সাথে একবার মিলানো হয়ে গেলে প্রতি পেজে আর profiles পড়া হয় না
+    const SYNC_KEY = 'sf_upazila_synced';
+    let syncedThisSession = false;
+    try { syncedThisSession = !!session && sessionStorage.getItem(SYNC_KEY) === session.user.id; } catch { /* প্রাইভেট মোড */ }
+    const cachedFirst = localStorage.getItem(STORAGE_KEY);
+    if (syncedThisSession && cachedFirst && UPAZILAS.some((u: any) => u.id === cachedFirst)) {
+      setUpazila(cachedFirst, { save: false, union: getSavedUnion(cachedFirst) });
+      return;
+    }
+
     if (session) {
+      try { sessionStorage.setItem(SYNC_KEY, session.user.id); } catch { /* প্রাইভেট মোড */ }
       const { data: profile } = await supabase
         .from('profiles')
         .select('upazila')
@@ -1500,7 +1483,7 @@
         : null;
 
       if (matched) {
-        setUpazila(matched.id, { save: true, syncProfile: false, union: getSavedUnion(matched.id) });
+        setUpazila(matched.id, { save: true, syncProfile: false, union: getSavedUnion(matched.id), track: false });
         return;
       }
     }
