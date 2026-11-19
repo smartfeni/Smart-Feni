@@ -78,6 +78,9 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     .saa-pct { display: inline-flex; align-items: center; gap: 4px; border: 1.5px solid #E2E8F0; border-radius: 12px; padding: 0 10px; height: 46px; background: #fff; }
     .saa-pct input { width: 46px; border: 0; outline: 0; font: inherit; font-size: 16px; font-weight: 700; text-align: right; }
     .saa-ok { flex: 1; min-height: 50px; border: 0; border-radius: 14px; background: linear-gradient(135deg,#22A06B,#1F8A5B); color: #fff; font: inherit; font-weight: 700; font-size: 16px; cursor: pointer; }
+    .saa-act { flex: 1; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 14px; border: 1.5px solid #E2E7EF; background: #fff; color: #1B2A4A; font: inherit; font-weight: 700; font-size: 14px; text-decoration: none; padding: 0 10px; cursor: pointer; }
+    .saa-act.danger { border-color: #FAD4D0; background: #FFF6F5; color: #B3261E; }
+    .saa-act:disabled { opacity: .6; }
     .saa-no { min-height: 46px; border-radius: 14px; border: 1.5px solid #FAD4D0; background: #FFF6F5; color: #B3261E; font: inherit; font-weight: 700; padding: 0 14px; cursor: pointer; }
     .saa-ok:disabled, .saa-no:disabled { opacity: .55; }
     .saa-badge { align-self: flex-start; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
@@ -98,6 +101,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     let rows = [];
     let cats = [];
     let tab = 'pending';
+    let shopState = {}; // অনুমোদিত আবেদনের দোকান: id → { is_active }
 
     function card(a) {
       const c = mk('div', 'saa-card');
@@ -181,7 +185,37 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       } else if (a.status === 'rejected') {
         const b = mk('span', 'saa-badge', 'ফেরত: ' + (a.reject_reason || '')); b.style.cssText += 'background:#FDECEA;color:#A3261B;'; inn.appendChild(b);
       } else if (a.status === 'approved') {
-        const b = mk('span', 'saa-badge', '✓ লাইভ'); b.style.cssText += 'background:#E6F6EE;color:#17663F;'; inn.appendChild(b);
+        const st = a.shop_id ? shopState[a.shop_id] : null;
+        const b = mk('span', 'saa-badge', !st ? 'দোকান মুছে ফেলা হয়েছে' : st.is_active ? '✓ লাইভ' : '🙈 লুকানো আছে');
+        b.style.cssText += !st ? 'background:#F1F3F7;color:#5B6B86;' : st.is_active ? 'background:#E6F6EE;color:#17663F;' : 'background:#FFF4E5;color:#7A3E00;';
+        inn.appendChild(b);
+        if (st) {
+          const row = mk('div', 'saa-row');
+          const ed = mk('a', 'saa-act', '✏️ এডিট'); ed.href = '/admin/delivery-shops?edit=' + encodeURIComponent(a.shop_id);
+          row.appendChild(ed);
+          const hd = mk('button', 'saa-act', st.is_active ? '🙈 লুকান' : '👁 আবার চালু'); hd.type = 'button';
+          hd.addEventListener('click', async () => {
+            hd.disabled = true;
+            const { error } = await supabase.from('delivery_shops').update({ is_active: !st.is_active }).eq('id', a.shop_id);
+            hd.disabled = false;
+            if (error) { toast('বদলানো যায়নি: ' + error.message, 'error'); return; }
+            toast(st.is_active ? 'দোকান লুকানো হয়েছে, কাস্টমার দেখবে না' : 'দোকান আবার লাইভ', 'success');
+            load();
+          });
+          row.appendChild(hd);
+          const del = mk('button', 'saa-act danger', '🗑 ডিলিট'); del.type = 'button';
+          del.addEventListener('click', async () => {
+            if (!confirm('"' + (a.name || '') + '" দোকান ও এর সব আইটেম ডিলিট করবেন? এটা ফেরানো যাবে না। শুধু সাময়িক বন্ধ রাখতে "লুকান" ব্যবহার করুন।')) return;
+            del.disabled = true;
+            const { error } = await supabase.from('delivery_shops').delete().eq('id', a.shop_id);
+            del.disabled = false;
+            if (error) { toast('ডিলিট হয়নি: ' + error.message, 'error'); return; }
+            toast('দোকান ডিলিট হয়েছে', 'success');
+            load();
+          });
+          row.appendChild(del);
+          inn.appendChild(row);
+        }
       }
       c.appendChild(inn);
       return c;
@@ -207,6 +241,12 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         rows = r2.data || [];
       } else rows = r.data || [];
       cats = c.data || [];
+      const ids = rows.filter((x) => x.status === 'approved' && x.shop_id).map((x) => x.shop_id);
+      shopState = {};
+      if (ids.length) {
+        const { data: sd } = await supabase.from('delivery_shops').select('id, is_active').in('id', ids);
+        (sd || []).forEach((s) => { shopState[s.id] = s; });
+      }
       render();
     }
 
