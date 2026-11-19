@@ -25,7 +25,12 @@
 //      তাই HTML ক্যাশ করাই যথেষ্ট — আলাদা ডেটা-ক্যাশ লাগে না) — অফলাইনে
 //      সবচেয়ে বেশি দরকার, tel: লিংক নেট ছাড়াও কাজ করে
 // ============================================================
-const CACHE_NAME = "smartfeni-v4";
+const CACHE_NAME = "smartfeni-v5";
+// স্ট্যাটিক অ্যাসেট (JS/CSS/ফন্ট/আইকন) আলাদা ক্যাশে, সর্বোচ্চ সংখ্যা বাঁধা (অডিট P2, ১৯ নভে ২০২৬):
+// আগে প্রতি ডেপ্লয়ের হ্যাশ করা ফাইল CACHE_NAME-এ জমত, কখনো মুছত না → ফোনের স্টোরেজ বাড়ত।
+// সীমা বড় রাখা হয়েছে যাতে SWR-এ দেখানো শেষ শেলের অ্যাসেট মুছে না যায়।
+const STATIC_CACHE_NAME = "smartfeni-static-v1";
+const MAX_STATIC_ITEMS = 250;
 const IMAGE_CACHE_NAME = "smartfeni-images-v1";
 const MAX_IMAGE_CACHE_ITEMS = 60;
 const NETWORK_TIMEOUT_MS = 4000;
@@ -91,8 +96,8 @@ async function cacheFirst(request) {
   try {
     const response = await fetch(request);
     if (response && response.ok) {
-      const cache = await caches.open(CACHE_NAME);
-      cache.put(request, response.clone());
+      const cache = await caches.open(STATIC_CACHE_NAME);
+      cache.put(request, response.clone()).then(() => trimCache(STATIC_CACHE_NAME, MAX_STATIC_ITEMS)).catch(() => {});
     }
     return response;
   } catch (err) {
@@ -183,7 +188,7 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME && key !== PRO_CACHE_NAME && key !== IMAGE_CACHE_NAME)
+          .filter((key) => key !== CACHE_NAME && key !== STATIC_CACHE_NAME && key !== PRO_CACHE_NAME && key !== IMAGE_CACHE_NAME)
           .map((key) => caches.delete(key))
       )
     )
