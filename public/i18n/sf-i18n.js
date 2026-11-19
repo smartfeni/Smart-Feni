@@ -104,8 +104,8 @@
       var a = el.getAttribute(ATTRS[i]);
       if (a && BN.test(a)) { var o = tr(a); if (o !== a) el.setAttribute(ATTRS[i], o); }
     }
-    if (el.nodeName === 'INPUT' && (el.type === 'button' || el.type === 'submit') && BN.test(el.value)) el.value = tr(el.value);
-    if (el.nodeName === 'OPTION' || el.nodeName === 'OPTGROUP') { var l = el.getAttribute('label'); if (l && BN.test(l)) el.setAttribute('label', tr(l)); }
+    if (el.nodeName === 'INPUT' && (el.type === 'button' || el.type === 'submit') && BN.test(el.value)) { var bv = tr(el.value); if (bv !== el.value) el.value = bv; }
+    if (el.nodeName === 'OPTION' || el.nodeName === 'OPTGROUP') { var l = el.getAttribute('label'); if (l && BN.test(l)) { var lo = tr(l); if (lo !== l) el.setAttribute('label', lo); } }
   }
   function walk(node) {
     if (!node) return;
