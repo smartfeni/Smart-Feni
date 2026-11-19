@@ -1,0 +1,346 @@
+---
+// path: src/pages/pro/hero/account.astro
+// ============================================================
+// পেজ: Pro রাইডারের হিসাব ও সম্পন্ন অর্ডার (/pro/hero/account)
+// মেনু → "হিসাব ও সম্পন্ন অর্ডার" থেকে আসে।
+// - উপরে: রেটিং, মোট সম্পন্ন, এই সপ্তাহের আয়, মোট আয়
+// - আজকের হিসাব (কুইক ডেলিভারি COD/দোকানে দেওয়া/আয় → অফিসের সাথে লেনদেন)
+// - আগের হিসাব: দিনভিত্তিক (৩০ দিন), ডিফল্টে ভাঁজ করা
+// - সম্পন্ন অর্ডার: আজ / ৭ দিন / ৩০ দিন; ১ ঘণ্টার মধ্যে রিপোর্ট
+// ডেটা শুধু পড়া (RLS: রাইডার নিজের অর্ডার পড়ে)। সময় বাংলাদেশ (UTC+6) অনুযায়ী।
+// ============================================================
+export const prerender = false;
+
+import BaseLayout from '../../../components/layout/BaseLayout.astro';
+import DisputeReasonModal from '../../../components/delivery/DisputeReasonModal.astro';
+---
+
+<BaseLayout title="হিসাব ও সম্পন্ন অর্ডার | Smart Feni Pro">
+  <div class="ra-page">
+    <DisputeReasonModal />
+    <div id="raRoot" aria-live="polite"></div>
+  </div>
+
+  <style is:global>
+    .ra-page { background: #F4F6FA; min-height: 80vh; padding: 14px 14px 110px; max-width: 560px; margin: 0 auto; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; }
+    .ra-hero { position: relative; overflow: hidden; border-radius: 26px; padding: 20px 18px 18px; color: #fff; background: radial-gradient(120% 140% at 100% 0%, #FF8A5B 0%, #FF6B35 32%, #E2531F 60%, #1B2A4A 100%); box-shadow: 0 14px 34px rgba(226, 83, 31, 0.28); }
+    .ra-hero::after { content: ''; position: absolute; width: 220px; height: 220px; border-radius: 50%; right: -70px; top: -90px; background: rgba(255, 255, 255, 0.12); }
+    .ra-hero-top { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; }
+    .ra-av { width: 52px; height: 52px; border-radius: 18px; background: rgba(255, 255, 255, 0.18); display: flex; align-items: center; justify-content: center; font-size: 22px; flex: none; backdrop-filter: blur(6px); }
+    .ra-hello small { display: block; font-size: 13px; opacity: 0.85; font-weight: 600; }
+    .ra-hello b { display: block; font-size: 19px; font-weight: 700; line-height: 1.3; }
+    .ra-rate { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; background: rgba(255, 255, 255, 0.2); padding: 6px 11px; border-radius: 999px; font-weight: 700; font-size: 14px; }
+    .ra-rate i { color: #FFD45C; }
+    .ra-kpis { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+    .ra-kpi { background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 16px; padding: 10px 10px 9px; }
+    .ra-kpi b { display: block; font-size: 19px; font-weight: 700; line-height: 1.2; }
+    .ra-kpi small { display: block; font-size: 12px; opacity: 0.88; font-weight: 600; margin-top: 2px; }
+
+    .ra-sec { margin: 22px 2px 10px; display: flex; align-items: center; gap: 8px; }
+    .ra-sec h2 { margin: 0; font-size: 18px; font-weight: 700; flex: 1; }
+    .ra-sec .ra-ic { width: 32px; height: 32px; border-radius: 11px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; flex: none; }
+    .ra-sec small { color: #5B6B86; font-weight: 600; font-size: 13px; }
+
+    .ra-today { background: #1B2A4A; color: #fff; border-radius: 24px; padding: 16px; box-shadow: 0 10px 26px rgba(27, 42, 74, 0.22); }
+    .ra-today-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .ra-today-h b { font-size: 16px; }
+    .ra-today-h span { font-size: 13px; opacity: 0.8; font-weight: 600; }
+    .ra-cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .ra-cell { background: rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 10px; }
+    .ra-cell small { display: block; font-size: 12px; opacity: 0.8; font-weight: 600; }
+    .ra-cell b { display: block; font-size: 17px; margin-top: 2px; }
+    .ra-bal { margin-top: 10px; border-radius: 16px; padding: 13px 14px; display: flex; align-items: center; justify-content: space-between; font-weight: 700; }
+    .ra-bal b { font-size: 22px; }
+    .ra-bal.pay { background: linear-gradient(135deg, #FF8A5B, #FF6B35); }
+    .ra-bal.get { background: linear-gradient(135deg, #22A06B, #1F8A5B); }
+    .ra-bal.done { background: rgba(255, 255, 255, 0.12); }
+    .ra-today-empty { text-align: center; padding: 8px 0 4px; font-size: 14px; opacity: 0.85; }
+
+    .ra-days { display: flex; flex-direction: column; gap: 10px; }
+    .ra-day { background: #fff; border-radius: 18px; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.06); overflow: hidden; }
+    .ra-day-h { width: 100%; display: flex; align-items: center; gap: 10px; padding: 13px 14px; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; min-height: 56px; }
+    .ra-day-d { width: 46px; flex: none; text-align: center; background: #FFF1E8; border-radius: 12px; padding: 5px 0; color: #C2410C; }
+    .ra-day-d b { display: block; font-size: 17px; line-height: 1.1; }
+    .ra-day-d small { display: block; font-size: 11px; font-weight: 700; }
+    .ra-day-m { flex: 1; min-width: 0; }
+    .ra-day-m b { display: block; font-size: 15.5px; }
+    .ra-day-m small { display: block; font-size: 12.5px; color: #5B6B86; font-weight: 600; }
+    .ra-badge { flex: none; font-size: 12px; font-weight: 700; padding: 4px 9px; border-radius: 999px; }
+    .ra-badge.ok { background: #E6F6EE; color: #17663F; }
+    .ra-badge.due { background: #FFF1E8; color: #C2410C; }
+    .ra-chev { color: #9AA6BA; transition: transform 0.2s; flex: none; }
+    .ra-day-h[aria-expanded='true'] .ra-chev { transform: rotate(180deg); }
+    .ra-day-b { padding: 0 14px 12px; }
+    .ra-day-sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
+    .ra-day-sum div { background: #F4F6FA; border-radius: 12px; padding: 8px; }
+    .ra-day-sum small { display: block; font-size: 11.5px; color: #5B6B86; font-weight: 600; }
+    .ra-day-sum b { font-size: 14.5px; }
+    .ra-day-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px dashed #E2E8F0; font-size: 14px; }
+    .ra-day-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ra-day-row b { flex: none; color: #17663F; }
+
+    .ra-filt { display: flex; gap: 8px; margin-bottom: 10px; }
+    .ra-f { flex: 1; min-height: 44px; border-radius: 14px; border: 1.5px solid #E2E8F0; background: #fff; font: inherit; font-weight: 700; font-size: 14.5px; color: #1B2A4A; cursor: pointer; }
+    .ra-f.on { background: #1B2A4A; border-color: #1B2A4A; color: #fff; box-shadow: 0 6px 14px rgba(27, 42, 74, 0.2); }
+    .ra-orders { display: flex; flex-direction: column; gap: 10px; }
+    .ra-o { background: #fff; border-radius: 18px; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.06); overflow: hidden; }
+    .ra-o-h { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+    .ra-o-ic { width: 44px; height: 44px; border-radius: 14px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .ra-o-ic.qd { background: linear-gradient(135deg, #FFE3D3, #FFD0B8); color: #E2531F; }
+    .ra-o-ic.old { background: #EAF0FA; color: #3B5BA9; }
+    .ra-o-m { flex: 1; min-width: 0; }
+    .ra-o-m b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ra-o-m small { display: block; font-size: 12.5px; color: #5B6B86; font-weight: 600; }
+    .ra-o-r { text-align: right; flex: none; }
+    .ra-o-r b { display: block; color: #17663F; font-size: 16px; }
+    .ra-o-r small { font-size: 11.5px; color: #5B6B86; font-weight: 600; }
+    .ra-o-b { padding: 0 14px 14px; font-size: 14px; }
+    .ra-kv { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px dashed #E2E8F0; }
+    .ra-kv span { color: #5B6B86; }
+    .ra-kv b { text-align: right; }
+    .ra-addr { margin: 8px 0 0; padding: 10px 12px; background: #F4F6FA; border-radius: 12px; line-height: 1.5; }
+    .ra-rep { margin-top: 10px; width: 100%; min-height: 44px; border-radius: 12px; border: 1.5px solid #FAD4D0; background: #FFF6F5; color: #B3261E; font: inherit; font-weight: 700; cursor: pointer; }
+    .ra-tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: #FDECEA; color: #A3261B; margin-left: 4px; vertical-align: middle; }
+    .ra-empty { background: #fff; border-radius: 18px; padding: 26px 16px; text-align: center; color: #5B6B86; font-weight: 600; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.06); }
+    .ra-empty i { display: block; font-size: 26px; color: #C5CEDD; margin-bottom: 8px; }
+    .ra-state { text-align: center; padding: 70px 12px; color: #5B6B86; font-weight: 600; }
+    .ra-state a { display: inline-block; margin-top: 12px; background: #1B2A4A; color: #fff; padding: 11px 18px; border-radius: 14px; text-decoration: none; }
+    .ra-day-h:focus-visible, .ra-o-h:focus-visible, .ra-f:focus-visible, .ra-rep:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
+  </style>
+
+  <script>
+    import { supabase } from '../../../lib/supabase.js';
+    import { proLoginUrl } from '../../../lib/proRoles.js';
+
+    const root = document.getElementById('raRoot');
+    const DH = 6 * 3600 * 1000; // বাংলাদেশ UTC+6
+    const BN = (n) => String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
+    const TK = (n) => '৳' + BN(Math.round(Number(n) || 0));
+    const MONTHS = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে'];
+
+    function mk(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined && text !== null) e.textContent = text;
+      return e;
+    }
+    function icon(cls) { const i = mk('i', 'fas ' + cls); i.setAttribute('aria-hidden', 'true'); return i; }
+    function dayKey(iso) { return new Date(new Date(iso).getTime() + DH).toISOString().slice(0, 10); }
+    function todayKey() { return dayKey(new Date().toISOString()); }
+    function timeBn(iso) { return new Date(iso).toLocaleTimeString('bn-BD', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dhaka' }); }
+    function doneAt(o) { return o.market_completed_at || o.updated_at; }
+    function earn(o) { return o.is_market ? Number(o.rider_earning || 0) : Number(o.final_price || 0); }
+    function title(o) {
+      if (o.is_market) {
+        if (o.order_type === 'anything') return 'অর্ডার এনিথিং';
+        if (o.order_type === 'send') return 'পাঠান / এনে দাও';
+        const it = Array.isArray(o.order_items) && o.order_items[0];
+        return (it && it.shop_name) || 'কুইক ডেলিভারি';
+      }
+      return 'ডেলিভারি' + (o.description ? ': ' + String(o.description).slice(0, 40) : '');
+    }
+    // কুইক অর্ডারে অফিসের সাথে নিট: + হলে রাইডার অফিসকে দেবে, − হলে অফিস রাইডারকে দেবে
+    function net(o) { return o.is_market ? Number(o.rider_cod_collected || 0) - Number(o.rider_purchase_paid || 0) - Number(o.rider_earning || 0) : 0; }
+
+    function state(text, link) {
+      root.textContent = '';
+      const d = mk('div', 'ra-state', text);
+      if (link) { d.appendChild(mk('br')); const a = mk('a', '', link[0]); a.href = link[1]; d.appendChild(a); }
+      root.appendChild(d);
+    }
+
+    let rider = null;
+    let orders = [];
+    let filter = 'today';
+
+    function hero() {
+      const c = mk('section', 'ra-hero');
+      c.setAttribute('aria-label', 'আমার সারসংক্ষেপ');
+      const top = mk('div', 'ra-hero-top');
+      const av = mk('div', 'ra-av'); av.appendChild(icon('fa-motorcycle')); top.appendChild(av);
+      const h = mk('div', 'ra-hello'); h.appendChild(mk('small', '', 'হিসাব ও সম্পন্ন অর্ডার')); h.appendChild(mk('b', '', rider.full_name || 'ডেলিভারি হিরো')); top.appendChild(h);
+      const r = mk('span', 'ra-rate'); r.appendChild(icon('fa-star')); r.appendChild(document.createTextNode(rider.avg_rating ? BN(rider.avg_rating) : '—')); top.appendChild(r);
+      c.appendChild(top);
+      const weekFrom = Date.now() - 7 * 86400000;
+      const week = orders.filter((o) => new Date(doneAt(o)).getTime() >= weekFrom).reduce((a, o) => a + earn(o), 0);
+      const k = mk('div', 'ra-kpis');
+      [[BN(rider.total_completed || 0), 'সম্পন্ন অর্ডার'], [TK(week), 'এই সপ্তাহের আয়'], [TK(rider.total_earned || 0), 'মোট আয়']].forEach(([v, l]) => {
+        const x = mk('div', 'ra-kpi'); x.appendChild(mk('b', '', v)); x.appendChild(mk('small', '', l)); k.appendChild(x);
+      });
+      c.appendChild(k);
+      return c;
+    }
+
+    function sec(text, ic, bg, sub) {
+      const s = mk('div', 'ra-sec');
+      const i = mk('span', 'ra-ic'); i.style.background = bg; i.appendChild(icon(ic)); s.appendChild(i);
+      s.appendChild(mk('h2', '', text));
+      if (sub) s.appendChild(mk('small', '', sub));
+      return s;
+    }
+
+    function balance(list) {
+      const pend = list.filter((o) => o.is_market && !o.rider_settled_at).reduce((a, o) => a + net(o), 0);
+      const b = mk('div', 'ra-bal ' + (pend > 0 ? 'pay' : pend < 0 ? 'get' : 'done'));
+      b.appendChild(mk('span', '', pend > 0 ? 'আপনি অফিসকে দেবেন' : pend < 0 ? 'অফিস আপনাকে দেবে' : 'হিসাব শেষ ✓'));
+      b.appendChild(mk('b', '', TK(Math.abs(pend))));
+      return b;
+    }
+
+    function todayCard() {
+      const list = orders.filter((o) => dayKey(doneAt(o)) === todayKey());
+      const c = mk('section', 'ra-today');
+      c.setAttribute('aria-label', 'আজকের হিসাব');
+      const h = mk('div', 'ra-today-h'); h.appendChild(mk('b', '', 'আজকের হিসাব')); h.appendChild(mk('span', '', BN(list.length) + 'টি অর্ডার')); c.appendChild(h);
+      if (!list.length) { c.appendChild(mk('div', 'ra-today-empty', 'আজ এখনো কোনো অর্ডার সম্পন্ন হয়নি।')); return c; }
+      const sum = (k) => list.reduce((a, o) => a + Number(o[k] || 0), 0);
+      const cells = mk('div', 'ra-cells');
+      [['COD আদায়', sum('rider_cod_collected')], ['দোকানে দিয়েছি', sum('rider_purchase_paid')], ['আমার আয়', list.reduce((a, o) => a + earn(o), 0)]].forEach(([l, v]) => {
+        const x = mk('div', 'ra-cell'); x.appendChild(mk('small', '', l)); x.appendChild(mk('b', '', TK(v))); cells.appendChild(x);
+      });
+      c.appendChild(cells);
+      c.appendChild(balance(list));
+      return c;
+    }
+
+    function daysList() {
+      const groups = {};
+      orders.forEach((o) => { const k = dayKey(doneAt(o)); (groups[k] = groups[k] || []).push(o); });
+      const keys = Object.keys(groups).filter((k) => k !== todayKey()).sort().reverse();
+      const wrap = mk('div', 'ra-days');
+      if (!keys.length) { const e = mk('div', 'ra-empty'); e.appendChild(icon('fa-calendar-days')); e.appendChild(document.createTextNode('আগের কোনো হিসাব নেই।')); wrap.appendChild(e); return wrap; }
+      keys.forEach((k, idx) => {
+        const list = groups[k];
+        const d = new Date(k + 'T00:00:00Z');
+        const box = mk('div', 'ra-day');
+        const h = mk('button', 'ra-day-h'); h.type = 'button';
+        const bid = 'raDay' + idx;
+        h.setAttribute('aria-expanded', 'false'); h.setAttribute('aria-controls', bid);
+        const dd = mk('div', 'ra-day-d'); dd.appendChild(mk('b', '', BN(d.getUTCDate()))); dd.appendChild(mk('small', '', MONTHS[d.getUTCMonth()])); h.appendChild(dd);
+        const m = mk('div', 'ra-day-m');
+        m.appendChild(mk('b', '', 'আয় ' + TK(list.reduce((a, o) => a + earn(o), 0))));
+        m.appendChild(mk('small', '', BN(list.length) + 'টি অর্ডার'));
+        h.appendChild(m);
+        const mk2 = list.filter((o) => o.is_market);
+        const pend = mk2.filter((o) => !o.rider_settled_at).reduce((a, o) => a + net(o), 0);
+        const unsettled = mk2.some((o) => !o.rider_settled_at && net(o) !== 0);
+        if (mk2.length) h.appendChild(mk('span', 'ra-badge ' + (unsettled ? 'due' : 'ok'), unsettled ? (pend > 0 ? 'দেবেন ' : 'পাবেন ') + TK(Math.abs(pend)) : 'হিসাব শেষ ✓'));
+        h.appendChild(icon('fa-chevron-down ra-chev'));
+        const b = mk('div', 'ra-day-b'); b.id = bid; b.hidden = true;
+        const sum = (key) => list.reduce((a, o) => a + Number(o[key] || 0), 0);
+        const s = mk('div', 'ra-day-sum');
+        [['COD আদায়', sum('rider_cod_collected')], ['দোকানে দিয়েছি', sum('rider_purchase_paid')], ['আমার আয়', list.reduce((a, o) => a + earn(o), 0)]].forEach(([l, v]) => {
+          const x = mk('div'); x.appendChild(mk('small', '', l)); x.appendChild(mk('b', '', TK(v))); s.appendChild(x);
+        });
+        b.appendChild(s);
+        list.forEach((o) => {
+          const r = mk('div', 'ra-day-row');
+          r.appendChild(mk('span', '', (o.order_no ? '#' + o.order_no + ' · ' : '') + title(o)));
+          r.appendChild(mk('b', '', TK(earn(o))));
+          b.appendChild(r);
+        });
+        h.addEventListener('click', () => { const open = b.hidden; b.hidden = !open; h.setAttribute('aria-expanded', String(open)); });
+        box.appendChild(h); box.appendChild(b);
+        wrap.appendChild(box);
+      });
+      return wrap;
+    }
+
+    function orderCard(o) {
+      const c = mk('div', 'ra-o');
+      const h = mk('button', 'ra-o-h'); h.type = 'button'; h.setAttribute('aria-expanded', 'false');
+      const ic = mk('div', 'ra-o-ic ' + (o.is_market ? 'qd' : 'old')); ic.appendChild(icon(o.is_market ? 'fa-bolt' : 'fa-box')); h.appendChild(ic);
+      const m = mk('div', 'ra-o-m');
+      const t = mk('b', '', title(o));
+      if (o.status === 'disputed') t.appendChild(mk('span', 'ra-tag', 'রিপোর্ট'));
+      m.appendChild(t);
+      m.appendChild(mk('small', '', (o.order_no ? '#' + o.order_no + ' · ' : '') + timeBn(doneAt(o))));
+      h.appendChild(m);
+      const r = mk('div', 'ra-o-r'); r.appendChild(mk('b', '', TK(earn(o)))); r.appendChild(mk('small', '', 'আমার আয়')); h.appendChild(r);
+      const b = mk('div', 'ra-o-b'); b.hidden = true;
+      const kv = (k, v) => { const x = mk('div', 'ra-kv'); x.appendChild(mk('span', '', k)); x.appendChild(mk('b', '', v)); b.appendChild(x); };
+      if (o.is_market) {
+        kv('COD আদায়', TK(o.rider_cod_collected));
+        kv('দোকানে দিয়েছি', TK(o.rider_purchase_paid));
+        kv('অফিসের সাথে', o.rider_settled_at ? 'হিসাব শেষ ✓' : net(o) > 0 ? 'আপনি দেবেন ' + TK(net(o)) : net(o) < 0 ? 'অফিস দেবে ' + TK(-net(o)) : 'কিছু নেই');
+      } else {
+        kv('ডেলিভারি চার্জ', TK(o.final_price));
+      }
+      if (o.drop_address) b.appendChild(mk('p', 'ra-addr', '📍 ' + o.drop_address));
+      const canReport = o.status === 'completed' && Date.now() - new Date(doneAt(o)).getTime() <= 3600000;
+      if (canReport && window.openDisputeModal) {
+        const rep = mk('button', 'ra-rep', 'সমস্যা হয়েছে? রিপোর্ট করুন'); rep.type = 'button';
+        rep.addEventListener('click', () => window.openDisputeModal({ requestId: o.id, onSuccess: load }));
+        b.appendChild(rep);
+      }
+      h.addEventListener('click', () => { const open = b.hidden; b.hidden = !open; h.setAttribute('aria-expanded', String(open)); });
+      c.appendChild(h); c.appendChild(b);
+      return c;
+    }
+
+    function ordersBlock() {
+      const wrap = mk('div');
+      const f = mk('div', 'ra-filt'); f.setAttribute('role', 'tablist');
+      const list = mk('div', 'ra-orders');
+      const paint = () => {
+        list.textContent = '';
+        const from = filter === 'today' ? null : Date.now() - (filter === '7' ? 7 : 30) * 86400000;
+        const rows = orders.filter((o) => (filter === 'today' ? dayKey(doneAt(o)) === todayKey() : new Date(doneAt(o)).getTime() >= from));
+        if (!rows.length) { const e = mk('div', 'ra-empty'); e.appendChild(icon('fa-box-open')); e.appendChild(document.createTextNode('এই সময়ে কোনো সম্পন্ন অর্ডার নেই।')); list.appendChild(e); return; }
+        rows.forEach((o) => list.appendChild(orderCard(o)));
+      };
+      [['today', 'আজ'], ['7', '৭ দিন'], ['30', '৩০ দিন']].forEach(([k, l]) => {
+        const b = mk('button', 'ra-f' + (filter === k ? ' on' : ''), l); b.type = 'button'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(filter === k));
+        b.addEventListener('click', () => { filter = k; f.querySelectorAll('.ra-f').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); }); paint(); });
+        f.appendChild(b);
+      });
+      wrap.appendChild(f); wrap.appendChild(list);
+      paint();
+      return wrap;
+    }
+
+    function render() {
+      root.textContent = '';
+      root.appendChild(hero());
+      root.appendChild(sec('আজকের হিসাব', 'fa-wallet', 'linear-gradient(135deg,#FF8A5B,#FF6B35)'));
+      root.appendChild(todayCard());
+      root.appendChild(sec('আগের হিসাব', 'fa-calendar-days', 'linear-gradient(135deg,#5B7BD5,#3B5BA9)', 'শেষ ৩০ দিন'));
+      root.appendChild(daysList());
+      root.appendChild(sec('সম্পন্ন অর্ডার', 'fa-circle-check', 'linear-gradient(135deg,#2BB673,#1F8A5B)'));
+      root.appendChild(ordersBlock());
+    }
+
+    async function load() {
+      const from = new Date(Date.now() - 31 * 86400000).toISOString();
+      const { data, error } = await supabase
+        .from('delivery_requests')
+        .select('id, order_no, status, is_market, order_type, order_items, description, final_price, drop_address, updated_at, market_completed_at, rider_cod_collected, rider_purchase_paid, rider_earning, rider_settled_at')
+        .eq('accepted_rider_id', rider.id)
+        .eq('category', 'delivery')
+        .in('status', ['completed', 'disputed'])
+        .gte('updated_at', from)
+        .order('updated_at', { ascending: false })
+        .limit(500);
+      if (error) { state('লোড করা যায়নি। একটু পরে আবার চেষ্টা করুন।'); return; }
+      orders = (data || []).sort((a, b) => new Date(doneAt(b)) - new Date(doneAt(a)));
+      render();
+    }
+
+    async function init() {
+      if (window.SFLoader) root.innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { location.href = proLoginUrl('/pro/hero/account'); return; }
+      const { data: r } = await supabase
+        .from('delivery_riders')
+        .select('id, avg_rating, total_completed, total_earned, verification_status')
+        .eq('profile_id', session.user.id)
+        .maybeSingle();
+      if (!r || r.verification_status !== 'approved') { state('এই অ্যাকাউন্টে অনুমোদিত রাইডার প্রোফাইল নেই।', ['অন্য ভূমিকায় যান', '/pro?pick=1']); return; }
+      const { data: pf } = await supabase.from('profiles').select('full_name').eq('id', session.user.id).maybeSingle();
+      rider = { ...r, full_name: pf && pf.full_name };
+      await load();
+    }
+
+    init();
+  </script>
+</BaseLayout>
