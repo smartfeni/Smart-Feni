@@ -16,6 +16,47 @@ const DEFAULT_MAX_DIMENSION = 1200;
 const DEFAULT_QUALITY = 0.78;
 const DEFAULT_SKIP_THRESHOLD = 200 * 1024; // 200KB — এর নিচে হলে কম্প্রেস না করলেও চলে
 
+// ---------- HEIC/HEIF → JPEG (অডিট, ১৯ নভে ২০২৬) ----------
+// Android-এর Chrome iPhone-এর HEIC ছবি canvas-এ খুলতে পারে না। আগে এমন ছবি ফেরত দেওয়া হতো
+// ("JPG দিন")। এখন ব্রাউজার না খুলতে পারলে তবেই নিজেদের সাইট থেকে কনভার্টার (heic-to, LGPL,
+// CSP-নিরাপদ বিল্ড, ~৭৮০KB gzip) লোড হয়, ছবি JPEG হয়ে আগের মতো কম্প্রেস হয়। সবার জন্য লোড হয় না।
+// ভার্সন বদলালে ফোল্ডারের নামও বদলাও (ক্যাশ immutable)।
+const HEIC_CONVERTER_URL = '/vendor/heic-to-1.6.7/heic-to.js';
+let heicConverterPromise = null;
+
+function loadHeicConverter() {
+  if (!heicConverterPromise) {
+    heicConverterPromise = import(/* @vite-ignore */ HEIC_CONVERTER_URL).catch((err) => {
+      heicConverterPromise = null; // পরের বার আবার চেষ্টা
+      throw err;
+    });
+  }
+  return heicConverterPromise;
+}
+
+// HEIC → JPEG File; ব্যর্থ হলে null (কলার আগের মতো "JPG দিন" দেখায়)
+async function convertHeicToJpeg(file) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+      window.showToast('ছবি প্রস্তুত হচ্ছে…');
+    }
+    const mod = await loadHeicConverter();
+    const blob = await mod.heicTo({ blob: file, type: 'image/jpeg', quality: 0.9 });
+    if (!blob || !blob.size) return null;
+    return new File([blob], renameToExt(file.name, 'image/jpeg'), {
+      type: 'image/jpeg',
+      lastModified: Date.now(),
+    });
+  } catch (err) {
+    try {
+      if (typeof window !== 'undefined' && typeof window.SFReportError === 'function') {
+        window.SFReportError({ kind: 'other', action: 'heic_convert', title: 'HEIC ছবি কনভার্ট ব্যর্থ', message: String((err && err.message) || err) });
+      }
+    } catch (_) { /* রিপোর্ট ব্যর্থ হলেও চলবে */ }
+    return null;
+  }
+}
+
 export function compressImage(file, options = {}) {
   const {
     maxDimension = DEFAULT_MAX_DIMENSION,
@@ -25,7 +66,8 @@ export function compressImage(file, options = {}) {
   } = options;
 
   return new Promise((resolve) => {
-    if (!file || !file.type || !file.type.startsWith('image/')) {
+    // কিছু Android পিকার HEIC-এর type খালি দেয়, তাই নাম দেখেও HEIC ধরা হয়
+    if (!file || ((!file.type || !file.type.startsWith('image/')) && !isHeicFile(file))) {
       resolve(file); // ইমেজ না হলে হাত না দিয়ে ফেরত
       return;
     }
@@ -87,6 +129,17 @@ export function compressImage(file, options = {}) {
 
     img.onerror = () => {
       URL.revokeObjectURL(objectUrl);
+      // ব্রাউজার HEIC খুলতে পারেনি → JPEG-এ কনভার্ট করে আবার কম্প্রেস (এক ধাপই, লুপ নয়)
+      if (isHeicFile(file) && !options.__heicConverted) {
+        convertHeicToJpeg(file).then((jpeg) => {
+          if (!jpeg) {
+            resolve(file); // কনভার্ট ব্যর্থ: আগের আচরণ (কলার isHeicFile দিয়ে আটকায়)
+            return;
+          }
+          compressImage(jpeg, { ...options, __heicConverted: true }).then(resolve, () => resolve(jpeg));
+        });
+        return;
+      }
       resolve(file); // fail-safe — কম্প্রেশন ব্যর্থ হলেও আপলোড আটকাবে না
     };
 

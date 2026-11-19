@@ -3389,5 +3389,6 @@ window.SF_I18N_EN = {
 "একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন": "This email is linked to more than one account, please log in with your phone number",
 "লগইন ব্যর্থ: ফোন নাম্বার/ইমেইল অথবা পাসওয়ার্ড ভুল": "Login failed: wrong phone number/email or password",
 "ম্যাপ লোড হয়নি। নেট চেক করে আবার চেষ্টা করুন।": "The map didn't load. Check your connection and try again.",
-"ম্যাপ লোড হয়নি। আবার চেষ্টা করুন, অথবা ঠিকানা লিখে এগিয়ে যান।": "The map didn't load. Try again, or type the address and continue."
+"ম্যাপ লোড হয়নি। আবার চেষ্টা করুন, অথবা ঠিকানা লিখে এগিয়ে যান।": "The map didn't load. Try again, or type the address and continue.",
+"ছবি প্রস্তুত হচ্ছে…": "Preparing photo…"
 };
