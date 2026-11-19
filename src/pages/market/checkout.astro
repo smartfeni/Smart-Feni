@@ -175,6 +175,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
     let name = '';
     let note = '';
     let busy = false;
+    let profPhone = false; // প্রোফাইলে সঠিক নম্বর আছে কিনা; না থাকলে এক-বারের নম্বর ইনপুট
 
     function toast(m, t) { if (window.showToast) window.showToast(m, t || 'info'); }
     function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
@@ -336,14 +337,25 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       const pc = card('যোগাযোগ', 'gadget');
       const pr = mk('div', 'qc-phone');
       pr.appendChild(mk('div', '', name || 'আপনি'));
-      if (phone) pr.appendChild(mk('b', '', phone));
+      if (phone && profPhone) pr.appendChild(mk('b', '', phone));
       pc.appendChild(pr);
-      if (!validPhone(phone)) {
-        const w = mk('div', 'qc-warn');
-        w.appendChild(document.createTextNode('অর্ডার দিতে প্রোফাইলে আপনার মোবাইল নম্বর লাগবে। '));
-        const a = mk('a', '', 'নম্বর যোগ করুন'); a.href = '/profile/edit';
-        w.appendChild(a);
-        pc.appendChild(w);
+      if (!profPhone) {
+        const l = mk('label', 'qc-lbl'); l.htmlFor = 'qcPhoneIn';
+        l.appendChild(document.createTextNode('আপনার মোবাইল নম্বর ')); const rq = mk('span', '', '*'); rq.style.color = '#D92D20'; l.appendChild(rq);
+        l.style.cssText = 'display:block;margin:10px 0 6px;font-weight:700;font-size:14px;';
+        pc.appendChild(l);
+        const pi = mk('input'); pi.id = 'qcPhoneIn'; pi.type = 'tel'; pi.inputMode = 'tel'; pi.maxLength = 14; pi.required = true; pi.autocomplete = 'tel';
+        pi.placeholder = '01XXXXXXXXX'; pi.value = phone;
+        pi.style.cssText = 'width:100%;height:50px;border:1.5px solid #E2E7EF;border-radius:14px;padding:0 14px;font-size:16px;background:#FBFCFE;color:#1B2A4A;';
+        pi.addEventListener('input', () => {
+          const was = validPhone(phone);
+          phone = pi.value.replace(/[০-৯]/g, (x) => String('০১২৩৪৫৬৭৮৯'.indexOf(x))).trim();
+          try { localStorage.setItem('sf_once_phone', phone); } catch (e) {}
+          if (was !== validPhone(phone)) { render(); const p2 = $('qcPhoneIn'); if (p2) { p2.focus(); p2.setSelectionRange(p2.value.length, p2.value.length); } }
+        });
+        pc.appendChild(pi);
+        const hn = mk('p', '', 'শুধু এই অর্ডারের জন্য। রাইডার/দোকান এই নম্বরে কল করবে।'); hn.style.cssText = 'margin:6px 0 0;font-size:12.5px;color:#6B7891;';
+        pc.appendChild(hn);
       }
       body.appendChild(pc);
 
@@ -422,6 +434,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
             dropInstructions: (($('qcIns') && $('qcIns').value) || d.instructions || '').trim(),
             dropLocSource: d.lat !== null ? 'map' : 'manual',
             customerFare: needCust ? Number(custFare) : undefined,
+            customerPhone: profPhone ? undefined : phone,
           }),
         });
         const out = await res.json().catch(() => ({}));
@@ -443,14 +456,14 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         showErr('ইন্টারনেটে সমস্যা, আবার চেষ্টা করুন');
       }
     }
-    const PRE_ERR = { login: 'লগইন করুন', restricted: 'অর্ডার দেওয়া এখন বন্ধ আছে, পরে চেষ্টা করুন', shop: 'দোকানটি এখন প্রি-অর্ডার নিচ্ছে না', too_many: 'আপনার ৫টি প্রি-অর্ডার চলমান, আগে সেগুলো শেষ হোক', phone: 'প্রোফাইলে সঠিক মোবাইল নম্বর দিন', address: 'ঠিকানা দিন', date: 'দিনটি আজ থেকে ৩০ দিনের মধ্যে দিন', items: 'কার্টে আইটেম নেই', item: 'কোনো আইটেম এখন পাওয়া যাচ্ছে না, মেনু থেকে আবার বাছুন' };
+    const PRE_ERR = { login: 'লগইন করুন', restricted: 'অর্ডার দেওয়া এখন বন্ধ আছে, পরে চেষ্টা করুন', shop: 'দোকানটি এখন প্রি-অর্ডার নিচ্ছে না', too_many: 'আপনার ৫টি প্রি-অর্ডার চলমান, আগে সেগুলো শেষ হোক', phone: 'সঠিক মোবাইল নম্বর দিন', address: 'ঠিকানা দিন', date: 'দিনটি আজ থেকে ৩০ দিনের মধ্যে দিন', items: 'কার্টে আইটেম নেই', item: 'কোনো আইটেম এখন পাওয়া যাচ্ছে না, মেনু থেকে আবার বাছুন' };
     async function placePreorder(c, d) {
       try {
         const ins = (($('qcIns') && $('qcIns').value) || d.instructions || '').trim();
         const { data, error } = await supabase.rpc('market_create_preorder', {
           p_shop_id: shop.id,
           p_items: c.lines.map((l) => ({ item_id: l.id, qty: l.qty })),
-          p_drop: { address: d.address + (ins ? ' (' + ins + ')' : ''), lat: d.lat, lng: d.lng, upazila: d.upazila || '', union: d.union || '' },
+          p_drop: { address: d.address + (ins ? ' (' + ins + ')' : ''), lat: d.lat, lng: d.lng, upazila: d.upazila || '', union: d.union || '', phone: profPhone ? '' : phone },
           p_note: note.trim(),
           p_wanted_date: wantDate || null,
         });
@@ -496,6 +509,8 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         ]);
         shop = s;
         if (p && p.data) { phone = p.data.phone || ''; name = p.data.full_name || ''; }
+        profPhone = validPhone(phone);
+        if (!profPhone) { try { phone = localStorage.getItem('sf_once_phone') || ''; } catch (e) { phone = ''; } }
       } catch (e) {
         if (window.SFReportError) { try { window.SFReportError(e, 'market-checkout-load'); } catch (_) {} }
       }

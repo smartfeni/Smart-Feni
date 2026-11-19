@@ -146,6 +146,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
     let type = new URLSearchParams(location.search).get('type') === 'send' ? 'send' : 'anything';
     let shops = [];
     let phone = '';
+    let profPhone = false; // প্রোফাইলে নম্বর না থাকলে এক-বারের নম্বর ইনপুট
     let busy = false;
     let fare = null;
     // পিন ছাড়া (লিখিত) ঠিকানা: কাস্টমার নিজে চার্জ প্রস্তাব দেয় (৳৪০–৫০০)
@@ -234,11 +235,17 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       body.textContent = '';
       const err = mk('p', 'qa-err'); err.id = 'qaErr'; err.hidden = true; err.setAttribute('role', 'alert');
       body.appendChild(err);
-      if (!BD.test(String(phone).replace(/[\s-]/g, '').replace(/^\+?88/, ''))) {
-        const w = mk('div', 'qa-warn');
-        w.appendChild(document.createTextNode('অর্ডার দিতে প্রোফাইলে আপনার মোবাইল নম্বর লাগবে। '));
-        const a = mk('a', '', 'নম্বর যোগ করুন'); a.href = '/profile/edit'; w.appendChild(a);
-        body.appendChild(w);
+      if (!profPhone) {
+        const c = card('আপনার মোবাইল নম্বর', 'gadget');
+        const l = mk('label', 'qa-lbl'); l.htmlFor = 'qaPhoneIn'; l.appendChild(document.createTextNode('মোবাইল নম্বর ')); l.appendChild(mk('i', '', '*'));
+        c.appendChild(l);
+        const i = mk('input', 'qa-in'); i.id = 'qaPhoneIn'; i.type = 'tel'; i.inputMode = 'tel'; i.maxLength = 14; i.required = true; i.autocomplete = 'tel';
+        i.placeholder = '01XXXXXXXXX'; i.value = phone;
+        i.addEventListener('input', () => { phone = i.value.replace(/[০-৯]/g, (x) => String('০১২৩৪৫৬৭৮৯'.indexOf(x))).trim(); try { localStorage.setItem('sf_once_phone', phone); } catch (e) {} paintFoot(); });
+        c.appendChild(i);
+        const hn = mk('p', '', 'শুধু এই অর্ডারের জন্য। রাইডার/দোকান এই নম্বরে কল করবে।'); hn.style.cssText = 'margin:6px 0 0;font-size:12.5px;color:#6B7891;';
+        c.appendChild(hn);
+        body.appendChild(c);
       }
       if (type === 'anything') renderAny(body); else renderSend(body);
       if (needCust && dropInfo()) body.appendChild(custFareCard());
@@ -466,6 +473,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       const d = dropInfo();
       const own = getDrop();
       const body = { isMarket: true, orderType: type };
+      if (!profPhone) body.customerPhone = phone;
       if (type === 'anything') {
         body.description = any.text.trim();
         if (any.src === 'list') body.marketShopId = any.shopId;
@@ -527,6 +535,8 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         ]);
         shops = (s || []).filter((x) => x.is_active);
         phone = (p && p.data && p.data.phone) || '';
+        profPhone = BD.test(String(phone).replace(/[\s-]/g, '').replace(/^\+?88/, ''));
+        if (!profPhone) { try { phone = localStorage.getItem('sf_once_phone') || ''; } catch (e) { phone = ''; } }
       } catch (e) { /* খালি */ }
       if (!getDrop() && window.SFMarketLocation) window.SFMarketLocation.open(() => { render(); recalcFare(); });
       render();

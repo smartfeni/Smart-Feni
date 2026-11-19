@@ -120,12 +120,9 @@ async function prepareMarketOrder(client, user, body) {
     if (staff !== true) return { error: 'দোকানটি এখন অর্ডার নিচ্ছে না', code: 'SHOP_UNAVAILABLE', status: 409 };
   }
 
-  // ফোন নম্বর (প্রোফাইল)
-  const { data: prof } = await admin.from('profiles').select('phone').eq('id', user.id).maybeSingle();
-  const phone = String((prof && prof.phone) || '').replace(/[\s-]/g, '').replace(/^\+?88/, '');
-  if (!/^01[3-9]\d{8}$/.test(phone)) {
-    return { error: 'অর্ডারের আগে প্রোফাইলে আপনার মোবাইল নম্বর যোগ করুন', code: 'PHONE_REQUIRED' };
-  }
+  // ফোন নম্বর: প্রোফাইলে না থাকলে এই অর্ডারের জন্য দেওয়া নম্বর
+  const cp = await resolveCustomerPhone(admin, user, body.customerPhone);
+  if (cp.error) return cp;
 
   // একসাথে চলমান অর্ডারের সীমা
   const { count } = await admin
@@ -186,6 +183,7 @@ async function prepareMarketOrder(client, user, body) {
     description,
     fare,
     customerFare,
+    oneTimePhone: cp.oneTime, customerName: cp.name,
   };
 }
 
@@ -197,7 +195,17 @@ async function prepareMarketOrder(client, user, body) {
 // - চার্জ: calc_delivery_fare (পিকআপ → ড্রপ), না পেলে ফলব্যাক
 // ============================================================
 const BD_PHONE = /^01[3-9]\d{8}$/;
-const cleanPhone = (v) => String(v || '').replace(/[\s-]/g, '').replace(/^\+?88/, '');
+const cleanPhone = (v) => String(v || '').replace(/[০-৯]/g, (x) => String('০১২৩৪৫৬৭৮৯'.indexOf(x))).replace(/[\s-]/g, '').replace(/^\+?88/, '');
+
+// কাস্টমারের ফোন: প্রোফাইলের নম্বর, না থাকলে এই অর্ডারের জন্য দেওয়া এক-বারের নম্বর (প্রোফাইল বদলায় না)
+async function resolveCustomerPhone(admin, user, given) {
+  const { data: prof } = await admin.from('profiles').select('phone, full_name').eq('id', user.id).maybeSingle();
+  const own = cleanPhone(prof && prof.phone);
+  if (BD_PHONE.test(own)) return { phone: own, oneTime: null, name: (prof && prof.full_name) || null };
+  const g = cleanPhone(given);
+  if (BD_PHONE.test(g)) return { phone: g, oneTime: g, name: (prof && prof.full_name) || null };
+  return { error: 'আপনার সঠিক মোবাইল নম্বর দিন', code: 'PHONE_REQUIRED' };
+}
 
 async function prepareMarketAny(client, user, b) {
   const admin = getAdminClient().client || client;
@@ -207,10 +215,8 @@ async function prepareMarketAny(client, user, b) {
   const dropAddress = typeof b.dropAddress === 'string' ? b.dropAddress.trim() : '';
   if (!dropAddress) return { error: 'ডেলিভারি ঠিকানা দিন', code: 'DROP_REQUIRED' };
 
-  const { data: prof } = await admin.from('profiles').select('phone').eq('id', user.id).maybeSingle();
-  if (!BD_PHONE.test(cleanPhone(prof && prof.phone))) {
-    return { error: 'অর্ডারের আগে প্রোফাইলে আপনার মোবাইল নম্বর যোগ করুন', code: 'PHONE_REQUIRED' };
-  }
+  const cp = await resolveCustomerPhone(admin, user, b.customerPhone);
+  if (cp.error) return cp;
   const { count } = await admin
     .from('delivery_requests')
     .select('id', { count: 'exact', head: true })
@@ -297,6 +303,7 @@ async function prepareMarketAny(client, user, b) {
     description,
     fare,
     customerFare,
+    oneTimePhone: cp.oneTime, customerName: cp.name,
   };
 }
 
@@ -354,6 +361,7 @@ export async function POST({ request }) {
       recipientPhone,
       parcelSize,
       customerFare,
+      customerPhone,
     } = await request.json();
 
     // ===== কুইক ডেলিভারি: শপ অর্ডার (সব দাম/পিকআপ/চার্জ সার্ভারে, ক্লায়েন্ট বিশ্বাস নয়) =====
@@ -364,10 +372,10 @@ export async function POST({ request }) {
         ? await prepareMarketAny(client, user, {
           orderType, description, marketShopId, pickupAddress, pickupLat, pickupLng, pickupUpazila, pickupUnion,
           pickupPhone, recipientName, recipientPhone, parcelSize,
-          dropAddress, dropLat, dropLng, dropUnion, upazila, customerFare,
+          dropAddress, dropLat, dropLng, dropUnion, upazila, customerFare, customerPhone,
         })
         : await prepareMarketOrder(client, user, {
-          orderItems, dropAddress, dropLat, dropLng, dropUnion, upazila, dropInstructions, marketNote, customerFare,
+          orderItems, dropAddress, dropLat, dropLng, dropUnion, upazila, dropInstructions, marketNote, customerFare, customerPhone,
         });
       if (r.error) {
         return new Response(JSON.stringify({ error: r.error, code: r.code }), {
@@ -469,6 +477,11 @@ export async function POST({ request }) {
       if (market.pickupPhone) extraColumns.pickup_contact_phone = market.pickupPhone;
       if (market.recipientName) extraColumns.drop_contact_name = market.recipientName;
       if (market.recipientPhone) extraColumns.drop_contact_phone = market.recipientPhone;
+      // প্রোফাইলে নম্বর নেই: এই অর্ডারের নম্বর ড্রপের যোগাযোগে (রাইডার এখান থেকে কল করবে)
+      else if (market.oneTimePhone) {
+        extraColumns.drop_contact_phone = market.oneTimePhone;
+        extraColumns.drop_contact_name = market.recipientName || market.customerName || 'কাস্টমার';
+      }
       if (market.parcelSize) extraColumns.parcel_size = market.parcelSize;
       // market_stage গার্ড-সুরক্ষিত (কাস্টমার বসাতে পারে না); null = নতুন অর্ডার
       // স্টাফের অর্ডারও অ্যাডমিন গেটে থাকে; টেস্ট শপের অর্ডার কখনো নিজে পাবলিশ হয় না (আসল রাইডার পায় না)

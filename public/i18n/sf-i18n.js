@@ -30,11 +30,6 @@
   });
   TPL.sort(function (a, b) { return b[0].source.length - a[0].source.length; });
   var BNL = /[\u0980-\u09E5\u09F0-\u09F2\u09F4-\u09FF]/;
-  var subKeys = Object.keys(DN).filter(function (k) { return k.length >= 2 && BN.test(k); }).sort(function (a, b) { return b.length - a.length; });
-  var SUB = null;
-  try {
-    SUB = new RegExp('(?<![\\u0980-\\u09FF])(' + subKeys.map(esc).join('|') + ')(?![\\u0980-\\u09FF])', 'g');
-  } catch (e) { SUB = null; }
 
   var TW = { 'সকাল': 'am', 'ভোর': 'am', 'দুপুর': 'pm', 'বিকেল': 'pm', 'সন্ধ্যা': 'pm', 'রাত': 'night' };
   function ampm(word, hh) {
@@ -51,11 +46,11 @@
       if (tm) { var k = 1, val = TPL[i][1]; return val.replace(/\{\}/g, function () { var g = tm[k++] || ''; if (!BNL.test(g)) return g; var c = core(norm(g)); return (k > 2 || val.indexOf('{}') > 0) && /^[A-Z][a-z]+$/.test(c) ? c.toLowerCase() : c; }); }
     }
     // কয়েকটা বাক্য/অংশ জোড়া থাকলে আলাদা করে অনুবাদ
-    var parts = s.split(/(?<=[।!?])\s+|\s+·\s+/);
-    if (parts.length > 1) {
-      var seps = s.match(/(?<=[।!?])\s+|\s+·\s+/g) || [];
+    var marked = s.replace(/([।!?])\s+/g, '$1\u0001').replace(/\s+·\s+/g, '\u0002');
+    if (marked !== s) {
+      var parts = marked.split(/[\u0001\u0002]/), seps = marked.match(/[\u0001\u0002]/g) || [];
       var done = parts.map(function (p) { return core(norm(p)); });
-      if (!done.some(function (p) { return BNL.test(p); })) return done.map(function (p, i) { return p + (i < seps.length ? (seps[i].indexOf('·') !== -1 ? ' · ' : ' ') : ''); }).join('');
+      if (!done.some(function (p) { return BNL.test(p); })) return done.map(function (p, i) { return p + (i < seps.length ? (seps[i] === '\u0002' ? ' · ' : ' ') : ''); }).join('');
     }
     var x = s;
     // সময়: "রাত ১০:৩০" / "১০:৩০ রাত"

@@ -1264,5 +1264,10 @@ window.SF_I18N_EN = {
 "একটু পরে আবার চেষ্টা করুন।": "Please try again a bit later.",
 "আবার চেষ্টা করুন।": "Please try again.",
 "হ্যাঁ": "Yes",
-"না": "No"
+"না": "No",
+"আপনার মোবাইল নম্বর": "Your mobile number",
+"মোবাইল নম্বর": "Mobile number",
+"শুধু এই অর্ডারের জন্য। রাইডার/দোকান এই নম্বরে কল করবে।": "For this order only. The rider/shop will call this number.",
+"সঠিক মোবাইল নম্বর দিন": "Enter a valid mobile number",
+"আপনার সঠিক মোবাইল নম্বর দিন": "Enter your valid mobile number"
 };
