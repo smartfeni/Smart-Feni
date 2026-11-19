@@ -152,7 +152,11 @@ async function prepareMarketOrder(client, user, body) {
   const description = ('কুইক ডেলিভারি · ' + shop.name + ': ' + names.join(', ') + (note ? ' | নোট: ' + note : '')).slice(0, 1000);
   const upazila = (typeof body.upazila === 'string' && body.upazila.trim()) || shop.upazila || 'ফেনী সদর';
 
+  let isStaff = false;
+  try { const { data: st } = await client.rpc('has_permission', { p_key: 'delivery_orders.manage' }); isStaff = st === true; } catch (_) { isStaff = false; }
   return {
+    isStaff,
+    orderType: 'shop_order',
     isTest: !!shop.is_test,
     upazila,
     pickupAddress: shop.address || shop.name,
@@ -160,6 +164,108 @@ async function prepareMarketOrder(client, user, body) {
     pickupLng: Number(shop.lng),
     pickupUpazila: shop.upazila || null,
     pickupUnion: shop.union_name || null,
+    description,
+    fare,
+  };
+}
+
+// ============================================================
+// কুইক ডেলিভারি: অর্ডার এনিথিং (anything) ও পাঠান/এনে দাও (send)
+// - কাস্টমারের ফোন বাধ্যতামূলক, একসাথে ২টা চলমান সীমা (শপ অর্ডারের মতো)
+// - anything: পিকআপ = বাছাই করা দোকান (পিন) অথবা কাস্টমারের দেওয়া জায়গা/নাম; না দিলে "কাছের দোকান"
+// - send: পিকআপ ঠিকানা + পিকআপের ফোন বাধ্যতামূলক; প্রাপক ঐচ্ছিক
+// - চার্জ: calc_delivery_fare (পিকআপ → ড্রপ), না পেলে ফলব্যাক
+// ============================================================
+const BD_PHONE = /^01[3-9]\d{8}$/;
+const cleanPhone = (v) => String(v || '').replace(/[\s-]/g, '').replace(/^\+?88/, '');
+
+async function prepareMarketAny(client, user, b) {
+  const admin = getAdminClient().client || client;
+  const type = b.orderType === 'send' ? 'send' : 'anything';
+  const text = typeof b.description === 'string' ? b.description.trim() : '';
+  if (text.length < 3) return { error: type === 'send' ? 'কী পাঠাচ্ছেন লিখুন' : 'কী লাগবে লিখুন', code: 'TEXT_REQUIRED' };
+  const dropAddress = typeof b.dropAddress === 'string' ? b.dropAddress.trim() : '';
+  if (!dropAddress) return { error: 'ডেলিভারি ঠিকানা দিন', code: 'DROP_REQUIRED' };
+
+  const { data: prof } = await admin.from('profiles').select('phone').eq('id', user.id).maybeSingle();
+  if (!BD_PHONE.test(cleanPhone(prof && prof.phone))) {
+    return { error: 'অর্ডারের আগে প্রোফাইলে আপনার মোবাইল নম্বর যোগ করুন', code: 'PHONE_REQUIRED' };
+  }
+  const { count } = await admin
+    .from('delivery_requests')
+    .select('id', { count: 'exact', head: true })
+    .eq('customer_profile_id', user.id)
+    .eq('is_market', true)
+    .in('status', ['open', 'confirmed']);
+  if ((count || 0) >= MARKET_MAX_ACTIVE) {
+    return { error: 'আপনার ২টা অর্ডার চলমান আছে। সেগুলো শেষ হলে নতুন অর্ডার দিন।', code: 'TOO_MANY_ACTIVE', status: 409 };
+  }
+
+  const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  const txt = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+  let pickupAddress = txt(b.pickupAddress, 300);
+  let pickupLat = num(b.pickupLat);
+  let pickupLng = num(b.pickupLng);
+  let pickupUpazila = txt(b.pickupUpazila, 60);
+  let pickupUnion = txt(b.pickupUnion, 60);
+  let shopName = null;
+
+  if (type === 'anything' && b.marketShopId) {
+    const { data: shop } = await admin
+      .from('delivery_shops')
+      .select('id, name, address, upazila, union_name, lat, lng, is_active')
+      .eq('id', String(b.marketShopId))
+      .maybeSingle();
+    if (shop && shop.is_active) {
+      shopName = shop.name;
+      pickupAddress = shop.address ? shop.name + ', ' + shop.address : shop.name;
+      pickupLat = num(shop.lat); pickupLng = num(shop.lng);
+      pickupUpazila = shop.upazila || pickupUpazila; pickupUnion = shop.union_name || pickupUnion;
+    }
+  }
+
+  let pickupPhone = null, recipientName = null, recipientPhone = null, parcelSize = null;
+  if (type === 'send') {
+    if (!pickupAddress) return { error: 'কোথা থেকে নেবে সেই ঠিকানা দিন', code: 'PICKUP_REQUIRED' };
+    pickupPhone = cleanPhone(b.pickupPhone);
+    if (!BD_PHONE.test(pickupPhone)) return { error: 'পিকআপের সঠিক মোবাইল নম্বর দিন', code: 'PICKUP_PHONE' };
+    recipientName = txt(b.recipientName, 80);
+    if (b.recipientPhone) {
+      recipientPhone = cleanPhone(b.recipientPhone);
+      if (!BD_PHONE.test(recipientPhone)) return { error: 'প্রাপকের সঠিক মোবাইল নম্বর দিন', code: 'RECIPIENT_PHONE' };
+    }
+    parcelSize = ['small', 'medium', 'large'].includes(b.parcelSize) ? b.parcelSize : 'small';
+  }
+  if (!pickupAddress) pickupAddress = 'রাইডার কাছের দোকান থেকে কিনবেন';
+
+  let fare = MARKET_FALLBACK_FARE;
+  try {
+    const { data: fr, error: fe } = await client.rpc('calc_delivery_fare', {
+      p_pickup_lat: pickupLat, p_pickup_lng: pickupLng,
+      p_drop_lat: num(b.dropLat), p_drop_lng: num(b.dropLng),
+      p_drop_union: txt(b.dropUnion, 120),
+      p_category: 'delivery',
+    });
+    if (!fe && fr && Number(fr.fare) > 0) fare = Math.round(Number(fr.fare));
+  } catch (_) { /* ফলব্যাক */ }
+  if (type === 'send' && parcelSize === 'large') fare += 20;
+
+  let isStaff = false;
+  try { const { data: st } = await client.rpc('has_permission', { p_key: 'delivery_orders.manage' }); isStaff = st === true; } catch (_) { isStaff = false; }
+
+  const SIZE_BN = { small: 'ছোট', medium: 'মাঝারি', large: 'বড়' };
+  const description = (type === 'send'
+    ? 'পাঠান · ' + text.slice(0, 600) + ' · সাইজ: ' + SIZE_BN[parcelSize]
+    : 'যেকোনো কিছু' + (shopName ? ' · ' + shopName : '') + ' · ' + text.slice(0, 800)).slice(0, 1000);
+
+  return {
+    isStaff,
+    isTest: false,
+    orderType: type,
+    upazila: txt(b.upazila, 60) || pickupUpazila || 'ফেনী সদর',
+    pickupAddress,
+    pickupLat, pickupLng, pickupUpazila, pickupUnion,
+    pickupPhone, recipientName, recipientPhone, parcelSize,
     description,
     fare,
   };
@@ -212,14 +318,27 @@ export async function POST({ request }) {
       // কুইক ডেলিভারি (মার্কেট) অর্ডার — marketplace ব্রান্চ
       isMarket,
       marketNote,
+      orderType,
+      marketShopId,
+      pickupPhone,
+      recipientName,
+      recipientPhone,
+      parcelSize,
     } = await request.json();
 
     // ===== কুইক ডেলিভারি: শপ অর্ডার (সব দাম/পিকআপ/চার্জ সার্ভারে, ক্লায়েন্ট বিশ্বাস নয়) =====
     let market = null; // { isTest }
     if (isMarket === true) {
-      const r = await prepareMarketOrder(client, user, {
-        orderItems, dropAddress, dropLat, dropLng, dropUnion, upazila, dropInstructions, marketNote,
-      });
+      const isAny = orderType === 'anything' || orderType === 'send';
+      const r = isAny
+        ? await prepareMarketAny(client, user, {
+          orderType, description, marketShopId, pickupAddress, pickupLat, pickupLng, pickupUpazila, pickupUnion,
+          pickupPhone, recipientName, recipientPhone, parcelSize,
+          dropAddress, dropLat, dropLng, dropUnion, upazila,
+        })
+        : await prepareMarketOrder(client, user, {
+          orderItems, dropAddress, dropLat, dropLng, dropUnion, upazila, dropInstructions, marketNote,
+        });
       if (r.error) {
         return new Response(JSON.stringify({ error: r.error, code: r.code }), {
           status: r.status || 400,
@@ -234,8 +353,9 @@ export async function POST({ request }) {
       pickupLng = r.pickupLng;
       pickupUpazila = r.pickupUpazila;
       pickupUnion = r.pickupUnion;
-      pickupLocSource = 'map';
+      pickupLocSource = r.pickupLat !== null && r.pickupLat !== undefined ? 'map' : 'manual';
       description = r.description;
+      if (isAny) orderItems = [];
       askingPrice = r.fare;
       vehicleType = 'any';
       isAsap = true;
@@ -314,11 +434,16 @@ export async function POST({ request }) {
     }
     if (market) {
       extraColumns.is_market = true;
-      extraColumns.order_type = 'shop_order';
+      extraColumns.order_type = market.orderType || 'shop_order';
+      if (market.pickupPhone) extraColumns.pickup_contact_phone = market.pickupPhone;
+      if (market.recipientName) extraColumns.drop_contact_name = market.recipientName;
+      if (market.recipientPhone) extraColumns.drop_contact_phone = market.recipientPhone;
+      if (market.parcelSize) extraColumns.parcel_size = market.parcelSize;
       // market_stage গার্ড-সুরক্ষিত (কাস্টমার বসাতে পারে না); null = নতুন অর্ডার
       // স্টাফের অর্ডারও অ্যাডমিন গেটে থাকে; টেস্ট শপের অর্ডার কখনো নিজে পাবলিশ হয় না (আসল রাইডার পায় না)
       extraColumns.publish_status = 'pending';
-      if (market.isTest) extraColumns.auto_publish_at = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+      // টেস্ট শপ বা স্টাফের (অ্যাডমিন টেস্ট) অর্ডার কখনো নিজে পাবলিশ হয় না — অ্যাডমিন হাতে পাবলিশ/অ্যাসাইন করবে
+      if (market.isTest || market.isStaff) extraColumns.auto_publish_at = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
     }
 
     const price = Number(askingPrice);
@@ -429,7 +554,7 @@ export async function POST({ request }) {
       );
     }
 
-    if (!onlineRiderCount && !(market && market.isTest)) {
+    if (!onlineRiderCount && !(market && (market.isTest || market.isStaff))) {
       const noRiderMessage =
         finalVehicleType !== 'any'
           ? `${whereLabel} এই বাহনের কোনো রাইডার এই মুহূর্তে সক্রিয় নেই। "যেকোনো" বেছে নিন, অথবা কিছুক্ষণ পর চেষ্টা করুন।`

@@ -1,0 +1,511 @@
+---
+// path: src/pages/market/anything.astro
+// ============================================================
+// কুইক ডেলিভারি — যেকোনো কিছু (/market/anything, ?type=send)। ব্রান্চ: marketplace, ধাপ ৮।
+// দুই ট্যাব:
+//  ১) অর্ডার এনিথিং: কী লাগবে (লেখা + ছবি ≤৪), কোথা থেকে (কাছের দোকান / তালিকা / ম্যাপ-নাম), ড্রপ = নিজের ঠিকানা
+//  ২) পাঠান / এনে দাও: পিকআপ (ম্যাপ/লিখে) + পিকআপের ফোন, ড্রপ নিজের বা অন্য কারও (নাম/ফোন/জায়গা), কী + সাইজ + ছবি
+// অর্ডার: POST /api/delivery/create-request { isMarket, orderType: anything|send } → ছবি chat-images/<id>/ → market_set_item_photos
+// তারপর অর্ডার প্যানেলে (/market/order)। চার্জ সার্ভার বসায়; এখানে শুধু আনুমানিক।
+// সব লেখা textContent দিয়ে বসানো (এস্কেপ)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import MarketLocationSheet from '../../components/market/MarketLocationSheet.astro';
+---
+
+<BaseLayout title="যেকোনো কিছু | কুইক ডেলিভারি">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="qa" id="qa">
+    <header class="qa-top">
+      <a class="qa-round" href="/market" aria-label="কুইক ডেলিভারিতে ফিরুন">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      </a>
+      <h1>যেকোনো কিছু</h1>
+    </header>
+
+    <div class="qa-tabs" role="tablist" aria-label="ধরন">
+      <button type="button" role="tab" class="qa-tab" id="qaTabAny" data-t="anything" aria-selected="true">
+        <img src="/market/icons/bags.webp" alt="" aria-hidden="true" /><span><b>অর্ডার এনিথিং</b><small>কিনে এনে দেবে</small></span>
+      </button>
+      <button type="button" role="tab" class="qa-tab" id="qaTabSend" data-t="send" aria-selected="false">
+        <img src="/market/icons/scooter.webp" alt="" aria-hidden="true" /><span><b>পাঠান / এনে দাও</b><small>জিনিস নিয়ে যাবে</small></span>
+      </button>
+    </div>
+
+    <div class="qa-body" id="qaBody"></div>
+
+    <footer class="qa-foot" id="qaFoot" hidden>
+      <div class="qa-foot-sum"><small>আনুমানিক চার্জ</small><b id="qaFare">—</b></div>
+      <button type="button" class="qa-go" id="qaGo">অর্ডার দিন</button>
+    </footer>
+  </div>
+
+  <MarketLocationSheet />
+
+  <style is:global>
+    #siteNavbar { display: none !important; }
+    .qa { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F4F6FA; min-height: 100vh; max-width: 600px; margin: 0 auto; padding-bottom: 190px; }
+    .qa * { box-sizing: border-box; }
+    .qa button, .qa input, .qa textarea { font-family: inherit; }
+    .qa-top { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 12px; padding: calc(12px + env(safe-area-inset-top)) 16px 10px; background: rgba(244,246,250,.94); backdrop-filter: blur(8px); }
+    .qa-top h1 { margin: 0; font-size: 21px; }
+    .qa-round { width: 44px; height: 44px; border-radius: 22px; background: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(27,42,74,.1); flex: none; }
+    .qa-round svg { width: 21px; height: 21px; fill: none; stroke: #1B2A4A; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }
+    .qa-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 4px 16px 12px; }
+    .qa-tab { display: flex; align-items: center; gap: 8px; min-height: 68px; padding: 8px 10px; border-radius: 20px; border: 2px solid transparent; background: #fff; color: #1B2A4A; text-align: left; cursor: pointer; box-shadow: 0 4px 14px rgba(27,42,74,.06); }
+    .qa-tab img { width: 42px; height: 42px; object-fit: contain; flex: none; filter: drop-shadow(0 4px 5px rgba(27,42,74,.18)); }
+    .qa-tab span { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+    .qa-tab b { font-size: 14.5px; }
+    .qa-tab small { font-size: 12px; color: #4A5568; }
+    .qa-tab[aria-selected='true'] { border-color: #FF6B35; background: linear-gradient(135deg, #FFF4EC, #FFFFFF); }
+    .qa-body { padding: 0 16px; }
+
+    .qa-card { background: #fff; border-radius: 22px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 18px rgba(27,42,74,.06); }
+    .qa-h { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 17px; font-weight: 700; }
+    .qa-h img { width: 28px; height: 28px; object-fit: contain; }
+    .qa-h .sp { flex: 1; }
+    .qa-link { font-size: 14px; font-weight: 700; color: #E8551C; background: none; border: 0; cursor: pointer; min-height: 36px; padding: 0 2px; }
+    .qa-ta, .qa-in { width: 100%; border: 1.5px solid #E2E7EF; border-radius: 16px; padding: 12px 14px; font-size: 16px; color: #1B2A4A; background: #FBFCFE; }
+    .qa-ta { min-height: 110px; resize: vertical; line-height: 1.55; }
+    .qa-in { height: 50px; padding: 0 14px; }
+    .qa-ta:focus, .qa-in:focus { outline: 0; border-color: #1B2A4A; }
+    .qa-lbl { display: block; font-size: 13px; font-weight: 600; color: #4A5568; margin: 12px 0 6px; }
+    .qa-lbl i { color: #D14343; font-style: normal; }
+    .qa-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .qa-chip { min-height: 38px; padding: 0 13px; border-radius: 999px; border: 1.5px solid #E2E7EF; background: #fff; color: #1B2A4A; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+    .qa-chip[aria-pressed='true'] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+
+    .qa-photos { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    .qa-ph { position: relative; width: 76px; height: 76px; border-radius: 16px; overflow: hidden; background: #F3F5F9; }
+    .qa-ph img { width: 100%; height: 100%; object-fit: cover; }
+    .qa-ph button { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 13px; border: 0; background: rgba(15,23,42,.7); color: #fff; font-size: 13px; cursor: pointer; }
+    .qa-add { width: 76px; height: 76px; border-radius: 16px; border: 2px dashed #C9D0DB; background: #FBFCFE; color: #4A5568; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 12px; font-weight: 700; cursor: pointer; }
+    .qa-add span { font-size: 24px; line-height: 1; color: #FF6B35; }
+
+    .qa-opts { display: flex; flex-direction: column; gap: 8px; }
+    .qa-opt { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; border: 1.5px solid #E2E7EF; background: #fff; cursor: pointer; text-align: left; color: #1B2A4A; width: 100%; }
+    .qa-opt[aria-pressed='true'] { border-color: #FF6B35; background: #FFF6F0; }
+    .qa-opt .dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #C9D0DB; flex: none; }
+    .qa-opt[aria-pressed='true'] .dot { border: 6px solid #FF6B35; }
+    .qa-opt b { display: block; font-size: 15px; }
+    .qa-opt small { display: block; font-size: 12.5px; color: #4A5568; }
+    .qa-shops { display: flex; gap: 10px; overflow-x: auto; margin: 10px -16px 0; padding: 2px 16px 4px; scrollbar-width: none; }
+    .qa-shops::-webkit-scrollbar { display: none; }
+    .qa-shop { flex: none; width: 128px; border-radius: 16px; border: 2px solid #EEF1F5; background: #fff; overflow: hidden; cursor: pointer; text-align: left; padding: 0; color: #1B2A4A; }
+    .qa-shop[aria-pressed='true'] { border-color: #FF6B35; }
+    .qa-shop i { display: block; height: 70px; background: #FFE3D1 center/cover no-repeat; font-style: normal; font-size: 26px; font-weight: 700; text-align: center; line-height: 70px; }
+    .qa-shop b { display: block; padding: 6px 8px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .qa-place { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border-radius: 16px; background: #F6F8FB; }
+    .qa-place .ic { width: 42px; height: 42px; border-radius: 13px; background: #FFF1E8; display: flex; align-items: center; justify-content: center; flex: none; }
+    .qa-place .ic svg { width: 22px; height: 22px; fill: #FF6B35; }
+    .qa-place .ic.blue { background: #E8EEF9; }
+    .qa-place .ic.blue svg { fill: #1B2A4A; }
+    .qa-place div { flex: 1; min-width: 0; }
+    .qa-place b { display: block; font-size: 15px; }
+    .qa-place span { display: block; font-size: 13px; color: #4A5568; line-height: 1.45; }
+    .qa-pinbtn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; margin-top: 10px; border-radius: 14px; border: 1.5px dashed #FF6B35; background: #FFF8F3; color: #B4400F; font-weight: 700; font-size: 14.5px; cursor: pointer; }
+    .qa-toggle { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .qa-toggle input { width: 22px; height: 22px; accent-color: #FF6B35; }
+
+    .qa-pay { display: flex; gap: 12px; align-items: flex-start; background: linear-gradient(135deg, #1B2A4A, #2C4372); color: #fff; }
+    .qa-pay img { width: 52px; height: 52px; object-fit: contain; flex: none; }
+    .qa-pay b { display: block; font-size: 16px; }
+    .qa-pay span { display: block; font-size: 13.5px; line-height: 1.55; opacity: .9; margin-top: 3px; }
+    .qa-warn { padding: 12px 14px; border-radius: 14px; background: #FDECEA; color: #A3261B; font-size: 14px; font-weight: 600; line-height: 1.5; margin-bottom: 14px; }
+    .qa-warn a { color: #A3261B; }
+    .qa-err { padding: 12px 14px; border-radius: 14px; background: #FDECEA; color: #A3261B; font-size: 14.5px; font-weight: 600; margin-bottom: 14px; }
+    .qa-err[hidden] { display: none; }
+
+    .qa-foot { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(66px + env(safe-area-inset-bottom)); width: 100%; max-width: 600px; display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: #fff; border-top: 1px solid #EEF1F5; box-shadow: 0 -8px 24px rgba(27,42,74,.08); z-index: 997; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; }
+    .qa-foot[hidden] { display: none; }
+    .qa-foot-sum small { display: block; font-size: 12.5px; color: #4A5568; }
+    .qa-foot-sum b { font-size: 20px; }
+    .qa-go { flex: 1; min-height: 54px; border: 0; border-radius: 16px; background: #FF6B35; color: #fff; font-size: 17px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(232,85,28,.35); }
+    .qa-go:disabled { background: #C9D0DB; box-shadow: none; cursor: not-allowed; }
+    .qa-tab:focus-visible, .qa-go:focus-visible, .qa-opt:focus-visible, .qa-chip:focus-visible, .qa-shop:focus-visible, .qa-add:focus-visible, .qa-pinbtn:focus-visible, .qa-link:focus-visible, .qa-round:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    .qa-empty { text-align: center; padding: 50px 16px; color: #4A5568; font-size: 15.5px; }
+    .qa-empty img { width: 110px; height: 110px; object-fit: contain; display: block; margin: 0 auto 10px; }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { fetchMarketShops, bnNum, marketAccess, shopOpenState } from '../../lib/marketApi.js';
+    import { getDrop } from '../../lib/marketCart.js';
+    import { compressImage } from '../../lib/imageCompress.js';
+
+    const $ = (id) => document.getElementById(id);
+    const tk = (n) => '৳' + bnNum(Math.round(Number(n) || 0));
+    const PIN = 'M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z';
+    const BD = /^01[3-9]\d{8}$/;
+
+    let type = new URLSearchParams(location.search).get('type') === 'send' ? 'send' : 'anything';
+    let shops = [];
+    let phone = '';
+    let busy = false;
+    let fare = null;
+    // অর্ডার এনিথিং
+    const any = { text: '', src: 'near', shopId: null, place: null, placeName: '', photos: [] };
+    // পাঠান
+    const snd = { text: '', pickup: null, pickupText: '', pickupPhone: '', other: false, rName: '', rPhone: '', rPlace: null, size: 'small', photos: [] };
+
+    function toast(m, t) { if (window.showToast) window.showToast(m, t || 'info'); }
+    function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
+    function icon(n) { const i = mk('img'); i.src = '/market/icons/' + n + '.webp'; i.alt = ''; i.setAttribute('aria-hidden', 'true'); return i; }
+    function svgPin(cls) {
+      const w = mk('span', 'ic' + (cls ? ' ' + cls : ''));
+      w.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + PIN + '"/></svg>';
+      return w;
+    }
+    function card(title, ic, extra) {
+      const c = mk('section', 'qa-card');
+      const h = mk('h2', 'qa-h');
+      if (ic) h.appendChild(icon(ic));
+      h.appendChild(document.createTextNode(title));
+      if (extra) { h.appendChild(mk('span', 'sp')); h.appendChild(extra); }
+      c.appendChild(h);
+      return c;
+    }
+    function place(title, sub, blue) {
+      const d = mk('div', 'qa-place');
+      d.appendChild(svgPin(blue ? 'blue' : ''));
+      const t = mk('div'); t.appendChild(mk('b', '', title)); if (sub) t.appendChild(mk('span', '', sub));
+      d.appendChild(t);
+      return d;
+    }
+    function pickPlace(title, cb) {
+      if (window.SFMarketLocation) window.SFMarketLocation.open((p) => { if (p) cb(p); }, { pick: true, title });
+    }
+
+    // ---------- ছবি ----------
+    function photosBlock(state) {
+      const wrap = mk('div', 'qa-photos');
+      state.photos.forEach((f, i) => {
+        const ph = mk('div', 'qa-ph');
+        const im = mk('img'); im.alt = 'ছবি ' + bnNum(i + 1); im.src = f.url;
+        const x = mk('button', '', '✕'); x.type = 'button'; x.setAttribute('aria-label', 'ছবি সরান');
+        x.addEventListener('click', () => { URL.revokeObjectURL(f.url); state.photos.splice(i, 1); render(); });
+        ph.appendChild(im); ph.appendChild(x);
+        wrap.appendChild(ph);
+      });
+      if (state.photos.length < 4) {
+        const add = mk('label', 'qa-add');
+        add.tabIndex = 0;
+        add.appendChild(mk('span', '', '+'));
+        add.appendChild(document.createTextNode('ছবি'));
+        const inp = mk('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true; inp.hidden = true;
+        inp.addEventListener('change', () => {
+          Array.from(inp.files || []).slice(0, 4 - state.photos.length).forEach((file) => state.photos.push({ file, url: URL.createObjectURL(file) }));
+          render();
+        });
+        add.appendChild(inp);
+        add.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inp.click(); } });
+        wrap.appendChild(add);
+      }
+      return wrap;
+    }
+
+    // ---------- আঁকা ----------
+    function render() {
+      $('qaTabAny').setAttribute('aria-selected', String(type === 'anything'));
+      $('qaTabSend').setAttribute('aria-selected', String(type === 'send'));
+      const body = $('qaBody');
+      const y = window.scrollY;
+      body.textContent = '';
+      const err = mk('p', 'qa-err'); err.id = 'qaErr'; err.hidden = true; err.setAttribute('role', 'alert');
+      body.appendChild(err);
+      if (!BD.test(String(phone).replace(/[\s-]/g, '').replace(/^\+?88/, ''))) {
+        const w = mk('div', 'qa-warn');
+        w.appendChild(document.createTextNode('অর্ডার দিতে প্রোফাইলে আপনার মোবাইল নম্বর লাগবে। '));
+        const a = mk('a', '', 'নম্বর যোগ করুন'); a.href = '/profile/edit'; w.appendChild(a);
+        body.appendChild(w);
+      }
+      if (type === 'anything') renderAny(body); else renderSend(body);
+      const pay = mk('section', 'qa-card qa-pay');
+      pay.appendChild(icon('bags'));
+      const pt = mk('div');
+      pt.appendChild(mk('b', '', type === 'send' ? 'পেমেন্ট: শুধু ডেলিভারি চার্জ' : 'পেমেন্ট রাইডার দাম জানানোর পর'));
+      pt.appendChild(mk('span', '', type === 'send'
+        ? 'রাইডার কনফার্ম হলে চার্জ অগ্রিম দেবেন (বিকাশ)। যাচাই হলেই রাইডার নিতে যাবেন।'
+        : 'রাইডার দোকানে গিয়ে দাম জানাবেন। তখন শুধু চার্জ বা পুরো টাকা অগ্রিম দেবেন, বাকিটা পণ্য হাতে পেয়ে।'));
+      pay.appendChild(pt);
+      body.appendChild(pay);
+      $('qaFoot').hidden = false;
+      paintFoot();
+      window.scrollTo(0, y);
+    }
+
+    function renderAny(body) {
+      const c1 = card('কী লাগবে?', 'bags');
+      const ta = mk('textarea', 'qa-ta'); ta.id = 'qaText'; ta.maxLength = 800;
+      ta.placeholder = 'যেমন: ২ কেজি মিনিকেট চাল, ১ লিটার সয়াবিন তেল, ১ প্যাকেট ডিটারজেন্ট';
+      ta.value = any.text;
+      ta.setAttribute('aria-label', 'কী লাগবে');
+      ta.addEventListener('input', () => { any.text = ta.value; paintFoot(); });
+      c1.appendChild(ta);
+      c1.appendChild(mk('label', 'qa-lbl', 'ছবি দিন (ঐচ্ছিক, সর্বোচ্চ ৪টা: প্রেসক্রিপশন, প্যাকেট, লিস্ট)'));
+      c1.appendChild(photosBlock(any));
+      body.appendChild(c1);
+
+      const c2 = card('কোথা থেকে আনবো?', 'basket');
+      const opts = mk('div', 'qa-opts');
+      [['near', 'কাছের যেকোনো দোকান', 'রাইডার নিজে ভালো দোকান থেকে কিনবেন'],
+       ['list', 'আমাদের দোকান থেকে', 'তালিকা থেকে দোকান বাছুন'],
+       ['place', 'নির্দিষ্ট দোকান/বাজার', 'ম্যাপে জায়গা বা নাম দিন']].forEach(([k, t, s]) => {
+        const b = mk('button', 'qa-opt'); b.type = 'button';
+        b.setAttribute('aria-pressed', String(any.src === k));
+        b.appendChild(mk('span', 'dot'));
+        const tt = mk('span'); tt.appendChild(mk('b', '', t)); tt.appendChild(mk('small', '', s)); b.appendChild(tt);
+        b.addEventListener('click', () => { any.src = k; render(); recalcFare(); });
+        opts.appendChild(b);
+      });
+      c2.appendChild(opts);
+      if (any.src === 'list') {
+        const row = mk('div', 'qa-shops');
+        const open = shops.filter((s) => shopOpenState(s).open);
+        if (!open.length) row.appendChild(mk('p', 'qa-lbl', 'এখন খোলা কোনো দোকান নেই।'));
+        open.forEach((s) => {
+          const b = mk('button', 'qa-shop'); b.type = 'button';
+          b.setAttribute('aria-pressed', String(any.shopId === s.id));
+          const im = mk('i');
+          if (s.image_url) im.style.backgroundImage = 'url("' + encodeURI(s.image_url) + '")'; else im.textContent = String(s.name || '?').charAt(0);
+          b.appendChild(im); b.appendChild(mk('b', '', s.name));
+          b.addEventListener('click', () => { any.shopId = s.id; render(); recalcFare(); });
+          row.appendChild(b);
+        });
+        c2.appendChild(row);
+      }
+      if (any.src === 'place') {
+        if (any.place) c2.appendChild(place(any.place.union || any.place.upazila || 'বাছাই করা জায়গা', any.place.address));
+        const pb = mk('button', 'qa-pinbtn', any.place ? 'জায়গা বদলান' : '📍 ম্যাপে জায়গা দিন'); pb.type = 'button';
+        pb.addEventListener('click', () => pickPlace('কোন দোকান/বাজার থেকে?', (p) => { any.place = p; render(); recalcFare(); }));
+        c2.appendChild(pb);
+        c2.appendChild(mk('label', 'qa-lbl', 'দোকান বা বাজারের নাম (ঐচ্ছিক)'));
+        const nm = mk('input', 'qa-in'); nm.maxLength = 100; nm.placeholder = 'যেমন: বড় বাজার, আল-আমিন ফার্মেসি'; nm.value = any.placeName;
+        nm.setAttribute('aria-label', 'দোকান বা বাজারের নাম');
+        nm.addEventListener('input', () => { any.placeName = nm.value; });
+        c2.appendChild(nm);
+      }
+      body.appendChild(c2);
+      body.appendChild(dropCard('কোথায় দেবো?'));
+    }
+
+    function dropCard(title, sendMode) {
+      const chg = mk('button', 'qa-link', 'বদলান'); chg.type = 'button';
+      chg.addEventListener('click', () => { if (window.SFMarketLocation) window.SFMarketLocation.open(() => { render(); recalcFare(); }); });
+      const c = card(title, 'scooter', sendMode && snd.other ? null : chg);
+      const d = getDrop();
+      if (sendMode) {
+        const tg = mk('label', 'qa-toggle');
+        const cb = mk('input'); cb.type = 'checkbox'; cb.checked = snd.other;
+        cb.addEventListener('change', () => { snd.other = cb.checked; render(); recalcFare(); });
+        tg.appendChild(cb); tg.appendChild(document.createTextNode('অন্য কারও কাছে পাঠাবো'));
+        if (!snd.other) c.appendChild(place(d ? [d.union, d.upazila].filter(Boolean).join(', ') || 'আমার ঠিকানা' : 'ঠিকানা দেওয়া নেই', d ? d.address : 'বদলান চেপে ঠিকানা দিন'));
+        c.appendChild(tg);
+        if (snd.other) {
+          if (snd.rPlace) c.appendChild(place(snd.rPlace.union || snd.rPlace.upazila || 'প্রাপকের জায়গা', snd.rPlace.address));
+          const pb = mk('button', 'qa-pinbtn', snd.rPlace ? 'জায়গা বদলান' : '📍 প্রাপকের জায়গা দিন'); pb.type = 'button';
+          pb.addEventListener('click', () => pickPlace('কোথায় পৌঁছে দেবো?', (p) => { snd.rPlace = p; render(); recalcFare(); }));
+          c.appendChild(pb);
+          c.appendChild(mk('label', 'qa-lbl', 'প্রাপকের নাম'));
+          const n = mk('input', 'qa-in'); n.maxLength = 80; n.value = snd.rName; n.setAttribute('aria-label', 'প্রাপকের নাম');
+          n.addEventListener('input', () => { snd.rName = n.value; });
+          c.appendChild(n);
+          const l = mk('label', 'qa-lbl'); l.appendChild(document.createTextNode('প্রাপকের মোবাইল ')); l.appendChild(mk('i', '', '*'));
+          c.appendChild(l);
+          const ph = mk('input', 'qa-in'); ph.type = 'tel'; ph.inputMode = 'tel'; ph.maxLength = 14; ph.placeholder = '01XXXXXXXXX'; ph.value = snd.rPhone; ph.setAttribute('aria-label', 'প্রাপকের মোবাইল');
+          ph.addEventListener('input', () => { snd.rPhone = ph.value; paintFoot(); });
+          c.appendChild(ph);
+        }
+        return c;
+      }
+      c.appendChild(place(d ? [d.union, d.upazila].filter(Boolean).join(', ') || 'আমার ঠিকানা' : 'ঠিকানা দেওয়া নেই', d ? d.address : 'বদলান চেপে ঠিকানা দিন'));
+      return c;
+    }
+
+    function renderSend(body) {
+      const c1 = card('কোথা থেকে নেবে?', 'basket');
+      if (snd.pickup) c1.appendChild(place(snd.pickup.union || snd.pickup.upazila || 'পিকআপের জায়গা', snd.pickup.address, true));
+      const pb = mk('button', 'qa-pinbtn', snd.pickup ? 'জায়গা বদলান' : '📍 ম্যাপে পিকআপের জায়গা দিন'); pb.type = 'button';
+      pb.addEventListener('click', () => pickPlace('কোথা থেকে নেবে?', (p) => { snd.pickup = p; render(); recalcFare(); }));
+      c1.appendChild(pb);
+      c1.appendChild(mk('label', 'qa-lbl', 'বাসা/দোকানের বিস্তারিত ঠিকানা'));
+      const pt = mk('input', 'qa-in'); pt.maxLength = 200; pt.placeholder = 'যেমন: ৩ তলা, রহমান ভিলা, কলেজ রোড'; pt.value = snd.pickupText; pt.setAttribute('aria-label', 'পিকআপের ঠিকানা');
+      pt.addEventListener('input', () => { snd.pickupText = pt.value; paintFoot(); });
+      c1.appendChild(pt);
+      const l = mk('label', 'qa-lbl'); l.appendChild(document.createTextNode('পিকআপের মোবাইল ')); l.appendChild(mk('i', '', '*'));
+      c1.appendChild(l);
+      const pp = mk('input', 'qa-in'); pp.type = 'tel'; pp.inputMode = 'tel'; pp.maxLength = 14; pp.placeholder = '01XXXXXXXXX'; pp.value = snd.pickupPhone; pp.setAttribute('aria-label', 'পিকআপের মোবাইল');
+      pp.addEventListener('input', () => { snd.pickupPhone = pp.value; paintFoot(); });
+      c1.appendChild(pp);
+      body.appendChild(c1);
+
+      body.appendChild(dropCard('কোথায় দেবে?', true));
+
+      const c3 = card('কী পাঠাচ্ছেন?', 'bags');
+      const ta = mk('textarea', 'qa-ta'); ta.maxLength = 600; ta.placeholder = 'যেমন: একটা ফাইল, চাবি, টিফিন বক্স, জামার প্যাকেট'; ta.value = snd.text; ta.setAttribute('aria-label', 'কী পাঠাচ্ছেন');
+      ta.style.minHeight = '84px';
+      ta.addEventListener('input', () => { snd.text = ta.value; paintFoot(); });
+      c3.appendChild(ta);
+      c3.appendChild(mk('label', 'qa-lbl', 'সাইজ'));
+      const chips = mk('div', 'qa-chips');
+      [['small', 'ছোট (হাতে ধরা যায়)'], ['medium', 'মাঝারি (ব্যাগে)'], ['large', 'বড় (+৳২০)']].forEach(([k, t]) => {
+        const b = mk('button', 'qa-chip', t); b.type = 'button'; b.setAttribute('aria-pressed', String(snd.size === k));
+        b.addEventListener('click', () => { snd.size = k; render(); recalcFare(); });
+        chips.appendChild(b);
+      });
+      c3.appendChild(chips);
+      c3.appendChild(mk('label', 'qa-lbl', 'ছবি (ঐচ্ছিক, সর্বোচ্চ ৪টা)'));
+      c3.appendChild(photosBlock(snd));
+      body.appendChild(c3);
+    }
+
+    // ---------- চার্জ ও বাটন ----------
+    function pickupCoords() {
+      if (type === 'anything') {
+        if (any.src === 'list') { const s = shops.find((x) => x.id === any.shopId); return s ? { lat: s.lat, lng: s.lng } : null; }
+        if (any.src === 'place' && any.place) return { lat: any.place.lat, lng: any.place.lng };
+        return null;
+      }
+      return snd.pickup ? { lat: snd.pickup.lat, lng: snd.pickup.lng } : null;
+    }
+    function dropInfo() {
+      if (type === 'send' && snd.other) return snd.rPlace;
+      return getDrop();
+    }
+    let fareTok = 0;
+    async function recalcFare() {
+      const d = dropInfo();
+      const p = pickupCoords();
+      const my = ++fareTok;
+      if (!d) { fare = null; paintFoot(); return; }
+      try {
+        const { data } = await supabase.rpc('calc_delivery_fare', {
+          p_pickup_lat: p && p.lat !== null ? Number(p.lat) : null, p_pickup_lng: p && p.lng !== null ? Number(p.lng) : null,
+          p_drop_lat: d.lat, p_drop_lng: d.lng, p_drop_union: d.union || null, p_category: 'delivery',
+        });
+        if (my !== fareTok) return;
+        fare = data && Number(data.fare) > 0 ? Math.round(Number(data.fare)) : 60;
+      } catch (e) { fare = 60; }
+      if (type === 'send' && snd.size === 'large') fare += 20;
+      paintFoot();
+    }
+
+    function problem() {
+      if (!BD.test(String(phone).replace(/[\s-]/g, '').replace(/^\+?88/, ''))) return 'মোবাইল নম্বর দিন';
+      if (type === 'anything') {
+        if (any.text.trim().length < 3) return 'কী লাগবে লিখুন';
+        if (any.src === 'list' && !any.shopId) return 'দোকান বাছুন';
+        if (!getDrop()) return 'ঠিকানা দিন';
+      } else {
+        if (!snd.pickup && !snd.pickupText.trim()) return 'পিকআপের জায়গা দিন';
+        if (!BD.test(snd.pickupPhone.replace(/[\s-]/g, '').replace(/^\+?88/, ''))) return 'পিকআপের মোবাইল দিন';
+        if (snd.other && !snd.rPlace) return 'প্রাপকের জায়গা দিন';
+        if (snd.other && !BD.test(snd.rPhone.replace(/[\s-]/g, '').replace(/^\+?88/, ''))) return 'প্রাপকের মোবাইল দিন';
+        if (!snd.other && !getDrop()) return 'ঠিকানা দিন';
+        if (snd.text.trim().length < 3) return 'কী পাঠাচ্ছেন লিখুন';
+      }
+      return '';
+    }
+    function paintFoot() {
+      $('qaFare').textContent = fare !== null ? tk(fare) : '—';
+      const p = problem();
+      const go = $('qaGo');
+      go.disabled = busy || !!p;
+      go.textContent = busy ? 'অর্ডার হচ্ছে…' : p || 'অর্ডার দিন';
+    }
+
+    function showErr(m) { const e = $('qaErr'); if (!e) { toast(m, 'error'); return; } e.textContent = m; e.hidden = !m; if (m) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+
+    async function uploadPhotos(reqId, list) {
+      const paths = [];
+      for (let i = 0; i < list.length; i++) {
+        let blob = list[i].file;
+        try { blob = await compressImage(list[i].file); } catch (e) { blob = list[i].file; }
+        const path = reqId + '/item-' + Date.now() + '-' + i + '.jpg';
+        const up = await supabase.storage.from('chat-images').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+        if (!up.error) paths.push(path);
+        else if (window.SFReportError) { try { window.SFReportError(up.error, 'market-item-photo'); } catch (_) {} }
+      }
+      if (paths.length) await supabase.rpc('market_set_item_photos', { p_request_id: reqId, p_paths: paths });
+      return paths.length;
+    }
+
+    $('qaGo').addEventListener('click', async () => {
+      if (busy || problem()) return;
+      busy = true; paintFoot();
+      const d = dropInfo();
+      const own = getDrop();
+      const body = { isMarket: true, orderType: type };
+      if (type === 'anything') {
+        body.description = any.text.trim();
+        if (any.src === 'list') body.marketShopId = any.shopId;
+        if (any.src === 'place') {
+          const nm = any.placeName.trim();
+          if (any.place) { body.pickupAddress = (nm ? nm + ', ' : '') + any.place.address; body.pickupLat = any.place.lat; body.pickupLng = any.place.lng; body.pickupUpazila = any.place.upazila; body.pickupUnion = any.place.union; }
+          else if (nm) body.pickupAddress = nm;
+        }
+        body.dropAddress = own.address; body.dropLat = own.lat; body.dropLng = own.lng; body.dropUnion = own.union || ''; body.upazila = own.upazila || '';
+        body.dropInstructions = own.instructions || '';
+      } else {
+        body.description = snd.text.trim();
+        body.parcelSize = snd.size;
+        body.pickupPhone = snd.pickupPhone.trim();
+        const det = snd.pickupText.trim();
+        if (snd.pickup) { body.pickupAddress = (det ? det + ', ' : '') + snd.pickup.address; body.pickupLat = snd.pickup.lat; body.pickupLng = snd.pickup.lng; body.pickupUpazila = snd.pickup.upazila; body.pickupUnion = snd.pickup.union; }
+        else body.pickupAddress = det;
+        body.dropAddress = d.address; body.dropLat = d.lat; body.dropLng = d.lng; body.dropUnion = d.union || ''; body.upazila = d.upazila || '';
+        if (snd.other) { body.recipientName = snd.rName.trim(); body.recipientPhone = snd.rPhone.trim(); }
+        else body.dropInstructions = (own && own.instructions) || '';
+      }
+      body.dropLocSource = d && d.lat !== null ? 'map' : 'manual';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/delivery/create-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session ? session.access_token : '') },
+          body: JSON.stringify(body),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) { busy = false; paintFoot(); showErr(out.error || 'অর্ডার দেওয়া যায়নি, আবার চেষ্টা করুন'); return; }
+        const reqId = out.request && out.request.id;
+        const list = type === 'anything' ? any.photos : snd.photos;
+        if (reqId && list.length) { $('qaGo').textContent = 'ছবি যাচ্ছে…'; try { await uploadPhotos(reqId, list); } catch (e) { /* ছবি ছাড়াই */ } }
+        toast('অর্ডার হয়েছে ✓', 'success');
+        location.replace('/market/order?id=' + encodeURIComponent(reqId));
+      } catch (e) {
+        busy = false; paintFoot();
+        showErr('ইন্টারনেটে সমস্যা, আবার চেষ্টা করুন');
+      }
+    });
+
+    $('qaTabAny').addEventListener('click', () => { if (type !== 'anything') { type = 'anything'; history.replaceState(null, '', '/market/anything'); render(); recalcFare(); } });
+    $('qaTabSend').addEventListener('click', () => { if (type !== 'send') { type = 'send'; history.replaceState(null, '', '/market/anything?type=send'); render(); recalcFare(); } });
+
+    async function init() {
+      const body = $('qaBody');
+      if (window.SFLoader) body.innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      const { data: { session } } = await supabase.auth.getSession();
+      const stop = (t) => { body.textContent = ''; const d = mk('div', 'qa-empty'); d.appendChild(icon('scooter')); d.appendChild(mk('div', '', t)); body.appendChild(d); };
+      if (!session) { stop('অর্ডার দিতে লগইন করুন।'); if (window.openAuthModal) window.openAuthModal(); return; }
+      const access = await marketAccess();
+      if (!access.allowed) { stop('কুইক ডেলিভারি শীঘ্রই আসছে।'); return; }
+      try {
+        const [s, p] = await Promise.all([
+          fetchMarketShops().catch(() => []),
+          supabase.from('profiles').select('phone').eq('id', session.user.id).maybeSingle(),
+        ]);
+        shops = (s || []).filter((x) => x.is_active);
+        phone = (p && p.data && p.data.phone) || '';
+      } catch (e) { /* খালি */ }
+      if (!getDrop() && window.SFMarketLocation) window.SFMarketLocation.open(() => { render(); recalcFare(); });
+      render();
+      recalcFare();
+    }
+    window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload(); });
+    init();
+  </script>
+</BaseLayout>

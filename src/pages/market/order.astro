@@ -178,6 +178,12 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     .qo-reason { display: flex; align-items: center; gap: 10px; min-height: 50px; padding: 0 14px; border-radius: 14px; border: 1.5px solid #E2E7EF; font-size: 15px; font-weight: 600; cursor: pointer; }
     .qo-reason input { width: 20px; height: 20px; accent-color: #FF6B35; }
     .qo-reason:has(input:checked) { border-color: #FF6B35; background: #FFF4EC; }
+    .qo-desc { margin: 0 0 8px; font-size: 15px; line-height: 1.6; color: #1B2A4A; white-space: pre-line; }
+    .qo-photos { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .qo-photos img { width: 84px; height: 84px; object-fit: cover; border-radius: 14px; background: #F3F5F9; cursor: zoom-in; }
+    .qo-ph { display: inline; font-size: 13px; color: #4A5568; font-weight: 600; }
+    .qo-qtot { display: flex; justify-content: space-between; padding: 10px 0 0; margin-top: 4px; border-top: 1.5px dashed #E2E7EF; font-size: 17px; font-weight: 700; }
+    .qo-receipt { display: block; width: 100%; max-height: 260px; object-fit: contain; margin-top: 12px; border-radius: 14px; background: #F3F5F9; cursor: zoom-in; }
     .qo-sub { margin: 0 0 12px; font-size: 14px; color: #4A5568; line-height: 1.5; }
     .qo-bad { margin: 0 0 12px; padding: 11px 13px; border-radius: 14px; background: #FDECEA; color: #A3261B; font-size: 14px; font-weight: 600; line-height: 1.5; }
     .qo-bad[hidden] { display: none; }
@@ -279,11 +285,23 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
 
     function offers() { return (req.delivery_offers || []).filter((o) => o.status === 'active'); }
     function bestOffer() { const o = offers(); return o.length ? Math.min(...o.map((x) => Number(x.offer_price))) : null; }
+    function kind() { return req.order_type === 'anything' ? 'anything' : req.order_type === 'send' ? 'send' : 'shop'; }
     function shopName() {
+      if (kind() === 'anything') return 'অর্ডার এনিথিং';
+      if (kind() === 'send') return 'পাঠান / এনে দাও';
       const it = Array.isArray(req.order_items) && req.order_items[0];
       if (it && it.shop_name) return it.shop_name;
       const m = /কুইক ডেলিভারি · ([^:]+):/.exec(req.description || '');
       return m ? m[1] : 'দোকান';
+    }
+
+    function advanceHero() {
+      const lp = lastPay();
+      if (lp && lp.status === 'pending') return ['orange', 'অগ্রিম যাচাই হচ্ছে', 'যাচাই হলেই রাইডার রওনা দেবেন।', 'bags', true];
+      if (kind() === 'anything' && req.purchase_total === null) return ['orange', 'রাইডার দাম জানাচ্ছেন…', 'রাইডার দোকানে গিয়ে দাম জানাবেন। চাইলে এখনই শুধু চার্জ দিতে পারেন।', 'basket', true];
+      if (kind() === 'anything') return ['orange', 'দাম এসেছে, অগ্রিম দিন', 'রাইডারের পাঠানো দাম দেখে অগ্রিম দিন।', 'bags', true];
+      if (kind() === 'send') return ['orange', 'অগ্রিম দিন', 'শুধু ডেলিভারি চার্জ দিলেই রাইডার নিতে যাবেন।', 'bags', true];
+      return ['orange', 'অগ্রিম দিন', 'রাইডার ঠিক হয়েছে। অগ্রিম দিলেই দোকানে যাবেন।', 'bags', true];
     }
 
     function hero() {
@@ -291,8 +309,8 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       const map = {
         review: ['blue', 'অর্ডার যাচাই হচ্ছে', 'স্মার্ট ফেনী টিম অর্ডারটি দেখছে, একটু পরেই রাইডারদের কাছে যাবে।', 'bags', true],
         finding: ['orange', 'রাইডার খোঁজা হচ্ছে…', offers().length ? 'রাইডাররা অফার দিচ্ছেন। পছন্দ হলে কনফার্ম করুন।' : 'কাছের রাইডারদের জানানো হয়েছে।', 'scooter', true],
-        advance: ['orange', lastPay() && lastPay().status === 'pending' ? 'অগ্রিম যাচাই হচ্ছে' : 'অগ্রিম দিন', lastPay() && lastPay().status === 'pending' ? 'যাচাই হলেই রাইডার দোকানে যাবেন।' : 'রাইডার ঠিক হয়েছে। অগ্রিম দিলেই দোকানে যাবেন।', 'bags', true],
-        pickup: ['blue', 'রাইডার দোকানে যাচ্ছেন', shopName() + ' থেকে আপনার অর্ডার নেবেন।', 'scooter', true],
+        advance: advanceHero(),
+        pickup: ['blue', kind() === 'send' ? 'রাইডার নিতে যাচ্ছেন' : 'রাইডার দোকানে যাচ্ছেন', kind() === 'send' ? 'পিকআপের জায়গা থেকে জিনিস নেবেন।' : kind() === 'anything' ? 'আপনার জিনিস কিনে আনবেন।' : shopName() + ' থেকে আপনার অর্ডার নেবেন।', 'scooter', true],
         onway: ['orange', 'রাইডার পথে আছেন', 'আপনার অর্ডার নিয়ে আসছেন। ফোনটা কাছে রাখুন।', 'scooter', true],
         done: ['green', 'ডেলিভারি হয়েছে', 'অর্ডারটি সম্পন্ন। স্মার্ট ফেনীর সাথে থাকার জন্য ধন্যবাদ!', 'food', false],
         cancelled: ['grey', 'অর্ডার বাতিল', 'এই অর্ডারটি বাতিল হয়েছে।', 'basket', false],
@@ -432,7 +450,17 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       }
       c.appendChild(mk('p', 'qo-sub', 'রাইডার দোকানে যাওয়ার আগে অগ্রিম দিন। বাকিটা পণ্য হাতে পেয়ে।'));
       const opts = mk('div', 'qo-opts');
-      [['charge', 'শুধু ডেলিভারি চার্জ', fareNow(), 'বাকি ' + tk(fullNow() - fareNow()) + ' পণ্য হাতে পেয়ে'], ['full', 'পুরো টাকা', fullNow(), 'ডেলিভারিতে আর কিছু দিতে হবে না']].forEach(([mode, t, amt, sub]) => {
+      const k = kind();
+      const noQuote = k === 'anything' && req.purchase_total === null;
+      const opt = [];
+      if (k === 'send') opt.push(['charge', 'ডেলিভারি চার্জ', fareNow(), 'এর বাইরে কিছু দিতে হবে না']);
+      else if (noQuote) opt.push(['charge', 'শুধু ডেলিভারি চার্জ', fareNow(), 'পণ্যের দাম জানার পর বাকিটা']);
+      else {
+        opt.push(['charge', 'শুধু ডেলিভারি চার্জ', fareNow(), 'বাকি ' + tk(fullNow() - fareNow()) + ' পণ্য হাতে পেয়ে']);
+        opt.push(['full', 'পুরো টাকা', fullNow(), 'ডেলিভারিতে আর কিছু দিতে হবে না']);
+      }
+      if (noQuote) c.appendChild(mk('div', 'qo-wait', 'রাইডার দাম জানালে "পুরো টাকা" অপশনও আসবে।'));
+      opt.forEach(([mode, t, amt, sub]) => {
         const b = mk('button', 'qo-opt');
         b.type = 'button';
         const l = mk('span'); l.appendChild(mk('b', '', t)); l.appendChild(mk('small', '', sub));
@@ -522,6 +550,34 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       }
     });
 
+    const signCache = {};
+    async function signed(path) {
+      if (signCache[path]) return signCache[path];
+      try {
+        const { data } = await supabase.storage.from('chat-images').createSignedUrl(path, 3600);
+        signCache[path] = data && data.signedUrl ? data.signedUrl : '';
+      } catch (e) { signCache[path] = ''; }
+      return signCache[path];
+    }
+
+    function quoteCard() {
+      const c = card('রাইডারের পাঠানো দাম', 'basket');
+      (req.purchase_lines || []).forEach((l, i) => {
+        const row = mk('div', 'qo-line');
+        row.appendChild(mk('span', '', l.label || ('দাম ' + bnNum(i + 1))));
+        row.appendChild(mk('b', '', tk(l.amount)));
+        c.appendChild(row);
+      });
+      const t = mk('div', 'qo-qtot'); t.appendChild(mk('span', '', 'পণ্যের মোট')); t.appendChild(mk('b', '', tk(req.purchase_total))); c.appendChild(t);
+      if (req.purchase_receipt_path) {
+        const im = mk('img', 'qo-receipt'); im.alt = 'রসিদের ছবি'; im.loading = 'lazy';
+        signed(req.purchase_receipt_path).then((u) => { if (u) im.src = u; });
+        im.addEventListener('click', () => { if (im.src) window.open(im.src, '_blank', 'noopener'); });
+        c.appendChild(im);
+      }
+      return c;
+    }
+
     // ---------- রাইডার ----------
     function riderCard() {
       const r = req.accepted_rider || {};
@@ -566,8 +622,23 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       sm.appendChild(mk('span', 'sp'));
       const em = mk('em'); em.appendChild(mk('span', 'o', 'দেখুন ▾')); em.appendChild(mk('span', 'c', 'বন্ধ ▴')); sm.appendChild(em);
       d.appendChild(sm);
-      const items = Array.isArray(req.order_items) ? req.order_items : [];
+      const items = kind() === 'shop' && Array.isArray(req.order_items) ? req.order_items : [];
       const list = mk('div'); list.style.marginTop = '10px';
+      if (kind() !== 'shop') {
+        const txt = String(req.description || '').replace(/^(যেকোনো কিছু|পাঠান)( · [^·]+)?? · /, '');
+        const p = mk('p', 'qo-desc', txt);
+        list.appendChild(p);
+        if (Array.isArray(req.item_photo_paths) && req.item_photo_paths.length) {
+          const g = mk('div', 'qo-photos');
+          req.item_photo_paths.forEach((path) => {
+            const im = mk('img'); im.alt = 'অর্ডারের ছবি'; im.loading = 'lazy';
+            signed(path).then((u) => { if (u) im.src = u; });
+            im.addEventListener('click', () => { if (im.src) window.open(im.src, '_blank', 'noopener'); });
+            g.appendChild(im);
+          });
+          list.appendChild(g);
+        }
+      }
       items.forEach((it) => {
         const l = mk('div', 'qo-line');
         l.appendChild(mk('span', '', it.name + ' × ' + bnNum(it.qty)));
@@ -578,13 +649,16 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       const fare = Number(req.final_price || req.current_price || req.initial_price || 0);
       const sub = Number(req.items_total || 0);
       const bill = mk('div', 'qo-bill');
-      const r1 = mk('div'); r1.appendChild(mk('span', '', 'আইটেমের দাম')); r1.appendChild(mk('b', '', tk(sub))); bill.appendChild(r1);
+      const r1 = mk('div'); r1.appendChild(mk('span', '', kind() === 'shop' ? 'আইটেমের দাম' : 'পণ্যের দাম')); r1.appendChild(mk('b', '', kind() === 'anything' && req.purchase_total === null ? 'রাইডার জানাবেন' : tk(sub)));
+      if (kind() !== 'send') bill.appendChild(r1);
       const r2 = mk('div'); r2.appendChild(mk('span', '', 'ডেলিভারি চার্জ')); r2.appendChild(mk('b', '', tk(fare))); bill.appendChild(r2);
       const r3 = mk('div', 'tot'); r3.appendChild(mk('span', '', 'সর্বমোট')); r3.appendChild(mk('span', '', tk(sub + fare))); bill.appendChild(r3);
       d.appendChild(bill);
       const trip = mk('div', 'qo-trip');
-      const a = mk('div', 'qo-stop'); a.appendChild(mk('small', '', 'পিকআপ')); a.appendChild(document.createTextNode(shopName() + (req.pickup_address && req.pickup_address !== shopName() ? ', ' + req.pickup_address : ''))); trip.appendChild(a);
+      const a = mk('div', 'qo-stop'); a.appendChild(mk('small', '', 'পিকআপ')); a.appendChild(document.createTextNode(kind() === 'shop' ? shopName() + (req.pickup_address && req.pickup_address !== shopName() ? ', ' + req.pickup_address : '') : (req.pickup_address || ''))); trip.appendChild(a);
+      if (req.pickup_contact_phone) a.appendChild(mk('span', 'qo-ph', ' · ফোন ' + req.pickup_contact_phone));
       const b = mk('div', 'qo-stop drop'); b.appendChild(mk('small', '', 'ডেলিভারি')); b.appendChild(document.createTextNode(req.drop_address || '')); trip.appendChild(b);
+      if (req.drop_contact_phone) b.appendChild(mk('span', 'qo-ph', ' · প্রাপক ' + (req.drop_contact_name ? req.drop_contact_name + ' ' : '') + req.drop_contact_phone));
       if (req.drop_instructions) trip.appendChild(mk('div', 'qo-note', 'নির্দেশনা: ' + req.drop_instructions));
       d.appendChild(trip);
       c.appendChild(d);
@@ -619,6 +693,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
 
     // ---------- আবার অর্ডার ----------
     function reorder() {
+      if (kind() !== 'shop') { location.href = '/market/anything' + (kind() === 'send' ? '?type=send' : ''); return; }
       const items = Array.isArray(req.order_items) ? req.order_items : [];
       if (!items.length) { location.href = '/market'; return; }
       clearCart();
@@ -673,6 +748,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       body.appendChild(hero());
       if (s === 'review') body.appendChild(dealCard());
       if (s === 'finding') body.appendChild(offerCard());
+      if (kind() === 'anything' && Array.isArray(req.purchase_lines) && req.purchase_lines.length && s !== 'cancelled') body.appendChild(quoteCard());
       if (s === 'advance') body.appendChild(advanceCard());
       if (s === 'advance' || s === 'pickup' || s === 'onway' || (s === 'done' && req.accepted_rider)) body.appendChild(riderCard());
       if ((s === 'pickup' || s === 'onway') && req.advance_verified) body.appendChild(paidCard());

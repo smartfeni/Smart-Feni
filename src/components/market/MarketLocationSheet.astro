@@ -149,6 +149,7 @@
   const $ = (id) => document.getElementById(id);
   const root = $('mlsRoot');
   let onDone = null;
+  let pickMode = false; // true = শুধু জায়গা বাছাই (পিকআপ), ড্রপ ঠিকানা বদলায় না
   let step = 1;
   let picked = null;       // { lat, lng, address, upazila, union, source }
   let L = null, geo = null, map = null, marker = null;
@@ -335,7 +336,7 @@
     step = n;
     [1, 2, 3, 4].forEach((i) => { $('mlsS' + i).hidden = n !== i; });
     $('mlsBack').hidden = n === 1;
-    $('mlsClose').hidden = !(n === 1 && hasAddress());
+    $('mlsClose').hidden = !(n === 1 && (hasAddress() || pickMode));
     $('mlsBrand').hidden = n !== 1;
     showErr('mlsErr2', ''); showErr('mlsErr3', '');
     if (map) setTimeout(() => map.invalidateSize(), 50);
@@ -350,12 +351,14 @@
 
   function close() { root.hidden = true; document.body.style.overflow = ''; }
 
-  async function open(cb) {
+  async function open(cb, opts) {
     onDone = typeof cb === 'function' ? cb : null;
+    pickMode = !!(opts && opts.pick);
+    setText('mlsTitle', pickMode ? ((opts && opts.title) || 'কোথা থেকে আনবো?') : 'কোথায় পৌঁছে দেব?');
     picked = null;
     root.hidden = false;
     document.body.style.overflow = 'hidden';
-    const d = getDrop();
+    const d = pickMode ? null : getDrop();
     const cur = $('mlsCur');
     if (d && d.address) { cur.textContent = 'বর্তমান ঠিকানা: ' + d.address; cur.hidden = false; } else cur.hidden = true;
     go(1);
@@ -370,6 +373,14 @@
     const addr = (detail.address || '').trim();
     if (!addr) return false;
     const lat = parseFloat(detail.lat), lng = parseFloat(detail.lng);
+    if (pickMode) {
+      close();
+      if (onDone) {
+        const f = onDone; onDone = null;
+        f({ address: addr, lat: isFinite(lat) ? lat : null, lng: isFinite(lng) ? lng : null, upazila: detail.upazila || '', union: detail.union || '', instructions: detail.instructions || '' });
+      }
+      return true;
+    }
     setDrop({
       address: addr,
       lat: isFinite(lat) ? lat : null,
@@ -442,7 +453,7 @@
 
   $('mlsBack').addEventListener('click', () => { if (step === 4) $('mlsCancel4').click(); else backToOne(); });
   $('mlsClose').addEventListener('click', close);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !root.hidden && step === 1 && hasAddress()) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !root.hidden && step === 1 && (hasAddress() || pickMode)) close(); });
 
   window.SFMarketLocation = { open, close };
 </script>
