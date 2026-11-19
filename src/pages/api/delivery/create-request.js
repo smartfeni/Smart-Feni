@@ -63,6 +63,14 @@ function pausedResponse(category) {
 // ============================================================
 const MARKET_MAX_ACTIVE = 2;
 const MARKET_FALLBACK_FARE = 60;
+// পিন ছাড়া (লিখিত) ঠিকানায় চার্জ হিসাব হয় না → কাস্টমার নিজে প্রস্তাব দেয় (সীমার মধ্যে)
+const CUST_FARE_MIN = 40;
+const CUST_FARE_MAX = 500;
+function customerFareOf(v) {
+  const n = parseInt(String(v === null || v === undefined ? '' : v).replace(/[০-৯]/g, (d) => '০১২৩৪৫৬৭৮৯'.indexOf(d)), 10);
+  return Number.isFinite(n) && n >= CUST_FARE_MIN && n <= CUST_FARE_MAX ? n : null;
+}
+const CUST_FARE_ERR = { error: 'ঠিকানা ম্যাপে না থাকায় ডেলিভারি চার্জ প্রস্তাব দিন (৳৪০–৫০০)', code: 'CUSTOMER_FARE', status: 400 };
 
 function dhakaOpenNow(shop) {
   if (shop.is_open === false) return false;
@@ -132,7 +140,7 @@ async function prepareMarketOrder(client, user, body) {
 
   // চার্জ: দোকান → ড্রপ
   const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
-  let fare = MARKET_FALLBACK_FARE;
+  let fare = null;
   try {
     const { data: fr, error: fe } = await client.rpc('calc_delivery_fare', {
       p_pickup_lat: Number(shop.lat),
@@ -143,7 +151,17 @@ async function prepareMarketOrder(client, user, body) {
       p_category: 'delivery',
     });
     if (!fe && fr && Number(fr.fare) > 0) fare = Math.round(Number(fr.fare));
-  } catch (_) { /* ফলব্যাক চার্জ */ }
+  } catch (_) { /* নিচে কাস্টমারের প্রস্তাব */ }
+  let customerFare = false;
+  if (fare === null) {
+    // পিন আছে অথচ হিসাব হয়নি (নেটওয়ার্ক) → পুরনো ফলব্যাক; পিন নেই → কাস্টমারের প্রস্তাব বাধ্যতামূলক
+    if (num(body.dropLat) !== null && num(body.dropLng) !== null) fare = MARKET_FALLBACK_FARE;
+    else {
+      fare = customerFareOf(body.customerFare);
+      if (fare === null) return CUST_FARE_ERR;
+      customerFare = true;
+    }
+  }
 
   const names = (rows || []).map((r) => {
     const q = items.find((it) => String(it.item_id) === r.id);
@@ -167,6 +185,7 @@ async function prepareMarketOrder(client, user, body) {
     pickupUnion: shop.union_name || null,
     description,
     fare,
+    customerFare,
   };
 }
 
@@ -239,7 +258,7 @@ async function prepareMarketAny(client, user, b) {
   }
   if (!pickupAddress) pickupAddress = 'রাইডার কাছের দোকান থেকে কিনবেন';
 
-  let fare = MARKET_FALLBACK_FARE;
+  let fare = null;
   try {
     const { data: fr, error: fe } = await client.rpc('calc_delivery_fare', {
       p_pickup_lat: pickupLat, p_pickup_lng: pickupLng,
@@ -248,7 +267,16 @@ async function prepareMarketAny(client, user, b) {
       p_category: 'delivery',
     });
     if (!fe && fr && Number(fr.fare) > 0) fare = Math.round(Number(fr.fare));
-  } catch (_) { /* ফলব্যাক */ }
+  } catch (_) { /* নিচে কাস্টমারের প্রস্তাব */ }
+  let customerFare = false;
+  if (fare === null) {
+    if (num(b.dropLat) !== null && num(b.dropLng) !== null) fare = MARKET_FALLBACK_FARE;
+    else {
+      fare = customerFareOf(b.customerFare);
+      if (fare === null) return CUST_FARE_ERR;
+      customerFare = true;
+    }
+  }
 
   let isStaff = false;
   try { const { data: st } = await client.rpc('has_permission', { p_key: 'delivery_orders.manage' }); isStaff = st === true; } catch (_) { isStaff = false; }
@@ -268,6 +296,7 @@ async function prepareMarketAny(client, user, b) {
     pickupPhone, recipientName, recipientPhone, parcelSize,
     description,
     fare,
+    customerFare,
   };
 }
 
@@ -324,6 +353,7 @@ export async function POST({ request }) {
       recipientName,
       recipientPhone,
       parcelSize,
+      customerFare,
     } = await request.json();
 
     // ===== কুইক ডেলিভারি: শপ অর্ডার (সব দাম/পিকআপ/চার্জ সার্ভারে, ক্লায়েন্ট বিশ্বাস নয়) =====
@@ -334,10 +364,10 @@ export async function POST({ request }) {
         ? await prepareMarketAny(client, user, {
           orderType, description, marketShopId, pickupAddress, pickupLat, pickupLng, pickupUpazila, pickupUnion,
           pickupPhone, recipientName, recipientPhone, parcelSize,
-          dropAddress, dropLat, dropLng, dropUnion, upazila,
+          dropAddress, dropLat, dropLng, dropUnion, upazila, customerFare,
         })
         : await prepareMarketOrder(client, user, {
-          orderItems, dropAddress, dropLat, dropLng, dropUnion, upazila, dropInstructions, marketNote,
+          orderItems, dropAddress, dropLat, dropLng, dropUnion, upazila, dropInstructions, marketNote, customerFare,
         });
       if (r.error) {
         return new Response(JSON.stringify({ error: r.error, code: r.code }), {
@@ -420,6 +450,7 @@ export async function POST({ request }) {
     if (dropUnionClean) extraColumns.drop_union = dropUnionClean;
     if (pickupUpazilaClean) extraColumns.pickup_upazila = pickupUpazilaClean;
     if (pickupUnionClean) extraColumns.pickup_union = pickupUnionClean;
+    if (market && market.customerFare) extraColumns.fare_proposed_by_customer = true;
     if (LOC_SOURCES.includes(dropLocSource)) extraColumns.drop_loc_source = dropLocSource;
     if (LOC_SOURCES.includes(pickupLocSource)) extraColumns.pickup_loc_source = pickupLocSource;
     if (finalCategory === 'delivery' && Array.isArray(orderItems) && orderItems.length > 0) {

@@ -148,6 +148,22 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
     let phone = '';
     let busy = false;
     let fare = null;
+    // পিন ছাড়া (লিখিত) ঠিকানা: কাস্টমার নিজে চার্জ প্রস্তাব দেয় (৳৪০–৫০০)
+    let needCust = false;
+    let custFare = '';
+    function custOk() { const n = Number(custFare); return Number.isInteger(n) && n >= 40 && n <= 500; }
+    function custFareCard() {
+      const c = card('আপনার প্রস্তাবিত ডেলিভারি চার্জ', 'scooter');
+      const l = mk('label', 'qa-lbl'); l.appendChild(document.createTextNode('চার্জ (৳৪০–৫০০) ')); l.appendChild(mk('i', '', '*'));
+      c.appendChild(l);
+      const i = mk('input', 'qa-in'); i.type = 'number'; i.min = '40'; i.max = '500'; i.step = '5'; i.inputMode = 'numeric'; i.required = true; i.placeholder = 'যেমন ৮০'; i.value = custFare;
+      i.setAttribute('aria-label', 'প্রস্তাবিত ডেলিভারি চার্জ');
+      i.addEventListener('input', () => { custFare = i.value.trim(); fare = custOk() ? Number(custFare) : null; paintFoot(); });
+      c.appendChild(i);
+      c.appendChild(mk('div', 'qa-warn', 'ঠিকানা ম্যাপে না থাকায় চার্জ হিসাব করা যাচ্ছে না, আপনি প্রস্তাব দিন। রাইডার রাজি না হলে অন্য দাম দিতে পারে। ম্যাপে পিন দিলে চার্জ নিজে থেকে হিসাব হবে।'));
+      c.lastChild.style.cssText = 'margin-top:10px;background:#FFF4E5;color:#7A3E00;border-radius:14px;padding:10px 12px;font-size:13.5px;font-weight:600;line-height:1.5;';
+      return c;
+    }
     // অর্ডার এনিথিং
     const any = { text: '', src: 'near', shopId: null, place: null, placeName: '', photos: [] };
     // পাঠান
@@ -225,6 +241,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         body.appendChild(w);
       }
       if (type === 'anything') renderAny(body); else renderSend(body);
+      if (needCust && dropInfo()) body.appendChild(custFareCard());
       const pay = mk('section', 'qa-card qa-pay');
       pay.appendChild(icon('bags'));
       const pt = mk('div');
@@ -390,8 +407,15 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
           p_drop_lat: d.lat, p_drop_lng: d.lng, p_drop_union: d.union || null, p_category: 'delivery',
         });
         if (my !== fareTok) return;
-        fare = data && Number(data.fare) > 0 ? Math.round(Number(data.fare)) : 60;
-      } catch (e) { fare = 60; }
+        const wasCust = needCust;
+        if (data && Number(data.fare) > 0) { fare = Math.round(Number(data.fare)); needCust = false; }
+        else if (d.lat !== null && d.lat !== undefined) { fare = 60; needCust = false; }
+        else { needCust = true; fare = custOk() ? Number(custFare) : null; }
+        if (wasCust !== needCust) render();
+      } catch (e) {
+        if (d.lat !== null && d.lat !== undefined) fare = 60;
+        else { const was = needCust; needCust = true; fare = custOk() ? Number(custFare) : null; if (!was) render(); }
+      }
       paintFoot();
     }
 
@@ -409,6 +433,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         if (!snd.other && !getDrop()) return 'ঠিকানা দিন';
         if (snd.text.trim().length < 3) return 'কী পাঠাচ্ছেন লিখুন';
       }
+      if (needCust && !custOk()) return 'চার্জ প্রস্তাব দিন (৳৪০–৫০০)';
       return '';
     }
     function paintFoot() {
@@ -463,6 +488,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         else body.dropInstructions = (own && own.instructions) || '';
       }
       body.dropLocSource = d && d.lat !== null ? 'map' : 'manual';
+      if (needCust) body.customerFare = Number(custFare);
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const res = await fetch('/api/delivery/create-request', {

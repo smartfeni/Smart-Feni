@@ -191,6 +191,34 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
 
     // প্রি-অর্ডার দোকান: রাইডার/চার্জ নেই, সরাসরি দোকানে যায়
     let wantDate = '';
+    // পিন ছাড়া (লিখিত) ঠিকানা: কাস্টমার নিজে চার্জ প্রস্তাব দেয় (৳৪০–৫০০)
+    let needCust = false;
+    let custFare = '';
+    function custOk() { const n = Number(custFare); return Number.isInteger(n) && n >= 40 && n <= 500; }
+    function custFareCard() {
+      const c = card('আপনার প্রস্তাবিত ডেলিভারি চার্জ', 'scooter');
+      const f = mk('label', 'qc-f');
+      const sp = mk('span', '', 'চার্জ (৳৪০–৫০০) '); const rq = mk('span', 'required-mark', '*'); rq.style.color = '#D7372B'; sp.appendChild(rq);
+      f.appendChild(sp);
+      const i = mk('input'); i.id = 'qcCustFare'; i.type = 'number'; i.min = '40'; i.max = '500'; i.step = '5'; i.inputMode = 'numeric'; i.required = true; i.placeholder = 'যেমন ৮০'; i.value = custFare;
+      i.addEventListener('input', () => {
+        custFare = i.value.trim();
+        fare = custOk() ? Number(custFare) : null;
+        const tot = cartTotal(getCart()) + (fare || 0);
+        $('qcFootTotal').textContent = tk(tot);
+        const b = $('qcOrder'); const d = getDrop();
+        b.disabled = busy || !d || !validPhone(phone) || fare === null;
+        b.textContent = fare === null ? 'চার্জ প্রস্তাব দিন (৳৪০–৫০০)' : 'অর্ডার দিন · ' + tk(tot);
+      });
+      f.appendChild(i);
+      c.appendChild(f);
+      c.appendChild(mk('div', 'qc-warn', 'ঠিকানা ম্যাপে না থাকায় চার্জ হিসাব করা যাচ্ছে না, আপনি প্রস্তাব দিন। রাইডার রাজি না হলে অন্য দাম দিতে পারে। ম্যাপে পিন দিলে চার্জ নিজে থেকে হিসাব হবে।'));
+      c.lastChild.style.cssText = 'margin-top:10px;background:#FFF4E5;color:#7A3E00;border-radius:14px;padding:10px 12px;font-size:13.5px;font-weight:600;line-height:1.5;';
+      const pin = mk('button', 'qc-link', '📍 ম্যাপে পিন দিন'); pin.type = 'button';
+      pin.addEventListener('click', () => { if (window.SFMarketLocation) window.SFMarketLocation.open(async () => { await loadFare(); render(); }); });
+      c.appendChild(pin);
+      return c;
+    }
     function isPre() { return !!(shop && shop.delivery_kind === 'preorder'); }
     function dhakaToday() { return new Date(Date.now() + 6 * 3600000).toISOString().slice(0, 10); }
     async function loadFare() {
@@ -203,8 +231,12 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
           p_pickup_lat: Number(shop.lat), p_pickup_lng: Number(shop.lng),
           p_drop_lat: d.lat, p_drop_lng: d.lng, p_drop_union: d.union || null, p_category: 'delivery',
         });
-        fare = !error && data && Number(data.fare) > 0 ? Math.round(Number(data.fare)) : 60;
-      } catch (e) { fare = 60; }
+        if (!error && data && Number(data.fare) > 0) { fare = Math.round(Number(data.fare)); needCust = false; }
+        else if (d.lat !== null && d.lat !== undefined) { fare = 60; needCust = false; }
+        else { needCust = true; fare = custOk() ? Number(custFare) : null; }
+      } catch (e) {
+        if (d.lat !== null && d.lat !== undefined) { fare = 60; needCust = false; } else { needCust = true; fare = custOk() ? Number(custFare) : null; }
+      }
       fareLoading = false;
     }
 
@@ -285,6 +317,8 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       ac.appendChild(insF);
       body.appendChild(ac);
 
+      if (!isPre() && needCust && d) body.appendChild(custFareCard());
+
       // প্রি-অর্ডার: কবে লাগবে
       if (isPre()) {
         const dc = card('কবে লাগবে?', 'bags');
@@ -328,7 +362,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       const bc = card('বিলের হিসাব');
       const bill = mk('div', 'qc-bill');
       const r1 = mk('div'); r1.appendChild(mk('span', '', 'আইটেমের দাম')); r1.appendChild(mk('b', '', tk(sub))); bill.appendChild(r1);
-      const r2 = mk('div'); r2.appendChild(mk('span', '', 'ডেলিভারি চার্জ')); r2.appendChild(mk('b', '', isPre() ? 'দোকান জানাবে' : fareLoading ? 'হিসাব হচ্ছে…' : fare !== null ? tk(fare) : '—')); bill.appendChild(r2);
+      const r2 = mk('div'); r2.appendChild(mk('span', '', needCust && !isPre() ? 'ডেলিভারি চার্জ (আপনার প্রস্তাব)' : 'ডেলিভারি চার্জ')); r2.appendChild(mk('b', '', isPre() ? 'দোকান জানাবে' : fareLoading ? 'হিসাব হচ্ছে…' : fare !== null ? tk(fare) : '—')); bill.appendChild(r2);
       const total = sub + (isPre() ? 0 : fare || 0);
       const r3 = mk('div', 'tot'); r3.appendChild(mk('span', '', isPre() ? 'পণ্যের মোট' : 'সর্বমোট')); r3.appendChild(mk('span', '', tk(total))); bill.appendChild(r3);
       bill.appendChild(mk('div', 'muted', isPre() ? 'ডেলিভারি চার্জ দোকান কনফার্মের সময় জানাবে।' : 'দাম দোকানের মেনু অনুযায়ী। চার্জ দূরত্ব থেকে হিসাব হয়।'));
@@ -355,7 +389,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       const open = isPre() || shopOpenState(shop).open;
       const btn = $('qcOrder');
       btn.disabled = busy || !open || !d || !validPhone(phone) || fare === null;
-      btn.textContent = busy ? 'অর্ডার হচ্ছে…' : !open ? 'দোকান এখন বন্ধ' : !d ? 'ঠিকানা দিন' : !validPhone(phone) ? 'মোবাইল নম্বর দিন' : (isPre() ? 'প্রি-অর্ডার দিন · ' : 'অর্ডার দিন · ') + tk(total);
+      btn.textContent = busy ? 'অর্ডার হচ্ছে…' : !open ? 'দোকান এখন বন্ধ' : !d ? 'ঠিকানা দিন' : !validPhone(phone) ? 'মোবাইল নম্বর দিন' : fare === null && !isPre() && needCust ? 'চার্জ প্রস্তাব দিন (৳৪০–৫০০)' : (isPre() ? 'প্রি-অর্ডার দিন · ' : 'অর্ডার দিন · ') + tk(total);
     }
 
     function showErr(msg) {
@@ -387,6 +421,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
             dropUnion: d.union || '',
             dropInstructions: (($('qcIns') && $('qcIns').value) || d.instructions || '').trim(),
             dropLocSource: d.lat !== null ? 'map' : 'manual',
+            customerFare: needCust ? Number(custFare) : undefined,
           }),
         });
         const out = await res.json().catch(() => ({}));
