@@ -79,20 +79,11 @@ export const GET: APIRoute = async () => {
     fetchAll('clubs', (from, to) =>
       supabase.from('clubs').select('slug, created_at').eq('is_active', true).order('created_at').order('slug').range(from, to)
     ),
-    fetchAll('shops', (from, to) =>
-      supabase.from('shops').select('slug, created_at').eq('is_active', true).order('created_at').order('slug').range(from, to)
+    // কুইক ডেলিভারির দোকান (পুরনো অনলাইন শপ ও তার প্রোডাক্ট পেজ বন্ধ, নভে ২০২৬)
+    fetchAll('market_shops', (from, to) =>
+      supabase.from('delivery_shops').select('id, updated_at').eq('is_active', true).order('created_at').order('id').range(from, to)
     ),
-    fetchAll('products', (from, to) =>
-      supabase
-        .from('listings')
-        .select('id, created_at')
-        .eq('category', 'online-shop')
-        .eq('status', 'active')
-        .eq('is_disabled', false)
-        .order('created_at')
-        .order('id')
-        .range(from, to)
-    ),
+    Promise.resolve([]),
     fetchAll('listings', (from, to) =>
       supabase
         .from('listings')
@@ -118,11 +109,9 @@ export const GET: APIRoute = async () => {
     if (c.slug) xml += urlEntry('/' + c.slug, { lastmod: c.created_at, changefreq: 'weekly', priority: '0.6' });
   }
   for (const s of shops) {
-    if (s.slug) xml += urlEntry('/' + s.slug, { lastmod: s.created_at, changefreq: 'weekly', priority: '0.7' });
+    xml += urlEntry('/market/shop?id=' + s.id, { lastmod: s.updated_at, changefreq: 'daily', priority: '0.7' });
   }
-  for (const p of products) {
-    xml += urlEntry('/product/' + p.id, { lastmod: p.created_at, changefreq: 'weekly', priority: '0.6' });
-  }
+  void products;
   for (const l of listings) {
     xml += urlEntry('/listing/' + l.id, { lastmod: l.created_at, changefreq: 'weekly', priority: '0.6' });
   }
