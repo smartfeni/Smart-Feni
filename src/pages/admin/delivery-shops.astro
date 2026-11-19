@@ -91,8 +91,10 @@ const guideSteps = [
       <div class="dsa-body">
         <label class="dsa-field dsa-search">
           <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-          <input id="searchIn" type="search" placeholder="দোকান খুঁজুন" autocomplete="off" aria-label="দোকান খুঁজুন" />
+          <input id="searchIn" type="search" placeholder="দোকানের নাম, ফোন বা মালিক খুঁজুন" autocomplete="off" aria-label="দোকান খুঁজুন" />
         </label>
+        <div class="dsa-ftabs" id="catTabs" role="tablist" aria-label="ক্যাটাগরি অনুযায়ী দোকান"></div>
+        <div class="dsa-ftabs dsa-ftabs2" id="flagTabs" aria-label="অবস্থা অনুযায়ী দোকান"></div>
         <div class="dsa-reorderbar">
           <button type="button" class="dsa-ghost" id="shopReorderBtn">↕ দোকানের ক্রম বদলান</button>
           <p class="dsa-hint2" id="shopReorderHint" style="display:none;">দোকান চেপে ধরে ওপর-নিচে টেনে ক্রম বদলান। শেষ হলে ✓ চাপুন।</p>
@@ -184,9 +186,10 @@ const guideSteps = [
 
           <div id="teamWrap" style="display:none;">
             <label class="dsa-lbl">মালিক ও স্টাফ (Pro অ্যাপে অর্ডার ধরবে)</label>
+            <p class="dsa-hint">মালিক বদলাতে নতুন মালিকের ফোন নম্বর বা নাম লিখে খুঁজুন, তারপর "মালিক বানান" চাপুন। আগের মালিক নিজে থেকেই বাদ যাবে।</p>
             <div id="teamBox" class="dsa-team"></div>
             <div class="dsa-teamsearch">
-              <input class="dsa-in" id="teamPhone" type="tel" inputmode="numeric" maxlength="15" placeholder="ফোন নম্বর (01XXXXXXXXX)" aria-label="ফোন নম্বর" />
+              <input class="dsa-in" id="teamPhone" type="search" maxlength="60" placeholder="ফোন নম্বর বা নাম" aria-label="ফোন নম্বর বা নাম" />
               <button type="button" class="dsa-ghost" id="teamFind">খুঁজুন</button>
             </div>
             <div id="teamFound" class="dsa-team"></div>
@@ -359,6 +362,16 @@ const guideSteps = [
     .dsa-teamrow .dsa-info small { display: block; font-size: 12.5px; color: #5B6B86; font-weight: 400; }
     .dsa-teamrow .dsa-ghost { height: 44px; font-size: 13.5px; padding: 0 12px; }
     .dsa-teamsearch { display: flex; gap: 8px; margin-top: 8px; }
+    .dsa-ftabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .dsa-ftabs::-webkit-scrollbar { display: none; }
+    .dsa-ftab { flex: none; min-height: 40px; padding: 0 14px; border-radius: 20px; border: 1.5px solid #E2E7EF; background: #fff; color: #1B2A4A; font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .dsa-ftab b { margin-left: 4px; color: #8A97AD; font-weight: 700; }
+    .dsa-ftab[aria-pressed="true"] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+    .dsa-ftab[aria-pressed="true"] b { color: #FFD3BF; }
+    .dsa-ftab.warn { border-color: #FAD4D0; color: #B3261E; }
+    .dsa-ftabs2 .dsa-ftab { min-height: 34px; font-size: 12.5px; }
+    .dsa-owner { font-size: 12.5px; color: #5B6B86; margin-top: 2px; }
+    .dsa-owner.none { color: #B3261E; font-weight: 700; }
     .dsa-teamsearch .dsa-in { flex: 1; }
     .dsa-teamsearch .dsa-ghost { height: 48px; flex: none; }
 
@@ -414,6 +427,9 @@ const guideSteps = [
     let catsCache = {};       // shop_id -> মেনু ক্যাটাগরি
     let menuFilter = {};      // shop_id -> বাছা ক্যাটাগরি চিপ
     let reorderMode = false;  // দোকানের ক্রম বদলের মোড
+    let owners = {};          // owner_id -> { full_name, phone }
+    let catTab = 'all';       // ক্যাটাগরি ট্যাব: all | none | <category id>
+    let flagTab = '';         // অবস্থা ফিল্টার: '' | hidden | noowner | noitems | test | preorder
 
     function toast(msg, type) { if (window.showToast) window.showToast(msg, type); }
     function bnNum(n) { return String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]); }
@@ -710,6 +726,25 @@ const guideSteps = [
         chips.appendChild(c3);
       }
       card.appendChild(chips);
+      card.appendChild(ownerLine(s));
+
+      // দ্রুত কাজ: লুকান/চালু, কাস্টমার পেজ, মালিক বদল
+      const qa = document.createElement('div');
+      qa.className = 'dsa-chips';
+      const qb = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'dsa-ftab'; b.textContent = label; b.addEventListener('click', fn); qa.appendChild(b); return b; };
+      const hb = qb(s.is_active ? '🙈 লুকান' : '👁 আবার চালু', async () => {
+        if (s.is_test && !s.is_active) { toast('টেস্ট দোকান চালু করতে আগে এডিটে "টেস্ট" বন্ধ করুন।', 'warning'); return; }
+        hb.disabled = true;
+        const { error } = await supabase.from('delivery_shops').update({ is_active: !s.is_active }).eq('id', s.id);
+        hb.disabled = false;
+        if (error) { toast('বদলানো যায়নি: ' + error.message, 'error'); return; }
+        s.is_active = !s.is_active;
+        toast(s.is_active ? 'দোকান আবার লাইভ' : 'দোকান লুকানো হয়েছে', 'success');
+        renderShops();
+      });
+      qb('🔗 কাস্টমার পেজ', () => { window.open('/market/shop?id=' + encodeURIComponent(s.id), '_blank'); });
+      qb('👤 মালিক বদলান', () => { openShop(s); setTimeout(() => { const w = $('teamWrap'); if (w) w.scrollIntoView({ behavior: 'smooth', block: 'center' }); const i = $('teamPhone'); if (i) i.focus(); }, 350); });
+      card.appendChild(qa);
 
       // আইটেম সারি
       const list = document.createElement('div');
@@ -971,6 +1006,7 @@ const guideSteps = [
       sub.textContent = place + ' · ' + bnNum(counts[s.id] || 0) + 'টি আইটেম' + (s.is_popular ? ' · জনপ্রিয়' : '') + (s.is_active ? '' : ' · বন্ধ');
       info.appendChild(n);
       info.appendChild(sub);
+      info.appendChild(ownerLine(s));
       b.appendChild(info);
       const ch = document.createElement('span');
       ch.className = 'dsa-chev';
@@ -980,13 +1016,77 @@ const guideSteps = [
       return b;
     }
 
+    // ---------- মালিক, ক্যাটাগরি ট্যাব ও অবস্থা ফিল্টার ----------
+    function ownerLine(s) {
+      const d = document.createElement('div');
+      const o = s.owner_id ? owners[s.owner_id] : null;
+      d.className = 'dsa-owner' + (s.owner_id ? '' : ' none');
+      d.textContent = s.owner_id ? '👤 ' + ((o && o.full_name) || 'মালিক') + (o && o.phone ? ' · ' + o.phone : '') + (s.phone ? ' · দোকান ' + s.phone : '') : '⚠️ মালিক সেট করা নেই';
+      return d;
+    }
+    function catsOf(s) { return Array.isArray(s.market_category_ids) ? s.market_category_ids : []; }
+    function matchCat(s, t) {
+      if (t === 'all') return true;
+      if (t === 'none') return !catsOf(s).length;
+      return catsOf(s).indexOf(t) !== -1;
+    }
+    function matchFlag(s, f) {
+      if (!f) return true;
+      if (f === 'hidden') return !s.is_active && !s.is_test;
+      if (f === 'noowner') return !s.owner_id;
+      if (f === 'noitems') return !(counts[s.id] > 0);
+      if (f === 'test') return !!s.is_test;
+      if (f === 'preorder') return s.delivery_kind === 'preorder';
+      return true;
+    }
+    function tabBtn(label, n, on, warn, fn) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dsa-ftab' + (warn && n ? ' warn' : '');
+      b.setAttribute('aria-pressed', String(on));
+      b.appendChild(document.createTextNode(label));
+      const c = document.createElement('b'); c.textContent = bnNum(n); b.appendChild(c);
+      b.addEventListener('click', fn);
+      return b;
+    }
+    function renderTabs() {
+      const ct = $('catTabs'), ft = $('flagTabs');
+      if (!ct || !ft) return;
+      ct.textContent = ''; ft.textContent = '';
+      if (reorderMode) { ct.style.display = 'none'; ft.style.display = 'none'; return; }
+      ct.style.display = ''; ft.style.display = '';
+      const base = shops.filter((s) => matchFlag(s, flagTab));
+      ct.appendChild(tabBtn('সব', base.length, catTab === 'all', false, () => { catTab = 'all'; renderShops(); }));
+      mkCats.forEach((c) => {
+        const n = base.filter((s) => matchCat(s, c.id)).length;
+        if (!n && !c.is_active) return;
+        ct.appendChild(tabBtn(c.name, n, catTab === c.id, false, () => { catTab = c.id; renderShops(); }));
+      });
+      const none = base.filter((s) => matchCat(s, 'none')).length;
+      if (none || catTab === 'none') ct.appendChild(tabBtn('ক্যাটাগরি নেই', none, catTab === 'none', true, () => { catTab = 'none'; renderShops(); }));
+      const inCat = shops.filter((s) => matchCat(s, catTab));
+      [['hidden', '🙈 লুকানো', true], ['noowner', '👤 মালিক নেই', true], ['noitems', '📭 আইটেম নেই', true], ['preorder', '🗓 প্রি-অর্ডার', false], ['test', '🧪 টেস্ট', false]].forEach(([k, l, w]) => {
+        const n = inCat.filter((s) => matchFlag(s, k)).length;
+        if (!n && flagTab !== k) return;
+        ft.appendChild(tabBtn(l, n, flagTab === k, w, () => { flagTab = flagTab === k ? '' : k; renderShops(); }));
+      });
+      const on = ct.querySelector('[aria-pressed="true"]');
+      if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
     function renderShops() {
       const wrap = $('shopList');
       wrap.innerHTML = '';
       const q = $('searchIn').value.trim().toLowerCase();
+      const qd = q.replace(/[০-৯]/g, (x) => String('০১২৩৪৫৬৭৮৯'.indexOf(x))).replace(/\D/g, '');
+      renderTabs();
       const list = shops.filter((s) => {
+        if (!matchCat(s, catTab) || !matchFlag(s, flagTab)) return false;
         if (!q) return true;
-        return [s.name, s.upazila, s.union_name].some((v) => (v || '').toLowerCase().indexOf(q) !== -1);
+        const o = owners[s.owner_id] || {};
+        if ([s.name, s.upazila, s.union_name, s.address, o.full_name].some((v) => (v || '').toLowerCase().indexOf(q) !== -1)) return true;
+        if (qd.length >= 4) return [s.phone, s.payout_number, o.phone].some((v) => String(v || '').replace(/\D/g, '').indexOf(qd) !== -1);
+        return false;
       });
       if (!list.length) {
         const p = document.createElement('p');
@@ -1022,6 +1122,13 @@ const guideSteps = [
         return;
       }
       shops = sr.data || [];
+      const oids = Array.from(new Set(shops.map((s) => s.owner_id).filter(Boolean)));
+      owners = {};
+      const [pr] = await Promise.all([
+        oids.length ? supabase.from('profiles').select('id, full_name, phone').in('id', oids) : Promise.resolve({ data: [] }),
+        loadMkCats(),
+      ]);
+      (pr.data || []).forEach((p) => { owners[p.id] = p; });
       counts = {};
       (ir.data || []).forEach((r) => { counts[r.shop_id] = (counts[r.shop_id] || 0) + 1; });
       firstLoad = false;
@@ -1338,17 +1445,21 @@ const guideSteps = [
 
     async function findTeamUser() {
       if (!editing) return;
-      const digits = ($('teamPhone').value || '').replace(/\D/g, '');
+      const raw = ($('teamPhone').value || '').trim();
+      const digits = raw.replace(/[০-৯]/g, (x) => String('০১২৩৪৫৬৭৮৯'.indexOf(x))).replace(/\D/g, '');
       const out = $('teamFound');
       out.innerHTML = '';
-      if (digits.length < 10) { toast('সঠিক ফোন নম্বর দিন (কমপক্ষে ১০ সংখ্যা)।', 'error'); return; }
-      const tail = digits.slice(-10);
-      const { data, error } = await supabase.from('profiles').select('id, full_name, phone').ilike('phone', '%' + tail).limit(5);
+      const byPhone = digits.length >= 6 && digits.length >= raw.replace(/[\s+-]/g, '').length - 1;
+      if (!byPhone && raw.replace(/\s/g, '').length < 2) { toast('ফোন নম্বর (কমপক্ষে ৬ সংখ্যা) বা নাম (কমপক্ষে ২ অক্ষর) লিখুন।', 'error'); return; }
+      const qy = supabase.from('profiles').select('id, full_name, phone').limit(8);
+      const { data, error } = byPhone
+        ? await qy.ilike('phone', '%' + digits.slice(-10) + '%')
+        : await qy.ilike('full_name', '%' + raw.replace(/[%_,()]/g, ' ').trim() + '%');
       if (error) { toast('খোঁজা যায়নি: ' + error.message, 'error'); return; }
       if (!data || !data.length) {
         const p = document.createElement('p');
         p.className = 'dsa-hint';
-        p.textContent = 'এই নম্বরে কোনো অ্যাকাউন্ট নেই। আগে অ্যাপে রেজিস্টার করতে বলুন।';
+        p.textContent = byPhone ? 'এই নম্বরে কোনো অ্যাকাউন্ট নেই। আগে অ্যাপে রেজিস্টার করতে বলুন।' : 'এই নামে কাউকে পাওয়া যায়নি। ফোন নম্বর দিয়ে খুঁজুন।';
         out.appendChild(p);
         return;
       }
@@ -1363,14 +1474,19 @@ const guideSteps = [
           b.addEventListener('click', fn);
           row.appendChild(b);
         };
-        mk('মালিক', async () => {
+        mk('মালিক বানান', async () => {
+          const cur = editing && editing.id === shopId ? editing.owner_id : null;
+          if (cur && cur !== u.id && !confirm('"' + (editing.name || '') + '"-এর মালিক বদলে ' + (u.full_name || u.phone || '') + ' করবেন? আগের মালিক আর Pro অ্যাপে এই দোকান পাবেন না।')) return;
           const { error: e1 } = await supabase.from('delivery_shops').update({ owner_id: u.id }).eq('id', shopId);
           if (e1) { toast('সেট হয়নি: ' + e1.message, 'error'); return; }
+          if (editing && editing.id === shopId) editing.owner_id = u.id;
+          const sh = shops.find((x) => x.id === shopId); if (sh) sh.owner_id = u.id;
+          owners[u.id] = u;
           toast('মালিক সেট হয়েছে ✓', 'success');
           $('teamPhone').value = '';
           loadTeam();
         });
-        mk('স্টাফ', async () => {
+        mk('স্টাফ করুন', async () => {
           const { error: e2 } = await supabase.from('delivery_shop_staff').insert({ shop_id: shopId, profile_id: u.id, added_by: userId });
           if (e2) { toast(e2.code === '23505' ? 'ইনি আগেই স্টাফ।' : 'যোগ হয়নি: ' + e2.message, 'error'); return; }
           toast('স্টাফ যোগ হয়েছে ✓', 'success');
