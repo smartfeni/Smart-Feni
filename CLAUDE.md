@@ -39,6 +39,7 @@
 - নতুন API রুটে `Authorization` + permission চেক, আর `serverErrorReporter`।
 - Gemini মডেলের নাম শুধু `geminiConfig.js`-এ।
 - রাইডার অনলাইন (`delivery_online`/`ride_online`) কোডে সরাসরি লিখবে না; `is_active` ট্রিগারে ডেরাইভড।
+- ভাষা (বাংলা/English): নতুন UI লেখা যোগ করলে `public/i18n/en.js`-এ ইংরেজি লাইন দাও (জোড়া লেখায় `{}` টেমপ্লেট), তারপর `BaseLayout.astro`-এ `V` এক বাড়াও। ইউজারের লেখা/অনুবাদ চাই না এমন অংশে `data-no-i18n`। `/admin` বাংলাই থাকে। যাচাই: `scripts/i18n/`।
 
 ## ডিজাইন
 - মোবাইল-ফার্স্ট, top-notch UI। primary `#FF6B35`, navy `#1B2A4A`, পেজ bg `#FFF4EC`, সাদা কার্ড, rounded 12–24px।
