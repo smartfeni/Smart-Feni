@@ -121,6 +121,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
   <script>
     import { supabase } from '../lib/supabase.js';
     import { compressImage } from '../lib/imageCompress.js';
+    import { menuWord } from '../lib/marketFood.js';
 
     const $ = (id) => document.getElementById(id);
     const BN = (n) => String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
@@ -199,7 +200,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     function head(n, sub) {
       const h = mk('div', 'sa-step-h');
       h.appendChild(mk('span', '', BN(n + 1)));
-      const t = mk('div'); t.appendChild(mk('h2', '', STEPS[n])); if (sub) t.appendChild(mk('p', '', sub));
+      const t = mk('div'); t.appendChild(mk('h2', '', n === 3 ? menuWord(f.suggested_category_ids) : STEPS[n])); if (sub) t.appendChild(mk('p', '', sub));
       h.appendChild(t);
       return h;
     }
@@ -371,6 +372,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     }
 
     function showErr(reason) {
+      if (reason === 'pending') { showPending(); return; }
       const e = ERR[reason] || ['কিছু তথ্য বাকি আছে', step];
       step = e[1]; render();
       const box = mk('div', 'sa-err', '⚠️ ' + e[0]);
@@ -441,6 +443,10 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       body.appendChild(c);
     }
 
+    function showPending() {
+      stateCard('bags', 'আবেদন পর্যালোচনাধীন', '"' + ((app && app.name) || f.name || '') + '" — স্মার্ট ফেনী টিম দেখছে। অনুমোদন হলে নোটিফিকেশন পাবেন।', { t: 'হোমে যান', href: '/', ghost: true });
+    }
+
     function welcome() {
       $('saFoot').hidden = true;
       const body = $('saBody'); body.textContent = '';
@@ -459,15 +465,17 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       body.appendChild(go);
     }
 
-    $('saPrev').addEventListener('click', async () => { if (busy || step === 0) return; busy = true; render(); await save(false); busy = false; step--; render(); window.scrollTo(0, 0); });
+    $('saPrev').addEventListener('click', async () => { if (busy || step === 0) return; busy = true; render(); const sv = await save(false); busy = false; if (sv && sv.ok === false && sv.reason === 'pending') { showPending(); return; } step--; render(); window.scrollTo(0, 0); });
     $('saNext').addEventListener('click', async () => {
       if (busy) return;
       const se = stepErr(step);
       if (se) { stepBlock(se); return; }
       busy = true; render();
       if (step < STEPS.length - 1) {
-        await save(false);
-        busy = false; step++; render(); window.scrollTo(0, 0);
+        const sv = await save(false);
+        busy = false;
+        if (sv && sv.ok === false && sv.reason === 'pending') { showPending(); return; }
+        step++; render(); window.scrollTo(0, 0);
         return;
       }
       const out = await save(true);
@@ -487,16 +495,15 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       uid = session.user.id;
       const [c, a, p] = await Promise.all([
         supabase.from('delivery_market_categories').select('id, slug, name, icon, sort_order, is_active').eq('is_active', true).order('sort_order'),
-        supabase.from('market_shop_applications').select('*').eq('applicant_id', uid).order('created_at', { ascending: false }).limit(1),
+        supabase.from('market_shop_applications').select('*').eq('applicant_id', uid).order('updated_at', { ascending: false }).limit(10),
         supabase.from('profiles').select('phone').eq('id', uid).maybeSingle(),
       ]);
       cats = (c.data || []);
-      app = a.data && a.data[0];
+      // খোলা আবেদন (pending → draft/rejected) আগে, নইলে সর্বশেষটা
+      const rows = a.data || [];
+      app = rows.find((x) => x.status === 'pending') || rows.find((x) => x.status === 'draft' || x.status === 'rejected') || rows[0];
       if (p.data && p.data.phone && !f.phone) f.phone = p.data.phone;
-      if (app && app.status === 'pending') {
-        stateCard('bags', 'আবেদন পর্যালোচনাধীন', '"' + (app.name || '') + '" — স্মার্ট ফেনী টিম দেখছে। অনুমোদন হলে নোটিফিকেশন পাবেন।', { t: 'হোমে যান', href: '/', ghost: true });
-        return;
-      }
+      if (app && app.status === 'pending') { showPending(); return; }
       if (app && app.status === 'approved') {
         stateCard('scooter', 'আপনার দোকান লাইভ! 🎉', '"' + (app.name || '') + '" কুইক ডেলিভারিতে চলছে। অর্ডার ও মেনু Smart Feni Pro অ্যাপে। আরেকটা দোকানের জন্য নতুন আবেদন করতে পারেন।', { t: 'নতুন দোকানের আবেদন', fn: () => { app = null; step = 0; render(); } });
         return;
@@ -516,5 +523,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       welcome();
     }
     init();
+    // অ্যাপ/ব্রাউজারের ব্যাক-ক্যাশ থেকে পুরনো উইজার্ড ফিরে এলে আসল অবস্থা আবার লোড
+    window.addEventListener('pageshow', (e) => { if (e.persisted) { busy = false; init(); } });
   </script>
 </BaseLayout>
