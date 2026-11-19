@@ -1,436 +1,482 @@
 ---
+// path: src/pages/become-a-shop-owner.astro
 // ============================================================
-// পেজ: /become-a-shop-owner — লগইন করা ইউজার শপ ওউনার হওয়ার জন্য
-// আবেদন করবে এখান থেকে। Admin পরে /admin/shops থেকে Approve করলে
-// dashboard access পাবে (shop_requests টেবিল ব্যবহার করে)।
-//
-// ✅ আপডেট (একাধিক শপ): আগে থেকে শপ থাকলে আর "ইতিমধ্যে শপ ওউনার" বলে
-// আটকানো হয় না — ফর্ম খোলা থাকে, উপরে ছোট নোটিশে "আপনার N টা শপ আছে"
-// + "আমার শপ" লিংক দেখায়। পেন্ডিং আবেদন থাকলে আগের মতোই নতুন আবেদন বন্ধ।
+// পেজ: কুইক ডেলিভারিতে দোকান খোলার আবেদন (/become-a-shop-owner)
+// ৫ ধাপের উইজার্ড: দোকান → লোকেশন → ডেলিভারি ও সময় → মেনু (৩+ পণ্য) → পেমেন্ট ও শর্ত।
+// প্রতি ধাপে ড্রাফট সেভ (RPC market_shop_app_save, p_submit=false); শেষে জমা (true, সার্ভারে যাচাই)।
+// অ্যাডমিন /admin/delivery-shop-applications থেকে ক্যাটাগরি বেছে অনুমোদন দিলেই দোকান লাইভ।
+// ছবি: delivery-shop-images/applications/<uid>/... (কমপ্রেস করে)। ম্যাপ: MarketLocationSheet (pick মোড)।
 // ============================================================
-
 export const prerender = false;
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
+import MarketLocationSheet from '../components/market/MarketLocationSheet.astro';
 ---
 
-<BaseLayout title="শপ ওউনার হোন | স্মার্ট ফেনী">
-  <div class="request-page">
-    <div class="container">
-
-      <div id="loadingState" class="loading-state">
-        <div class="spinner"></div>
-        <p>লোড হচ্ছে...</p>
-      </div>
-
-      <!-- ===== লগইন লাগবে ===== -->
-      <div id="loginRequired" class="status-box" style="display:none;">
-        <i class="fas fa-lock"></i>
-        <h2>লগইন করুন</h2>
-        <p>শপ ওউনার হওয়ার আবেদন করতে আগে লগইন করতে হবে</p>
-        <a href="/" class="primary-btn">হোমপেজে যান</a>
-      </div>
-
-      <!-- ===== পেন্ডিং আবেদন আগে থেকেই আছে ===== -->
-      <div id="pendingExists" class="status-box" style="display:none;">
-        <i class="fas fa-hourglass-half"></i>
-        <h2>আবেদন পর্যালোচনাধীন</h2>
-        <p>আপনার আবেদনটি অ্যাডমিন টিম রিভিউ করছে। এপ্রুভ হলে আপনাকে জানানো হবে।</p>
-        <a href="/my-shop" class="primary-btn" id="pendingMyShopLink" style="display:none;">আমার শপ</a>
-      </div>
-
-      <!-- ===== আগে থেকে শপ আছে — তথ্য নোটিশ (ফর্ম খোলাই থাকে) ===== -->
-      <div id="existingShopsNotice" class="existing-notice" style="display:none;">
-        <span><i class="fas fa-store"></i> <span id="existingShopsText"></span></span>
-        <a href="/my-shop">আমার শপ</a>
-      </div>
-
-      <!-- ===== আবেদন বাতিল হয়েছিল — আবার আবেদনের সুযোগ ===== -->
-      <div id="rejectedNotice" class="rejected-notice" style="display:none;">
-        <i class="fas fa-circle-info"></i> আপনার আগের আবেদনটি গ্রহণ করা হয়নি। চাইলে আবার আবেদন করতে পারেন।
-      </div>
-
-      <!-- ===== আবেদন ফর্ম ===== -->
-      <div id="requestForm" class="form-card" style="display:none;">
-        <div class="form-header">
-          <i class="fas fa-store"></i>
-          <h1 id="formTitle">শপ ওউনার হওয়ার আবেদন করুন</h1>
-          <p id="formSubtitle">ফর্মটি পূরণ করুন — অ্যাডমিন টিম রিভিউ করে এপ্রুভ করলে আপনি একটা নিজস্ব শপ পেজ ও ড্যাশবোর্ড পাবেন</p>
+<BaseLayout title="কুইক ডেলিভারিতে দোকান খুলুন | স্মার্ট ফেনী">
+  <MarketLocationSheet />
+  <div class="sa">
+    <header class="sa-hero">
+      <div class="sa-hero-in">
+        <a href="/" class="sa-round" aria-label="হোমে ফিরুন"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg></a>
+        <div class="sa-hero-t">
+          <small>কুইক ডেলিভারি · পার্টনার</small>
+          <h1>আপনার দোকান খুলুন</h1>
         </div>
-
-        <p class="form-message" id="formMessage"></p>
-
-        <label class="form-label">শপের নাম<span class="required-mark">*</span></label>
-        <input type="text" class="form-input" id="shopNameInput" placeholder="যেমন: রহিম'স ক্লথিং শপ" required />
-        <div class="field-error-msg" data-error-for="shopNameInput"><i class="fas fa-circle-exclamation"></i><span>শপের নাম লিখুন</span></div>
-
-        <label class="form-label">যোগাযোগের ফোন নম্বর<span class="required-mark">*</span></label>
-        <input type="text" class="form-input" id="phoneInput" placeholder="01xxxxxxxxx" required />
-        <div class="field-error-msg" data-error-for="phoneInput"><i class="fas fa-circle-exclamation"></i><span>ফোন নম্বর লিখুন</span></div>
-
-        <label class="form-label">সংক্ষেপে বলুন আপনি কী বিক্রি করবেন (ঐচ্ছিক)</label>
-        <textarea class="form-textarea" id="messageInput" placeholder="যেমন: হোম মেড কেক, ড্রেস, ইলেকট্রনিক্স ইত্যাদি" rows="3"></textarea>
-
-        <button class="submit-btn" id="submitBtn" type="button">
-          <i class="fas fa-paper-plane"></i> <span id="submitBtnText">আবেদন জমা দিন</span>
-        </button>
+        <img src="/market/icons/bags.webp" alt="" aria-hidden="true" class="sa-hero-ic" />
       </div>
-
-    </div>
+      <div class="sa-prog" id="saProg" aria-hidden="true"></div>
+    </header>
+    <main class="sa-body" id="saBody" aria-live="polite"></main>
+    <footer class="sa-foot" id="saFoot" hidden>
+      <button type="button" class="sa-back" id="saPrev">আগের ধাপ</button>
+      <button type="button" class="sa-next" id="saNext">পরের ধাপ</button>
+    </footer>
   </div>
 
-  <style>
-    .request-page {
-      min-height: 70vh;
-      padding: 50px 0 80px;
-    }
-
-    .loading-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      padding: 120px 0;
-      color: #5A6E85;
-      font-weight: 600;
-    }
-
-    .spinner {
-      width: 36px;
-      height: 36px;
-      border: 3px solid #E5EAF0;
-      border-top-color: #FF6B35;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .status-box {
-      max-width: 420px;
-      margin: 60px auto;
-      text-align: center;
-      background: #fff;
-      border-radius: 24px;
-      padding: 44px 28px;
-      box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
-    }
-
-    .status-box i {
-      font-size: 2.4rem;
-      color: #FF6B35;
-      margin-bottom: 16px;
-    }
-
-    .status-box h2 {
-      font-size: 1.2rem;
-      font-weight: 700;
-      color: #1B2A4A;
-      margin-bottom: 8px;
-    }
-
-    .status-box p {
-      color: #5A6E85;
-      font-size: 0.9rem;
-      line-height: 1.6;
-      margin-bottom: 20px;
-    }
-
-    .primary-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: #FF6B35;
-      color: #fff;
-      text-decoration: none;
-      padding: 12px 26px;
-      border-radius: 14px;
-      font-weight: 700;
-      font-size: 0.9rem;
-    }
-
-    .existing-notice {
-      max-width: 560px;
-      margin: 0 auto 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      background: #EFF6FF;
-      color: #1D4ED8;
-      padding: 12px 18px;
-      border-radius: 14px;
-      font-size: 0.85rem;
-      font-weight: 600;
-    }
-
-    .existing-notice a {
-      flex-shrink: 0;
-      color: #fff;
-      background: #2563EB;
-      text-decoration: none;
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-size: 0.78rem;
-      font-weight: 700;
-    }
-
-    .rejected-notice {
-      max-width: 560px;
-      margin: 0 auto 20px;
-      background: #FFF0EA;
-      color: #D14343;
-      padding: 12px 18px;
-      border-radius: 14px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      text-align: center;
-    }
-
-    .form-card {
-      max-width: 560px;
-      margin: 0 auto;
-      background: #fff;
-      border-radius: 24px;
-      padding: 32px 26px;
-      box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
-    }
-
-    .form-header {
-      text-align: center;
-      margin-bottom: 24px;
-    }
-
-    .form-header i {
-      font-size: 2rem;
-      color: #FF6B35;
-      margin-bottom: 10px;
-    }
-
-    .form-header h1 {
-      font-size: 1.3rem;
-      font-weight: 700;
-      color: #1B2A4A;
-      margin-bottom: 8px;
-    }
-
-    .form-header p {
-      color: #5A6E85;
-      font-size: 0.86rem;
-      line-height: 1.6;
-    }
-
-    .form-message {
-      display: none;
-      font-size: 0.85rem;
-      font-weight: 600;
-      padding: 10px 14px;
-      border-radius: 12px;
-      margin-bottom: 12px;
-      text-align: center;
-    }
-
-    .form-message.show-error {
-      display: block;
-      background: #FFF0EA;
-      color: #D14343;
-    }
-
-    .form-message.show-success {
-      display: block;
-      background: #EAFBF0;
-      color: #1B7A3C;
-    }
-
-    .form-label {
-      display: block;
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: #1B2A4A;
-      margin-bottom: 6px;
-      margin-top: 16px;
-    }
-
-    .form-label:first-of-type {
-      margin-top: 0;
-    }
-
-    .form-input, .form-textarea {
-      width: 100%;
-      padding: 12px 14px;
-      border-radius: 14px;
-      border: 1.5px solid #E5EAF0;
-      font-size: 0.9rem;
-      font-family: inherit;
-      color: #1B2A4A;
-      background: #FBFCFE;
-      resize: vertical;
-    }
-
-    .form-input:focus, .form-textarea:focus {
-      outline: none;
-      border-color: #FF6B35;
-      background: #fff;
-    }
-
-    .submit-btn {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      background: #FF6B35;
-      color: #fff;
-      border: none;
-      padding: 14px;
-      border-radius: 14px;
-      font-weight: 700;
-      font-size: 0.92rem;
-      cursor: pointer;
-      margin-top: 22px;
-    }
-
-    .submit-btn:disabled {
-      opacity: 0.65;
-      cursor: not-allowed;
-    }
+  <style is:global>
+    #siteNavbar { display: none !important; }
+    .sa { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #FFF4EC; min-height: 100vh; padding-bottom: 120px; }
+    .sa-hero { background: radial-gradient(130% 140% at 100% 0%, #FF9A6B 0%, #FF6B35 38%, #E2531F 62%, #1B2A4A 100%); color: #fff; padding-bottom: 14px; box-shadow: 0 10px 26px rgba(226,83,31,.22); }
+    .sa-hero-in { max-width: 560px; margin: 0 auto; padding: 14px 16px 6px; display: flex; align-items: center; gap: 12px; }
+    .sa-round { width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; flex: none; }
+    .sa-round svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .sa-hero-t { flex: 1; }
+    .sa-hero-t small { font-size: 13px; font-weight: 600; opacity: .9; }
+    .sa-hero-t h1 { margin: 0; font-size: 22px; color: #fff; }
+    .sa-hero-ic { width: 56px; height: 56px; filter: drop-shadow(0 6px 10px rgba(0,0,0,.2)); }
+    .sa-prog { max-width: 560px; margin: 8px auto 0; padding: 0 16px; display: flex; gap: 6px; }
+    .sa-prog i { flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,.28); }
+    .sa-prog i.on { background: #fff; }
+    .sa-body { max-width: 560px; margin: 0 auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 14px; }
+    .sa-step-h { display: flex; align-items: center; gap: 10px; }
+    .sa-step-h span { width: 34px; height: 34px; border-radius: 12px; background: #1B2A4A; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+    .sa-step-h h2 { margin: 0; font-size: 19px; }
+    .sa-step-h p { margin: 0; font-size: 13px; color: #5B6B86; font-weight: 600; }
+    .sa-card { background: #fff; border-radius: 20px; padding: 16px; box-shadow: 0 2px 12px rgba(27,42,74,.06); display: flex; flex-direction: column; gap: 12px; }
+    .sa-f { display: flex; flex-direction: column; gap: 6px; }
+    .sa-f > span { font-size: 14px; font-weight: 700; }
+    .sa-f > span .required-mark { color: #D7372B; margin-left: 2px; }
+    .sa-f small { font-size: 12.5px; color: #5B6B86; }
+    .sa-f input, .sa-f textarea, .sa-f select { min-height: 48px; border: 1.5px solid #E2E8F0; border-radius: 14px; padding: 10px 12px; font: inherit; font-size: 16px; color: #1B2A4A; background: #fff; width: 100%; box-sizing: border-box; }
+    .sa-f textarea { min-height: 84px; resize: vertical; }
+    .sa-f input:focus, .sa-f textarea:focus, .sa-f select:focus { outline: 0; border-color: #FF6B35; box-shadow: 0 0 0 3px rgba(255,107,53,.15); }
+    .sa-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .sa-imgs { display: flex; gap: 12px; align-items: flex-start; }
+    .sa-pick { position: relative; border: 2px dashed #F4C7AE; background: #FFF8F3 center/cover no-repeat; border-radius: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #C2410C; font-weight: 700; font-size: 13px; cursor: pointer; text-align: center; overflow: hidden; }
+    .sa-pick.has { border-style: solid; border-color: #fff; box-shadow: 0 4px 14px rgba(27,42,74,.12); color: transparent; }
+    .sa-pick.logo { width: 104px; height: 104px; flex: none; }
+    .sa-pick.cover { flex: 1; height: 104px; }
+    .sa-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .sa-pick svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; }
+    .sa-cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .sa-cat { border: 1.5px solid #E2E8F0; border-radius: 16px; background: #fff; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; font: inherit; font-size: 13px; font-weight: 700; color: #1B2A4A; cursor: pointer; min-height: 88px; }
+    .sa-cat img { width: 40px; height: 40px; }
+    .sa-cat[aria-pressed='true'] { border-color: #FF6B35; background: #FFF4EC; box-shadow: 0 0 0 2px #FF6B35 inset; }
+    .sa-map { border-radius: 16px; background: #F4F6FA; padding: 14px; display: flex; align-items: center; gap: 12px; }
+    .sa-map-ic { width: 48px; height: 48px; border-radius: 14px; background: linear-gradient(135deg,#FF8A5B,#FF6B35); display: flex; align-items: center; justify-content: center; flex: none; }
+    .sa-map-ic svg { width: 24px; height: 24px; fill: #fff; }
+    .sa-map b { display: block; font-size: 15px; }
+    .sa-map small { display: block; font-size: 13px; color: #5B6B86; }
+    .sa-btn { min-height: 46px; border-radius: 14px; border: 0; background: #1B2A4A; color: #fff; font: inherit; font-weight: 700; padding: 0 16px; cursor: pointer; }
+    .sa-btn.ghost { background: #fff; color: #1B2A4A; border: 1.5px solid #1B2A4A; }
+    .sa-kind { display: flex; flex-direction: column; gap: 10px; }
+    .sa-kopt { display: flex; gap: 12px; align-items: flex-start; text-align: left; border: 1.5px solid #E2E8F0; border-radius: 18px; padding: 14px; background: #fff; font: inherit; color: #1B2A4A; cursor: pointer; }
+    .sa-kopt[aria-pressed='true'] { border-color: #FF6B35; background: #FFF6F0; box-shadow: 0 0 0 2px #FF6B35 inset; }
+    .sa-kopt img { width: 46px; height: 46px; flex: none; }
+    .sa-kopt b { display: block; font-size: 16px; }
+    .sa-kopt small { display: block; font-size: 13px; color: #5B6B86; line-height: 1.5; margin-top: 2px; }
+    .sa-item { border: 1.5px solid #EDF0F5; border-radius: 18px; padding: 12px; display: grid; grid-template-columns: 78px 1fr; gap: 10px; position: relative; }
+    .sa-item .sa-pick { width: 78px; height: 78px; font-size: 11px; }
+    .sa-item-f { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .sa-item-f input { min-height: 42px; border: 1.5px solid #E2E8F0; border-radius: 12px; padding: 6px 10px; font: inherit; font-size: 15px; width: 100%; box-sizing: border-box; }
+    .sa-item-row { display: grid; grid-template-columns: 1fr 96px; gap: 8px; }
+    .sa-item-x { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; border-radius: 16px; border: 0; background: #FDECEA; color: #B3261E; font-weight: 700; cursor: pointer; }
+    .sa-add { min-height: 48px; border-radius: 14px; border: 1.5px dashed #FF6B35; background: #FFF8F3; color: #E2531F; font: inherit; font-weight: 700; cursor: pointer; }
+    .sa-seg { display: flex; background: #F4F6FA; border-radius: 14px; padding: 4px; gap: 4px; }
+    .sa-seg button { flex: 1; min-height: 44px; border: 0; border-radius: 11px; background: none; font: inherit; font-weight: 700; color: #5B6B86; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .sa-seg button img { width: 22px; height: 22px; object-fit: contain; }
+    .sa-seg button[aria-pressed='true'] { background: #fff; color: #1B2A4A; box-shadow: 0 2px 8px rgba(27,42,74,.12); }
+    .sa-terms { background: #F4F6FA; border-radius: 16px; padding: 12px 14px; font-size: 14px; line-height: 1.6; }
+    .sa-terms ul { margin: 6px 0 0; padding-left: 18px; }
+    .sa-check { display: flex; gap: 10px; align-items: flex-start; font-weight: 700; font-size: 14.5px; }
+    .sa-check input { width: 22px; height: 22px; margin-top: 2px; accent-color: #FF6B35; flex: none; }
+    .sa-err { background: #FDECEA; color: #A3261B; border-radius: 14px; padding: 11px 13px; font-weight: 700; font-size: 14px; }
+    .sa-foot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: rgba(255,255,255,.96); backdrop-filter: blur(8px); border-top: 1px solid #F1E2D7; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); display: flex; gap: 10px; justify-content: center; }
+    .sa-foot button { min-height: 52px; border-radius: 16px; font: inherit; font-weight: 700; font-size: 16px; cursor: pointer; }
+    .sa-back { flex: 0 0 34%; max-width: 190px; background: #fff; border: 1.5px solid #E2E8F0; color: #1B2A4A; }
+    .sa-next { flex: 1; max-width: 360px; border: 0; color: #fff; background: linear-gradient(135deg,#FF8A5B,#FF6B35); box-shadow: 0 8px 20px rgba(255,107,53,.3); }
+    .sa-next:disabled { opacity: .55; }
+    .sa-state { background: #fff; border-radius: 24px; padding: 26px 18px; text-align: center; box-shadow: 0 2px 12px rgba(27,42,74,.06); display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .sa-state img { width: 84px; height: 84px; }
+    .sa-state h2 { margin: 0; font-size: 21px; }
+    .sa-state p { margin: 0; color: #4A5568; line-height: 1.6; }
+    .sa-state .sa-btn { width: 100%; max-width: 320px; display: flex; align-items: center; justify-content: center; text-decoration: none; }
+    .sa-perks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .sa-perk { background: #fff; border-radius: 16px; padding: 12px 8px; text-align: center; font-size: 12.5px; font-weight: 700; box-shadow: 0 2px 10px rgba(27,42,74,.05); }
+    .sa-perk img { width: 36px; height: 36px; display: block; margin: 0 auto 4px; }
+    .sa-cat:focus-visible, .sa-kopt:focus-visible, .sa-btn:focus-visible, .sa-foot button:focus-visible, .sa-seg button:focus-visible, .sa-add:focus-visible, .sa-pick:focus-within { outline: 3px solid #FF6B35; outline-offset: 2px; }
   </style>
 
   <script>
     import { supabase } from '../lib/supabase.js';
+    import { compressImage } from '../lib/imageCompress.js';
 
-    const loadingState = document.getElementById('loadingState');
-    const loginRequired = document.getElementById('loginRequired');
-    const pendingExists = document.getElementById('pendingExists');
-    const pendingMyShopLink = document.getElementById('pendingMyShopLink');
-    const existingShopsNotice = document.getElementById('existingShopsNotice');
-    const existingShopsText = document.getElementById('existingShopsText');
-    const rejectedNotice = document.getElementById('rejectedNotice');
-    const requestForm = document.getElementById('requestForm');
-    const formTitle = document.getElementById('formTitle');
-    const formSubtitle = document.getElementById('formSubtitle');
+    const $ = (id) => document.getElementById(id);
+    const BN = (n) => String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
+    const toast = (m, t) => { if (window.showToast) window.showToast(m, t || 'info'); };
+    function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
+    const IC = '/market/icons/';
+    const CAT_IMG = { food: 'food', grocery: 'grocery', pharmacy: 'pharmacy', flower: 'flower', flowers: 'flower', beauty: 'beauty', gadget: 'gadget', fashion: 'fashion', home: 'home', bakery: 'bakery', organic: 'organic', books: 'books', baby: 'baby', other: 'bags' };
+    const DAYS = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+    const STEPS = ['দোকান', 'লোকেশন', 'ডেলিভারি ও সময়', 'মেনু', 'পেমেন্ট ও শর্ত'];
+    const ERR = { name: ['দোকানের নাম দিন (৩ অক্ষরের বেশি)', 0], logo: ['লোগো ছবি দিন', 0], category: ['অন্তত ১টা ক্যাটাগরি বাছুন', 0], pin: ['ম্যাপে দোকানের পিন বসান', 1], address: ['উপজেলা ও ঠিকানা দিন', 1], hours: ['খোলা ও বন্ধের সময় দিন', 2], phone: ['সঠিক মোবাইল নম্বর দিন', 4], payout: ['পাওনা নেওয়ার বিকাশ/নগদ নম্বর দিন', 4], items: ['দামসহ অন্তত ৩টা পণ্য দিন', 3], agree: ['শর্তে সম্মতি দিন', 4], pending: ['আবেদন পর্যালোচনাধীন আছে', 0], login: ['লগইন করুন', 0] };
 
-    const formMessage = document.getElementById('formMessage');
-    const shopNameInput = document.getElementById('shopNameInput');
-    const phoneInput = document.getElementById('phoneInput');
-    const messageInput = document.getElementById('messageInput');
-    const submitBtn = document.getElementById('submitBtn');
-    const submitBtnText = document.getElementById('submitBtnText');
+    let uid = null;
+    let cats = [];
+    let step = 0;
+    let busy = false;
+    let app = null; // সার্ভারের সারি
+    const f = { name: '', logo_url: '', cover_url: '', description: '', sells: '', suggested_category_ids: [], lat: null, lng: null, upazila: '', union_name: '', address: '', delivery_kind: 'instant', opens_at: '10:00', closes_at: '22:00', weekly_off: '', prep_minutes: 15, phone: '', payout_method: 'bkash', payout_number: '', items: [], agreed: false };
 
-    function showMsg(text, type = 'error') {
-      formMessage.textContent = text;
-      formMessage.className = `form-message ${type === 'error' ? 'show-error' : 'show-success'}`;
+    function fromRow(r) {
+      Object.keys(f).forEach((k) => { if (r[k] !== undefined && r[k] !== null) f[k] = r[k]; });
+      if (f.opens_at) f.opens_at = String(f.opens_at).slice(0, 5);
+      if (f.closes_at) f.closes_at = String(f.closes_at).slice(0, 5);
+      if (f.weekly_off === null || f.weekly_off === undefined) f.weekly_off = '';
+      f.weekly_off = String(f.weekly_off);
+      if (!Array.isArray(f.items)) f.items = [];
+      if (!Array.isArray(f.suggested_category_ids)) f.suggested_category_ids = [];
+    }
+    while (f.items.length < 3) f.items.push({ name: '', price: '', unit: '', image_url: '' });
 
-      // গ্লোবাল টোস্টেও দেখানো হয় — ইনলাইন মেসেজ স্ক্রিনের বাইরে থাকলেও যেন চোখে পড়ে
-      if (text && typeof window.showToast === 'function') {
-        window.showToast(text, type === 'error' ? 'error' : 'success', type === 'error' ? 3500 : 2500);
-      }
+    async function upload(file, kind) {
+      const blob = await compressImage(file, { maxDimension: kind === 'cover' ? 1400 : 900, quality: 0.8 });
+      const path = 'applications/' + uid + '/' + kind + '-' + crypto.randomUUID() + '.jpg';
+      const { error } = await supabase.storage.from('delivery-shop-images').upload(path, blob, { contentType: 'image/jpeg', cacheControl: '31536000', upsert: false });
+      if (error) throw error;
+      return supabase.storage.from('delivery-shop-images').getPublicUrl(path).data.publicUrl;
     }
 
-    async function init() {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (!session) {
-        loadingState.style.display = 'none';
-        loginRequired.style.display = 'block';
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('is_shop_owner, phone')
-        .eq('id', session.user.id)
-        .single();
-
-      // ইউজারের বর্তমান শপ সংখ্যা (একাধিক শপ সাপোর্ট) — এরর হলেও ফর্ম আটকায় না
-      let shopCount = 0;
-      const { count } = await supabase
-        .from('shops')
-        .select('id', { count: 'exact', head: true })
-        .eq('owner_id', session.user.id);
-      shopCount = count || 0;
-      const hasShops = shopCount > 0 || !!profile?.is_shop_owner;
-
-      // আগের আবেদনের status চেক (সর্বশেষটা)
-      const { data: existingRequests } = await supabase
-        .from('shop_requests')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const latestRequest = existingRequests?.[0];
-
-      loadingState.style.display = 'none';
-
-      if (latestRequest?.status === 'pending') {
-        if (hasShops) pendingMyShopLink.style.display = 'inline-flex';
-        pendingExists.style.display = 'block';
-        return;
-      }
-
-      if (hasShops) {
-        existingShopsText.textContent = shopCount > 0
-          ? `আপনার ${shopCount.toLocaleString('bn-BD')}টা শপ আছে`
-          : 'আপনার শপ আছে';
-        existingShopsNotice.style.display = 'flex';
-        formTitle.textContent = 'আরেকটা শপের আবেদন করুন';
-        formSubtitle.textContent = 'নতুন শপের তথ্য দিন — অ্যাডমিন টিম এপ্রুভ করলে এটা আপনার আগের শপের পাশে যোগ হবে';
-      }
-
-      if (latestRequest?.status === 'rejected') {
-        rejectedNotice.style.display = 'block';
-      }
-
-      if (profile?.phone) {
-        phoneInput.value = profile.phone;
-      }
-
-      requestForm.style.display = 'block';
-    }
-
-    submitBtn?.addEventListener('click', async () => {
-      formMessage.className = 'form-message';
-
-      const shopName = shopNameInput.value.trim();
-      const phone = phoneInput.value.trim();
-      const message = messageInput.value.trim();
-
-      if (!window.SFValidateForm(requestForm) || !shopName || !phone) {
-        showMsg('শপের নাম ও ফোন নম্বর দিন');
-        return;
-      }
-
-      submitBtnText.textContent = 'জমা হচ্ছে...';
-      submitBtn.disabled = true;
-
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const { error } = await supabase.from('shop_requests').insert({
-        user_id: session.user.id,
-        shop_name: shopName,
-        phone,
-        message: message || null,
-        status: 'pending',
+    function picker(cls, url, label, onFile) {
+      const p = mk('label', 'sa-pick ' + cls + (url ? ' has' : ''));
+      if (url) p.style.backgroundImage = 'url("' + encodeURI(url) + '")';
+      p.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+      p.appendChild(mk('span', '', label));
+      const inp = mk('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('aria-label', label);
+      inp.addEventListener('change', async () => {
+        const file = inp.files && inp.files[0];
+        if (!file) return;
+        p.classList.add('has'); p.style.opacity = '.6';
+        try {
+          const u = await upload(file, cls.split(' ')[0] || 'img');
+          p.style.backgroundImage = 'url("' + encodeURI(u) + '")'; onFile(u);
+        } catch (e) { toast('ছবি আপলোড হয়নি, আবার চেষ্টা করুন', 'error'); p.classList.remove('has'); if (window.SFReportError) { try { window.SFReportError(e, 'shop-app-upload'); } catch (_) {} } }
+        p.style.opacity = '';
       });
+      p.appendChild(inp);
+      return p;
+    }
 
-      if (error) {
-        showMsg('আবেদন জমা ব্যর্থ: ' + error.message);
-        submitBtnText.textContent = 'আবেদন জমা দিন';
-        submitBtn.disabled = false;
+    function field(label, input, req, hint) {
+      const l = mk('label', 'sa-f');
+      const s = mk('span', '', label);
+      if (req) { const r = mk('span', 'required-mark', '*'); s.appendChild(r); }
+      l.appendChild(s); l.appendChild(input);
+      if (hint) l.appendChild(mk('small', '', hint));
+      return l;
+    }
+    function inp(type, key, ph, max) {
+      const i = mk(type === 'textarea' ? 'textarea' : 'input');
+      if (type !== 'textarea') i.type = type;
+      if (ph) i.placeholder = ph;
+      if (max) i.maxLength = max;
+      i.value = f[key] === null || f[key] === undefined ? '' : String(f[key]);
+      i.addEventListener('input', () => { f[key] = i.value; });
+      return i;
+    }
+
+    function head(n, sub) {
+      const h = mk('div', 'sa-step-h');
+      h.appendChild(mk('span', '', BN(n + 1)));
+      const t = mk('div'); t.appendChild(mk('h2', '', STEPS[n])); if (sub) t.appendChild(mk('p', '', sub));
+      h.appendChild(t);
+      return h;
+    }
+
+    function stepShop(body) {
+      body.appendChild(head(0, 'কাস্টমার প্রথমে এগুলোই দেখবে'));
+      const c = mk('section', 'sa-card');
+      const imgs = mk('div', 'sa-imgs');
+      imgs.appendChild(picker('logo', f.logo_url, 'লোগো *', (u) => { f.logo_url = u; }));
+      imgs.appendChild(picker('cover', f.cover_url, 'কভার ছবি (দোকান/পণ্য)', (u) => { f.cover_url = u; }));
+      c.appendChild(imgs);
+      c.appendChild(field('দোকানের নাম', inp('text', 'name', 'যেমন: রহিম স্টোর', 80), true));
+      c.appendChild(field('ছোট বিবরণ', inp('textarea', 'description', 'আপনার দোকান সম্পর্কে ১–২ লাইন', 300), false));
+      body.appendChild(c);
+      const c2 = mk('section', 'sa-card');
+      c2.appendChild(mk('div', 'sa-f')).appendChild(mk('span', '', 'কী বিক্রি করেন? (১–৩টা বাছুন)'));
+      const g = mk('div', 'sa-cats');
+      cats.forEach((cat) => {
+        const b = mk('button', 'sa-cat'); b.type = 'button';
+        const on = f.suggested_category_ids.indexOf(cat.id) !== -1;
+        b.setAttribute('aria-pressed', String(on));
+        const k = CAT_IMG[cat.icon] || CAT_IMG[cat.slug] || 'bags';
+        const im = mk('img'); im.src = IC + k + '.webp'; im.alt = ''; im.setAttribute('aria-hidden', 'true');
+        b.appendChild(im); b.appendChild(mk('span', '', cat.name));
+        b.addEventListener('click', () => {
+          const i = f.suggested_category_ids.indexOf(cat.id);
+          if (i !== -1) f.suggested_category_ids.splice(i, 1);
+          else { if (f.suggested_category_ids.length >= 3) { toast('সর্বোচ্চ ৩টা', 'warning'); return; } f.suggested_category_ids.push(cat.id); }
+          b.setAttribute('aria-pressed', String(f.suggested_category_ids.indexOf(cat.id) !== -1));
+        });
+        g.appendChild(b);
+      });
+      c2.appendChild(g);
+      c2.appendChild(field('আরো বিস্তারিত (ঐচ্ছিক)', inp('text', 'sells', 'যেমন: হোমমেড কেক, জন্মদিনের কেক', 200), false));
+      body.appendChild(c2);
+    }
+
+    function stepLocation(body) {
+      body.appendChild(head(1, 'রাইডার এই পিনেই আসবে, চার্জও এখান থেকে হিসাব হবে'));
+      const c = mk('section', 'sa-card');
+      const m = mk('div', 'sa-map');
+      const ic = mk('div', 'sa-map-ic');
+      ic.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg>';
+      m.appendChild(ic);
+      const t = mk('div'); t.style.flex = '1';
+      t.appendChild(mk('b', '', f.lat !== null && f.lat !== '' ? 'পিন বসানো আছে ✓' : 'এখনো পিন বসানো হয়নি'));
+      t.appendChild(mk('small', '', [f.union_name, f.upazila].filter(Boolean).join(', ') || 'ম্যাপে দোকানের জায়গা বাছুন'));
+      m.appendChild(t);
+      c.appendChild(m);
+      const b = mk('button', 'sa-btn', f.lat !== null && f.lat !== '' ? 'পিন বদলান' : 'ম্যাপে পিন বসান'); b.type = 'button';
+      b.addEventListener('click', () => {
+        if (!window.SFMarketLocation) return;
+        window.SFMarketLocation.open((p) => {
+          if (!p) return;
+          if (p.lat === null || p.lng === null) { toast('ম্যাপে পিন বসাতে হবে, লিখিত ঠিকানা নয়', 'warning'); return; }
+          f.lat = p.lat; f.lng = p.lng; f.upazila = p.upazila || f.upazila; f.union_name = p.union || f.union_name;
+          if (!f.address) f.address = p.address || '';
+          render();
+        }, { pick: true, title: 'দোকান কোথায়?' });
+      });
+      c.appendChild(b);
+      c.appendChild(field('লিখিত ঠিকানা', inp('text', 'address', 'যেমন: ট্রাংক রোড, শহীদ মিনারের পাশে', 300), true, 'কাস্টমার ও রাইডার যেন সহজে খুঁজে পায়'));
+      body.appendChild(c);
+    }
+
+    function stepDelivery(body) {
+      body.appendChild(head(2, 'কীভাবে ডেলিভারি দেবেন, কখন খোলা'));
+      const c = mk('section', 'sa-card');
+      const k = mk('div', 'sa-kind');
+      [['instant', 'scooter', 'এখনই ডেলিভারি', 'অর্ডার এলে আপনি রেডি করবেন, স্মার্ট ফেনী রাইডার ৩০–৬০ মিনিটে কাস্টমারের কাছে পৌঁছে দেবে। খাবার, গ্রোসারি, ফার্মেসির জন্য।'],
+       ['preorder', 'bags', 'প্রি-অর্ডার', 'অর্ডার সরাসরি আপনার কাছে আসবে। কাস্টমারকে কল করে কনফার্ম করবেন, তারপর নিজে বা আমাদের রাইডার দিয়ে পাঠাবেন। কেক, হোমমেড, ফ্যাশনের জন্য।']].forEach(([v, img, t, s]) => {
+        const b = mk('button', 'sa-kopt'); b.type = 'button';
+        b.setAttribute('aria-pressed', String(f.delivery_kind === v));
+        const im = mk('img'); im.src = IC + img + '.webp'; im.alt = ''; im.setAttribute('aria-hidden', 'true'); b.appendChild(im);
+        const tx = mk('div'); tx.appendChild(mk('b', '', t)); tx.appendChild(mk('small', '', s)); b.appendChild(tx);
+        b.addEventListener('click', () => { f.delivery_kind = v; k.querySelectorAll('.sa-kopt').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); });
+        k.appendChild(b);
+      });
+      c.appendChild(k);
+      body.appendChild(c);
+      const c2 = mk('section', 'sa-card');
+      const two = mk('div', 'sa-two');
+      two.appendChild(field('খোলে', inp('time', 'opens_at'), true));
+      two.appendChild(field('বন্ধ হয়', inp('time', 'closes_at'), true));
+      c2.appendChild(two);
+      const off = mk('select');
+      const o0 = mk('option', '', 'কোনো ছুটি নেই'); o0.value = ''; off.appendChild(o0);
+      DAYS.forEach((d, i) => { const o = mk('option', '', d); o.value = String(i); off.appendChild(o); });
+      off.value = f.weekly_off; off.addEventListener('change', () => { f.weekly_off = off.value; });
+      const two2 = mk('div', 'sa-two');
+      two2.appendChild(field('সাপ্তাহিক ছুটি', off, false));
+      const pm = inp('number', 'prep_minutes'); pm.min = '5'; pm.max = '240'; pm.inputMode = 'numeric';
+      two2.appendChild(field('রেডি করতে (মিনিট)', pm, false));
+      c2.appendChild(two2);
+      body.appendChild(c2);
+    }
+
+    function stepMenu(body) {
+      body.appendChild(head(3, 'দামসহ অন্তত ৩টা পণ্য — পরে Pro অ্যাপ থেকে আরো যোগ করবেন'));
+      const c = mk('section', 'sa-card');
+      f.items.forEach((it, idx) => {
+        const row = mk('div', 'sa-item');
+        row.appendChild(picker('item', it.image_url, 'ছবি', (u) => { it.image_url = u; }));
+        const fx = mk('div', 'sa-item-f');
+        const n = mk('input'); n.type = 'text'; n.maxLength = 120; n.placeholder = 'পণ্যের নাম'; n.value = it.name || ''; n.setAttribute('aria-label', 'পণ্য ' + BN(idx + 1) + ' নাম');
+        n.addEventListener('input', () => { it.name = n.value; });
+        const r = mk('div', 'sa-item-row');
+        const pr = mk('input'); pr.type = 'number'; pr.min = '1'; pr.inputMode = 'decimal'; pr.placeholder = 'দাম ৳'; pr.value = it.price === null || it.price === undefined ? '' : it.price; pr.setAttribute('aria-label', 'পণ্য ' + BN(idx + 1) + ' দাম');
+        pr.addEventListener('input', () => { it.price = pr.value; });
+        const un = mk('input'); un.type = 'text'; un.maxLength = 20; un.placeholder = 'একক'; un.value = it.unit || ''; un.setAttribute('aria-label', 'একক (পিস/কেজি)');
+        un.addEventListener('input', () => { it.unit = un.value; });
+        r.appendChild(pr); r.appendChild(un);
+        fx.appendChild(n); fx.appendChild(r);
+        row.appendChild(fx);
+        if (f.items.length > 3) {
+          const x = mk('button', 'sa-item-x', '✕'); x.type = 'button'; x.setAttribute('aria-label', 'পণ্য মুছুন');
+          x.addEventListener('click', () => { f.items.splice(idx, 1); render(); });
+          row.appendChild(x);
+        }
+        c.appendChild(row);
+      });
+      if (f.items.length < 30) {
+        const add = mk('button', 'sa-add', '+ আরো পণ্য'); add.type = 'button';
+        add.addEventListener('click', () => { f.items.push({ name: '', price: '', unit: '', image_url: '' }); render(); });
+        c.appendChild(add);
+      }
+      body.appendChild(c);
+    }
+
+    function stepPay(body) {
+      body.appendChild(head(4, 'যোগাযোগ ও টাকা পাওয়ার নম্বর'));
+      const c = mk('section', 'sa-card');
+      const ph = inp('tel', 'phone', '01XXXXXXXXX', 14); ph.inputMode = 'tel';
+      c.appendChild(field('দোকানের মোবাইল নম্বর', ph, true, 'কাস্টমার ও রাইডার এই নম্বরে কল করবে'));
+      const seg = mk('div', 'sa-seg');
+      [['bkash', 'বিকাশ'], ['nagad', 'নগদ']].forEach(([v, l]) => {
+        const b = mk('button', ''); b.type = 'button'; b.setAttribute('aria-pressed', String(f.payout_method === v));
+        const im = mk('img'); im.src = '/market/pay/' + v + '.webp'; im.alt = ''; im.setAttribute('aria-hidden', 'true'); b.appendChild(im);
+        b.appendChild(document.createTextNode(l));
+        b.addEventListener('click', () => { f.payout_method = v; seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); });
+        seg.appendChild(b);
+      });
+      c.appendChild(field('পাওনা নেওয়ার মাধ্যম', seg, true));
+      const pn = inp('tel', 'payout_number', '01XXXXXXXXX', 14); pn.inputMode = 'tel';
+      c.appendChild(field('বিকাশ/নগদ নম্বর', pn, true, 'কুইক ডেলিভারির অর্ডারের পণ্যের টাকা স্মার্ট ফেনী এই নম্বরে পাঠাবে'));
+      body.appendChild(c);
+      const c2 = mk('section', 'sa-card');
+      const t = mk('div', 'sa-terms');
+      t.appendChild(mk('b', '', 'শর্ত'));
+      const ul = mk('ul');
+      ['মেনুর দাম দোকানের দামের সমান বা কম রাখবেন।', 'অর্ডার এলে দ্রুত সাড়া দেবেন; না পারলে দোকান "বন্ধ" করে রাখবেন।', 'রাইডার দিয়ে যাওয়া অর্ডারের পণ্যের টাকা স্মার্ট ফেনী হিসাব করে পরিশোধ করবে; প্রযোজ্য হলে কমিশন কাটা হবে।', 'ভুল তথ্য বা বারবার অর্ডার বাতিলে দোকান বন্ধ করা হতে পারে।'].forEach((x) => ul.appendChild(mk('li', '', x)));
+      t.appendChild(ul);
+      c2.appendChild(t);
+      const ck = mk('label', 'sa-check');
+      const cb = mk('input'); cb.type = 'checkbox'; cb.checked = !!f.agreed; cb.addEventListener('change', () => { f.agreed = cb.checked; });
+      ck.appendChild(cb); ck.appendChild(mk('span', '', 'আমি শর্তগুলো পড়েছি এবং রাজি'));
+      c2.appendChild(ck);
+      body.appendChild(c2);
+    }
+
+    function payload() {
+      return { ...f, lat: f.lat === '' ? null : f.lat, lng: f.lng === '' ? null : f.lng, items: f.items.filter((x) => String(x.name || '').trim()) };
+    }
+
+    async function save(submit) {
+      const { data, error } = await supabase.rpc('market_shop_app_save', { p: payload(), p_submit: !!submit });
+      if (error) { toast('সেভ হয়নি, ইন্টারনেট দেখে আবার চেষ্টা করুন', 'error'); return null; }
+      return data;
+    }
+
+    function showErr(reason) {
+      const e = ERR[reason] || ['কিছু তথ্য বাকি আছে', step];
+      step = e[1]; render();
+      const box = mk('div', 'sa-err', '⚠️ ' + e[0]);
+      $('saBody').insertBefore(box, $('saBody').firstChild.nextSibling);
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function renderProg(n) {
+      const p = $('saProg'); p.textContent = '';
+      for (let i = 0; i < STEPS.length; i++) p.appendChild(mk('i', i <= n ? 'on' : ''));
+    }
+
+    function render() {
+      const body = $('saBody');
+      body.textContent = '';
+      renderProg(step);
+      [stepShop, stepLocation, stepDelivery, stepMenu, stepPay][step](body);
+      $('saFoot').hidden = false;
+      $('saPrev').style.visibility = step === 0 ? 'hidden' : '';
+      $('saNext').textContent = busy ? 'সেভ হচ্ছে…' : step === STEPS.length - 1 ? 'আবেদন জমা দিন' : 'পরের ধাপ';
+      $('saNext').disabled = busy;
+    }
+
+    function stateCard(img, title, text, btn) {
+      $('saFoot').hidden = true;
+      renderProg(STEPS.length - 1);
+      const body = $('saBody'); body.textContent = '';
+      const c = mk('section', 'sa-state');
+      const im = mk('img'); im.src = IC + img + '.webp'; im.alt = ''; im.setAttribute('aria-hidden', 'true'); c.appendChild(im);
+      c.appendChild(mk('h2', '', title)); c.appendChild(mk('p', '', text));
+      if (btn) { const a = mk(btn.href ? 'a' : 'button', 'sa-btn' + (btn.ghost ? ' ghost' : ''), btn.t); if (btn.href) a.href = btn.href; else { a.type = 'button'; a.addEventListener('click', btn.fn); } c.appendChild(a); }
+      body.appendChild(c);
+    }
+
+    function welcome() {
+      $('saFoot').hidden = true;
+      const body = $('saBody'); body.textContent = '';
+      const c = mk('section', 'sa-state');
+      const im = mk('img'); im.src = IC + 'scooter.webp'; im.alt = ''; im.setAttribute('aria-hidden', 'true'); c.appendChild(im);
+      c.appendChild(mk('h2', '', 'ফেনীর হাজারো কাস্টমারের কাছে পৌঁছান'));
+      c.appendChild(mk('p', '', '৫টা ছোট ধাপে আবেদন করুন। অনুমোদন হলেই আপনার দোকান কুইক ডেলিভারিতে লাইভ, অর্ডার আসবে Smart Feni Pro অ্যাপে।'));
+      body.appendChild(c);
+      const perks = mk('div', 'sa-perks');
+      [['scooter', 'রাইডার আমাদের'], ['bags', 'অর্ডার ম্যানেজ সহজ'], ['grocery', 'সব ক্যাটাগরি']].forEach(([i, t]) => {
+        const p = mk('div', 'sa-perk'); const x = mk('img'); x.src = IC + i + '.webp'; x.alt = ''; x.setAttribute('aria-hidden', 'true'); p.appendChild(x); p.appendChild(document.createTextNode(t)); perks.appendChild(p);
+      });
+      body.appendChild(perks);
+      const go = mk('button', 'sa-btn', 'আবেদন শুরু করুন'); go.type = 'button'; go.style.minHeight = '54px';
+      go.addEventListener('click', () => { step = 0; render(); });
+      body.appendChild(go);
+    }
+
+    $('saPrev').addEventListener('click', async () => { if (busy || step === 0) return; busy = true; render(); await save(false); busy = false; step--; render(); window.scrollTo(0, 0); });
+    $('saNext').addEventListener('click', async () => {
+      if (busy) return;
+      busy = true; render();
+      if (step < STEPS.length - 1) {
+        await save(false);
+        busy = false; step++; render(); window.scrollTo(0, 0);
         return;
       }
-
-      showMsg('আবেদন সফলভাবে জমা হয়েছে ✓ অ্যাডমিন টিম রিভিউ করার পর জানানো হবে', 'success');
-      submitBtn.style.display = 'none';
-      shopNameInput.disabled = true;
-      phoneInput.disabled = true;
-      messageInput.disabled = true;
+      const out = await save(true);
+      busy = false;
+      if (!out) { render(); return; }
+      if (!out.ok) { showErr(out.reason); return; }
+      stateCard('bags', 'আবেদন জমা হয়েছে! 🎉', 'স্মার্ট ফেনী টিম আপনার আবেদন দেখছে। অনুমোদন হলেই নোটিফিকেশন পাবেন, আর দোকান কুইক ডেলিভারিতে লাইভ হবে।', { t: 'হোমে যান', href: '/' });
     });
 
+    async function init() {
+      if (window.SFLoader) $('saBody').innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        stateCard('bags', 'আগে লগইন করুন', 'দোকান খোলার আবেদন করতে আপনার অ্যাকাউন্টে লগইন করুন।', { t: 'লগইন করুন', fn: () => { if (window.openAuthModal) window.openAuthModal(); } });
+        return;
+      }
+      uid = session.user.id;
+      const [c, a, p] = await Promise.all([
+        supabase.from('delivery_market_categories').select('id, slug, name, icon, sort_order, is_active').eq('is_active', true).order('sort_order'),
+        supabase.from('market_shop_applications').select('*').eq('applicant_id', uid).order('created_at', { ascending: false }).limit(1),
+        supabase.from('profiles').select('phone').eq('id', uid).maybeSingle(),
+      ]);
+      cats = (c.data || []);
+      app = a.data && a.data[0];
+      if (p.data && p.data.phone && !f.phone) f.phone = p.data.phone;
+      if (app && app.status === 'pending') {
+        stateCard('bags', 'আবেদন পর্যালোচনাধীন', '"' + (app.name || '') + '" — স্মার্ট ফেনী টিম দেখছে। অনুমোদন হলে নোটিফিকেশন পাবেন।', { t: 'হোমে যান', href: '/', ghost: true });
+        return;
+      }
+      if (app && app.status === 'approved') {
+        stateCard('scooter', 'আপনার দোকান লাইভ! 🎉', '"' + (app.name || '') + '" কুইক ডেলিভারিতে চলছে। অর্ডার ও মেনু Smart Feni Pro অ্যাপে। আরেকটা দোকানের জন্য নতুন আবেদন করতে পারেন।', { t: 'নতুন দোকানের আবেদন', fn: () => { app = null; step = 0; render(); } });
+        return;
+      }
+      if (app) {
+        fromRow(app);
+        while (f.items.length < 3) f.items.push({ name: '', price: '', unit: '', image_url: '' });
+        if (app.status === 'rejected') {
+          step = 0; render();
+          const box = mk('div', 'sa-err', '⚠️ আবেদন ফেরত এসেছে: ' + (app.reject_reason || '') + ' — ঠিক করে আবার জমা দিন।');
+          $('saBody').insertBefore(box, $('saBody').firstChild);
+          return;
+        }
+        step = 0; render();
+        return;
+      }
+      welcome();
+    }
     init();
   </script>
 </BaseLayout>

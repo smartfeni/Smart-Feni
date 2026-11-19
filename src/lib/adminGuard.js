@@ -38,6 +38,7 @@ const AREA_BY_SEGMENT = {
   'shops': 'shops',
   'delivery-riders': 'riders',
   'delivery-shops': 'delivery_shops',
+  'delivery-shop-applications': 'delivery_shops',
   'delivery-orders': 'delivery_orders',
   'delivery-market-payments': 'delivery_orders',
   'delivery-market-accounts': 'delivery_orders',
