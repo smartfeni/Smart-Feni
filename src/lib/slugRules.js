@@ -74,7 +74,8 @@ export async function checkSlugAvailability(supabaseAdmin, slug, { excludeShopId
 
   const [clubRes, shopRes] = await Promise.all([
     supabaseAdmin.from('clubs').select('id').eq('slug', slug).maybeSingle(),
-    supabaseAdmin.from('shops').select('id').eq('slug', slug).maybeSingle(),
+    // পুরনো অনলাইন শপের স্লাগ (কুইক ডেলিভারির দোকানে রিডাইরেক্ট হয়) — নভে ২০২৬
+    supabaseAdmin.from('delivery_shops').select('id').ilike('legacy_slug', slug).maybeSingle(),
   ]);
 
   if (clubRes.error || shopRes.error) {

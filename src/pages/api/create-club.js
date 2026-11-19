@@ -125,7 +125,8 @@ export async function POST({ request }) {
     // কারণ দুটোই একই top-level URL namespace শেয়ার করে (/[slug])
     const [{ data: existingClub }, { data: existingShop }] = await Promise.all([
       supabaseAdmin.from('clubs').select('id').eq('slug', cleanSlug).maybeSingle(),
-      supabaseAdmin.from('shops').select('id').eq('slug', cleanSlug).maybeSingle(),
+      // পুরনো অনলাইন শপের স্লাগ এখন কুইক ডেলিভারির দোকানে রিডাইরেক্ট হয় (delivery_shops.legacy_slug)
+      supabaseAdmin.from('delivery_shops').select('id').ilike('legacy_slug', cleanSlug).maybeSingle(),
     ]);
 
     if (existingClub || existingShop) {
