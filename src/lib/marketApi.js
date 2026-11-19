@@ -13,8 +13,8 @@ const DHAKA_MS = 6 * 60 * 60 * 1000;
 export async function fetchMarketCategories() {
   const { data, error } = await supabase
     .from('delivery_market_categories')
-    .select('id, slug, name, icon, sort_order')
-    .eq('is_active', true)
+    .select('id, slug, name, icon, sort_order, is_active')
+    // RLS: সাধারণ ইউজার/গেস্ট শুধু চালু ক্যাটাগরি পায়, স্টাফ বন্ধগুলোও (টেস্টের জন্য)
     .order('sort_order', { ascending: true });
   if (error) throw error;
   return data || [];
