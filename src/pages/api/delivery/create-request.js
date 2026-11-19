@@ -248,7 +248,6 @@ async function prepareMarketAny(client, user, b) {
     });
     if (!fe && fr && Number(fr.fare) > 0) fare = Math.round(Number(fr.fare));
   } catch (_) { /* ফলব্যাক */ }
-  if (type === 'send' && parcelSize === 'large') fare += 20;
 
   let isStaff = false;
   try { const { data: st } = await client.rpc('has_permission', { p_key: 'delivery_orders.manage' }); isStaff = st === true; } catch (_) { isStaff = false; }
