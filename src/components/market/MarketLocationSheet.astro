@@ -43,7 +43,10 @@
 
     <!-- ধাপ ২ -->
     <section class="mls-step" id="mlsS2" hidden>
-      <div class="mls-ok" id="mlsOk"><i class="fas fa-circle-check" aria-hidden="true"></i> <span id="mlsOkT">লোকেশন খোঁজা হচ্ছে...</span></div>
+      <div class="mls-okrow">
+        <div class="mls-ok" id="mlsOk"><i class="fas fa-circle-check" aria-hidden="true"></i> <span id="mlsOkT">লোকেশন খোঁজা হচ্ছে...</span></div>
+        <button type="button" class="mls-relocate" id="mlsRelocate" aria-label="আমার লোকেশন আবার খুঁজুন"><i class="fas fa-location-crosshairs" aria-hidden="true"></i> আবার খুঁজুন</button>
+      </div>
       <div class="mls-tiles">
         <div class="mls-tile"><small>উপজেলা</small><b id="mlsUp">—</b></div>
         <div class="mls-tile"><small>ইউনিয়ন</small><b id="mlsUn">—</b></div>
@@ -118,6 +121,10 @@
   .mls-btn-tx b { font-size: 14.5px; font-weight: 700; white-space: nowrap; }
   .mls-btn-tx small { font-size: 11px; font-weight: 500; color: #4A5568; white-space: nowrap; }
   .mls-btn.dark small { color: #E6EAF2; }
+  .mls-okrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .mls-relocate { flex: none; display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid #FFD3BF; background: #FFF4EE; color: #E0531F; font: inherit; font-size: 13px; font-weight: 700; padding: 7px 12px; border-radius: 999px; cursor: pointer; }
+  .mls-relocate:disabled { opacity: .55; cursor: default; }
+  .mls-relocate:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
   .mls-ok { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: #1F7A4D; }
   .mls-ok.wait { color: #5B6B86; }
   .mls-tiles { display: flex; gap: 10px; margin: 12px 0; }
@@ -276,7 +283,8 @@
       L.polyline(border, { pane: 'mlsLines', color: '#FF6B35', weight: 4.5, opacity: 1, interactive: false }).addTo(map);
       labels = getLabelPoints(geo);
       chipLayer = L.layerGroup().addTo(map);
-      map.setMaxBounds(getFeniBounds(geo, 0.05));
+      // আগে কড়া maxBounds-এর কারণে ম্যাপ টানলে মাঝে ফিরে আসত — এখন অনেক ঢিলা সীমা
+      map.setMaxBounds(getFeniBounds(geo, 0.6));
       map.setMinZoom(9);
       map.on('zoomend', refreshChips);
       refreshChips();
@@ -403,14 +411,24 @@
     setText('mlsUp', '—'); setText('mlsUn', '—');
     $('mlsAddr').hidden = true; $('mlsSave2').disabled = true;
     go(2);
+    locateMe();
+  });
+  function locateMe() {
+    const b = $('mlsRelocate');
+    b.disabled = true;
+    setText('mlsOkT', 'লোকেশন খোঁজা হচ্ছে...'); $('mlsOk').classList.add('wait');
+    showErr('mlsErr2', '');
     getCurrentPosition(
-      (pos) => place(pos.coords.latitude, pos.coords.longitude, true),
+      (pos) => { b.disabled = false; place(pos.coords.latitude, pos.coords.longitude, true); },
       () => {
-        setText('mlsOkT', 'লোকেশন পাওয়া যায়নি');
-        showErr('mlsErr2', 'GPS চালু করে আবার চেষ্টা করুন, অথবা ম্যাপে নিজের জায়গায় ট্যাপ করুন।');
+        b.disabled = false;
+        setText('mlsOkT', picked ? 'আগের পিন রাখা আছে' : 'লোকেশন পাওয়া যায়নি');
+        if (picked) $('mlsOk').classList.remove('wait');
+        showErr('mlsErr2', 'GPS চালু করে "আবার খুঁজুন" চাপুন, অথবা ম্যাপে নিজের জায়গায় ট্যাপ করুন।');
       }
     );
-  });
+  }
+  $('mlsRelocate').addEventListener('click', locateMe);
   $('mlsSave2').addEventListener('click', () => {
     if (!picked) { showErr('mlsErr2', 'আগে ম্যাপে লোকেশন বেছে নিন।'); return; }
     finish({ ...picked, instructions: $('mlsIns').value.trim() });

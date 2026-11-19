@@ -28,10 +28,15 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
 
       <div class="qd-cats" id="qdCats" role="tablist" aria-label="ক্যাটাগরি"></div>
 
-      <label class="qd-search">
-        <input id="qdQ" type="search" autocomplete="off" placeholder="আজ কী খেতে মন চায়?" aria-label="দোকান বা খাবার খুঁজুন" />
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-      </label>
+      <div class="qd-srow">
+        <label class="qd-search">
+          <input id="qdQ" type="search" autocomplete="off" placeholder="আজ কী খেতে মন চায়?" aria-label="দোকান বা খাবার খুঁজুন" />
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+        </label>
+        <button type="button" class="qd-favbtn" id="qdFav" aria-pressed="false" aria-label="শুধু প্রিয় দোকান দেখুন" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.2-4.4-9.5-8.9C1 8.6 2.8 5 6.4 5c2.1 0 3.5 1.1 4.2 2.3h2.8C14.1 6.1 15.5 5 17.6 5 21.2 5 23 8.6 21.5 11.6 19.2 16.1 12 20.5 12 20.5Z" /></svg>
+        </button>
+      </div>
     </div>
 
     <div id="qdBody" class="qd-body"></div>
@@ -71,6 +76,14 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     .qd-cat[aria-selected='true'] .qd-cat-l { color: #E8551C; font-weight: 700; }
     .qd-cat:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 3px; border-radius: 22px; }
 
+    .qd-srow { display: flex; align-items: center; gap: 10px; margin: 12px 0 8px; }
+    .qd-srow .qd-search { flex: 1; min-width: 0; margin: 0; }
+    .qd-favbtn { flex: none; width: 54px; height: 54px; border-radius: 18px; border: 1.5px solid #F1E2D7; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 14px rgba(27,42,74,.06); transition: transform .15s; }
+    .qd-favbtn svg { width: 24px; height: 24px; fill: none; stroke: #E53E3E; stroke-width: 2.2; stroke-linejoin: round; }
+    .qd-favbtn.on { background: linear-gradient(135deg,#FF5A5F,#E53E3E); border-color: transparent; box-shadow: 0 6px 16px rgba(229,62,62,.35); }
+    .qd-favbtn.on svg { fill: #fff; stroke: #fff; }
+    .qd-favbtn:active { transform: scale(.94); }
+    .qd-favbtn:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
     .qd-search { display: flex; align-items: center; gap: 10px; margin: 12px 0 8px; height: 54px; padding: 0 18px; border-radius: 18px; background: #fff; border: 1.5px solid #F1E2D7; box-shadow: 0 4px 14px rgba(27,42,74,.06); }
     .qd-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font-size: 16px; font-weight: 500; color: #1B2A4A; }
     .qd-search input::placeholder { color: #6B7891; }
@@ -163,7 +176,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
 
   <script>
     import { supabase } from '../lib/supabase.js';
-    import { fetchMarketCategories, fetchMarketShops, fetchMarketItemIndex, shopOpenState, bnNum, marketAccess, distanceKm, searchNeedles, fetchShopRatings, ratingText, fetchFavoriteIds, fetchPastShopIds } from '../lib/marketApi.js';
+    import { fetchMarketCategories, fetchMarketShops, fetchMarketItemIndex, shopOpenState, bnNum, marketAccess, distanceKm, searchNeedles, fetchShopRatings, ratingText, fetchFavoriteIds } from '../lib/marketApi.js';
     import { getDrop } from '../lib/marketCart.js';
 
     const $ = (id) => document.getElementById(id);
@@ -194,7 +207,13 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     let shops = [];
     let ratings = {};
     let favIds = new Set();
-    let pastIds = [];
+    let favOnly = false;
+    function paintFavBtn() {
+      const b = $('qdFav');
+      b.hidden = false;
+      b.classList.toggle('on', favOnly);
+      b.setAttribute('aria-pressed', String(favOnly));
+    }
     let itemIdx = {};
     let active = null;
     let food = null;
@@ -228,8 +247,6 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       return s;
     }
     const BOLT = 'M13 2 4 14h7l-1 8 9-12h-7l1-8Z';
-    const HEART = 'M12 21s-7.5-4.6-10-9.3C.4 8.6 2.3 4.5 6.2 4.5c2.2 0 3.6 1.2 4.3 2.4h3c.7-1.2 2.1-2.4 4.3-2.4 3.9 0 5.8 4.1 4.2 7.2C19.5 16.4 12 21 12 21Z';
-    const AGAIN = 'M12 4a8 8 0 1 1-7.4 5H2l3.5-4L9 9H6.7A6 6 0 1 0 12 6V4Z';
     const PIN = 'M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z';
 
     // ---------- ঠিকানা ----------
@@ -453,12 +470,13 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     function renderBody() {
       const body = $('qdBody');
       body.textContent = '';
+      if (cats.length) $('qdFav').hidden = active === ANY;
       if (active === ANY) { renderAny(body); return; }
 
-      if (!q) body.appendChild(slides());
-      if (isFoodCat()) body.appendChild(foodsRow());
+      if (!q && !favOnly) body.appendChild(slides());
+      if (isFoodCat() && !favOnly) body.appendChild(foodsRow());
 
-      const list = shops.filter((s) => inCat(s) && matchesQ(s) && matchesFood(s));
+      const list = shops.filter((s) => inCat(s) && matchesQ(s) && matchesFood(s) && (!favOnly || favIds.has(s.id)));
       // খোলা আগে, তারপর দূরত্ব অনুযায়ী
       list.sort((a, b) => {
         const oa = shopOpenState(a).open ? 0 : 1, ob = shopOpenState(b).open ? 0 : 1;
@@ -468,21 +486,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
         return 0;
       });
 
-      if (!q && !food) {
-        const favs = shops.filter((s) => favIds.has(s.id));
-        if (favs.length) {
-          body.appendChild(sec('আপনার প্রিয়', '', HEART));
-          const row = mk('div', 'qd-row');
-          favs.forEach((s) => { const w = mk('div', 'qd-pop'); w.appendChild(shopCard(s, true)); row.appendChild(w); });
-          body.appendChild(row);
-        }
-        const past = pastIds.map((id) => shops.find((s) => s.id === id)).filter(Boolean);
-        if (past.length) {
-          body.appendChild(sec('আবার অর্ডার করুন', '', AGAIN));
-          const row = mk('div', 'qd-row');
-          past.forEach((s) => { const w = mk('div', 'qd-pop'); w.appendChild(shopCard(s, true)); row.appendChild(w); });
-          body.appendChild(row);
-        }
+      if (!q && !food && !favOnly) {
         const pop = list.filter((s) => s.is_popular);
         if (pop.length) {
           body.appendChild(sec('জনপ্রিয়', '', BOLT));
@@ -493,11 +497,12 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       }
 
       const c = catOf(active);
-      const title = q ? 'খোঁজার ফল' : food ? FOODS.find((x) => x.k === food).t : getDrop() && getDrop().lat !== null ? 'আপনার কাছের দোকান' : 'সব দোকান';
+      const title = favOnly ? 'আপনার প্রিয়' : q ? 'খোঁজার ফল' : food ? FOODS.find((x) => x.k === food).t : getDrop() && getDrop().lat !== null ? 'আপনার কাছের দোকান' : 'সব দোকান';
       body.appendChild(sec(title, bnNum(list.length) + 'টি দোকান', !q && !food && getDrop() && getDrop().lat !== null ? PIN : null));
       if (!list.length) {
         let msg = 'এই ক্যাটাগরিতে এখনো কোনো দোকান নেই। শীঘ্রই আসছে!';
-        if (q) msg = '"' + q + '" নামে কিছু পাওয়া যায়নি।';
+        if (favOnly) msg = 'এই ক্যাটাগরিতে এখনো প্রিয় দোকান নেই। দোকানের পেজে ❤️ চাপলে এখানে আসবে।';
+        else if (q) msg = '"' + q + '" নামে কিছু পাওয়া যায়নি।';
         else if (food) msg = 'এই খাবারের দোকান এখনো যুক্ত হয়নি।';
         body.appendChild(empty(msg, c && CAT_IMG[c.icon] ? CAT_IMG[c.icon] : 'basket'));
         return;
@@ -572,13 +577,12 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       if (!getDrop()) openLoc();
 
       try {
-        const res = await Promise.all([fetchMarketCategories(), fetchMarketShops(), fetchMarketItemIndex().catch(() => ({})), fetchShopRatings(), fetchFavoriteIds().catch(() => new Set()), fetchPastShopIds(session.user.id).catch(() => [])]);
+        const res = await Promise.all([fetchMarketCategories(), fetchMarketShops(), fetchMarketItemIndex().catch(() => ({})), fetchShopRatings(), fetchFavoriteIds().catch(() => new Set())]);
         cats = res[0];
         shops = res[1];
         itemIdx = res[2] || {};
         ratings = res[3] || {};
         favIds = res[4];
-        pastIds = res[5];
       } catch (err) {
         if (window.SFReportError) { try { window.SFReportError(err, 'market-load'); } catch (e) {} }
         showMsg(empty('লোড করতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।', 'basket'));
@@ -588,6 +592,8 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       active = foodCat ? foodCat.id : cats.length ? cats[0].id : ANY;
       renderCats();
       setPlaceholder();
+      paintFavBtn();
+      $('qdFav').addEventListener('click', () => { favOnly = !favOnly; paintFavBtn(); renderBody(); });
       renderBody();
     }
 
