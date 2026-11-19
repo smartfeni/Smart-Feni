@@ -65,6 +65,9 @@
           <span class="hm-profile-name" id="hmProfileName">প্রোফাইল</span>
           <span class="hm-profile-phone" id="hmProfilePhone"></span>
         </span>
+        <button type="button" class="hm-lang" id="hmLangBtn" data-no-i18n aria-label="ভাষা / Language">
+          <span data-l="bn">বাং</span><span data-l="en">EN</span>
+        </button>
         <a href="/profile/edit" class="hm-settings-btn" id="hmSettingsBtn" aria-label="প্রোফাইল এডিট করুন">
           <i class="fas fa-gear"></i>
         </a>
@@ -235,6 +238,38 @@
     background: #fff;
     border: 1px solid #E5EAF0;
     border-radius: 20px;
+  }
+
+  .hm-lang {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    padding: 3px;
+    height: 36px;
+    border: 0;
+    border-radius: 18px;
+    background: #F4F7FC;
+    cursor: pointer;
+    font: inherit;
+    margin-right: 6px;
+  }
+  .hm-lang span {
+    min-width: 34px;
+    height: 30px;
+    padding: 0 8px;
+    border-radius: 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #5A6E85;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .hm-lang span.on {
+    background: #FF6B35;
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(255, 107, 53, 0.35);
   }
 
   .hm-settings-btn {
@@ -581,6 +616,22 @@
     loadScratchItem();
   }
 
+  // ===== ভাষা টগল (বাংলা/English) =====
+  const langBtn = document.getElementById('hmLangBtn');
+  if (langBtn) {
+    const cur = window.SFLang ? window.SFLang.get() : 'bn';
+    langBtn.querySelectorAll('span').forEach((s) => s.classList.toggle('on', s.dataset.l === cur));
+    langBtn.addEventListener('click', async () => {
+      const next = (window.SFLang ? window.SFLang.get() : 'bn') === 'en' ? 'bn' : 'en';
+      langBtn.querySelectorAll('span').forEach((s) => s.classList.toggle('on', s.dataset.l === next));
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) await supabase.from('profiles').update({ preferred_lang: next }).eq('id', session.user.id);
+      } catch (e) { /* ভাষা ফোনে থাকলেই চলবে */ }
+      if (window.SFLang) window.SFLang.set(next);
+    });
+  }
+
   const logoutBtn = document.getElementById('hmLogoutBtn');
   const logoutText = document.getElementById('hmLogoutText');
   let logoutConfirming = false;
@@ -593,11 +644,19 @@
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('full_name, phone, avatar_url, role, is_shop_owner, is_club_owner')
+      .select('full_name, phone, avatar_url, role, is_shop_owner, is_club_owner, preferred_lang')
       .eq('id', session.user.id)
       .single();
 
     if (!profile) return;
+
+    // অন্য ডিভাইসে বাছাই করা ভাষা: এই ফোনে আগে কিছু বাছাই না থাকলে সেটাই চালু
+    try {
+      if (profile.preferred_lang && !localStorage.getItem('sf_lang') && profile.preferred_lang !== 'bn' && window.SFLang) {
+        window.SFLang.set(profile.preferred_lang);
+        return;
+      }
+    } catch (e) { /* উপেক্ষা */ }
 
     const { data: modRows } = await supabase
       .from('moderators')
