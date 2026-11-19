@@ -1,0 +1,497 @@
+---
+// path: src/pages/admin/delivery-market-accounts.astro
+// ============================================================
+// পেজ: কুইক ডেলিভারির হিসাব (/admin/delivery-market-accounts)। ব্রান্চ: marketplace, ধাপ ৯।
+// ট্যাব: রাইডার হিসাব (বুঝে নিলাম / হিসাব শেষ) · শপের পাওনা (পরিশোধ করেছি) · লাভ-লস
+// সেটিংস শিট: কোম্পানির কমিশন %, বিকাশ/নগদ নম্বর, নিজস্ব রাইডার টগল
+// ডেটা: delivery_requests (is_market, completed; হিসাবের কলাম ট্রিগার market_on_complete বসায়),
+//        shop_settlements, rider_settlements, market_losses
+// RPC: admin_settle_rider_orders, admin_pay_shop_settlements, admin_add_market_loss, admin_set_rider_own, admin_set_market_setting
+// প্যাটার্ন: adminGuard.js + smartfeni:admin-ready। সব টেক্সট textContent দিয়ে বসানো।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="কুইক ডেলিভারির হিসাব | স্মার্ট ফেনী">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="mac">
+    <div id="adminLoadingState" class="mac-loading"><p>যাচাই করা হচ্ছে…</p></div>
+
+    <div id="adminGuardedContent" style="display:none;">
+      <div class="mac-head">
+        <div class="mac-head-in">
+          <a href="/admin/delivery-orders" class="mac-round" aria-label="ডেলিভারি অর্ডারে ফিরুন">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          </a>
+          <div class="mac-title"><h1>হিসাব</h1><span>কুইক ডেলিভারি</span></div>
+          <button type="button" class="mac-round" id="macSetBtn" aria-label="সেটিংস">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" /></svg>
+          </button>
+        </div>
+        <div class="mac-head-in mac-tabs" role="tablist" aria-label="হিসাবের ধরন">
+          <button type="button" role="tab" class="mac-tab" data-t="riders" aria-selected="true">রাইডার</button>
+          <button type="button" role="tab" class="mac-tab" data-t="shops" aria-selected="false">শপের পাওনা</button>
+          <button type="button" role="tab" class="mac-tab" data-t="pl" aria-selected="false">লাভ-লস</button>
+        </div>
+      </div>
+
+      <div class="mac-body">
+        <div class="mac-range" role="group" aria-label="সময়">
+          <button type="button" class="mac-r" data-r="today" aria-pressed="true">আজ</button>
+          <button type="button" class="mac-r" data-r="yday" aria-pressed="false">গতকাল</button>
+          <button type="button" class="mac-r" data-r="7d" aria-pressed="false">৭ দিন</button>
+          <button type="button" class="mac-r" data-r="month" aria-pressed="false">এই মাস</button>
+          <label class="mac-date"><span>তারিখ</span><input type="date" id="macDate" aria-label="নির্দিষ্ট তারিখ" /></label>
+        </div>
+        <div id="macFilter" class="mac-filter" role="group" aria-label="রাইডারের ধরন">
+          <button type="button" class="mac-f" data-f="all" aria-pressed="true">সব</button>
+          <button type="button" class="mac-f" data-f="own" aria-pressed="false">নিজস্ব</button>
+          <button type="button" class="mac-f" data-f="free" aria-pressed="false">ফ্রিলান্সার</button>
+        </div>
+        <div id="macList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- সেটিংস -->
+  <div class="mac-ov" id="macSetOv" hidden>
+    <div class="mac-sheet" role="dialog" aria-modal="true" aria-labelledby="macSetT">
+      <button type="button" class="mac-x" id="macSetX" aria-label="বন্ধ করুন">✕</button>
+      <h2 id="macSetT">হিসাবের সেটিংস</h2>
+      <label class="mac-fl"><span>কোম্পানির কমিশন (ফ্রিলান্সারের চার্জ থেকে, %)</span><input id="macPct" type="number" inputmode="decimal" min="0" max="100" step="0.5" /></label>
+      <p class="mac-hint">০ মানে ফ্রিলান্সার পুরো চার্জ পাবে। নিজস্ব রাইডারের চার্জ পুরোটা কোম্পানির।</p>
+      <label class="mac-fl"><span>বিকাশ নম্বর (অগ্রিম নেওয়ার)</span><input id="macBkash" type="tel" inputmode="tel" maxlength="14" /></label>
+      <label class="mac-fl"><span>নগদ নম্বর (খালি রাখলে নগদ অপশন আসবে না)</span><input id="macNagad" type="tel" inputmode="tel" maxlength="14" /></label>
+      <button type="button" class="mac-btn" id="macSetSave">সেভ করুন</button>
+      <h3 class="mac-sub">নিজস্ব রাইডার</h3>
+      <input id="macRSearch" class="mac-search" placeholder="রাইডারের নাম বা ফোন খুঁজুন" aria-label="রাইডার খুঁজুন" />
+      <div id="macRList"></div>
+    </div>
+  </div>
+
+  <!-- ক্ষতি লেখা -->
+  <div class="mac-ov" id="macLossOv" hidden>
+    <div class="mac-sheet" role="dialog" aria-modal="true" aria-labelledby="macLossT">
+      <button type="button" class="mac-x" id="macLossX" aria-label="বন্ধ করুন">✕</button>
+      <h2 id="macLossT">ক্ষতি লিখুন</h2>
+      <label class="mac-fl"><span>অর্ডার নম্বর (ঐচ্ছিক, যেমন SFD-1340)</span><input id="macLossNo" maxlength="20" /></label>
+      <label class="mac-fl"><span>টাকা</span><input id="macLossAmt" type="number" inputmode="numeric" min="1" /></label>
+      <label class="mac-fl"><span>কারণ</span><input id="macLossNote" maxlength="200" placeholder="যেমন: কাস্টমার পণ্য নেয়নি" /></label>
+      <button type="button" class="mac-btn" id="macLossSave">সেভ করুন</button>
+    </div>
+  </div>
+
+  <style is:global>
+    .mac { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F4F6FA; min-height: 70vh; padding-bottom: 100px; overflow-x: hidden; }
+    .mac * { box-sizing: border-box; }
+    .mac button, .mac input, .mac-ov button, .mac-ov input { font-family: 'Hind Siliguri', system-ui, sans-serif; }
+    .mac-loading { padding: 120px 0; text-align: center; color: #5B6B86; font-weight: 600; }
+    .mac-head { position: relative; left: 50%; width: 100vw; margin-left: -50vw; background: linear-gradient(135deg, #1B2A4A, #2C4372); color: #fff; }
+    .mac-head-in { max-width: 680px; margin: 0 auto; padding: 14px 16px 8px; display: flex; align-items: center; gap: 12px; }
+    .mac-round { width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,.15); border: 0; display: flex; align-items: center; justify-content: center; flex: none; cursor: pointer; }
+    .mac-round svg { width: 21px; height: 21px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .mac-title { flex: 1; }
+    .mac-title h1 { margin: 0; font-size: 20px; color: #fff; }
+    .mac-title span { font-size: 13px; opacity: .8; }
+    .mac-tabs { padding-top: 4px; padding-bottom: 12px; gap: 8px; }
+    .mac-tab { flex: 1; min-height: 42px; border-radius: 12px; border: 0; background: rgba(255,255,255,.12); color: #fff; font-weight: 700; font-size: 14.5px; cursor: pointer; }
+    .mac-tab[aria-selected='true'] { background: #FF6B35; }
+    .mac-body { max-width: 680px; margin: 0 auto; padding: 14px 16px; }
+    .mac-range, .mac-filter { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 10px; align-items: center; scrollbar-width: none; }
+    .mac-r, .mac-f { flex: none; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1.5px solid #E2E7EF; background: #fff; color: #1B2A4A; font-weight: 700; font-size: 14px; cursor: pointer; }
+    .mac-r[aria-pressed='true'], .mac-f[aria-pressed='true'] { background: #1B2A4A; color: #fff; border-color: #1B2A4A; }
+    .mac-date { flex: none; display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #4A5568; }
+    .mac-date input { height: 40px; border: 1.5px solid #E2E7EF; border-radius: 12px; padding: 0 8px; font-size: 14px; }
+    .mac-filter[hidden] { display: none; }
+
+    .mac-sum { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .mac-kpi { background: #fff; border-radius: 18px; padding: 12px 14px; box-shadow: 0 4px 14px rgba(27,42,74,.05); }
+    .mac-kpi small { display: block; font-size: 12px; font-weight: 600; color: #6B7891; }
+    .mac-kpi b { display: block; font-size: 21px; margin-top: 2px; }
+    .mac-kpi.dark { background: linear-gradient(135deg, #1B2A4A, #2C4372); color: #fff; }
+    .mac-kpi.dark small { color: #C9D3E6; }
+    .mac-kpi.green b { color: #17663F; }
+    .mac-kpi.red b { color: #B42318; }
+
+    .mac-card { background: #fff; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 4px 16px rgba(27,42,74,.06); overflow: hidden; }
+    .mac-rh { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; border: 0; background: none; text-align: left; cursor: pointer; color: #1B2A4A; }
+    .mac-ava { width: 46px; height: 46px; border-radius: 14px; background: #FFE3D1; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; flex: none; }
+    .mac-rh-t { flex: 1; min-width: 0; }
+    .mac-rh-t b { display: block; font-size: 16px; }
+    .mac-rh-t small { font-size: 12.5px; color: #4A5568; }
+    .mac-badge { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
+    .mac-badge.own { background: #E8EEF9; color: #1B2A4A; }
+    .mac-badge.free { background: #FFF1E8; color: #B4400F; }
+    .mac-net { text-align: right; }
+    .mac-net small { display: block; font-size: 11.5px; font-weight: 700; color: #6B7891; }
+    .mac-net b { font-size: 18px; }
+    .mac-net.pos b { color: #B4400F; }
+    .mac-net.neg b { color: #17663F; }
+    .mac-net.zero b { color: #17663F; }
+    .mac-rb { padding: 0 16px 14px; border-top: 1px solid #EEF1F5; }
+    .mac-rb[hidden] { display: none; }
+    .mac-ord { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 0; border-bottom: 1px solid #F1F3F7; font-size: 13.5px; }
+    .mac-ord:last-of-type { border-bottom: 0; }
+    .mac-ord b { font-size: 14.5px; }
+    .mac-ord .det { grid-column: 1 / -1; color: #4A5568; font-size: 12.5px; }
+    .mac-ok { min-height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: #1F8A5B; color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; }
+    .mac-done { font-size: 12.5px; font-weight: 700; color: #17663F; align-self: center; }
+    .mac-btn { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 50px; margin-top: 12px; border: 0; border-radius: 14px; background: #FF6B35; color: #fff; font-size: 15.5px; font-weight: 700; cursor: pointer; }
+    .mac-btn.navy { background: #1B2A4A; }
+    .mac-btn:disabled { opacity: .55; }
+    .mac-empty { text-align: center; padding: 40px 16px; color: #4A5568; font-size: 15px; }
+    .mac-empty img { width: 90px; height: 90px; object-fit: contain; display: block; margin: 0 auto 8px; }
+
+    .mac-pl { background: #fff; border-radius: 20px; padding: 16px; box-shadow: 0 4px 16px rgba(27,42,74,.06); margin-bottom: 12px; }
+    .mac-pl h3 { margin: 0 0 8px; font-size: 16px; }
+    .mac-pl div { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14.5px; color: #33415C; border-bottom: 1px solid #F1F3F7; }
+    .mac-pl div:last-child { border-bottom: 0; }
+    .mac-pl .tot { font-size: 18px; font-weight: 700; color: #1B2A4A; border-top: 1.5px dashed #E2E7EF; border-bottom: 0; margin-top: 4px; padding-top: 10px; }
+
+    .mac-ov { position: fixed; inset: 0; z-index: 9500; background: rgba(15,23,42,.55); display: flex; align-items: flex-end; justify-content: center; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; }
+    .mac-ov[hidden] { display: none; }
+    .mac-sheet { position: relative; width: 100%; max-width: 600px; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 26px 26px 0 0; padding: 22px 18px calc(18px + env(safe-area-inset-bottom)); }
+    .mac-sheet h2 { margin: 0 0 8px; font-size: 20px; }
+    .mac-sub { margin: 22px 0 8px; font-size: 16px; }
+    .mac-x { position: absolute; right: 12px; top: 12px; width: 42px; height: 42px; border-radius: 21px; border: 0; background: #F3F5F9; font-size: 17px; cursor: pointer; }
+    .mac-fl { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; font-size: 13px; font-weight: 600; color: #4A5568; }
+    .mac-fl input, .mac-search { height: 48px; border: 1.5px solid #E2E7EF; border-radius: 14px; padding: 0 14px; font-size: 16px; color: #1B2A4A; width: 100%; }
+    .mac-hint { margin: 6px 0 0; font-size: 12.5px; color: #6B7891; }
+    .mac-rider { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #F1F3F7; }
+    .mac-rider span { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 600; }
+    .mac-rider small { display: block; font-size: 12px; color: #6B7891; font-weight: 500; }
+    .mac-sw { position: relative; width: 52px; height: 30px; border-radius: 15px; border: 0; background: #D5DCE8; cursor: pointer; flex: none; }
+    .mac-sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: transform .15s; }
+    .mac-sw[aria-checked='true'] { background: #1F8A5B; }
+    .mac-sw[aria-checked='true']::after { transform: translateX(22px); }
+    .mac-tab:focus-visible, .mac-r:focus-visible, .mac-f:focus-visible, .mac-rh:focus-visible, .mac-ok:focus-visible, .mac-btn:focus-visible, .mac-sw:focus-visible, .mac-round:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const $ = (id) => document.getElementById(id);
+    const bn = (n) => String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
+    const tk = (n) => (Number(n) < 0 ? '−' : '') + '৳' + bn(Math.abs(Math.round(Number(n) || 0)));
+    const DH = 6 * 3600 * 1000;
+    let tab = 'riders';
+    let range = 'today';
+    let filter = 'all';
+    let orders = [];
+    let riders = {};
+    let shopRows = [];
+    let losses = [];
+    let openRider = null;
+    let busy = false;
+
+    function toast(m, t) { if (window.showToast) window.showToast(m, t || 'info'); }
+    function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
+    function fare(o) { return Number(o.final_price || o.current_price || o.initial_price || 0); }
+    function net(o) { return Number(o.rider_cod_collected || 0) - Number(o.rider_purchase_paid || 0) - Number(o.rider_earning || 0); }
+    function dhakaDay(d) { const x = new Date(d.getTime() + DH); return x.toISOString().slice(0, 10); }
+
+    // ঢাকার সময় অনুযায়ী [from, to) UTC
+    function bounds() {
+      const now = new Date();
+      const today = dhakaDay(now);
+      const at = (day) => new Date(Date.parse(day + 'T00:00:00Z') - DH);
+      const addDays = (day, n) => new Date(Date.parse(day + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+      if (range === 'date' && $('macDate').value) { const d = $('macDate').value; return [at(d), at(addDays(d, 1))]; }
+      if (range === 'yday') { const y = addDays(today, -1); return [at(y), at(today)]; }
+      if (range === '7d') return [at(addDays(today, -6)), at(addDays(today, 1))];
+      if (range === 'month') return [at(today.slice(0, 8) + '01'), at(addDays(today, 1))];
+      return [at(today), at(addDays(today, 1))];
+    }
+
+    async function load() {
+      const box = $('macList');
+      if (window.SFLoader) box.innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      const [from, to] = bounds();
+      const [o, s, l] = await Promise.all([
+        supabase.from('delivery_requests')
+          .select('id, order_no, order_type, accepted_rider_id, final_price, current_price, initial_price, items_total, advance_verified_amount, rider_cod_collected, rider_purchase_paid, rider_earning, rider_settled_at, market_completed_at')
+          .eq('is_market', true).eq('status', 'completed')
+          .gte('market_completed_at', from.toISOString()).lt('market_completed_at', to.toISOString())
+          .order('market_completed_at', { ascending: false }).limit(1000),
+        supabase.from('shop_settlements').select('id, shop_id, request_id, amount, created_at, paid_at, delivery_shops(name), delivery_requests(order_no)').order('created_at', { ascending: false }).limit(500),
+        supabase.from('market_losses').select('id, amount, note, created_at, delivery_requests(order_no)').gte('created_at', from.toISOString()).lt('created_at', to.toISOString()).order('created_at', { ascending: false }),
+      ]);
+      if (o.error) { box.textContent = ''; box.appendChild(mk('p', 'mac-empty', 'লোড করা যায়নি: ' + o.error.message)); return; }
+      orders = o.data || [];
+      shopRows = s.data || [];
+      losses = l.data || [];
+      const ids = [...new Set(orders.map((x) => x.accepted_rider_id).filter(Boolean))];
+      riders = {};
+      if (ids.length) {
+        const { data } = await supabase.from('delivery_riders').select('id, is_own, profile_id, profiles!delivery_riders_profile_id_fkey(full_name, phone)').in('id', ids);
+        (data || []).forEach((r) => { riders[r.id] = r; });
+      }
+      render();
+    }
+
+    function kpi(label, value, cls) { const d = mk('div', 'mac-kpi' + (cls ? ' ' + cls : '')); d.appendChild(mk('small', '', label)); d.appendChild(mk('b', '', value)); return d; }
+    function empty(t) { const e = mk('div', 'mac-empty'); const i = mk('img'); i.src = '/market/icons/bags.webp'; i.alt = ''; i.setAttribute('aria-hidden', 'true'); e.appendChild(i); e.appendChild(mk('div', '', t)); return e; }
+
+    function render() {
+      document.querySelectorAll('.mac-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.t === tab)));
+      document.querySelectorAll('.mac-r').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.r === range)));
+      document.querySelectorAll('.mac-f').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.f === filter)));
+      $('macFilter').hidden = tab === 'shops';
+      const box = $('macList');
+      box.textContent = '';
+      if (tab === 'riders') renderRiders(box);
+      else if (tab === 'shops') renderShops(box);
+      else renderPL(box);
+    }
+
+    function isOwn(o) { const r = riders[o.accepted_rider_id]; return !!(r && r.is_own); }
+    function filtered() { return orders.filter((o) => filter === 'all' || (filter === 'own') === isOwn(o)); }
+
+    function renderRiders(box) {
+      const list = filtered();
+      const sum = (f) => list.reduce((a, o) => a + f(o), 0);
+      const pend = list.filter((o) => !o.rider_settled_at);
+      const g = mk('div', 'mac-sum');
+      g.appendChild(kpi('মোট COD আদায়', tk(sum((o) => Number(o.rider_cod_collected || 0))), 'dark'));
+      g.appendChild(kpi('অর্ডার', bn(list.length)));
+      g.appendChild(kpi('রাইডার জমা দেবে (বাকি)', tk(pend.reduce((a, o) => a + Math.max(0, net(o)), 0)), 'red'));
+      g.appendChild(kpi('কোম্পানি দেবে (বাকি)', tk(pend.reduce((a, o) => a + Math.max(0, -net(o)), 0)), 'green'));
+      box.appendChild(g);
+      if (!list.length) { box.appendChild(empty('এই সময়ে কোনো সম্পন্ন কুইক অর্ডার নেই')); return; }
+      const by = {};
+      list.forEach((o) => { (by[o.accepted_rider_id] = by[o.accepted_rider_id] || []).push(o); });
+      Object.keys(by).forEach((rid) => {
+        const os = by[rid];
+        const r = riders[rid] || {};
+        const p = r.profiles || {};
+        const c = mk('section', 'mac-card');
+        const h = mk('button', 'mac-rh'); h.type = 'button';
+        h.setAttribute('aria-expanded', String(openRider === rid));
+        h.appendChild(mk('span', 'mac-ava', String(p.full_name || 'র').charAt(0)));
+        const t = mk('span', 'mac-rh-t');
+        const nm = mk('b', '', p.full_name || 'রাইডার');
+        nm.appendChild(mk('span', 'mac-badge ' + (r.is_own ? 'own' : 'free'), r.is_own ? 'নিজস্ব' : 'ফ্রিলান্সার'));
+        t.appendChild(nm);
+        const cod = os.reduce((a, o) => a + Number(o.rider_cod_collected || 0), 0);
+        const pur = os.reduce((a, o) => a + Number(o.rider_purchase_paid || 0), 0);
+        const ern = os.reduce((a, o) => a + Number(o.rider_earning || 0), 0);
+        t.appendChild(mk('small', '', bn(os.length) + 'টি অর্ডার · COD ' + tk(cod) + ' · দোকানে ' + tk(pur) + ' · আয় ' + tk(ern)));
+        h.appendChild(t);
+        const pn = os.filter((o) => !o.rider_settled_at).reduce((a, o) => a + net(o), 0);
+        const n = mk('span', 'mac-net ' + (pn > 0 ? 'pos' : pn < 0 ? 'neg' : 'zero'));
+        n.appendChild(mk('small', '', pn > 0 ? 'জমা দেবে' : pn < 0 ? 'কোম্পানি দেবে' : 'হিসাব শেষ'));
+        n.appendChild(mk('b', '', tk(Math.abs(pn))));
+        h.appendChild(n);
+        h.addEventListener('click', () => { openRider = openRider === rid ? null : rid; render(); });
+        c.appendChild(h);
+        const b = mk('div', 'mac-rb'); b.hidden = openRider !== rid;
+        os.forEach((o) => {
+          const row = mk('div', 'mac-ord');
+          row.appendChild(mk('b', '', '#' + (o.order_no || '') + ' · ' + ({ anything: 'এনিথিং', send: 'পাঠান' }[o.order_type] || 'শপ')));
+          if (o.rider_settled_at) row.appendChild(mk('span', 'mac-done', '✓ বুঝে নেওয়া'));
+          else {
+            const ok = mk('button', 'mac-ok', 'বুঝে নিলাম'); ok.type = 'button';
+            ok.addEventListener('click', () => settle([o.id], ok));
+            row.appendChild(ok);
+          }
+          const nv = net(o);
+          row.appendChild(mk('span', 'det', 'চার্জ ' + tk(fare(o)) + ' · COD ' + tk(o.rider_cod_collected) + ' · দোকানে ' + tk(o.rider_purchase_paid) + ' · আয় ' + tk(o.rider_earning) + ' → ' + (nv >= 0 ? 'জমা ' + tk(nv) : 'কোম্পানি দেবে ' + tk(-nv))));
+          b.appendChild(row);
+        });
+        const pendIds = os.filter((o) => !o.rider_settled_at).map((o) => o.id);
+        if (pendIds.length) {
+          const all = mk('button', 'mac-btn navy', 'হিসাব শেষ (' + bn(pendIds.length) + 'টি অর্ডার · ' + (pn >= 0 ? 'জমা ' : 'দেওয়া ') + tk(Math.abs(pn)) + ')'); all.type = 'button';
+          all.addEventListener('click', () => settle(pendIds, all));
+          b.appendChild(all);
+        }
+        c.appendChild(b);
+        box.appendChild(c);
+      });
+    }
+
+    async function settle(ids, btn) {
+      if (busy) return;
+      if (ids.length > 1 && !window.confirm('এই রাইডারের ' + bn(ids.length) + 'টি অর্ডারের হিসাব শেষ করবেন?')) return;
+      busy = true; btn.disabled = true;
+      const { data, error } = await supabase.rpc('admin_settle_rider_orders', { p_request_ids: ids, p_note: null });
+      busy = false; btn.disabled = false;
+      if (error) { toast(error.message, 'error'); return; }
+      toast('হিসাব নেওয়া হয়েছে (' + bn(data.count) + 'টি)', 'success');
+      await load();
+    }
+
+    function renderShops(box) {
+      const unpaid = shopRows.filter((r) => !r.paid_at);
+      const g = mk('div', 'mac-sum');
+      g.appendChild(kpi('শপের বাকি পাওনা', tk(unpaid.reduce((a, r) => a + Number(r.amount || 0), 0)), 'dark'));
+      g.appendChild(kpi('বাকি অর্ডার', bn(unpaid.length)));
+      box.appendChild(g);
+      if (!shopRows.length) { box.appendChild(empty('এখনো কোনো শপের পাওনা নেই (ওনার আছে এমন শপের অর্ডার সম্পন্ন হলে এখানে আসে)')); return; }
+      const by = {};
+      shopRows.forEach((r) => { (by[r.shop_id] = by[r.shop_id] || []).push(r); });
+      Object.keys(by).forEach((sid) => {
+        const rs = by[sid];
+        const name = (rs[0].delivery_shops && rs[0].delivery_shops.name) || 'দোকান';
+        const due = rs.filter((r) => !r.paid_at);
+        const c = mk('section', 'mac-card');
+        const h = mk('button', 'mac-rh'); h.type = 'button';
+        h.setAttribute('aria-expanded', String(openRider === 's' + sid));
+        h.appendChild(mk('span', 'mac-ava', String(name).charAt(0)));
+        const t = mk('span', 'mac-rh-t'); t.appendChild(mk('b', '', name)); t.appendChild(mk('small', '', bn(rs.length) + 'টি অর্ডার · বাকি ' + bn(due.length) + 'টি'));
+        h.appendChild(t);
+        const n = mk('span', 'mac-net ' + (due.length ? 'pos' : 'zero'));
+        n.appendChild(mk('small', '', due.length ? 'পাওনা' : 'পরিশোধিত'));
+        n.appendChild(mk('b', '', tk(due.reduce((a, r) => a + Number(r.amount || 0), 0))));
+        h.appendChild(n);
+        h.addEventListener('click', () => { openRider = openRider === 's' + sid ? null : 's' + sid; render(); });
+        c.appendChild(h);
+        const b = mk('div', 'mac-rb'); b.hidden = openRider !== 's' + sid;
+        rs.forEach((r) => {
+          const row = mk('div', 'mac-ord');
+          row.appendChild(mk('b', '', '#' + ((r.delivery_requests && r.delivery_requests.order_no) || '') + ' · ' + tk(r.amount)));
+          if (r.paid_at) row.appendChild(mk('span', 'mac-done', '✓ পরিশোধিত'));
+          else { const ok = mk('button', 'mac-ok', 'পরিশোধ'); ok.type = 'button'; ok.addEventListener('click', () => payShop([r.id], ok)); row.appendChild(ok); }
+          row.appendChild(mk('span', 'det', new Date(r.created_at).toLocaleString('bn-BD', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dhaka' })));
+          b.appendChild(row);
+        });
+        if (due.length) {
+          const all = mk('button', 'mac-btn navy', 'সব পরিশোধ করেছি (' + tk(due.reduce((a, r) => a + Number(r.amount || 0), 0)) + ')'); all.type = 'button';
+          all.addEventListener('click', () => payShop(due.map((r) => r.id), all));
+          b.appendChild(all);
+        }
+        c.appendChild(b);
+        box.appendChild(c);
+      });
+    }
+
+    async function payShop(ids, btn) {
+      if (busy) return;
+      if (ids.length > 1 && !window.confirm(bn(ids.length) + 'টি অর্ডারের পাওনা পরিশোধ হিসেবে মার্ক করবেন?')) return;
+      busy = true; btn.disabled = true;
+      const { error } = await supabase.rpc('admin_pay_shop_settlements', { p_ids: ids });
+      busy = false; btn.disabled = false;
+      if (error) { toast(error.message, 'error'); return; }
+      toast('পরিশোধ হিসেবে মার্ক হয়েছে', 'success');
+      await load();
+    }
+
+    function renderPL(box) {
+      const list = filtered();
+      const own = list.filter(isOwn);
+      const free = list.filter((o) => !isOwn(o));
+      const ownIncome = own.reduce((a, o) => a + fare(o), 0);
+      const freeComm = free.reduce((a, o) => a + (fare(o) - Number(o.rider_earning || 0)), 0);
+      const loss = losses.reduce((a, l) => a + Number(l.amount || 0), 0);
+      const g = mk('div', 'mac-sum');
+      g.appendChild(kpi('নেট লাভ', tk(ownIncome + freeComm - loss), ownIncome + freeComm - loss >= 0 ? 'dark' : 'red'));
+      g.appendChild(kpi('সম্পন্ন অর্ডার', bn(list.length)));
+      box.appendChild(g);
+      const c = mk('section', 'mac-pl');
+      c.appendChild(mk('h3', '', 'আয়'));
+      const line = (a, b, cls) => { const d = mk('div', cls || ''); d.appendChild(mk('span', '', a)); d.appendChild(mk('b', '', b)); c.appendChild(d); };
+      line('নিজস্ব রাইডারের চার্জ (' + bn(own.length) + 'টি অর্ডার)', tk(ownIncome));
+      line('ফ্রিলান্সারদের থেকে কমিশন (' + bn(free.length) + 'টি অর্ডার)', tk(freeComm));
+      line('ক্ষতি (' + bn(losses.length) + 'টি)', tk(-loss));
+      line('নেট', tk(ownIncome + freeComm - loss), 'tot');
+      box.appendChild(c);
+      if (losses.length) {
+        const lc = mk('section', 'mac-pl');
+        lc.appendChild(mk('h3', '', 'ক্ষতির তালিকা'));
+        losses.forEach((l) => { const d = mk('div'); d.appendChild(mk('span', '', (l.delivery_requests && l.delivery_requests.order_no ? '#' + l.delivery_requests.order_no + ' · ' : '') + (l.note || 'ক্ষতি'))); d.appendChild(mk('b', '', tk(l.amount))); lc.appendChild(d); });
+        box.appendChild(lc);
+      }
+      const add = mk('button', 'mac-btn', '+ ক্ষতি লিখুন'); add.type = 'button';
+      add.addEventListener('click', () => { $('macLossNo').value = ''; $('macLossAmt').value = ''; $('macLossNote').value = ''; $('macLossOv').hidden = false; });
+      box.appendChild(add);
+      box.appendChild(mk('p', 'mac-hint', 'নিজস্ব রাইডারের বেতন/খরচ মাস শেষে আলাদা হিসাবে বসবে।'));
+    }
+
+    // ---------- ক্ষতি ----------
+    $('macLossX').addEventListener('click', () => { $('macLossOv').hidden = true; });
+    $('macLossSave').addEventListener('click', async () => {
+      const amt = Number($('macLossAmt').value);
+      if (!amt || amt <= 0) { toast('টাকা লিখুন', 'warning'); return; }
+      let reqId = null;
+      const no = $('macLossNo').value.trim().toUpperCase();
+      if (no) {
+        const { data } = await supabase.from('delivery_requests').select('id').eq('order_no', no).maybeSingle();
+        if (!data) { toast('এই অর্ডার নম্বর পাওয়া যায়নি', 'error'); return; }
+        reqId = data.id;
+      }
+      const { error } = await supabase.rpc('admin_add_market_loss', { p_request_id: reqId, p_amount: amt, p_note: $('macLossNote').value.trim() });
+      if (error) { toast(error.message, 'error'); return; }
+      $('macLossOv').hidden = true;
+      toast('ক্ষতি লেখা হয়েছে', 'success');
+      await load();
+    });
+
+    // ---------- সেটিংস ----------
+    let allRiders = [];
+    async function openSettings() {
+      const { data } = await supabase.from('site_settings').select('key, value').in('key', ['market_commission_pct', 'market_payment_bkash', 'market_payment_nagad']);
+      (data || []).forEach((r) => {
+        if (r.key === 'market_commission_pct') $('macPct').value = r.value || '0';
+        if (r.key === 'market_payment_bkash') $('macBkash').value = r.value || '';
+        if (r.key === 'market_payment_nagad') $('macNagad').value = r.value || '';
+      });
+      $('macSetOv').hidden = false;
+      const rr = await supabase.from('delivery_riders').select('id, is_own, verification_status, profiles!delivery_riders_profile_id_fkey(full_name, phone)').eq('verification_status', 'approved').limit(500);
+      allRiders = rr.data || [];
+      renderRiderToggles();
+    }
+    function renderRiderToggles() {
+      const q = $('macRSearch').value.trim().toLowerCase();
+      const box = $('macRList');
+      box.textContent = '';
+      const list = allRiders
+        .filter((r) => !q || String((r.profiles && r.profiles.full_name) || '').toLowerCase().includes(q) || String((r.profiles && r.profiles.phone) || '').includes(q))
+        .sort((a, b) => Number(b.is_own) - Number(a.is_own));
+      list.slice(0, 60).forEach((r) => {
+        const row = mk('div', 'mac-rider');
+        const t = mk('span', '', (r.profiles && r.profiles.full_name) || 'রাইডার');
+        t.appendChild(mk('small', '', (r.profiles && r.profiles.phone) || ''));
+        row.appendChild(t);
+        const sw = mk('button', 'mac-sw'); sw.type = 'button'; sw.setAttribute('role', 'switch');
+        sw.setAttribute('aria-checked', String(!!r.is_own));
+        sw.setAttribute('aria-label', ((r.profiles && r.profiles.full_name) || 'রাইডার') + ' নিজস্ব রাইডার');
+        sw.addEventListener('click', async () => {
+          const want = !r.is_own;
+          sw.disabled = true;
+          const { error } = await supabase.rpc('admin_set_rider_own', { p_rider_id: r.id, p_own: want });
+          sw.disabled = false;
+          if (error) { toast(error.message, 'error'); return; }
+          r.is_own = want; sw.setAttribute('aria-checked', String(want));
+          toast(want ? 'নিজস্ব রাইডার করা হয়েছে' : 'ফ্রিলান্সার করা হয়েছে', 'success');
+        });
+        row.appendChild(sw);
+        box.appendChild(row);
+      });
+      if (!list.length) box.appendChild(mk('p', 'mac-hint', 'কোনো রাইডার পাওয়া যায়নি'));
+    }
+    $('macRSearch').addEventListener('input', renderRiderToggles);
+    $('macSetBtn').addEventListener('click', openSettings);
+    $('macSetX').addEventListener('click', () => { $('macSetOv').hidden = true; load(); });
+    $('macSetSave').addEventListener('click', async () => {
+      const b = $('macSetSave'); b.disabled = true;
+      for (const [k, el] of [['market_commission_pct', 'macPct'], ['market_payment_bkash', 'macBkash'], ['market_payment_nagad', 'macNagad']]) {
+        const { error } = await supabase.rpc('admin_set_market_setting', { p_key: k, p_value: $(el).value });
+        if (error) { b.disabled = false; toast(error.message, 'error'); return; }
+      }
+      b.disabled = false;
+      toast('সেটিংস সেভ হয়েছে', 'success');
+    });
+
+    document.querySelectorAll('.mac-tab').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; openRider = null; render(); }));
+    document.querySelectorAll('.mac-r').forEach((b) => b.addEventListener('click', () => { range = b.dataset.r; $('macDate').value = ''; load(); }));
+    document.querySelectorAll('.mac-f').forEach((b) => b.addEventListener('click', () => { filter = b.dataset.f; render(); }));
+    $('macDate').addEventListener('change', () => { if ($('macDate').value) { range = 'date'; document.querySelectorAll('.mac-r').forEach((x) => x.setAttribute('aria-pressed', 'false')); load(); } });
+
+    let started = false;
+    window.addEventListener('smartfeni:admin-ready', () => { if (!started) { started = true; load(); } });
+    initAdminGuard();
+  </script>
+</BaseLayout>

@@ -69,6 +69,7 @@ const guideSteps = [
           <button type="button" class="ps-tab active" data-tab="orders" role="tab">অর্ডার <span class="ps-bdg" id="psBdgNew" style="display:none;"></span></button>
           <button type="button" class="ps-tab" data-tab="done" role="tab">সম্পন্ন</button>
           <button type="button" class="ps-tab" data-tab="menu" role="tab">মেনু</button>
+          <button type="button" class="ps-tab" data-tab="account" role="tab">হিসাব</button>
         </div>
       </div>
 
@@ -486,7 +487,62 @@ const guideSteps = [
       }
       if (list === null) return;
       if (tab === 'menu') { if (!quiet || !menu.length) await loadMenu(); return; }
+      if (tab === 'account') { if (!quiet) await renderAccount(); return; }
       renderOrders(list);
+    }
+
+    // ---------- আমার হিসাব (কুইক ডেলিভারির পাওনা, স্মার্ট ফেনী পরিশোধ করে) ----------
+    async function renderAccount() {
+      const pane = $('psPane');
+      pane.textContent = '';
+      const { data, error } = await supabase
+        .from('shop_settlements')
+        .select('id, amount, created_at, paid_at, delivery_requests(order_no)')
+        .eq('shop_id', shop.id)
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (error) { pane.appendChild(h('p', 'ps-meta', 'হিসাব লোড হয়নি')); return; }
+      const rows = data || [];
+      const due = rows.filter((r) => !r.paid_at);
+      const dueSum = due.reduce((a, r) => a + Number(r.amount || 0), 0);
+      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+      const paidMonth = rows.filter((r) => r.paid_at && new Date(r.paid_at) >= monthStart).reduce((a, r) => a + Number(r.amount || 0), 0);
+      const top = h('div', '');
+      top.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0;';
+      const kp = (label, val, dark) => {
+        const d = h('div', '');
+        d.style.cssText = 'border-radius:18px;padding:14px;' + (dark ? 'background:linear-gradient(135deg,#1B2A4A,#2C4372);color:#fff;' : 'background:#fff;color:#1B2A4A;box-shadow:0 4px 14px rgba(27,42,74,.06);');
+        const sm = h('small', '', label); sm.style.cssText = 'display:block;font-size:12px;font-weight:600;opacity:.8;';
+        const b = h('b', '', '৳' + bn(Math.round(val))); b.style.cssText = 'display:block;font-size:22px;margin-top:2px;';
+        d.appendChild(sm); d.appendChild(b);
+        return d;
+      };
+      top.appendChild(kp('স্মার্ট ফেনী থেকে পাওনা', dueSum, true));
+      top.appendChild(kp('এই মাসে পেয়েছেন', paidMonth, false));
+      pane.appendChild(top);
+      const note = h('p', 'ps-meta', 'কুইক ডেলিভারির অর্ডারে কাস্টমার টাকা স্মার্ট ফেনীকে দেয়, রাইডার দোকানে টাকা দেয় না। আপনার পাওনা স্মার্ট ফেনী পরিশোধ করে।');
+      pane.appendChild(note);
+      if (!rows.length) { pane.appendChild(h('p', 'ps-meta', 'এখনো কোনো হিসাব নেই।')); return; }
+      rows.forEach((r) => {
+        const c = h('div', 'ps-card');
+        c.style.cssText = 'display:flex;align-items:center;gap:10px;';
+        const t = h('div', '');
+        t.style.cssText = 'flex:1;min-width:0;';
+        const no = h('b', '', '#' + ((r.delivery_requests && r.delivery_requests.order_no) || ''));
+        no.style.cssText = 'display:block;font-size:15px;';
+        t.appendChild(no);
+        t.appendChild(h('div', 'ps-meta', new Date(r.created_at).toLocaleString('bn-BD', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dhaka' })));
+        c.appendChild(t);
+        const right = h('div', '');
+        right.style.cssText = 'text-align:right;';
+        const am = h('b', '', '৳' + bn(Math.round(Number(r.amount || 0))));
+        am.style.cssText = 'display:block;font-size:17px;';
+        const st = h('span', '', r.paid_at ? '✓ পেয়েছেন' : 'পাওনা');
+        st.style.cssText = 'font-size:12px;font-weight:700;color:' + (r.paid_at ? '#17663F' : '#B4400F') + ';';
+        right.appendChild(am); right.appendChild(st);
+        c.appendChild(right);
+        pane.appendChild(c);
+      });
     }
 
     function setActive(list) {

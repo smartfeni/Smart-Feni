@@ -138,3 +138,39 @@ export function bindMarketRider(card, req, supabase, onDone) {
     }
   });
 }
+
+// ============================================================
+// রাইডারের "আজকের হিসাব" কার্ড (কুইক ডেলিভারি, ঢাকার আজকের দিন)। ধাপ ৯।
+// কলাম rider_cod_collected / rider_purchase_paid / rider_earning ট্রিগার market_on_complete বসায়।
+// ============================================================
+export async function renderRiderToday(supabase, riderId, anchorEl) {
+  if (!riderId || !anchorEl || !anchorEl.parentNode) return;
+  let box = document.getElementById('qdRiderToday');
+  try {
+    const DH = 6 * 3600 * 1000;
+    const day = new Date(Date.now() + DH).toISOString().slice(0, 10);
+    const from = new Date(Date.parse(day + 'T00:00:00Z') - DH).toISOString();
+    const { data } = await supabase
+      .from('delivery_requests')
+      .select('rider_cod_collected, rider_purchase_paid, rider_earning, rider_settled_at')
+      .eq('accepted_rider_id', riderId)
+      .eq('is_market', true)
+      .eq('status', 'completed')
+      .gte('market_completed_at', from);
+    const list = data || [];
+    if (!list.length) { if (box) box.remove(); return; }
+    const sum = (k) => list.reduce((a, o) => a + Number(o[k] || 0), 0);
+    const pend = list.filter((o) => !o.rider_settled_at).reduce((a, o) => a + Number(o.rider_cod_collected || 0) - Number(o.rider_purchase_paid || 0) - Number(o.rider_earning || 0), 0);
+    if (!box) {
+      box = document.createElement('section');
+      box.id = 'qdRiderToday';
+      box.setAttribute('aria-label', 'আজকের কুইক ডেলিভারি হিসাব');
+      anchorEl.parentNode.insertBefore(box, anchorEl);
+    }
+    box.style.cssText = 'margin:12px 0;padding:16px;border-radius:20px;background:linear-gradient(135deg,#1B2A4A,#2C4372);color:#fff;font-family:inherit;';
+    const cell = (label, val) => '<div style="background:rgba(255,255,255,.1);border-radius:14px;padding:10px 12px;"><small style="display:block;font-size:0.72rem;font-weight:600;opacity:.8;">' + label + '</small><b style="font-size:1.15rem;">' + TK(val) + '</b></div>';
+    box.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><i class="fas fa-bolt" style="color:#FFB48F;"></i><b style="flex:1;font-size:1rem;">আজকের হিসাব · কুইক ডেলিভারি</b><span style="font-size:0.78rem;opacity:.8;">' + BN(list.length) + 'টি অর্ডার</span></div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">' + cell('COD আদায়', sum('rider_cod_collected')) + cell('দোকানে দিয়েছি', sum('rider_purchase_paid')) + cell('আমার আয়', sum('rider_earning')) + '</div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding:12px 14px;border-radius:14px;background:' + (pend > 0 ? '#FF6B35' : '#1F8A5B') + ';"><span style="font-weight:700;">' + (pend > 0 ? 'অফিসে জমা দিতে হবে' : pend < 0 ? 'অফিস আপনাকে দেবে' : 'হিসাব শেষ ✓') + '</span><b style="font-size:1.3rem;">' + TK(Math.abs(pend)) + '</b></div>';
+  } catch (_) { /* কার্ড না এলেও চলবে */ }
+}
