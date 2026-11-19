@@ -1,0 +1,427 @@
+---
+// path: src/pages/market/checkout.astro
+// ============================================================
+// কুইক ডেলিভারি — কার্ট ও চেকআউট (/market/checkout)। ব্রান্চ: marketplace, ধাপ ৪।
+// - কার্ট (marketCart.js) এডিট, ডেলিভারি ঠিকানা (MarketLocationSheet), প্রোফাইলের ফোন, নোট
+// - চার্জের প্রিভিউ calc_delivery_fare (দোকানের পিন → ড্রপ); আসল চার্জ/দাম সার্ভার বসায়
+// - অর্ডার: POST /api/delivery/create-request { isMarket: true } → অ্যাডমিন গেটে pending
+// - পেমেন্ট এখন নয়: রাইডার কনফার্মের পর অগ্রিম (ধাপ ৬)
+// - সব লেখা textContent দিয়ে বসানো (এস্কেপ)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import MarketLocationSheet from '../../components/market/MarketLocationSheet.astro';
+---
+
+<BaseLayout title="চেকআউট | কুইক ডেলিভারি">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="qc" id="qc">
+    <header class="qc-top">
+      <a class="qc-round" id="qcBack" href="/market" aria-label="পেছনে যান">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      </a>
+      <div class="qc-top-t">
+        <h1>চেকআউট</h1>
+        <span id="qcShopName"></span>
+      </div>
+    </header>
+
+    <div id="qcBody" class="qc-body"></div>
+
+    <footer class="qc-foot" id="qcFoot" hidden>
+      <div class="qc-foot-sum">
+        <small>সর্বমোট</small>
+        <b id="qcFootTotal">৳০</b>
+      </div>
+      <button type="button" class="qc-order" id="qcOrder">অর্ডার দিন</button>
+    </footer>
+  </div>
+
+  <!-- সফল -->
+  <div class="qc-done" id="qcDone" hidden role="dialog" aria-modal="true" aria-labelledby="qcDoneT">
+    <div class="qc-done-in">
+      <div class="qc-tick" aria-hidden="true">
+        <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24" /><path d="M15 27l7 7 15-16" /></svg>
+      </div>
+      <h2 id="qcDoneT">অর্ডার হয়েছে!</h2>
+      <p class="qc-done-no" id="qcDoneNo"></p>
+      <ol class="qc-steps">
+        <li class="on"><b>অর্ডার যাচাই</b><span>স্মার্ট ফেনী টিম অর্ডারটি দেখছে</span></li>
+        <li><b>রাইডার কনফার্ম</b><span>রাইডার পেলে আপনাকে জানানো হবে</span></li>
+        <li><b>অগ্রিম পেমেন্ট</b><span>শুধু ডেলিভারি চার্জ বা পুরো টাকা (বিকাশ/নগদ)</span></li>
+        <li><b>ডেলিভারি</b><span>বাকি টাকা পণ্য হাতে পেয়ে দিন</span></li>
+      </ol>
+      <a class="qc-order full" id="qcDoneGo" href="/market">অর্ডার দেখুন</a>
+      <a class="qc-home" href="/market">হোমে ফিরুন</a>
+    </div>
+  </div>
+
+  <MarketLocationSheet />
+
+  <style is:global>
+    #siteNavbar { display: none !important; }
+    .qc { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F4F6FA; min-height: 100vh; max-width: 600px; margin: 0 auto; padding-bottom: 190px; }
+    .qc * { box-sizing: border-box; }
+    .qc button, .qc input, .qc textarea, .qc-done a { font-family: inherit; }
+    .qc-top { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 12px; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; background: rgba(244,246,250,.94); backdrop-filter: blur(8px); }
+    .qc-round { width: 44px; height: 44px; border-radius: 22px; background: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(27,42,74,.1); flex: none; }
+    .qc-round svg { width: 21px; height: 21px; fill: none; stroke: #1B2A4A; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }
+    .qc-top-t h1 { margin: 0; font-size: 21px; line-height: 1.2; }
+    .qc-top-t span { font-size: 13.5px; color: #4A5568; }
+    .qc-body { padding: 4px 16px 0; }
+
+    .qc-card { background: #fff; border-radius: 22px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 18px rgba(27,42,74,.06); }
+    .qc-h { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 17px; font-weight: 700; }
+    .qc-h img { width: 30px; height: 30px; object-fit: contain; }
+    .qc-h .sp { flex: 1; }
+    .qc-h a, .qc-link { font-size: 14px; font-weight: 700; color: #E8551C; text-decoration: none; background: none; border: 0; cursor: pointer; padding: 6px 2px; min-height: 36px; }
+
+    .qc-shop { display: flex; align-items: center; gap: 12px; }
+    .qc-shop-img { width: 56px; height: 56px; border-radius: 16px; background: #FFE3D1 center/cover no-repeat; flex: none; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; }
+    .qc-shop b { display: block; font-size: 16.5px; }
+    .qc-shop small { font-size: 13px; color: #4A5568; }
+
+    .qc-line { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #EEF1F5; }
+    .qc-line:first-of-type { border-top: 0; padding-top: 2px; }
+    .qc-line-t { flex: 1; min-width: 0; }
+    .qc-line-t b { display: block; font-size: 15px; line-height: 1.35; }
+    .qc-line-t small { font-size: 13px; color: #4A5568; }
+    .qc-line-p { font-size: 15px; font-weight: 700; min-width: 64px; text-align: right; }
+    .qc-step { display: inline-flex; align-items: center; border: 1.5px solid #E2E7EF; border-radius: 14px; height: 40px; flex: none; }
+    .qc-step button { width: 38px; height: 38px; border: 0; background: none; color: #1B2A4A; font-size: 20px; cursor: pointer; }
+    .qc-step span { min-width: 18px; text-align: center; font-weight: 700; }
+    .qc-more { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 14.5px; font-weight: 700; color: #E8551C; text-decoration: none; min-height: 40px; }
+
+    .qc-addr { display: flex; gap: 12px; align-items: flex-start; }
+    .qc-addr-ic { width: 46px; height: 46px; border-radius: 14px; background: #FFF1E8; display: flex; align-items: center; justify-content: center; flex: none; }
+    .qc-addr-ic svg { width: 24px; height: 24px; fill: #FF6B35; }
+    .qc-addr-t { flex: 1; min-width: 0; }
+    .qc-addr-t b { display: block; font-size: 15.5px; }
+    .qc-addr-t span { display: block; font-size: 13.5px; color: #4A5568; line-height: 1.5; margin-top: 2px; }
+    .qc-f { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+    .qc-f span { font-size: 13px; font-weight: 600; color: #4A5568; }
+    .qc-f input, .qc-f textarea { width: 100%; border: 1.5px solid #E2E7EF; border-radius: 14px; padding: 0 14px; height: 48px; font-size: 15.5px; color: #1B2A4A; background: #FBFCFE; }
+    .qc-f textarea { height: 78px; padding: 10px 14px; resize: none; }
+    .qc-f input:focus, .qc-f textarea:focus { outline: 0; border-color: #1B2A4A; }
+
+    .qc-phone { display: flex; align-items: center; gap: 12px; }
+    .qc-phone b { font-size: 16px; letter-spacing: .3px; }
+    .qc-warn { margin-top: 10px; padding: 12px; border-radius: 14px; background: #FDECEA; color: #A3261B; font-size: 14px; font-weight: 600; line-height: 1.5; }
+    .qc-warn a { color: #A3261B; }
+
+    .qc-bill div { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; font-size: 15px; color: #33415C; }
+    .qc-bill div b { color: #1B2A4A; }
+    .qc-bill .tot { border-top: 1.5px dashed #E2E7EF; margin-top: 6px; padding-top: 12px; font-size: 18px; font-weight: 700; color: #1B2A4A; }
+    .qc-bill .muted { font-size: 12.5px; color: #6B7891; }
+
+    .qc-pay { display: flex; gap: 12px; align-items: flex-start; background: linear-gradient(135deg, #1B2A4A, #2C4372); color: #fff; }
+    .qc-pay img { width: 54px; height: 54px; object-fit: contain; flex: none; }
+    .qc-pay b { display: block; font-size: 16px; }
+    .qc-pay span { display: block; font-size: 13.5px; line-height: 1.55; opacity: .9; margin-top: 3px; }
+
+    .qc-err { margin: 0 0 14px; padding: 12px 14px; border-radius: 14px; background: #FDECEA; color: #A3261B; font-size: 14.5px; font-weight: 600; line-height: 1.5; }
+    .qc-err[hidden] { display: none; }
+
+    .qc-empty { text-align: center; padding: 50px 16px; color: #4A5568; font-size: 15.5px; line-height: 1.6; }
+    .qc-empty img { width: 110px; height: 110px; object-fit: contain; display: block; margin: 0 auto 10px; }
+
+    .qc-foot { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(66px + env(safe-area-inset-bottom)); width: 100%; max-width: 600px; display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: #fff; border-top: 1px solid #EEF1F5; box-shadow: 0 -8px 24px rgba(27,42,74,.08); z-index: 997; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; }
+    .qc-foot[hidden] { display: none; }
+    .qc-foot-sum small { display: block; font-size: 12.5px; color: #4A5568; }
+    .qc-foot-sum b { font-size: 20px; }
+    .qc-order { flex: 1; min-height: 54px; border: 0; border-radius: 16px; background: #FF6B35; color: #fff; font-size: 17px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(232,85,28,.35); display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+    .qc-order:disabled { background: #C9D0DB; box-shadow: none; cursor: not-allowed; }
+    .qc-order.full { width: 100%; margin-top: 18px; }
+    .qc-order:focus-visible, .qc-round:focus-visible, .qc-step button:focus-visible, .qc-link:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+
+    .qc-done { position: fixed; inset: 0; z-index: 9800; background: #fff; display: flex; align-items: center; justify-content: center; padding: 24px; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; overflow-y: auto; }
+    .qc-done[hidden] { display: none; }
+    .qc-done-in { width: 100%; max-width: 420px; text-align: center; }
+    .qc-home { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; margin-top: 8px; color: #1B2A4A; font-weight: 700; font-size: 15px; text-decoration: none; }
+    .qc-tick { width: 108px; height: 108px; margin: 0 auto 10px; }
+    .qc-tick circle { fill: #E3F3EA; stroke: #1F8A5B; stroke-width: 2.5; }
+    .qc-tick path { fill: none; stroke: #1F8A5B; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 40; stroke-dashoffset: 40; animation: qcTick .5s .2s ease-out forwards; }
+    @keyframes qcTick { to { stroke-dashoffset: 0; } }
+    .qc-done h2 { margin: 0; font-size: 26px; }
+    .qc-done-no { margin: 4px 0 18px; font-size: 15px; color: #4A5568; font-weight: 600; }
+    .qc-steps { list-style: none; margin: 0; padding: 0; text-align: left; }
+    .qc-steps li { position: relative; padding: 0 0 16px 38px; }
+    .qc-steps li::before { content: ''; position: absolute; left: 8px; top: 4px; width: 14px; height: 14px; border-radius: 50%; border: 2.5px solid #C9D0DB; background: #fff; }
+    .qc-steps li::after { content: ''; position: absolute; left: 15px; top: 22px; bottom: 2px; width: 2px; background: #E2E7EF; }
+    .qc-steps li:last-child::after { display: none; }
+    .qc-steps li.on::before { border-color: #FF6B35; background: #FF6B35; box-shadow: 0 0 0 5px rgba(255,107,53,.18); }
+    .qc-steps b { display: block; font-size: 15.5px; }
+    .qc-steps span { font-size: 13.5px; color: #4A5568; }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { fetchMarketShop, bnNum, marketAccess, shopOpenState } from '../../lib/marketApi.js';
+    import { getCart, getDrop, addItem, decItem, clearCart, cartTotal, setDrop } from '../../lib/marketCart.js';
+
+    const $ = (id) => document.getElementById(id);
+    const tk = (n) => '৳' + bnNum(Math.round(Number(n) || 0));
+    let shop = null;
+    let fare = null;
+    let fareLoading = false;
+    let phone = '';
+    let name = '';
+    let note = '';
+    let busy = false;
+
+    function toast(m, t) { if (window.showToast) window.showToast(m, t || 'info'); }
+    function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
+    function icon(n) { const i = mk('img'); i.src = '/market/icons/' + n + '.webp'; i.alt = ''; i.setAttribute('aria-hidden', 'true'); return i; }
+    function validPhone(p) { return /^01[3-9]\d{8}$/.test(String(p || '').replace(/[\s-]/g, '').replace(/^\+?88/, '')); }
+
+    function empty(text, ic, link) {
+      const d = mk('div', 'qc-empty');
+      d.appendChild(icon(ic || 'basket'));
+      d.appendChild(mk('div', '', text));
+      if (link) { const a = mk('a', 'qc-order full', link.t); a.href = link.h; d.appendChild(a); }
+      return d;
+    }
+
+    async function loadFare() {
+      const d = getDrop();
+      if (!shop || !d) { fare = null; return; }
+      fareLoading = true;
+      try {
+        const { data, error } = await supabase.rpc('calc_delivery_fare', {
+          p_pickup_lat: Number(shop.lat), p_pickup_lng: Number(shop.lng),
+          p_drop_lat: d.lat, p_drop_lng: d.lng, p_drop_union: d.union || null, p_category: 'delivery',
+        });
+        fare = !error && data && Number(data.fare) > 0 ? Math.round(Number(data.fare)) : 60;
+      } catch (e) { fare = 60; }
+      fareLoading = false;
+    }
+
+    function card(title, ic, extra) {
+      const c = mk('section', 'qc-card');
+      const h = mk('h2', 'qc-h');
+      if (ic) h.appendChild(icon(ic));
+      h.appendChild(document.createTextNode(title));
+      if (extra) { h.appendChild(mk('span', 'sp')); h.appendChild(extra); }
+      c.appendChild(h);
+      return c;
+    }
+
+    function render() {
+      const body = $('qcBody');
+      const c = getCart();
+      body.textContent = '';
+      if (!c.lines.length || !shop) {
+        $('qcFoot').hidden = true;
+        body.appendChild(empty('আপনার কার্ট খালি।', 'basket', { t: 'দোকান দেখুন', h: '/market' }));
+        return;
+      }
+      $('qcShopName').textContent = shop.name;
+      $('qcBack').href = '/market/shop?id=' + encodeURIComponent(shop.id);
+
+      const err = mk('p', 'qc-err'); err.id = 'qcErr'; err.hidden = true; err.setAttribute('role', 'alert');
+      body.appendChild(err);
+
+      // দোকান + আইটেম
+      const ic = card('আপনার অর্ডার', 'food');
+      const sh = mk('div', 'qc-shop');
+      const im = mk('div', 'qc-shop-img');
+      if (shop.image_url) im.style.backgroundImage = 'url("' + encodeURI(shop.image_url) + '")';
+      else im.textContent = String(shop.name || '?').charAt(0);
+      sh.appendChild(im);
+      const st = mk('div'); st.appendChild(mk('b', '', shop.name)); st.appendChild(mk('small', '', bnNum(c.lines.reduce((n, l) => n + l.qty, 0)) + 'টি আইটেম'));
+      sh.appendChild(st);
+      ic.appendChild(sh);
+      const list = mk('div'); list.style.marginTop = '12px';
+      c.lines.forEach((l) => {
+        const row = mk('div', 'qc-line');
+        const t = mk('div', 'qc-line-t'); t.appendChild(mk('b', '', l.name)); t.appendChild(mk('small', '', tk(l.price) + ' প্রতিটি'));
+        row.appendChild(t);
+        const s = mk('div', 'qc-step');
+        const m = mk('button', '', '−'); m.type = 'button'; m.setAttribute('aria-label', l.name + ' কমান');
+        m.addEventListener('click', () => decItem(l.id));
+        const p = mk('button', '', '+'); p.type = 'button'; p.setAttribute('aria-label', l.name + ' বাড়ান');
+        p.addEventListener('click', () => { if (addItem({ id: shop.id, name: shop.name }, l) === 'max') toast('এর বেশি যোগ করা যাবে না', 'warning'); });
+        s.appendChild(m); s.appendChild(mk('span', '', bnNum(l.qty))); s.appendChild(p);
+        row.appendChild(s);
+        row.appendChild(mk('div', 'qc-line-p', tk(l.price * l.qty)));
+        list.appendChild(row);
+      });
+      ic.appendChild(list);
+      const more = mk('a', 'qc-more', '+ আরো যোগ করুন'); more.href = '/market/shop?id=' + encodeURIComponent(shop.id);
+      ic.appendChild(more);
+      body.appendChild(ic);
+
+      // ঠিকানা
+      const chg = mk('button', 'qc-link', 'বদলান'); chg.type = 'button';
+      chg.addEventListener('click', () => { if (window.SFMarketLocation) window.SFMarketLocation.open(async () => { await loadFare(); render(); }); });
+      const ac = card('ডেলিভারি ঠিকানা', 'scooter', chg);
+      const d = getDrop();
+      const ad = mk('div', 'qc-addr');
+      const ai = mk('div', 'qc-addr-ic');
+      ai.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg>';
+      ad.appendChild(ai);
+      const at = mk('div', 'qc-addr-t');
+      at.appendChild(mk('b', '', d ? [d.union, d.upazila].filter(Boolean).join(', ') || 'ঠিকানা' : 'ঠিকানা দেওয়া নেই'));
+      at.appendChild(mk('span', '', d ? d.address : 'ঠিকানা দিতে "বদলান" চাপুন'));
+      ad.appendChild(at);
+      ac.appendChild(ad);
+      const insF = mk('label', 'qc-f');
+      insF.appendChild(mk('span', '', 'রাইডারের জন্য নির্দেশনা (ঐচ্ছিক)'));
+      const ins = mk('input'); ins.id = 'qcIns'; ins.maxLength = 200; ins.placeholder = 'যেমন: ৩ তলা, নীল গেট'; ins.value = d && d.instructions ? d.instructions : '';
+      ins.addEventListener('change', () => { const x = getDrop(); if (x) setDrop({ ...x, instructions: ins.value.trim() }); });
+      insF.appendChild(ins);
+      ac.appendChild(insF);
+      body.appendChild(ac);
+
+      // যোগাযোগ
+      const pc = card('যোগাযোগ', 'gadget');
+      const pr = mk('div', 'qc-phone');
+      pr.appendChild(mk('div', '', name || 'আপনি'));
+      if (phone) pr.appendChild(mk('b', '', phone));
+      pc.appendChild(pr);
+      if (!validPhone(phone)) {
+        const w = mk('div', 'qc-warn');
+        w.appendChild(document.createTextNode('অর্ডার দিতে প্রোফাইলে আপনার মোবাইল নম্বর লাগবে। '));
+        const a = mk('a', '', 'নম্বর যোগ করুন'); a.href = '/profile/edit';
+        w.appendChild(a);
+        pc.appendChild(w);
+      }
+      body.appendChild(pc);
+
+      // নোট
+      const nc = card('দোকানের জন্য নোট', 'bags');
+      const nf = mk('label', 'qc-f');
+      nf.appendChild(mk('span', '', 'ঐচ্ছিক, যেমন: ঝাল কম, আলাদা প্যাকেট'));
+      const nt = mk('textarea'); nt.id = 'qcNote'; nt.maxLength = 300; nt.value = note;
+      nt.addEventListener('input', () => { note = nt.value; });
+      nf.appendChild(nt);
+      nc.appendChild(nf);
+      body.appendChild(nc);
+
+      // বিল
+      const sub = cartTotal(c);
+      const bc = card('বিলের হিসাব');
+      const bill = mk('div', 'qc-bill');
+      const r1 = mk('div'); r1.appendChild(mk('span', '', 'আইটেমের দাম')); r1.appendChild(mk('b', '', tk(sub))); bill.appendChild(r1);
+      const r2 = mk('div'); r2.appendChild(mk('span', '', 'ডেলিভারি চার্জ')); r2.appendChild(mk('b', '', fareLoading ? 'হিসাব হচ্ছে…' : fare !== null ? tk(fare) : '—')); bill.appendChild(r2);
+      const total = sub + (fare || 0);
+      const r3 = mk('div', 'tot'); r3.appendChild(mk('span', '', 'সর্বমোট')); r3.appendChild(mk('span', '', tk(total))); bill.appendChild(r3);
+      bill.appendChild(mk('div', 'muted', 'দাম দোকানের মেনু অনুযায়ী। চার্জ দূরত্ব থেকে হিসাব হয়।'));
+      bc.appendChild(bill);
+      body.appendChild(bc);
+
+      // পেমেন্ট
+      const pay = mk('section', 'qc-card qc-pay');
+      pay.appendChild(icon('bags'));
+      const pt = mk('div');
+      pt.appendChild(mk('b', '', 'পেমেন্ট রাইডার কনফার্ম হলে'));
+      pt.appendChild(mk('span', '', 'এখন টাকা লাগবে না। রাইডার কনফার্ম হলে অগ্রিম দেবেন: শুধু ডেলিভারি চার্জ অথবা পুরো টাকা (বিকাশ/নগদ)। বাকিটা পণ্য হাতে পেয়ে।'));
+      pay.appendChild(pt);
+      body.appendChild(pay);
+
+      // ফুটার
+      $('qcFoot').hidden = false;
+      $('qcFootTotal').textContent = tk(total);
+      const open = shopOpenState(shop).open;
+      const btn = $('qcOrder');
+      btn.disabled = busy || !open || !d || !validPhone(phone) || fare === null;
+      btn.textContent = busy ? 'অর্ডার হচ্ছে…' : !open ? 'দোকান এখন বন্ধ' : !d ? 'ঠিকানা দিন' : !validPhone(phone) ? 'মোবাইল নম্বর দিন' : 'অর্ডার দিন · ' + tk(total);
+    }
+
+    function showErr(msg) {
+      const e = $('qcErr');
+      if (!e) { toast(msg, 'error'); return; }
+      e.textContent = msg; e.hidden = !msg;
+      if (msg) e.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function placeOrder() {
+      if (busy) return;
+      const c = getCart();
+      const d = getDrop();
+      if (!c.lines.length || !d || !shop) return;
+      busy = true; render();
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/delivery/create-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session ? session.access_token : '') },
+          body: JSON.stringify({
+            isMarket: true,
+            marketNote: note.trim(),
+            orderItems: c.lines.map((l) => ({ item_id: l.id, qty: l.qty })),
+            upazila: d.upazila || '',
+            dropAddress: d.address,
+            dropLat: d.lat, dropLng: d.lng,
+            dropUnion: d.union || '',
+            dropInstructions: (($('qcIns') && $('qcIns').value) || d.instructions || '').trim(),
+            dropLocSource: d.lat !== null ? 'map' : 'manual',
+          }),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          busy = false; render();
+          showErr(out.error || 'অর্ডার দেওয়া যায়নি, আবার চেষ্টা করুন');
+          if (out.code === 'ITEM_UNAVAILABLE' || out.code === 'SHOP_CLOSED') { try { shop = await fetchMarketShop(shop.id) || shop; } catch (e) {} }
+          return;
+        }
+        const r = out.request || {};
+        clearCart();
+        $('qcDoneNo').textContent = 'অর্ডার নম্বর: ' + (r.order_no ? '#' + bnNum(r.order_no) : String(r.id || '').slice(0, 8).toUpperCase()) + (r.initial_price ? ' · চার্জ ' + tk(r.initial_price) : '');
+        if (r.id) $('qcDoneGo').href = '/market/order?id=' + encodeURIComponent(r.id);
+        try { history.replaceState(null, '', '/market'); } catch (e) {}
+        $('qcDone').hidden = false;
+        document.body.style.overflow = 'hidden';
+      } catch (e) {
+        busy = false; render();
+        showErr('ইন্টারনেটে সমস্যা, আবার চেষ্টা করুন');
+      }
+    }
+    $('qcOrder').addEventListener('click', placeOrder);
+
+    window.addEventListener('smartfeni:market-cart-changed', () => { if (!busy) render(); });
+
+    async function init() {
+      const body = $('qcBody');
+      if (window.SFLoader) body.innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        body.textContent = '';
+        body.appendChild(empty('অর্ডার দিতে লগইন করুন।', 'scooter'));
+        if (window.openAuthModal) window.openAuthModal();
+        return;
+      }
+      const access = await marketAccess();
+      if (!access.allowed) { body.textContent = ''; body.appendChild(empty('কুইক ডেলিভারি শীঘ্রই আসছে।', 'scooter')); return; }
+      const c = getCart();
+      try {
+        const [s, p] = await Promise.all([
+          c.shopId ? fetchMarketShop(c.shopId) : Promise.resolve(null),
+          supabase.from('profiles').select('full_name, phone').eq('id', session.user.id).maybeSingle(),
+        ]);
+        shop = s;
+        if (p && p.data) { phone = p.data.phone || ''; name = p.data.full_name || ''; }
+      } catch (e) {
+        if (window.SFReportError) { try { window.SFReportError(e, 'market-checkout-load'); } catch (_) {} }
+      }
+      if (c.lines.length && !shop) {
+        body.textContent = '';
+        body.appendChild(empty('এই দোকানটি এখন অর্ডার নিচ্ছে না।', 'basket', { t: 'অন্য দোকান দেখুন', h: '/market' }));
+        return;
+      }
+      if (!getDrop()) {
+        if (window.SFMarketLocation) window.SFMarketLocation.open(async () => { await loadFare(); render(); });
+      }
+      render();
+      await loadFare();
+      render();
+    }
+
+    // পেছনে ফিরলে (bfcache) পুরনো কার্ট/সফল স্ক্রিন না দেখিয়ে নতুন করে লোড
+    window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload(); });
+
+    init();
+  </script>
+</BaseLayout>

@@ -74,7 +74,7 @@ export async function POST({ request }) {
 
     const { data: reqRow, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, accepted_rider_id, pickup_done_at, order_confirmed_at, shop_ids')
+      .select('id, status, accepted_rider_id, pickup_done_at, order_confirmed_at, shop_ids, is_market, advance_verified')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -114,6 +114,14 @@ export async function POST({ request }) {
     if (reqRow.pickup_done_at) {
       return new Response(
         JSON.stringify({ error: 'পিকআপ ইতিমধ্যে সম্পন্ন হিসেবে মার্ক করা আছে' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // কুইক ডেলিভারি: অগ্রিম যাচাই না হলে পিকআপ নয়
+    if (reqRow.is_market && !reqRow.advance_verified) {
+      return new Response(
+        JSON.stringify({ error: 'কাস্টমারের অগ্রিম এখনো যাচাই হয়নি। যাচাই হলে নোটিফিকেশন পাবেন, তারপর পিকআপ করুন।', code: 'ADVANCE_PENDING' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }

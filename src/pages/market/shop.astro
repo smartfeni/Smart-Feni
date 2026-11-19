@@ -1,0 +1,623 @@
+---
+// path: src/pages/market/shop.astro
+// ============================================================
+// কুইক ডেলিভারি — শপ পেজ (/market/shop?id=...&q=...)। ব্রান্চ: marketplace, ধাপ ৩।
+// - কভার + শপ তথ্য-কার্ড (খোলা/বন্ধ, ডেলিভারি সময়, দূরত্ব, খোলার সময়)
+// - আটকে থাকা মেনু ক্যাটাগরি ট্যাব (স্ক্রলের সাথে বদলায়) + শপের ভেতরে সার্চ (ইংরেজি/বাংলিশ/বাংলা)
+// - আইটেম কার্ড (+ / − স্টেপার), আইটেম শিট (বড় ছবি, পরিমাণ), ভাসমান কার্ট বার
+// - কার্ট শুধু ফোনে (marketCart.js), এক কার্টে এক শপ। চেকআউট পরের ধাপে।
+// - সুইচ: marketplace_enabled বন্ধ থাকলে শুধু স্টাফ। সব লেখা textContent দিয়ে বসানো (এস্কেপ)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import MarketLocationSheet from '../../components/market/MarketLocationSheet.astro';
+---
+
+<BaseLayout title="দোকান | কুইক ডেলিভারি">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="qs" id="qs">
+    <div class="qs-cover" id="qsCover">
+      <div class="qs-cover-btns">
+        <a class="qs-round" href="/market" aria-label="পেছনে যান">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+        </a>
+        <span class="qs-sp"></span>
+        <button type="button" class="qs-round qs-fav" id="qsFav" aria-label="প্রিয়তে রাখুন" aria-pressed="false" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.2-4.4-9.5-8.9C1 8.6 2.8 5 6.4 5c2.1 0 3.5 1.1 4.2 2.3h2.8C14.1 6.1 15.5 5 17.6 5 21.2 5 23 8.6 21.5 11.6 19.2 16.1 12 20.5 12 20.5Z" /></svg>
+        </button>
+        <button type="button" class="qs-round" id="qsSearchBtn" aria-label="মেনুতে খুঁজুন">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+        </button>
+        <button type="button" class="qs-round" id="qsShare" aria-label="শেয়ার করুন">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5" /><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="19" r="2.5" /><path d="m8.2 10.8 7.6-4.4M8.2 13.2l7.6 4.4" /></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="qs-wrap">
+      <section class="qs-info" id="qsInfo" aria-live="polite"></section>
+
+      <div class="qs-sticky" id="qsSticky">
+        <label class="qs-search" id="qsSearch" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+          <input id="qsQ" type="search" autocomplete="off" placeholder="এই দোকানের মেনুতে খুঁজুন" aria-label="মেনুতে খুঁজুন" />
+          <button type="button" class="qs-x" id="qsQx" aria-label="সার্চ বন্ধ করুন">✕</button>
+        </label>
+        <nav class="qs-tabs" id="qsTabs" aria-label="মেনু ক্যাটাগরি"></nav>
+      </div>
+
+      <div id="qsMenu" class="qs-menu"></div>
+    </div>
+
+    <button type="button" class="qs-cart" id="qsCart" hidden>
+      <span class="qs-cart-n" id="qsCartN">০</span>
+      <span class="qs-cart-t">কার্ট দেখুন</span>
+      <span class="qs-cart-p" id="qsCartP">৳০</span>
+    </button>
+  </div>
+
+  <!-- আইটেম শিট -->
+  <div class="qs-ov" id="qsItemOv" hidden>
+    <div class="qs-sheet" role="dialog" aria-modal="true" aria-labelledby="qsItName">
+      <button type="button" class="qs-sheet-x" id="qsItX" aria-label="বন্ধ করুন">✕</button>
+      <div class="qs-it-img" id="qsItImg"></div>
+      <div class="qs-it-body">
+        <h2 id="qsItName"></h2>
+        <p class="qs-it-desc" id="qsItDesc"></p>
+        <div class="qs-it-price" id="qsItPrice"></div>
+        <p class="qs-it-note">দাম দোকানের মেনু অনুযায়ী।</p>
+      </div>
+      <div class="qs-it-foot">
+        <div class="qs-step big" aria-label="পরিমাণ">
+          <button type="button" id="qsItMinus" aria-label="কমান">−</button>
+          <span id="qsItQty">১</span>
+          <button type="button" id="qsItPlus" aria-label="বাড়ান">+</button>
+        </div>
+        <button type="button" class="qs-add" id="qsItAdd">কার্টে যোগ করুন</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- অন্য দোকানের কার্ট আছে -->
+  <div class="qs-ov" id="qsSwapOv" hidden>
+    <div class="qs-dlg" role="alertdialog" aria-modal="true" aria-labelledby="qsSwapT">
+      <h2 id="qsSwapT">নতুন কার্ট শুরু করবেন?</h2>
+      <p id="qsSwapD"></p>
+      <button type="button" class="qs-add" id="qsSwapYes">আগের কার্ট মুছে নতুন শুরু</button>
+      <button type="button" class="qs-ghost" id="qsSwapNo">থাক</button>
+    </div>
+  </div>
+
+  <MarketLocationSheet />
+
+  <style is:global>
+    #siteNavbar { display: none !important; }
+    .qs { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F8FAFC; min-height: 100vh; max-width: 600px; margin: 0 auto; padding-bottom: 170px; }
+    .qs * { box-sizing: border-box; }
+    .qs button, .qs input, .qs-ov button { font-family: inherit; }
+    .qs-cover { position: relative; height: 210px; background: linear-gradient(135deg, #1B2A4A, #E8551C); background-size: cover; background-position: center; }
+    .qs-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.35) 0%, rgba(0,0,0,0) 45%); pointer-events: none; }
+    .qs-cover-btns { position: absolute; left: 0; right: 0; top: 0; display: flex; gap: 10px; padding: calc(14px + env(safe-area-inset-top)) 14px 0; z-index: 1; }
+    .qs-sp { flex: 1; }
+    .qs-round { width: 44px; height: 44px; border-radius: 22px; border: 0; background: rgba(255,255,255,.95); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+    .qs-fav.on svg { fill: #E53E3E; stroke: #E53E3E; }
+    .qs-fav.on { animation: qsPop .3s ease; }
+    @keyframes qsPop { 50% { transform: scale(1.18); } }
+    .qs-chip.star { background: #FFF7E0; color: #975A16; }
+    .qs-rv { margin-top: 14px; border: 1px solid #EDF0F5; border-radius: 16px; overflow: hidden; background: #fff; }
+    .qs-rv-h { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 0; background: #FFFBF5; font: inherit; font-weight: 700; color: #1B2A4A; cursor: pointer; text-align: left; }
+    .qs-rv-ic { width: 30px; height: 30px; border-radius: 10px; background: linear-gradient(135deg,#FFC94D,#FF9F1C); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; flex: none; }
+    .qs-rv-t { flex: 1; }
+    .qs-rv-n { background: #FFE8DC; color: #C2410C; border-radius: 10px; padding: 1px 9px; font-size: 13px; }
+    .qs-rv-more { font-size: 13px; color: #FF6B35; }
+    .qs-rv-b { padding: 4px 14px 10px; }
+    .qs-rv-row { padding: 10px 0; border-top: 1px dashed #E2E8F0; }
+    .qs-rv-row:first-child { border-top: 0; }
+    .qs-rv-top { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .qs-rv-top small { margin-left: auto; color: #718096; }
+    .qs-rv-st { color: #F6A609; letter-spacing: 1px; font-size: 13px; }
+    .qs-rv-row p { margin: 4px 0 0; font-size: 14px; color: #4A5568; line-height: 1.5; }
+    .qs-round svg { width: 21px; height: 21px; fill: none; stroke: #1B2A4A; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }
+
+    .qs-wrap { padding: 0 16px; }
+    .qs-info { position: relative; margin-top: -42px; background: #fff; border-radius: 22px; padding: 16px; box-shadow: 0 8px 26px rgba(27,42,74,.1); }
+    .qs-info h1 { margin: 0; font-size: 23px; line-height: 1.25; font-weight: 700; }
+    .qs-sub { margin-top: 2px; font-size: 14px; color: #4A5568; }
+    .qs-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .qs-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 6px 11px; border-radius: 12px; background: #F3F5F9; color: #1B2A4A; }
+    .qs-chip svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .qs-chip.ok { background: #E3F3EA; color: #17663F; }
+    .qs-chip.no { background: #FDECEA; color: #A3261B; }
+    .qs-chip.test { background: #FFF4CC; color: #7A4A00; }
+    .qs-closed { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: #FDECEA; color: #A3261B; font-size: 14px; font-weight: 600; }
+
+    .qs-sticky { position: sticky; top: 0; z-index: 20; background: #F8FAFC; margin: 0 -16px; padding: 10px 16px 0; }
+    .qs-sticky.stuck { box-shadow: 0 6px 14px rgba(27,42,74,.08); }
+    .qs-search { display: flex; align-items: center; gap: 10px; height: 50px; padding: 0 8px 0 16px; border-radius: 16px; background: #fff; border: 1.5px solid #1B2A4A; margin-bottom: 8px; }
+    .qs-search[hidden] { display: none; }
+    .qs-search svg { width: 20px; height: 20px; flex: none; fill: none; stroke: #1B2A4A; stroke-width: 2.2; stroke-linecap: round; }
+    .qs-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font-size: 16px; font-weight: 500; color: #1B2A4A; }
+    .qs-x { width: 40px; height: 40px; border: 0; background: none; font-size: 17px; color: #4A5568; cursor: pointer; }
+    .qs-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; }
+    .qs-tabs::-webkit-scrollbar { display: none; }
+    .qs-tab { flex: none; min-height: 40px; padding: 0 16px; border-radius: 999px; border: 1.5px solid #E2E7EF; background: #fff; color: #1B2A4A; font-size: 14.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .qs-tab[aria-current='true'] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+    .qs-tab:focus-visible, .qs-round:focus-visible, .qs-item:focus-visible, .qs-step button:focus-visible, .qs-cart:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
+
+    .qs-sec { scroll-margin-top: 70px; }
+    .qs-sec h3 { margin: 18px 0 10px; font-size: 19px; font-weight: 700; }
+    .qs-item { display: flex; gap: 12px; align-items: stretch; width: 100%; text-align: left; border: 0; background: #fff; border-radius: 18px; padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 10px rgba(27,42,74,.05); cursor: pointer; color: #1B2A4A; }
+    .qs-item.off { opacity: .55; }
+    .qs-it-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .qs-it-n { font-size: 16px; font-weight: 700; line-height: 1.35; }
+    .qs-it-d { font-size: 13px; color: #4A5568; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .qs-price { margin-top: auto; padding-top: 4px; display: flex; align-items: baseline; gap: 8px; font-size: 16px; font-weight: 700; }
+    .qs-price s { font-size: 13px; font-weight: 500; color: #6B7891; }
+    .qs-price .disc { font-size: 12px; font-weight: 700; color: #fff; background: #E8551C; padding: 1px 7px; border-radius: 8px; }
+    .qs-na { font-size: 12.5px; font-weight: 700; color: #A3261B; }
+    .qs-it-r { position: relative; flex: none; width: 104px; display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; }
+    .qs-it-r.hasimg { height: 104px; }
+    .qs-it-r img { position: absolute; inset: 0; width: 104px; height: 104px; object-fit: cover; border-radius: 14px; }
+    .qs-plus { position: relative; width: 40px; height: 40px; border-radius: 20px; border: 0; background: #FF6B35; color: #fff; font-size: 24px; line-height: 1; cursor: pointer; box-shadow: 0 4px 10px rgba(232,85,28,.35); margin: 0 -4px -4px 0; }
+    .qs-step { position: relative; display: inline-flex; align-items: center; background: #1B2A4A; color: #fff; border-radius: 22px; height: 40px; box-shadow: 0 4px 10px rgba(27,42,74,.25); margin: 0 -4px -4px 0; }
+    .qs-step button { width: 38px; height: 40px; border: 0; background: none; color: #fff; font-size: 21px; cursor: pointer; }
+    .qs-step span { min-width: 18px; text-align: center; font-weight: 700; font-size: 15px; }
+    .qs-step.big { height: 52px; border-radius: 16px; margin: 0; background: #F3F5F9; color: #1B2A4A; box-shadow: none; }
+    .qs-step.big button { width: 48px; height: 52px; color: #1B2A4A; font-size: 24px; }
+    .qs-step.big span { min-width: 26px; font-size: 18px; }
+
+    .qs-empty { text-align: center; padding: 34px 12px; color: #4A5568; font-size: 15px; line-height: 1.6; }
+    .qs-empty img { width: 90px; height: 90px; object-fit: contain; display: block; margin: 0 auto 8px; }
+
+    .qs-cart { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(76px + env(safe-area-inset-bottom)); width: calc(100% - 28px); max-width: 572px; height: 58px; border: 0; border-radius: 18px; background: #FF6B35; color: #fff; display: flex; align-items: center; gap: 12px; padding: 0 16px; cursor: pointer; z-index: 997; box-shadow: 0 10px 26px rgba(232,85,28,.4); font-family: 'Hind Siliguri', system-ui, sans-serif; }
+    .qs-cart[hidden] { display: none; }
+    .qs-cart-n { min-width: 30px; height: 30px; border-radius: 10px; background: rgba(255,255,255,.25); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; }
+    .qs-cart-t { flex: 1; text-align: left; font-size: 17px; font-weight: 700; }
+    .qs-cart-p { font-size: 17px; font-weight: 700; }
+
+    .qs-ov { position: fixed; inset: 0; z-index: 9500; background: rgba(15,23,42,.55); display: flex; align-items: flex-end; justify-content: center; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; }
+    .qs-ov[hidden] { display: none; }
+    .qs-sheet { position: relative; width: 100%; max-width: 600px; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 26px 26px 0 0; padding-bottom: env(safe-area-inset-bottom); animation: qsUp .22s ease-out; }
+    @keyframes qsUp { from { transform: translateY(40px); opacity: .4; } to { transform: none; opacity: 1; } }
+    .qs-sheet-x { position: absolute; right: 12px; top: 12px; z-index: 2; width: 42px; height: 42px; border-radius: 21px; border: 0; background: rgba(255,255,255,.95); font-size: 18px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); color: #1B2A4A; }
+    .qs-it-img { height: 230px; background: linear-gradient(135deg, #FFE3D1, #FFF4EC); display: flex; align-items: center; justify-content: center; border-radius: 26px 26px 0 0; overflow: hidden; }
+    .qs-it-img img { width: 100%; height: 100%; object-fit: cover; }
+    .qs-it-img img.ic { width: 120px; height: 120px; object-fit: contain; }
+    .qs-it-body { padding: 16px 18px 4px; }
+    .qs-it-body h2 { margin: 0; font-size: 22px; line-height: 1.3; }
+    .qs-it-desc { margin: 6px 0 0; font-size: 14.5px; color: #4A5568; line-height: 1.55; }
+    .qs-it-desc:empty { display: none; }
+    .qs-it-price { margin-top: 10px; font-size: 20px; font-weight: 700; display: flex; gap: 10px; align-items: baseline; }
+    .qs-it-price s { font-size: 15px; color: #6B7891; font-weight: 500; }
+    .qs-it-note { margin: 4px 0 0; font-size: 12.5px; color: #6B7891; }
+    .qs-it-foot { position: sticky; bottom: 0; display: flex; gap: 12px; padding: 14px 18px 16px; background: #fff; border-top: 1px solid #EEF1F5; }
+    .qs-add { flex: 1; min-height: 52px; border: 0; border-radius: 16px; background: #FF6B35; color: #fff; font-size: 16.5px; font-weight: 700; cursor: pointer; width: 100%; }
+    .qs-add:disabled { background: #C9D0DB; cursor: not-allowed; }
+    .qs-ghost { width: 100%; min-height: 48px; margin-top: 8px; border: 0; background: none; color: #1B2A4A; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .qs-dlg { width: 100%; max-width: 600px; background: #fff; border-radius: 26px 26px 0 0; padding: 22px 18px calc(16px + env(safe-area-inset-bottom)); animation: qsUp .22s ease-out; }
+    .qs-dlg h2 { margin: 0 0 6px; font-size: 20px; }
+    .qs-dlg p { margin: 0 0 16px; font-size: 14.5px; color: #4A5568; line-height: 1.55; }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { fetchMarketShop, fetchShopMenu, fetchMarketCategories, shopOpenState, bnNum, marketAccess, distanceKm, searchNeedles, etaLabel, bnTime, fetchShopRatings, fetchShopReviews, fetchFavoriteIds, setFavorite } from '../../lib/marketApi.js';
+    import { getDrop, getCart, addItem, decItem, qtyOf, cartCount, cartTotal } from '../../lib/marketCart.js';
+
+    const $ = (id) => document.getElementById(id);
+    const params = new URLSearchParams(location.search);
+    const shopId = params.get('id');
+    let shop = null;
+    let menu = { cats: [], items: [] };
+    let rating = null;
+    let reviews = [];
+    let canAdd = false;
+    let q = params.get('q') || '';
+    let qN = searchNeedles(q);
+    let sheetItem = null;
+    let sheetQty = 1;
+    let pendingSwap = null;
+
+    function toast(m, t) { if (window.showToast) window.showToast(m, t || 'info'); }
+    function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
+    function svg(paths) {
+      const ns = 'http://www.w3.org/2000/svg';
+      const s = document.createElementNS(ns, 'svg');
+      s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('aria-hidden', 'true');
+      paths.forEach((d) => { const p = document.createElementNS(ns, 'path'); p.setAttribute('d', d); s.appendChild(p); });
+      return s;
+    }
+    const tk = (n) => '৳' + bnNum(Math.round(Number(n) || 0));
+
+    function emptyBox(text, ic) {
+      const d = mk('div', 'qs-empty');
+      const i = mk('img'); i.src = '/market/icons/' + (ic || 'basket') + '.webp'; i.alt = ''; i.setAttribute('aria-hidden', 'true');
+      d.appendChild(i); d.appendChild(mk('div', '', text));
+      return d;
+    }
+
+    // ---------- শপ তথ্য ----------
+    function renderInfo(catNames) {
+      const box = $('qsInfo');
+      box.textContent = '';
+      if (shop.image_url) $('qsCover').style.backgroundImage = 'url("' + encodeURI(shop.image_url) + '")';
+      box.appendChild(mk('h1', '', shop.name));
+      const sub = [catNames, [shop.union_name, shop.upazila].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
+      if (sub) box.appendChild(mk('div', 'qs-sub', sub));
+      const st = shopOpenState(shop);
+      const d = getDrop();
+      const km = d ? distanceKm(d.lat, d.lng, shop.lat, shop.lng) : null;
+      const chips = mk('div', 'qs-chips');
+      chips.appendChild(mk('span', 'qs-chip ' + (st.open ? 'ok' : 'no'), st.label));
+      if (st.open) {
+        const c = mk('span', 'qs-chip'); c.appendChild(svg(['M12 7v5l3 2', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z'])); c.appendChild(document.createTextNode(etaLabel(shop, km))); chips.appendChild(c);
+      }
+      if (km !== null) {
+        const c = mk('span', 'qs-chip'); c.appendChild(svg(['M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Z'])); c.appendChild(document.createTextNode(bnNum(km < 1 ? km.toFixed(1) : Math.round(km)) + ' কিমি')); chips.appendChild(c);
+      }
+      if (shop.opens_at && shop.closes_at) chips.appendChild(mk('span', 'qs-chip', bnTime(shop.opens_at) + ' – ' + bnTime(shop.closes_at)));
+      if (rating && rating.count) chips.appendChild(mk('span', 'qs-chip star', '★ ' + bnNum(rating.avg.toFixed(1)) + ' · ' + bnNum(rating.count) + 'টি রিভিউ'));
+      if (shop.is_test) chips.appendChild(mk('span', 'qs-chip test', 'টেস্ট শপ'));
+      box.appendChild(chips);
+      if (!st.open) {
+        let msg = 'দোকান এখন ' + st.label + '। মেনু দেখতে পারবেন, অর্ডার খোলা থাকলে।';
+        if (st.label === 'বন্ধ' && shop.opens_at) msg = 'দোকান এখন বন্ধ, খুলবে ' + bnTime(shop.opens_at) + '-এ। মেনু দেখতে পারবেন।';
+        box.appendChild(mk('div', 'qs-closed', msg));
+      }
+    }
+
+    // ---------- রিভিউ (ভাঁজ করা) ----------
+    function renderReviews(list) {
+      if (!list.length) return;
+      const wrap = mk('div', 'qs-rv');
+      const head = mk('button', 'qs-rv-h');
+      head.type = 'button';
+      head.setAttribute('aria-expanded', 'false');
+      head.setAttribute('aria-controls', 'qsRvBody');
+      head.appendChild(mk('span', 'qs-rv-ic', '★'));
+      head.appendChild(mk('span', 'qs-rv-t', 'কাস্টমার রিভিউ'));
+      head.appendChild(mk('span', 'qs-rv-n', bnNum(list.length)));
+      head.appendChild(mk('span', 'qs-rv-more', 'দেখুন ▾'));
+      const body = mk('div', 'qs-rv-b');
+      body.id = 'qsRvBody';
+      body.hidden = true;
+      list.forEach((r) => {
+        const row = mk('div', 'qs-rv-row');
+        const top = mk('div', 'qs-rv-top');
+        top.appendChild(mk('b', '', r.reviewer || 'গ্রাহক'));
+        top.appendChild(mk('span', 'qs-rv-st', '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating)));
+        top.appendChild(mk('small', '', new Date(r.created_at).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short' })));
+        row.appendChild(top);
+        if (r.comment) row.appendChild(mk('p', '', r.comment));
+        body.appendChild(row);
+      });
+      head.addEventListener('click', () => {
+        const open = body.hidden;
+        body.hidden = !open;
+        head.setAttribute('aria-expanded', String(open));
+        head.querySelector('.qs-rv-more').textContent = open ? 'বন্ধ ▴' : 'দেখুন ▾';
+      });
+      wrap.appendChild(head);
+      wrap.appendChild(body);
+      $('qsInfo').appendChild(wrap);
+    }
+
+    // ---------- প্রিয় ----------
+    let isFav = false;
+    function paintFav() {
+      const b = $('qsFav');
+      b.hidden = false;
+      b.classList.toggle('on', isFav);
+      b.setAttribute('aria-pressed', String(isFav));
+      b.setAttribute('aria-label', isFav ? 'প্রিয় থেকে সরান' : 'প্রিয়তে রাখুন');
+    }
+    $('qsFav').addEventListener('click', async () => {
+      const next = !isFav;
+      isFav = next; paintFav();
+      const ok = await setFavorite(shopId, next);
+      if (!ok) { isFav = !next; paintFav(); toast('সেভ করা যায়নি, আবার চেষ্টা করুন', 'error'); return; }
+      toast(next ? 'প্রিয়তে রাখা হয়েছে ❤️' : 'প্রিয় থেকে সরানো হয়েছে', 'success');
+    });
+
+    // ---------- মেনু ----------
+    function itemMatches(it) {
+      if (!qN.length) return true;
+      const hay = (String(it.name || '') + ' ' + String(it.description || '') + ' ' + (Array.isArray(it.tags) ? it.tags.join(' ') : '')).toLowerCase();
+      return qN.some((n) => hay.includes(n));
+    }
+
+    function groups() {
+      const items = menu.items.filter(itemMatches);
+      const out = [];
+      menu.cats.forEach((c) => {
+        const list = items.filter((i) => i.category_id === c.id);
+        if (list.length) out.push({ id: c.id, name: c.name, items: list });
+      });
+      const known = new Set(menu.cats.map((c) => c.id));
+      const rest = items.filter((i) => !i.category_id || !known.has(i.category_id));
+      if (rest.length) out.push({ id: 'rest', name: out.length ? 'আরো' : 'মেনু', items: rest });
+      // যে আইটেম এখন নেই সেগুলো প্রতিটা গ্রুপের শেষে
+      out.forEach((g) => g.items.sort((a, b) => (a.is_available === false ? 1 : 0) - (b.is_available === false ? 1 : 0)));
+      return out;
+    }
+
+    function priceRow(it, cls) {
+      const p = mk('div', cls || 'qs-price');
+      p.appendChild(mk('span', '', tk(it.price)));
+      const old = Number(it.old_price);
+      if (old && old > Number(it.price)) {
+        p.appendChild(mk('s', '', tk(old)));
+        if (!cls) p.appendChild(mk('span', 'disc', bnNum(Math.round((1 - Number(it.price) / old) * 100)) + '% ছাড়'));
+      }
+      return p;
+    }
+
+    function stepper(it) {
+      const qty = qtyOf(it.id);
+      if (!qty) {
+        const b = mk('button', 'qs-plus', '+');
+        b.type = 'button';
+        b.setAttribute('aria-label', it.name + ' কার্টে যোগ করুন');
+        b.addEventListener('click', (e) => { e.stopPropagation(); add(it, 1); });
+        return b;
+      }
+      const w = mk('div', 'qs-step');
+      w.addEventListener('click', (e) => e.stopPropagation());
+      const m = mk('button', '', '−'); m.type = 'button'; m.setAttribute('aria-label', 'কমান');
+      m.addEventListener('click', () => { decItem(it.id); });
+      const p = mk('button', '', '+'); p.type = 'button'; p.setAttribute('aria-label', 'বাড়ান');
+      p.addEventListener('click', () => add(it, 1));
+      w.appendChild(m); w.appendChild(mk('span', '', bnNum(qty))); w.appendChild(p);
+      return w;
+    }
+
+    function itemCard(it) {
+      const avail = it.is_available !== false;
+      const b = mk('div', 'qs-item' + (avail ? '' : ' off'));
+      b.setAttribute('role', 'button');
+      b.tabIndex = 0;
+      b.setAttribute('aria-label', it.name + ', ' + tk(it.price));
+      const t = mk('div', 'qs-it-t');
+      t.appendChild(mk('div', 'qs-it-n', it.name));
+      if (it.description) t.appendChild(mk('div', 'qs-it-d', it.description));
+      t.appendChild(priceRow(it));
+      if (!avail) t.appendChild(mk('div', 'qs-na', 'এখন নেই'));
+      b.appendChild(t);
+      const r = mk('div', 'qs-it-r' + (it.image_url ? ' hasimg' : ''));
+      if (it.image_url) { const i = mk('img'); i.src = it.image_url; i.alt = ''; i.loading = 'lazy'; i.decoding = 'async'; r.appendChild(i); }
+      if (avail && canAdd) r.appendChild(stepper(it));
+      b.appendChild(r);
+      const open = () => openSheet(it);
+      b.addEventListener('click', open);
+      b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      return b;
+    }
+
+    let observer = null;
+    function renderMenu() {
+      const box = $('qsMenu');
+      const tabs = $('qsTabs');
+      box.textContent = '';
+      tabs.textContent = '';
+      const gs = groups();
+      if (!gs.length) {
+        box.appendChild(emptyBox(q ? '"' + q + '" নামে এই দোকানে কিছু পাওয়া যায়নি।' : 'এই দোকানের মেনু এখনো যোগ হয়নি।'));
+        return;
+      }
+      gs.forEach((g, i) => {
+        const tb = mk('button', 'qs-tab', g.name + ' (' + bnNum(g.items.length) + ')');
+        tb.type = 'button';
+        tb.dataset.g = g.id;
+        if (i === 0) tb.setAttribute('aria-current', 'true');
+        tb.addEventListener('click', () => {
+          const sec = document.getElementById('qsg-' + g.id);
+          if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          setTab(g.id);
+        });
+        tabs.appendChild(tb);
+        const sec = mk('section', 'qs-sec');
+        sec.id = 'qsg-' + g.id;
+        sec.dataset.g = g.id;
+        sec.appendChild(mk('h3', '', g.name));
+        g.items.forEach((it) => sec.appendChild(itemCard(it)));
+        box.appendChild(sec);
+      });
+      if (observer) observer.disconnect();
+      observer = new IntersectionObserver((ents) => {
+        const vis = ents.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (vis.length) setTab(vis[0].target.dataset.g);
+      }, { rootMargin: '-120px 0px -60% 0px' });
+      box.querySelectorAll('.qs-sec').forEach((s) => observer.observe(s));
+    }
+
+    function setTab(id) {
+      $('qsTabs').querySelectorAll('.qs-tab').forEach((t) => {
+        const on = t.dataset.g === id;
+        t.setAttribute('aria-current', String(on));
+        if (on) t.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+      });
+    }
+
+    // ---------- কার্ট ----------
+    function add(it, n) {
+      for (let i = 0; i < n; i++) {
+        const r = addItem({ id: shop.id, name: shop.name }, it);
+        if (r === 'other_shop') { pendingSwap = { it, n }; askSwap(); return false; }
+        if (r === 'max') { toast('এর বেশি যোগ করা যাবে না', 'warning'); return false; }
+      }
+      return true;
+    }
+
+    function askSwap() {
+      const c = getCart();
+      $('qsSwapD').textContent = 'আপনার কার্টে "' + (c.shopName || 'অন্য দোকান') + '"-এর আইটেম আছে। এক কার্টে এক দোকানের অর্ডার হয়।';
+      $('qsSwapOv').hidden = false;
+      $('qsSwapYes').focus();
+    }
+    $('qsSwapYes').addEventListener('click', () => {
+      $('qsSwapOv').hidden = true;
+      if (!pendingSwap) return;
+      const { it, n } = pendingSwap; pendingSwap = null;
+      addItem({ id: shop.id, name: shop.name }, it, { replace: true });
+      if (n > 1) add(it, n - 1);
+      closeSheet();
+    });
+    $('qsSwapNo').addEventListener('click', () => { $('qsSwapOv').hidden = true; pendingSwap = null; });
+
+    function renderCartBar() {
+      const c = getCart();
+      const mine = c.shopId === (shop && shop.id);
+      const n = mine ? cartCount(c) : 0;
+      $('qsCart').hidden = !n;
+      if (!n) return;
+      $('qsCartN').textContent = bnNum(n);
+      $('qsCartP').textContent = tk(cartTotal(c));
+      $('qsCart').setAttribute('aria-label', 'কার্ট দেখুন, ' + bnNum(n) + 'টি আইটেম, ' + tk(cartTotal(c)));
+    }
+    $('qsCart').addEventListener('click', () => { location.href = '/market/checkout'; });
+
+    window.addEventListener('smartfeni:market-cart-changed', () => {
+      renderCartBar();
+      // স্টেপার আবার আঁকা (স্ক্রল অবস্থান ঠিক থাকে)
+      if (shop) renderMenuKeepScroll();
+    });
+    function renderMenuKeepScroll() {
+      const y = window.scrollY;
+      const cur = $('qsTabs').querySelector('[aria-current="true"]');
+      const id = cur ? cur.dataset.g : null;
+      renderMenu();
+      window.scrollTo(0, y);
+      if (id) setTab(id);
+    }
+
+    // ---------- আইটেম শিট ----------
+    function openSheet(it) {
+      sheetItem = it;
+      sheetQty = Math.max(1, qtyOf(it.id) || 1);
+      const img = $('qsItImg');
+      img.textContent = '';
+      const i = mk('img');
+      if (it.image_url) { i.src = it.image_url; i.alt = it.name; }
+      else { i.src = '/market/icons/food.webp'; i.alt = ''; i.className = 'ic'; i.setAttribute('aria-hidden', 'true'); }
+      img.appendChild(i);
+      $('qsItName').textContent = it.name;
+      $('qsItDesc').textContent = it.description || '';
+      const pr = $('qsItPrice'); pr.textContent = '';
+      pr.appendChild(priceRow(it, 'qs-it-price-in'));
+      const avail = it.is_available !== false;
+      const add = $('qsItAdd');
+      add.disabled = !avail || !canAdd;
+      add.textContent = !avail ? 'এখন নেই' : !canAdd ? (shopOpenState(shop).open ? 'অর্ডার এখন বন্ধ' : 'দোকান এখন বন্ধ') : '';
+      paintSheet();
+      $('qsItemOv').hidden = false;
+      document.body.style.overflow = 'hidden';
+      $('qsItX').focus();
+    }
+    function paintSheet() {
+      $('qsItQty').textContent = bnNum(sheetQty);
+      const add = $('qsItAdd');
+      if (!add.disabled) add.textContent = (qtyOf(sheetItem.id) ? 'কার্ট আপডেট করুন' : 'কার্টে যোগ করুন') + ' · ' + tk(sheetQty * Number(sheetItem.price));
+    }
+    function closeSheet() { $('qsItemOv').hidden = true; document.body.style.overflow = ''; sheetItem = null; }
+    $('qsItMinus').addEventListener('click', () => { if (sheetQty > 1) { sheetQty--; paintSheet(); } });
+    $('qsItPlus').addEventListener('click', () => { if (sheetQty < 20) { sheetQty++; paintSheet(); } });
+    $('qsItX').addEventListener('click', closeSheet);
+    $('qsItemOv').addEventListener('click', (e) => { if (e.target === $('qsItemOv')) closeSheet(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!$('qsSwapOv').hidden) { $('qsSwapOv').hidden = true; pendingSwap = null; }
+      else if (!$('qsItemOv').hidden) closeSheet();
+    });
+    $('qsItAdd').addEventListener('click', () => {
+      if (!sheetItem) return;
+      const it = sheetItem;
+      const have = getCart().shopId === shop.id ? qtyOf(it.id) : 0;
+      if (sheetQty > have) {
+        if (!add(it, sheetQty - have)) return;
+      } else {
+        for (let i = have; i > sheetQty; i--) decItem(it.id);
+      }
+      toast('কার্টে যোগ হয়েছে', 'success');
+      closeSheet();
+    });
+
+    // ---------- সার্চ ও শেয়ার ----------
+    function openSearch() {
+      $('qsSearch').hidden = false;
+      $('qsQ').value = q;
+      $('qsQ').focus();
+    }
+    $('qsSearchBtn').addEventListener('click', () => {
+      openSearch();
+      $('qsSticky').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    let tmr = null;
+    $('qsQ').addEventListener('input', (e) => {
+      clearTimeout(tmr);
+      tmr = setTimeout(() => { q = e.target.value.trim(); qN = searchNeedles(q); renderMenu(); }, 160);
+    });
+    $('qsQx').addEventListener('click', () => { q = ''; qN = []; $('qsQ').value = ''; $('qsSearch').hidden = true; renderMenu(); });
+    $('qsShare').addEventListener('click', async () => {
+      const url = location.origin + '/market/shop?id=' + encodeURIComponent(shopId);
+      try {
+        if (navigator.share) { await navigator.share({ title: shop ? shop.name : 'স্মার্ট ফেনী', url }); return; }
+        await navigator.clipboard.writeText(url);
+        toast('লিংক কপি হয়েছে', 'success');
+      } catch (e) { /* বাতিল */ }
+    });
+
+    // sticky ছায়া
+    const sentinel = mk('div'); sentinel.style.height = '1px';
+    $('qsSticky').before(sentinel);
+    new IntersectionObserver(([e]) => $('qsSticky').classList.toggle('stuck', !e.isIntersecting)).observe(sentinel);
+
+    function fail(text, ic) {
+      $('qsInfo').textContent = '';
+      $('qsInfo').appendChild(emptyBox(text, ic));
+      $('qsTabs').textContent = '';
+      $('qsMenu').textContent = '';
+    }
+
+    async function init() {
+      const info = $('qsInfo');
+      if (window.SFLoader) info.innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      if (!shopId) { fail('দোকান পাওয়া যায়নি।'); return; }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        fail('কুইক ডেলিভারি ব্যবহার করতে লগইন করুন।', 'scooter');
+        if (window.openAuthModal) window.openAuthModal();
+        return;
+      }
+      const access = await marketAccess();
+      if (!access.allowed) { fail('কুইক ডেলিভারি শীঘ্রই আসছে।', 'scooter'); return; }
+      try {
+        const [s, m, cats, rts, favs, rvs] = await Promise.all([fetchMarketShop(shopId), fetchShopMenu(shopId), fetchMarketCategories().catch(() => []), fetchShopRatings(), fetchFavoriteIds().catch(() => new Set()), fetchShopReviews(shopId)]);
+        shop = s; menu = m; rating = rts[shopId] || null; reviews = rvs || [];
+        isFav = favs.has(shopId);
+        if (!shop) { fail('দোকানটি এখন পাওয়া যাচ্ছে না।'); return; }
+        document.title = shop.name + ' | কুইক ডেলিভারি';
+        const names = (shop.market_category_ids || []).map((id) => { const c = cats.find((x) => x.id === id); return c ? c.name : ''; }).filter(Boolean).join(', ');
+        canAdd = shopOpenState(shop).open; // টেস্ট শপ RLS-এ শুধু স্টাফ পায়
+        renderInfo(names);
+        renderReviews(reviews);
+        paintFav();
+      } catch (err) {
+        if (window.SFReportError) { try { window.SFReportError(err, 'market-shop-load'); } catch (e) {} }
+        fail('লোড করতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।');
+        return;
+      }
+      if (q) openSearch();
+      renderMenu();
+      renderCartBar();
+    }
+
+    // পেছনে ফিরলে ব্রাউজার পুরনো পেজ (bfcache) দেখায় — কার্ট নতুন করে পড়ি (অর্ডারের পর খালি কার্ট)
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted && shop) { renderCartBar(); renderMenuKeepScroll(); }
+    });
+
+    init();
+  </script>
+</BaseLayout>

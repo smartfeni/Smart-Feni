@@ -1,260 +1,610 @@
 ---
 // path: src/pages/market.astro
 // ============================================================
-// কাস্টমারের নতুন মার্কেট হোম (/market) — মার্কেটপ্লেস ধাপ ২ (ব্রান্চ: marketplace)।
-// শুধু দেখা: ক্যাটাগরি ট্যাব + সার্চ + ব্যানার + দোকানের তালিকা। কার্ট/অর্ডার পরের ধাপে।
-// বিদ্যমান ডেলিভারি/কুরিয়ার ফ্লো ছোঁয়া হয়নি; লাইভের দিন লিংক এখানে ঘোরানো হবে।
-// ডেটা: src/lib/marketApi.js (delivery_market_categories, delivery_shops; RLS সাপেক্ষে)।
-// টেস্ট দোকান (is_test) শুধু delivery_shops.view পারমিশনওয়ালা স্টাফ দেখে (RLS)।
-// সব টেক্সট textContent দিয়ে বসানো (ইউজার/অ্যাডমিনের লেখা এস্কেপ)।
+// কুইক ডেলিভারি — কাস্টমার হোম (/market)। ব্রান্চ: marketplace, ধাপ ২।
+// - প্রথমবার: ঠিকানা সেটআপ (আসল ফেনী ম্যাপ, MarketLocationSheet), না দিলে হোম দেখা যায় না
+// - হোম: ঠিকানা চিপ, ৩D ক্যাটাগরি টাইল, সার্চ (দোকান + আইটেমের নাম), ব্যানার স্লাইডার,
+//   খাবারের ধরন (বিরিয়ানি/বার্গার...), "জনপ্রিয়" আড়াআড়ি কার্ড, সব দোকান (দূরত্ব অনুযায়ী)
+// - শপ পেজ/কার্ট পরের ধাপে। সুইচ: site_settings.marketplace_enabled (বন্ধ = শুধু স্টাফ)
+// - সব ইউজার/অ্যাডমিনের লেখা textContent দিয়ে বসানো (এস্কেপ)।
+// - ৩D আইকন: Microsoft Fluent Emoji (MIT), public/market/icons/
 // ============================================================
 
 export const prerender = false;
 
 import BaseLayout from '../components/layout/BaseLayout.astro';
+import MarketLocationSheet from '../components/market/MarketLocationSheet.astro';
 ---
 
-<BaseLayout title="মার্কেট | স্মার্ট ফেনী">
+<BaseLayout title="কুইক ডেলিভারি | স্মার্ট ফেনী">
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <div class="mk-page">
+  <div class="qd" id="qd">
+    <div class="qd-hero">
+      <button type="button" class="qd-loc" id="qdLoc" aria-label="ডেলিভারি ঠিকানা বদলান">
+        <svg class="qd-pin" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z" /></svg>
+        <span class="qd-loc-t"><b id="qdLocMain">ঠিকানা দিন</b><span id="qdLocSub"></span></span>
+        <svg class="qd-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
 
-    <header class="mk-top">
-      <div class="mk-loc-lbl">ডেলিভারি ঠিকানা</div>
-      <div class="mk-loc" id="mkLoc">ফেনী</div>
-    </header>
+      <div class="qd-cats" id="qdCats" role="tablist" aria-label="ক্যাটাগরি"></div>
 
-    <label class="mk-search">
-      <i class="fas fa-search" aria-hidden="true"></i>
-      <input id="mkQ" type="search" placeholder="দোকান খুঁজুন" autocomplete="off" aria-label="দোকান খুঁজুন" />
-    </label>
+      <div class="qd-srow">
+        <label class="qd-search">
+          <input id="qdQ" type="search" autocomplete="off" placeholder="আজ কী খেতে মন চায়?" aria-label="দোকান বা খাবার খুঁজুন" />
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+        </label>
+        <button type="button" class="qd-favbtn" id="qdFav" aria-pressed="false" aria-label="শুধু প্রিয় দোকান দেখুন" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.2-4.4-9.5-8.9C1 8.6 2.8 5 6.4 5c2.1 0 3.5 1.1 4.2 2.3h2.8C14.1 6.1 15.5 5 17.6 5 21.2 5 23 8.6 21.5 11.6 19.2 16.1 12 20.5 12 20.5Z" /></svg>
+        </button>
+      </div>
+    </div>
 
-    <div class="mk-tabs" id="mkTabs" role="tablist" aria-label="ক্যাটাগরি"></div>
-
-    <section class="mk-banner" aria-label="স্মার্ট ফেনী">
-      <div class="mk-banner-c1"></div>
-      <div class="mk-banner-c2"></div>
-      <div class="mk-banner-s">ফেনীর সব দোকান, এক অ্যাপে</div>
-      <div class="mk-banner-t">প্রয়োজন আপনার, দায়িত্ব আমাদের</div>
-    </section>
-
-    <div id="mkBody"></div>
+    <div id="qdBody" class="qd-body"></div>
   </div>
 
+  <a class="qd-live" id="qdLive" hidden href="/market">
+    <img src="/market/icons/scooter.webp" alt="" aria-hidden="true" />
+    <span><b id="qdLiveT">চলমান অর্ডার</b><small id="qdLiveS"></small></span>
+    <em>দেখুন ›</em>
+  </a>
+
+  <MarketLocationSheet />
+
   <style is:global>
-    .mk-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #FFF4EC; min-height: 70vh; padding: 14px 16px 110px; max-width: 560px; margin: 0 auto; overflow-x: hidden; }
-    .mk-page * { box-sizing: border-box; }
-    .mk-page button, .mk-page input { font-family: inherit; }
-    .mk-loc-lbl { font-size: 11.5px; font-weight: 600; color: #5B6B86; }
-    .mk-loc { font-size: 17px; font-weight: 700; }
-    .mk-search { display: flex; align-items: center; gap: 10px; margin: 12px 0; height: 50px; padding: 0 16px; border-radius: 16px; background: #fff; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.08); color: #5B6B86; }
-    .mk-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font-size: 15px; font-weight: 500; color: #1B2A4A; }
-    .mk-search:focus-within { box-shadow: 0 0 0 2px #1B2A4A; }
-    .mk-tabs { display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 8px; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
-    .mk-tabs::-webkit-scrollbar { display: none; }
-    .mk-tab { flex: none; min-width: 66px; border: 0; background: none; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: #1B2A4A; cursor: pointer; }
-    .mk-tab[aria-selected='true'] { font-weight: 700; }
-    .mk-tab-ic { width: 56px; height: 56px; border-radius: 18px; background: #fff; border: 1.5px solid #EADBCF; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #1B2A4A; }
-    .mk-tab[aria-selected='true'] .mk-tab-ic { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
-    .mk-tab-bar { width: 20px; height: 3px; border-radius: 2px; background: transparent; }
-    .mk-tab[aria-selected='true'] .mk-tab-bar { background: #FF6B35; }
-    .mk-tab:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; border-radius: 12px; }
-    .mk-banner { position: relative; overflow: hidden; margin: 8px 0 16px; border-radius: 22px; background: #1B2A4A; color: #fff; padding: 20px; min-height: 130px; }
-    .mk-banner-c1 { position: absolute; right: -30px; top: -30px; width: 150px; height: 150px; border-radius: 50%; background: #FF6B35; }
-    .mk-banner-c2 { position: absolute; right: 40px; bottom: -40px; width: 90px; height: 90px; border-radius: 50%; background: #FFDCC4; }
-    .mk-banner-s { position: relative; font-size: 12px; font-weight: 600; color: #FFDCC4; max-width: 200px; }
-    .mk-banner-t { position: relative; font-size: 21px; font-weight: 700; line-height: 1.3; margin-top: 6px; max-width: 210px; }
-    .mk-sec { display: flex; justify-content: space-between; align-items: baseline; margin: 6px 2px 10px; }
-    .mk-sec h2 { margin: 0; font-size: 18px; font-weight: 700; }
-    .mk-card { display: flex; gap: 12px; background: #fff; border-radius: 18px; padding: 10px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.07); }
-    .mk-card.closed { opacity: 0.7; }
-    .mk-img { flex: none; width: 76px; height: 76px; border-radius: 14px; background: #FFDCC4; display: flex; align-items: center; justify-content: center; overflow: hidden; font-size: 28px; font-weight: 700; color: #1B2A4A; }
-    .mk-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .mk-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
-    .mk-name { font-size: 15.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .mk-cats { font-size: 12.5px; color: #5B6B86; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .mk-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #5B6B86; flex-wrap: wrap; }
-    .mk-badge { font-weight: 700; padding: 2px 8px; border-radius: 8px; background: #E3F3EA; color: #1F7A4D; }
-    .mk-badge.off { background: #EEF0F4; color: #4A5568; }
-    .mk-badge.test { background: #FFE9DA; color: #8A3B12; }
-    .mk-empty { padding: 28px 8px; text-align: center; font-size: 14px; line-height: 1.6; color: #5B6B86; }
-    .mk-empty a { color: #1B2A4A; font-weight: 700; }
-    .mk-any { width: 100%; text-align: left; display: flex; align-items: center; gap: 14px; background: #fff; border: 0; border-radius: 20px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.07); cursor: pointer; color: #1B2A4A; }
-    .mk-any-ic { flex: none; width: 64px; height: 64px; border-radius: 18px; background: #FFDCC4; display: flex; align-items: center; justify-content: center; font-size: 26px; }
-    .mk-any-t { font-size: 17px; font-weight: 700; }
-    .mk-any-d { font-size: 13px; line-height: 1.45; color: #5B6B86; margin-top: 2px; }
-    .mk-any:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    /* কুইক ডেলিভারির ভেতরে সাইটের মূল হেডার লুকানো (ওয়েব ও অ্যাপ) */
+    #siteNavbar { display: none !important; }
+    .qd { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F8FAFC; min-height: 80vh; max-width: 600px; margin: 0 auto; padding-bottom: 120px; overflow-x: hidden; }
+    .qd * { box-sizing: border-box; }
+    .qd button, .qd input { font-family: inherit; }
+    .qd-hero { background: linear-gradient(180deg, #FFE3D1 0%, #FFF1E8 55%, #F8FAFC 100%); padding: 16px 16px 6px; }
+    .qd-loc { display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 44px; border: 0; background: none; padding: 0; color: #1B2A4A; cursor: pointer; text-align: left; }
+    .qd-pin { width: 26px; height: 26px; flex: none; fill: #FF6B35; }
+    .qd-loc-t { min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; white-space: nowrap; }
+    .qd-loc-t b { font-size: 19px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+    .qd-loc-t span { font-size: 15px; color: #4A5568; overflow: hidden; text-overflow: ellipsis; }
+    .qd-chev { width: 20px; height: 20px; flex: none; fill: none; stroke: #1B2A4A; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+    .qd-cats { display: flex; gap: 12px; overflow-x: auto; margin: 14px -16px 0; padding: 2px 16px 6px; scrollbar-width: none; scroll-snap-type: x proximity; }
+    .qd-cats::-webkit-scrollbar { display: none; }
+    .qd-cat { flex: none; width: 78px; border: 0; background: none; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; scroll-snap-align: start; color: #1B2A4A; }
+    .qd-cat-tile { width: 78px; height: 78px; border-radius: 22px; background: rgba(255,255,255,.72); border: 2px solid transparent; display: flex; align-items: center; justify-content: center; transition: transform .15s ease, background .15s ease; box-shadow: 0 1px 2px rgba(27,42,74,.06); }
+    .qd-cat-tile img { width: 54px; height: 54px; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(27,42,74,.18)); }
+    .qd-cat-tile i { font-size: 26px; color: #1B2A4A; }
+    .qd-cat-l { font-size: 13.5px; font-weight: 600; line-height: 1.2; text-align: center; }
+    .qd-cat[aria-selected='true'] .qd-cat-tile { background: #1B2A4A; border-color: #FF6B35; transform: translateY(-2px); box-shadow: 0 8px 18px rgba(27,42,74,.25); }
+    .qd-cat[aria-selected='true'] .qd-cat-tile i { color: #fff; }
+    .qd-cat[aria-selected='true'] .qd-cat-l { color: #E8551C; font-weight: 700; }
+    .qd-cat:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 3px; border-radius: 22px; }
+
+    .qd-srow { display: flex; align-items: center; gap: 10px; margin: 12px 0 8px; }
+    .qd-srow .qd-search { flex: 1; min-width: 0; margin: 0; }
+    .qd-favbtn { flex: none; width: 54px; height: 54px; border-radius: 18px; border: 1.5px solid #F1E2D7; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 14px rgba(27,42,74,.06); transition: transform .15s; }
+    .qd-favbtn svg { width: 24px; height: 24px; fill: none; stroke: #E53E3E; stroke-width: 2.2; stroke-linejoin: round; }
+    .qd-favbtn.on { background: linear-gradient(135deg,#FF5A5F,#E53E3E); border-color: transparent; box-shadow: 0 6px 16px rgba(229,62,62,.35); }
+    .qd-favbtn.on svg { fill: #fff; stroke: #fff; }
+    .qd-favbtn:active { transform: scale(.94); }
+    .qd-favbtn:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
+    .qd-search { display: flex; align-items: center; gap: 10px; margin: 12px 0 8px; height: 54px; padding: 0 18px; border-radius: 18px; background: #fff; border: 1.5px solid #F1E2D7; box-shadow: 0 4px 14px rgba(27,42,74,.06); }
+    .qd-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font-size: 16px; font-weight: 500; color: #1B2A4A; }
+    .qd-search input::placeholder { color: #6B7891; }
+    .qd-search svg { width: 22px; height: 22px; flex: none; fill: none; stroke: #1B2A4A; stroke-width: 2.2; stroke-linecap: round; }
+    .qd-search:focus-within { border-color: #1B2A4A; }
+
+    .qd-body { padding: 0 16px; }
+
+    .qd-slides { display: flex; gap: 12px; overflow-x: auto; margin: 10px -16px 0; padding: 0 16px; scroll-snap-type: x mandatory; scrollbar-width: none; }
+    .qd-slides::-webkit-scrollbar { display: none; }
+    .qd-slide { flex: none; width: 100%; height: 150px; border-radius: 22px; position: relative; overflow: hidden; scroll-snap-align: center; padding: 18px 20px; color: #fff; display: flex; flex-direction: column; justify-content: center; }
+    .qd-slide.s1 { background: linear-gradient(120deg, #1B2A4A 0%, #2C4372 100%); }
+    .qd-slide.s2 { background: linear-gradient(120deg, #E8551C 0%, #FF8A55 100%); }
+    .qd-slide.s3 { background: linear-gradient(120deg, #0F5E4C 0%, #1F8A6E 100%); }
+    .qd-slide small { font-size: 12.5px; font-weight: 600; opacity: .9; position: relative; z-index: 1; }
+    .qd-slide b { font-size: 21px; font-weight: 700; line-height: 1.3; max-width: 62%; margin-top: 4px; position: relative; z-index: 1; }
+    .qd-slide img { position: absolute; right: 8px; bottom: 6px; width: 128px; height: 128px; object-fit: contain; filter: drop-shadow(0 10px 14px rgba(0,0,0,.28)); }
+    .qd-slide::after { content: ''; position: absolute; right: -40px; top: -50px; width: 190px; height: 190px; border-radius: 50%; background: rgba(255,255,255,.1); }
+    .qd-dots { display: flex; justify-content: center; gap: 6px; margin: 8px 0 4px; }
+    .qd-dots span { width: 6px; height: 6px; border-radius: 3px; background: #D5DCE8; transition: width .2s; }
+    .qd-dots span.on { width: 18px; background: #FF6B35; }
+
+    .qd-foods { display: flex; gap: 6px; overflow-x: auto; margin: 14px -16px 4px; padding: 4px 16px 12px; scrollbar-width: none; border-bottom: 1px solid #E8ECF2; }
+    .qd-foods::-webkit-scrollbar { display: none; }
+    .qd-food { flex: none; width: 82px; border: 0; background: none; padding: 4px 0; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; color: #4A5568; }
+    .qd-food img { width: 58px; height: 58px; object-fit: contain; filter: drop-shadow(0 5px 6px rgba(27,42,74,.16)); transition: transform .15s; }
+    .qd-food span { font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+    .qd-food[aria-pressed='true'] img { transform: scale(1.1); }
+    .qd-food[aria-pressed='true'] span { color: #E8551C; font-weight: 700; }
+    .qd-food:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; border-radius: 14px; }
+
+    .qd-sec { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 22px 0 12px; }
+    .qd-sec h2 { margin: 0; font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .qd-sec h2 svg { width: 20px; height: 20px; fill: #FF6B35; }
+    .qd-sec small { font-size: 13px; color: #4A5568; font-weight: 600; }
+
+    .qd-row { display: flex; gap: 12px; overflow-x: auto; margin: 0 -16px; padding: 0 16px 6px; scroll-snap-type: x proximity; scrollbar-width: none; }
+    .qd-row::-webkit-scrollbar { display: none; }
+    .qd-pop { flex: none; width: 250px; scroll-snap-align: start; }
+
+    .qd-card { display: block; width: 100%; border: 0; padding: 0; background: #fff; border-radius: 20px; overflow: hidden; text-align: left; cursor: pointer; color: #1B2A4A; box-shadow: 0 4px 16px rgba(27,42,74,.07); margin-bottom: 14px; }
+    .qd-card:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    .qd-img { position: relative; height: 150px; background: #FFE3D1; overflow: hidden; }
+    .qd-pop .qd-img { height: 128px; }
+    .qd-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .qd-img .qd-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 40px; font-weight: 700; color: #1B2A4A; }
+    .qd-card.closed .qd-img img { filter: grayscale(.85); }
+    .qd-shut { position: absolute; inset: 0; background: rgba(27,42,74,.55); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; }
+    .qd-tag { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; }
+    .qd-tag span { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: #fff; color: #1B2A4A; box-shadow: 0 2px 6px rgba(0,0,0,.12); }
+    .qd-tag span.hot { background: #FF6B35; color: #fff; }
+    .qd-tag span.test { background: #FFF4CC; color: #7A4A00; }
+    .qd-eta { position: absolute; right: 10px; bottom: 10px; font-size: 12.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,.95); color: #1B2A4A; }
+    .qd-info { padding: 10px 14px 12px; }
+    .qd-name { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qd-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; font-size: 13px; color: #4A5568; }
+    .qd-meta .star { color: #B7791F; font-weight: 700; }
+    .qd-meta i { width: 3px; height: 3px; border-radius: 50%; background: #9AA6BA; display: inline-block; }
+    .qd-meta .ok { color: #1F7A4D; font-weight: 700; }
+    .qd-meta .no { color: #B42318; font-weight: 700; }
+
+    .qd-empty { text-align: center; padding: 34px 12px; color: #4A5568; font-size: 15px; line-height: 1.6; }
+    .qd-empty img { width: 92px; height: 92px; object-fit: contain; display: block; margin: 0 auto 8px; }
+    .qd-empty a, .qd-empty button { display: inline-flex; align-items: center; justify-content: center; margin-top: 12px; min-height: 46px; padding: 0 22px; border-radius: 14px; background: #FF6B35; color: #fff; font-weight: 700; text-decoration: none; border: 0; cursor: pointer; font-size: 15px; }
+
+    .qd-any-hero { position: relative; overflow: hidden; border-radius: 24px; background: linear-gradient(135deg, #1B2A4A 0%, #2C4372 100%); color: #fff; padding: 22px 20px; margin-top: 10px; min-height: 170px; }
+    .qd-any-hero small { font-size: 12.5px; font-weight: 700; color: #FFB48F; }
+    .qd-any-hero h2 { margin: 6px 0 4px; font-size: 23px; line-height: 1.3; max-width: 64%; }
+    .qd-any-hero p { margin: 0; font-size: 13.5px; opacity: .85; max-width: 60%; line-height: 1.5; }
+    .qd-any-hero img { position: absolute; right: 6px; bottom: 6px; width: 130px; height: 130px; object-fit: contain; filter: drop-shadow(0 10px 14px rgba(0,0,0,.3)); }
+    .qd-any-go { display: inline-flex; align-items: center; margin-top: 14px; min-height: 44px; padding: 0 18px; border-radius: 12px; background: #FF6B35; color: #fff; border: 0; font-weight: 700; font-size: 15px; cursor: pointer; position: relative; z-index: 1; }
+    .qd-any-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+    .qd-any-card { border: 0; background: #fff; border-radius: 20px; padding: 14px; text-align: left; cursor: pointer; color: #1B2A4A; box-shadow: 0 4px 16px rgba(27,42,74,.07); min-height: 150px; display: flex; flex-direction: column; }
+    .qd-any-card img { width: 58px; height: 58px; object-fit: contain; filter: drop-shadow(0 5px 6px rgba(27,42,74,.16)); }
+    .qd-any-card b { font-size: 16px; margin-top: 8px; }
+    .qd-any-card span { font-size: 12.5px; color: #4A5568; line-height: 1.45; margin-top: 2px; }
+    .qd-any-go:focus-visible, .qd-any-card:focus-visible, .qd-loc:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    .qd-live { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(78px + env(safe-area-inset-bottom)); width: calc(100% - 28px); max-width: 572px; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 18px; background: #1B2A4A; color: #fff; text-decoration: none; z-index: 997; box-shadow: 0 10px 26px rgba(27,42,74,.35); font-family: 'Hind Siliguri', system-ui, sans-serif; }
+    .qd-live[hidden] { display: none; }
+    .qd-live img { width: 40px; height: 40px; object-fit: contain; animation: qdBob 1.8s ease-in-out infinite; }
+    @keyframes qdBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+    @media (prefers-reduced-motion: reduce) { .qd-live img { animation: none; } }
+    .qd-live span { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+    .qd-live b { font-size: 15px; }
+    .qd-live small { font-size: 12.5px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .qd-live em { font-style: normal; font-weight: 700; font-size: 14px; color: #FFB48F; }
+    .qd-live:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
+    @media (min-width: 560px) { .qd-slide { width: 520px; } }
   </style>
 
   <script>
     import { supabase } from '../lib/supabase.js';
-    import { fetchMarketCategories, fetchMarketShops, shopOpenState, bnNum } from '../lib/marketApi.js';
+    import { fetchMarketCategories, fetchMarketShops, fetchMarketItemIndex, shopOpenState, bnNum, marketAccess, distanceKm, searchNeedles, fetchShopRatings, ratingText, fetchFavoriteIds } from '../lib/marketApi.js';
+    import { getDrop } from '../lib/marketCart.js';
 
     const $ = (id) => document.getElementById(id);
+    const IC = '/market/icons/';
     const ANY = '__any__';
-    const ICON_CLASS = {
-      food: 'fa-utensils', grocery: 'fa-basket-shopping', pharmacy: 'fa-prescription-bottle-medical',
-      flower: 'fa-seedling', beauty: 'fa-wand-magic-sparkles', gadget: 'fa-mobile-screen', other: 'fa-store',
-    };
-    const ANY_CARDS = [
-      { t: 'অর্ডার এনিথিং', d: 'যেকোনো দোকান থেকে যেকোনো জিনিস কিনে আনা', i: 'fa-box-open' },
-      { t: 'পাঠান', d: 'পার্সেল এক জায়গা থেকে অন্য জায়গায়', i: 'fa-paper-plane' },
-      { t: 'এনে দাও', d: 'ভুলে যাওয়া বা জরুরি জিনিস এনে দেওয়া', i: 'fa-rotate-left' },
+    // ক্যাটাগরির icon কী → ৩D ছবি (না থাকলে FontAwesome)
+    const CAT_IMG = { food: 'food', grocery: 'grocery', pharmacy: 'pharmacy', flower: 'flower', flowers: 'flower', beauty: 'beauty', gadget: 'gadget' };
+    const CAT_FA = { other: 'fa-store' };
+    const PLACEHOLDER = { food: 'আজ কী খেতে মন চায়?', grocery: 'চাল, ডাল, তেল খুঁজুন', pharmacy: 'ওষুধ বা ফার্মেসি খুঁজুন', flower: 'ফুল বা তোড়া খুঁজুন', flowers: 'ফুল বা তোড়া খুঁজুন', beauty: 'বিউটি পণ্য খুঁজুন', gadget: 'গ্যাজেট খুঁজুন' };
+    // খাবারের ধরন: আইটেম/দোকানের নামে এই শব্দগুলোর কোনোটা থাকলে মিলবে
+    const FOODS = [
+      { k: 'biryani', t: 'বিরিয়ানি', img: 'biryani', w: ['বিরিয়ানি', 'বিরিয়ানী', 'কাচ্চি', 'তেহারি', 'পোলাও', 'biryani', 'kacchi', 'tehari'] },
+      { k: 'burger', t: 'বার্গার', img: 'burger', w: ['বার্গার', 'burger'] },
+      { k: 'pizza', t: 'পিৎজা', img: 'pizza', w: ['পিৎজা', 'পিজ্জা', 'পিজা', 'pizza'] },
+      { k: 'chicken', t: 'চিকেন', img: 'chicken', w: ['চিকেন', 'মুরগি', 'ফ্রাই', 'chicken', 'wings', 'fry'] },
+      { k: 'fastfood', t: 'ফাস্ট ফুড', img: 'fastfood', w: ['ফ্রেঞ্চ', 'স্যান্ডউইচ', 'শর্মা', 'সাব', 'fries', 'sandwich', 'shawarma', 'hot dog', 'নাগেট'] },
+      { k: 'noodles', t: 'নুডলস', img: 'noodles', w: ['নুডলস', 'চাউমিন', 'পাস্তা', 'স্যুপ', 'noodle', 'chowmein', 'pasta', 'soup', 'ramen'] },
+      { k: 'tea', t: 'চা-কফি', img: 'tea', w: ['চা', 'কফি', 'tea', 'coffee', 'latte', 'cappuccino'] },
+      { k: 'sweets', t: 'ডেজার্ট', img: 'sweets', w: ['কেক', 'মিষ্টি', 'আইসক্রিম', 'পুডিং', 'ডেজার্ট', 'cake', 'dessert', 'ice cream', 'pudding', 'falooda', 'ফালুদা'] },
+    ];
+    const SLIDES = [
+      { c: 's1', s: 'কুইক ডেলিভারি', t: 'ফেনীর সব দোকান, এক অ্যাপে', img: 'scooter' },
+      { c: 's2', s: 'গরম গরম খাবার', t: 'পছন্দের রেস্টুরেন্ট থেকে দরজায়', img: 'burger' },
+      { c: 's3', s: 'যেকোনো কিছু', t: 'যা লাগে লিখে দিন, আমরা এনে দেব', img: 'bags' },
     ];
 
     let cats = [];
     let shops = [];
+    let ratings = {};
+    let favIds = new Set();
+    let favOnly = false;
+    function paintFavBtn() {
+      const b = $('qdFav');
+      b.hidden = false;
+      b.classList.toggle('on', favOnly);
+      b.setAttribute('aria-pressed', String(favOnly));
+    }
+    let itemIdx = {};
     let active = null;
+    let food = null;
     let q = '';
+    let slideTimer = null;
 
-    function toast(msg, type) { if (window.showToast) window.showToast(msg, type); }
+    function toast(msg, type) { if (window.showToast) window.showToast(msg, type || 'info'); }
     function mk(tag, cls, text) {
       const e = document.createElement(tag);
       if (cls) e.className = cls;
       if (text !== undefined && text !== null) e.textContent = text;
       return e;
     }
+    function img(name, alt) {
+      const i = document.createElement('img');
+      i.src = IC + name + '.webp';
+      i.alt = alt || '';
+      i.loading = 'lazy';
+      i.decoding = 'async';
+      if (!alt) i.setAttribute('aria-hidden', 'true');
+      return i;
+    }
+    function svgIcon(path) {
+      const ns = 'http://www.w3.org/2000/svg';
+      const s = document.createElementNS(ns, 'svg');
+      s.setAttribute('viewBox', '0 0 24 24');
+      s.setAttribute('aria-hidden', 'true');
+      const p = document.createElementNS(ns, 'path');
+      p.setAttribute('d', path);
+      s.appendChild(p);
+      return s;
+    }
+    const BOLT = 'M13 2 4 14h7l-1 8 9-12h-7l1-8Z';
+    const PIN = 'M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z';
 
-    // ---------- ঠিকানা লাইন (ধাপ ২-তে শুধু বর্তমান উপজেলা) ----------
+    // ---------- ঠিকানা ----------
     function showLoc() {
-      let up = null;
-      try { up = localStorage.getItem('smartfeni_upazila'); } catch (e) {}
-      $('mkLoc').textContent = up || 'ফেনী';
+      const d = getDrop();
+      if (!d) { $('qdLocMain').textContent = 'ঠিকানা দিন'; $('qdLocSub').textContent = ''; return; }
+      const main = d.union || d.upazila || d.address.split(',')[0];
+      const sub = d.union && d.upazila ? d.upazila : '';
+      $('qdLocMain').textContent = main;
+      $('qdLocSub').textContent = sub ? '- ' + sub : '';
+    }
+    function openLoc() {
+      if (window.SFMarketLocation) window.SFMarketLocation.open(() => { showLoc(); renderBody(); });
     }
 
-    // ---------- ক্যাটাগরি ট্যাব ----------
-    function renderTabs() {
-      const box = $('mkTabs');
+    // ---------- ক্যাটাগরি ----------
+    function catOf(id) { return cats.find((c) => c.id === id); }
+    function renderCats() {
+      const box = $('qdCats');
       box.textContent = '';
       const list = [{ id: ANY, name: 'যেকোনো কিছু', icon: 'any' }].concat(cats);
       list.forEach((c) => {
-        const b = mk('button', 'mk-tab');
+        const b = mk('button', 'qd-cat');
         b.type = 'button';
         b.setAttribute('role', 'tab');
-        b.setAttribute('aria-selected', c.id === active ? 'true' : 'false');
-        const ic = mk('span', 'mk-tab-ic');
-        const i = document.createElement('i');
-        i.className = 'fas ' + (c.id === ANY ? 'fa-box-open' : (ICON_CLASS[c.icon] || ICON_CLASS.other));
-        i.setAttribute('aria-hidden', 'true');
-        ic.appendChild(i);
-        b.appendChild(ic);
-        b.appendChild(mk('span', null, c.name));
-        b.appendChild(mk('span', 'mk-tab-bar'));
-        b.addEventListener('click', () => { active = c.id; renderTabs(); renderBody(); });
+        b.setAttribute('aria-selected', String(c.id === active));
+        const tile = mk('span', 'qd-cat-tile');
+        const key = c.id === ANY ? 'any' : CAT_IMG[c.icon] || CAT_IMG[c.slug];
+        if (key) tile.appendChild(img(key));
+        else { const i = mk('i', 'fas ' + (CAT_FA[c.icon] || 'fa-store')); i.setAttribute('aria-hidden', 'true'); tile.appendChild(i); }
+        b.appendChild(tile);
+        b.appendChild(mk('span', 'qd-cat-l', c.name));
+        b.addEventListener('click', () => {
+          if (active === c.id) return;
+          active = c.id; food = null;
+          renderCats(); setPlaceholder(); renderBody();
+        });
         box.appendChild(b);
       });
     }
-
-    // ---------- মূল অংশ ----------
-    function catNames(shop) {
-      const ids = Array.isArray(shop.market_category_ids) ? shop.market_category_ids : [];
-      return ids.map((id) => { const c = cats.find((x) => x.id === id); return c ? c.name : null; }).filter(Boolean).join(' · ');
+    function setPlaceholder() {
+      const c = catOf(active);
+      const k = c ? c.icon || c.slug : '';
+      $('qdQ').placeholder = active === ANY ? 'দোকান বা পণ্য খুঁজুন' : PLACEHOLDER[k] || 'দোকান খুঁজুন';
     }
 
-    function shopCard(s) {
+    // ---------- দোকানের হিসাব ----------
+    function shopKm(s) {
+      const d = getDrop();
+      return d ? distanceKm(d.lat, d.lng, s.lat, s.lng) : null;
+    }
+    function etaText(s) {
+      const km = shopKm(s);
+      const prep = Number(s.prep_minutes) || 15;
+      const lo = Math.round((prep + 8 + (km !== null ? km * 4 : 10)) / 5) * 5;
+      return bnNum(lo) + '–' + bnNum(lo + 10) + ' মিনিট';
+    }
+    function catNames(s) {
+      return (s.market_category_ids || []).map((id) => { const c = catOf(id); return c ? c.name : ''; }).filter(Boolean).join(', ');
+    }
+    let qNeedles = [];
+    function matchesQ(s) {
+      if (!q) return true;
+      const hay = String(s.name || '').toLowerCase() + ' ' + (itemIdx[s.id] || '');
+      return qNeedles.some((n) => hay.includes(n));
+    }
+    function matchesFood(s) {
+      if (!food) return true;
+      const f = FOODS.find((x) => x.k === food);
+      const hay = (String(s.name || '') + ' ' + (itemIdx[s.id] || '')).toLowerCase();
+      return f.w.some((w) => hay.includes(w.toLowerCase()));
+    }
+    function inCat(s) {
+      if (active === ANY) return true;
+      return Array.isArray(s.market_category_ids) && s.market_category_ids.indexOf(active) !== -1;
+    }
+
+    // ---------- কার্ড ----------
+    function shopCard(s, small) {
       const st = shopOpenState(s);
-      const card = mk('article', 'mk-card' + (st.open ? '' : ' closed'));
-      const img = mk('div', 'mk-img');
+      const b = mk('button', 'qd-card' + (st.open ? '' : ' closed'));
+      b.type = 'button';
+      b.setAttribute('aria-label', s.name + (st.open ? '' : ', ' + st.label));
+      const im = mk('div', 'qd-img');
       if (s.image_url) {
-        const im = document.createElement('img');
-        im.src = s.image_url;
-        im.alt = s.name;
-        im.loading = 'lazy';
-        img.appendChild(im);
-      } else {
-        img.textContent = (s.name || '?').trim().charAt(0);
-      }
-      const info = mk('div', 'mk-info');
-      info.appendChild(mk('div', 'mk-name', s.name));
+        const i = document.createElement('img');
+        i.src = s.image_url; i.alt = ''; i.loading = 'lazy'; i.decoding = 'async';
+        im.appendChild(i);
+      } else im.appendChild(mk('span', 'qd-ph', String(s.name || '?').trim().charAt(0)));
+      const tg = mk('div', 'qd-tag');
+      if (s.is_popular) tg.appendChild(mk('span', 'hot', 'জনপ্রিয়'));
+      if (s.is_test) tg.appendChild(mk('span', 'test', 'টেস্ট শপ'));
+      if (tg.childNodes.length) im.appendChild(tg);
+      if (st.open) im.appendChild(mk('span', 'qd-eta', etaText(s)));
+      else im.appendChild(mk('div', 'qd-shut', st.label));
+      b.appendChild(im);
+
+      const info = mk('div', 'qd-info');
+      info.appendChild(mk('div', 'qd-name', s.name));
+      const meta = mk('div', 'qd-meta');
+      const rt = ratingText(ratings[s.id]);
+      if (rt) meta.appendChild(mk('span', 'star', rt));
       const cn = catNames(s);
-      if (cn) info.appendChild(mk('div', 'mk-cats', cn));
-      const meta = mk('div', 'mk-meta');
-      meta.appendChild(mk('span', 'mk-badge' + (st.open ? '' : ' off'), st.label));
-      if (st.open && s.prep_minutes) meta.appendChild(mk('span', null, 'প্রস্তুতি ~' + bnNum(s.prep_minutes) + ' মিনিট'));
-      if (s.is_test) meta.appendChild(mk('span', 'mk-badge test', 'টেস্ট শপ'));
+      if (cn && !(small && rt)) { if (meta.childNodes.length) meta.appendChild(mk('i')); meta.appendChild(mk('span', '', cn)); }
+      const km = shopKm(s);
+      if (km !== null) { if (meta.childNodes.length) meta.appendChild(mk('i')); meta.appendChild(mk('span', '', bnNum(km < 1 ? km.toFixed(1) : Math.round(km)) + ' কিমি')); }
+      if (!small) {
+        if (meta.childNodes.length) meta.appendChild(mk('i'));
+        meta.appendChild(mk('span', st.open ? 'ok' : 'no', st.label));
+      }
       info.appendChild(meta);
-      card.appendChild(img);
-      card.appendChild(info);
-      return card;
+      b.appendChild(info);
+      b.addEventListener('click', () => { location.href = '/market/shop?id=' + encodeURIComponent(s.id) + (q ? '&q=' + encodeURIComponent(q) : ''); });
+      return b;
     }
 
-    function renderBody() {
-      const body = $('mkBody');
-      body.textContent = '';
-      if (active === ANY) {
-        const h = mk('div', 'mk-sec');
-        h.appendChild(mk('h2', null, 'যেকোনো কিছু আনান'));
-        body.appendChild(h);
-        ANY_CARDS.forEach((a) => {
-          const b = mk('button', 'mk-any');
-          b.type = 'button';
-          const ic = mk('span', 'mk-any-ic');
-          const i = document.createElement('i');
-          i.className = 'fas ' + a.i;
-          i.setAttribute('aria-hidden', 'true');
-          ic.appendChild(i);
-          const tx = mk('span');
-          tx.appendChild(mk('div', 'mk-any-t', a.t));
-          tx.appendChild(mk('div', 'mk-any-d', a.d));
-          b.appendChild(ic);
-          b.appendChild(tx);
-          b.addEventListener('click', () => toast('শিগগিরই আসছে।', 'success'));
-          body.appendChild(b);
-        });
-        return;
-      }
-      const term = q.trim().toLowerCase();
-      let list = shops.filter((s) => Array.isArray(s.market_category_ids) && s.market_category_ids.indexOf(active) !== -1);
-      if (term) list = list.filter((s) => (s.name || '').toLowerCase().indexOf(term) !== -1);
-      list.sort((a, b) => Number(shopOpenState(b).open) - Number(shopOpenState(a).open));
-      const h = mk('div', 'mk-sec');
-      const cat = cats.find((c) => c.id === active);
-      h.appendChild(mk('h2', null, cat ? cat.name : 'দোকান'));
+    // ---------- ব্যানার ----------
+    function slides() {
+      const wrap = mk('div');
+      const row = mk('div', 'qd-slides');
+      row.setAttribute('aria-label', 'অফার');
+      SLIDES.forEach((x) => {
+        const d = mk('div', 'qd-slide ' + x.c);
+        d.appendChild(mk('small', '', x.s));
+        d.appendChild(mk('b', '', x.t));
+        d.appendChild(img(x.img));
+        row.appendChild(d);
+      });
+      const dots = mk('div', 'qd-dots');
+      dots.setAttribute('aria-hidden', 'true');
+      SLIDES.forEach((_, i) => dots.appendChild(mk('span', i === 0 ? 'on' : '')));
+      let cur = 0;
+      row.addEventListener('scroll', () => {
+        const i = Math.round(row.scrollLeft / Math.max(1, row.firstChild.offsetWidth + 12));
+        if (i !== cur) { cur = i; Array.from(dots.children).forEach((e, j) => e.classList.toggle('on', j === i)); }
+      }, { passive: true });
+      if (slideTimer) clearInterval(slideTimer);
+      slideTimer = setInterval(() => {
+        if (!row.isConnected) { clearInterval(slideTimer); return; }
+        const n = (cur + 1) % SLIDES.length;
+        row.scrollTo({ left: n * (row.firstChild.offsetWidth + 12), behavior: 'smooth' });
+      }, 5000);
+      wrap.appendChild(row);
+      wrap.appendChild(dots);
+      return wrap;
+    }
+
+    function foodsRow() {
+      const row = mk('div', 'qd-foods');
+      row.setAttribute('aria-label', 'খাবারের ধরন');
+      FOODS.forEach((f) => {
+        const b = mk('button', 'qd-food');
+        b.type = 'button';
+        b.setAttribute('aria-pressed', String(food === f.k));
+        b.appendChild(img(f.img));
+        b.appendChild(mk('span', '', f.t));
+        b.addEventListener('click', () => { food = food === f.k ? null : f.k; renderBody(); });
+        row.appendChild(b);
+      });
+      return row;
+    }
+
+    function sec(title, sub, icon) {
+      const h = mk('div', 'qd-sec');
+      const t = mk('h2');
+      if (icon) t.appendChild(svgIcon(icon));
+      t.appendChild(document.createTextNode(title));
+      h.appendChild(t);
+      if (sub) h.appendChild(mk('small', '', sub));
+      return h;
+    }
+
+    function empty(text, imgName, action) {
+      const d = mk('div', 'qd-empty');
+      d.appendChild(img(imgName || 'basket'));
+      d.appendChild(mk('div', '', text));
+      if (action) d.appendChild(action);
+      return d;
+    }
+
+    function isFoodCat() {
+      const c = catOf(active);
+      return !!c && (c.icon === 'food' || c.slug === 'food');
+    }
+
+    // ---------- যেকোনো কিছু ----------
+    function renderAny(body) {
+      const h = mk('div', 'qd-any-hero');
+      h.appendChild(mk('small', '', 'অর্ডার এনিথিং'));
+      h.appendChild(mk('h2', '', 'যেকোনো দোকান থেকে, যেকোনো কিছু'));
+      h.appendChild(mk('p', '', 'কী লাগবে লিখে দিন, রাইডার কিনে দরজায় পৌঁছে দেবে।'));
+      const go = mk('button', 'qd-any-go', 'অর্ডার শুরু করুন');
+      go.type = 'button';
+      go.addEventListener('click', () => { location.href = '/market/anything'; });
+      h.appendChild(go);
+      h.appendChild(img('any'));
       body.appendChild(h);
+      const g = mk('div', 'qd-any-grid');
+      [
+        { t: 'পাঠান / এনে দাও', d: 'পার্সেল বা জিনিস এক জায়গা থেকে আরেক জায়গায়', i: 'scooter', h: '/market/anything?type=send' },
+        { t: 'বাজার করে দিন', d: 'লিস্ট দিন, কাছের বাজার থেকে কিনে আনবে', i: 'basket', h: '/market/anything' },
+      ].forEach((x) => {
+        const b = mk('button', 'qd-any-card');
+        b.type = 'button';
+        b.appendChild(img(x.i));
+        b.appendChild(mk('b', '', x.t));
+        b.appendChild(mk('span', '', x.d));
+        b.addEventListener('click', () => { location.href = x.h; });
+        g.appendChild(b);
+      });
+      body.appendChild(g);
+      const all = shops.filter(matchesQ);
+      if (q) {
+        body.appendChild(sec('খোঁজার ফল', bnNum(all.length) + 'টি দোকান'));
+        if (!all.length) body.appendChild(empty('"' + q + '" নামে কিছু পাওয়া যায়নি।'));
+        all.forEach((s) => body.appendChild(shopCard(s)));
+      }
+    }
+
+    // ---------- মূল তালিকা ----------
+    function renderBody() {
+      const body = $('qdBody');
+      body.textContent = '';
+      if (cats.length) $('qdFav').hidden = active === ANY;
+      if (active === ANY) { renderAny(body); return; }
+
+      if (!q && !favOnly) body.appendChild(slides());
+      if (isFoodCat() && !favOnly) body.appendChild(foodsRow());
+
+      const list = shops.filter((s) => inCat(s) && matchesQ(s) && matchesFood(s) && (!favOnly || favIds.has(s.id)));
+      // খোলা আগে, তারপর দূরত্ব অনুযায়ী
+      list.sort((a, b) => {
+        const oa = shopOpenState(a).open ? 0 : 1, ob = shopOpenState(b).open ? 0 : 1;
+        if (oa !== ob) return oa - ob;
+        const ka = shopKm(a), kb = shopKm(b);
+        if (ka !== null && kb !== null) return ka - kb;
+        return 0;
+      });
+
+      if (!q && !food && !favOnly) {
+        const pop = list.filter((s) => s.is_popular);
+        if (pop.length) {
+          body.appendChild(sec('জনপ্রিয়', '', BOLT));
+          const row = mk('div', 'qd-row');
+          pop.forEach((s) => { const w = mk('div', 'qd-pop'); w.appendChild(shopCard(s, true)); row.appendChild(w); });
+          body.appendChild(row);
+        }
+      }
+
+      const c = catOf(active);
+      const title = favOnly ? 'আপনার প্রিয়' : q ? 'খোঁজার ফল' : food ? FOODS.find((x) => x.k === food).t : getDrop() && getDrop().lat !== null ? 'আপনার কাছের দোকান' : 'সব দোকান';
+      body.appendChild(sec(title, bnNum(list.length) + 'টি দোকান', !q && !food && getDrop() && getDrop().lat !== null ? PIN : null));
       if (!list.length) {
-        body.appendChild(mk('p', 'mk-empty', term ? 'এই নামে কোনো দোকান পাওয়া যায়নি।' : 'এই ক্যাটাগরিতে এখনো কোনো দোকান নেই।'));
+        let msg = 'এই ক্যাটাগরিতে এখনো কোনো দোকান নেই। শীঘ্রই আসছে!';
+        if (favOnly) msg = 'এই ক্যাটাগরিতে এখনো প্রিয় দোকান নেই। দোকানের পেজে ❤️ চাপলে এখানে আসবে।';
+        else if (q) msg = '"' + q + '" নামে কিছু পাওয়া যায়নি।';
+        else if (food) msg = 'এই খাবারের দোকান এখনো যুক্ত হয়নি।';
+        body.appendChild(empty(msg, c && CAT_IMG[c.icon] ? CAT_IMG[c.icon] : 'basket'));
         return;
       }
       list.forEach((s) => body.appendChild(shopCard(s)));
     }
 
-    function showMsg(html) {
-      const body = $('mkBody');
+    function showMsg(node) {
+      const body = $('qdBody');
       body.textContent = '';
-      const p = mk('p', 'mk-empty');
-      p.appendChild(html);
-      body.appendChild(p);
+      body.appendChild(node);
+    }
+
+    // চলমান কুইক অর্ডার থাকলে নিচে ভাসমান পিল
+    async function showLive(uid) {
+      try {
+        const { data } = await supabase
+          .from('delivery_requests')
+          .select('id, status, publish_status, pickup_done_at, order_items, order_no, order_type')
+          .eq('customer_profile_id', uid)
+          .eq('is_market', true)
+          .in('status', ['open', 'confirmed'])
+          .order('created_at', { ascending: false })
+          .limit(5);
+        const list = (data || []);
+        if (!list.length) return;
+        const r = list[0];
+        let st = 'রাইডার খোঁজা হচ্ছে';
+        if (r.publish_status === 'pending' || r.publish_status === 'hold') st = 'যাচাই হচ্ছে';
+        if (r.status === 'confirmed') st = r.pickup_done_at ? 'রাইডার পথে আছেন' : 'রাইডার দোকানে যাচ্ছেন';
+        const it = Array.isArray(r.order_items) && r.order_items[0];
+        $('qdLiveT').textContent = list.length > 1 ? bnNum(list.length) + 'টি চলমান অর্ডার' : 'চলমান অর্ডার';
+        const nm = r.order_type === 'anything' ? 'অর্ডার এনিথিং' : r.order_type === 'send' ? 'পাঠান' : (it && it.shop_name) || '';
+        $('qdLiveS').textContent = st + (nm ? ' · ' + nm : '');
+        $('qdLive').href = list.length > 1 ? '/my-orders' : '/market/order?id=' + encodeURIComponent(r.id);
+        $('qdLive').hidden = false;
+      } catch (e) { /* পিল না দেখালেও চলবে */ }
     }
 
     async function init() {
       showLoc();
-      window.addEventListener('smartfeni:upazila-changed', showLoc);
-      $('mkQ').addEventListener('input', (e) => { q = e.target.value; if (active !== ANY) renderBody(); });
-      showMsg(document.createTextNode('লোড হচ্ছে...'));
+      $('qdLoc').addEventListener('click', openLoc);
+      window.addEventListener('smartfeni:market-drop-changed', () => { showLoc(); });
+      let t = null;
+      $('qdQ').addEventListener('input', (e) => {
+        clearTimeout(t);
+        t = setTimeout(() => { q = e.target.value.trim(); qNeedles = searchNeedles(q); renderBody(); }, 180);
+      });
+      const loading = mk('div');
+      if (window.SFLoader) loading.innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      else loading.textContent = 'লোড হচ্ছে…';
+      showMsg(loading);
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        const frag = document.createDocumentFragment();
-        frag.appendChild(document.createTextNode('দোকান দেখতে '));
-        const a = document.createElement('a');
-        a.href = '/login';
-        a.textContent = 'লগইন করুন';
-        frag.appendChild(a);
-        showMsg(frag);
+        const a = mk('button', '', 'লগইন করুন');
+        a.type = 'button';
+        a.addEventListener('click', () => { if (window.openAuthModal) window.openAuthModal(); });
+        showMsg(empty('কুইক ডেলিভারি ব্যবহার করতে লগইন করুন।', 'scooter', a));
         return;
       }
+      const access = await marketAccess();
+      if (!access.allowed) {
+        showMsg(empty('কুইক ডেলিভারি শীঘ্রই আসছে।', 'scooter'));
+        return;
+      }
+      if (!access.enabled) toast('টেস্ট মোড: কুইক ডেলিভারি এখনো সবার জন্য বন্ধ');
+
+      showLive(session.user.id);
+
+      // প্রথমবার: ঠিকানা না দিলে হোম দেখা যাবে না
+      if (!getDrop()) openLoc();
+
       try {
-        const res = await Promise.all([fetchMarketCategories(), fetchMarketShops()]);
+        const res = await Promise.all([fetchMarketCategories(), fetchMarketShops(), fetchMarketItemIndex().catch(() => ({})), fetchShopRatings(), fetchFavoriteIds().catch(() => new Set())]);
         cats = res[0];
         shops = res[1];
+        itemIdx = res[2] || {};
+        ratings = res[3] || {};
+        favIds = res[4];
       } catch (err) {
         if (window.SFReportError) { try { window.SFReportError(err, 'market-load'); } catch (e) {} }
-        showMsg(document.createTextNode('লোড করতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।'));
+        showMsg(empty('লোড করতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।', 'basket'));
         return;
       }
-      active = cats.length ? cats[0].id : ANY;
-      renderTabs();
+      const foodCat = cats.find((c) => c.icon === 'food' || c.slug === 'food');
+      active = foodCat ? foodCat.id : cats.length ? cats[0].id : ANY;
+      renderCats();
+      setPlaceholder();
+      paintFavBtn();
+      $('qdFav').addEventListener('click', () => { favOnly = !favOnly; paintFavBtn(); renderBody(); });
       renderBody();
     }
+
+    // পেছনে ফিরলে (bfcache) চলমান অর্ডারের পিল আবার দেখি
+    window.addEventListener('pageshow', async (e) => {
+      if (!e.persisted) return;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) { showLive(session.user.id); favIds = await fetchFavoriteIds(); if (shops.length) renderBody(); }
+      } catch (_) {}
+    });
 
     init();
   </script>

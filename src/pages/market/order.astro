@@ -1,0 +1,879 @@
+---
+// path: src/pages/market/order.astro
+// ============================================================
+// কুইক ডেলিভারি — অর্ডার প্যানেল (/market/order?id=...)। ব্রান্চ: marketplace, ধাপ ৫।
+// এক প্যানেলেই সব: স্ট্যাটাস কার্ড, লাইভ টাইমলাইন, অ্যাডমিন ডিল, রাইডারের অফার/কনফার্ম,
+// রাইডার কার্ড (কল/চ্যাট), অর্ডারের বিবরণ, বাতিল, রিপোর্ট, রিভিউ, আবার অর্ডার।
+// - কাস্টমারের "পেয়েছি" ধাপ নেই: রাইডার ডেলিভারি কনফার্ম করলেই সম্পন্ন (SF সিদ্ধান্ত)
+// - বিদ্যমান API/RPC: confirm-best-price, update-asking-price, cancel-request, submit-review,
+//   customer_respond_admin_offer, raise-dispute (DisputeReasonModal), ChatModal
+// - লাইভ আপডেট: realtime + প্রতি ১৫ সেকেন্ডে রিফ্রেশ
+// - অগ্রিম পেমেন্ট ধাপ ৬-এ (এখন টাইমলাইনে শুধু দেখায়)
+// - সব লেখা textContent দিয়ে বসানো (এস্কেপ)।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+import ChatModal from '../../components/delivery/ChatModal.astro';
+import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.astro';
+---
+
+<BaseLayout title="অর্ডার | কুইক ডেলিভারি">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="qo" id="qo">
+    <header class="qo-top">
+      <a class="qo-round" href="/market" aria-label="কুইক ডেলিভারিতে ফিরুন">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      </a>
+      <div class="qo-top-t">
+        <h1 id="qoTitle">আপনার অর্ডার</h1>
+        <span id="qoNo"></span>
+      </div>
+    </header>
+    <div id="qoBody" class="qo-body"></div>
+  </div>
+
+  <!-- বাতিলের কারণ -->
+  <div class="qo-ov" id="qoCancelOv" hidden>
+    <div class="qo-sheet" role="dialog" aria-modal="true" aria-labelledby="qoCancelT">
+      <h2 id="qoCancelT">কেন বাতিল করছেন?</h2>
+      <div class="qo-reasons" id="qoReasons"></div>
+      <button type="button" class="qo-btn danger" id="qoCancelGo" disabled>অর্ডার বাতিল করুন</button>
+      <button type="button" class="qo-btn ghost" id="qoCancelNo">থাক</button>
+    </div>
+  </div>
+
+  <!-- অগ্রিম পেমেন্ট শিট -->
+  <div class="qo-ov" id="qoPayOv" hidden>
+    <div class="qo-sheet qo-pay" role="dialog" aria-modal="true" aria-labelledby="qoPayT">
+      <button type="button" class="qo-x" id="qoPayX" aria-label="বন্ধ করুন">✕</button>
+      <h2 id="qoPayT">অগ্রিম পেমেন্ট</h2>
+      <p class="qo-sub" id="qoPayMode"></p>
+      <div class="qo-methods" role="group" aria-label="মাধ্যম">
+        <button type="button" class="qo-m bkash" id="qoMBkash" aria-pressed="true" aria-label="বিকাশ"><img src="/market/pay/bkash.webp" alt="" /></button>
+        <button type="button" class="qo-m nagad" id="qoMNagad" aria-pressed="false" aria-label="নগদ"><img src="/market/pay/nagad.webp" alt="" /></button>
+      </div>
+      <div class="qo-paynum bkash" id="qoPayBox">
+        <div class="qo-paytop"><small id="qoPayNumL">বিকাশ নম্বর (Send Money)</small><span class="qo-paylogo"><img id="qoPayLogo" src="/market/pay/bkash.webp" alt="" /></span></div>
+        <div><b id="qoPayNum">—</b><button type="button" class="qo-copy" id="qoPayCopy">কপি</button></div>
+      </div>
+      <label class="qo-pf"><span>কত টাকা পাঠিয়েছেন <i class="required-mark">*</i></span><input id="qoPayAmt" type="number" inputmode="numeric" min="1" max="99999" /></label>
+      <div class="qo-pf-row">
+        <label class="qo-pf"><span>TrxID</span><input id="qoPayTrx" maxlength="30" autocomplete="off" placeholder="যেমন: 9KX4ABCD12" /></label>
+        <label class="qo-pf small"><span>অথবা শেষ ৪ ডিজিট</span><input id="qoPayL4" inputmode="numeric" maxlength="4" placeholder="১২৩৪" /></label>
+      </div>
+      <p class="qo-hint">TrxID অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ ডিজিট, যেকোনো একটা দিন।</p>
+      <label class="qo-pf"><span>স্ক্রিনশট (ঐচ্ছিক)</span><input id="qoPayFile" type="file" accept="image/*" /></label>
+      <p class="qo-bad" id="qoPayErr" role="alert" hidden></p>
+      <button type="button" class="qo-btn" id="qoPayGo">পেমেন্ট জমা দিন</button>
+    </div>
+  </div>
+
+  <ChatModal />
+  <DisputeReasonModal />
+
+  <style is:global>
+    #siteNavbar { display: none !important; }
+    .qo { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F4F6FA; min-height: 100vh; max-width: 600px; margin: 0 auto; padding-bottom: 120px; }
+    .qo * { box-sizing: border-box; }
+    .qo button, .qo input, .qo textarea, .qo-ov button { font-family: inherit; }
+    .qo-top { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 12px; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; background: rgba(244,246,250,.94); backdrop-filter: blur(8px); }
+    .qo-round { width: 44px; height: 44px; border-radius: 22px; background: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(27,42,74,.1); flex: none; }
+    .qo-round svg { width: 21px; height: 21px; fill: none; stroke: #1B2A4A; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }
+    .qo-top-t h1 { margin: 0; font-size: 21px; line-height: 1.2; }
+    .qo-top-t span { font-size: 13.5px; color: #4A5568; font-weight: 600; }
+    .qo-body { padding: 4px 16px 0; }
+
+    .qo-hero { position: relative; overflow: hidden; border-radius: 26px; padding: 22px 20px; color: #fff; min-height: 168px; margin-bottom: 14px; background: linear-gradient(135deg, #1B2A4A 0%, #2C4372 100%); box-shadow: 0 10px 28px rgba(27,42,74,.22); }
+    .qo-hero.orange { background: linear-gradient(135deg, #E8551C 0%, #FF8A55 100%); }
+    .qo-hero.green { background: linear-gradient(135deg, #0F5E4C 0%, #1F8A6E 100%); }
+    .qo-hero.grey { background: linear-gradient(135deg, #4A5568 0%, #718096 100%); }
+    .qo-hero::after { content: ''; position: absolute; right: -50px; top: -60px; width: 200px; height: 200px; border-radius: 50%; background: rgba(255,255,255,.1); }
+    .qo-hero small { position: relative; z-index: 1; font-size: 13px; font-weight: 700; opacity: .9; }
+    .qo-hero h2 { position: relative; z-index: 1; margin: 6px 0 4px; font-size: 24px; line-height: 1.3; max-width: 64%; }
+    .qo-hero p { position: relative; z-index: 1; margin: 0; font-size: 14px; line-height: 1.55; opacity: .92; max-width: 62%; }
+    .qo-hero img { position: absolute; right: 8px; bottom: 8px; width: 120px; height: 120px; object-fit: contain; filter: drop-shadow(0 10px 14px rgba(0,0,0,.28)); z-index: 1; }
+    .qo-hero .pulse { animation: qoBob 1.8s ease-in-out infinite; }
+    @keyframes qoBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+    @media (prefers-reduced-motion: reduce) { .qo-hero .pulse { animation: none; } }
+
+    .qo-card { background: #fff; border-radius: 22px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 18px rgba(27,42,74,.06); }
+    .qo-h { margin: 0 0 12px; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .qo-h img { width: 28px; height: 28px; object-fit: contain; }
+
+    .qo-tl { list-style: none; margin: 0; padding: 0; }
+    .qo-tl li { position: relative; padding: 0 0 18px 40px; min-height: 40px; }
+    .qo-tl li::before { content: ''; position: absolute; left: 9px; top: 3px; width: 16px; height: 16px; border-radius: 50%; border: 2.5px solid #C9D0DB; background: #fff; box-sizing: border-box; }
+    .qo-tl li::after { content: ''; position: absolute; left: 16px; top: 22px; bottom: 0; width: 2px; background: #E2E7EF; }
+    .qo-tl li:last-child { padding-bottom: 0; }
+    .qo-tl li:last-child::after { display: none; }
+    .qo-tl li.done::before { border-color: #1F8A5B; background: #1F8A5B; }
+    .qo-tl li.done::after { background: #1F8A5B; }
+    .qo-tl li.now::before { border-color: #FF6B35; background: #FF6B35; box-shadow: 0 0 0 6px rgba(255,107,53,.18); }
+    .qo-tl li.skip::before { border-style: dashed; }
+    .qo-tl b { display: block; font-size: 15.5px; }
+    .qo-tl span { display: block; font-size: 13px; color: #4A5568; margin-top: 1px; }
+    .qo-tl li.todo b { color: #6B7891; font-weight: 600; }
+
+    .qo-offer { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 18px; background: #FFF4EC; border: 1.5px solid #FFD9C4; }
+    .qo-offer-p { font-size: 28px; font-weight: 700; color: #E8551C; line-height: 1; }
+    .qo-offer-t { flex: 1; min-width: 0; font-size: 13.5px; color: #4A5568; line-height: 1.5; }
+    .qo-offer-t b { color: #1B2A4A; font-size: 15px; display: block; }
+    .qo-wait { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 18px; background: #F3F5F9; font-size: 14.5px; color: #33415C; }
+    .qo-dots { display: inline-flex; gap: 4px; }
+    .qo-dots i { width: 7px; height: 7px; border-radius: 50%; background: #FF6B35; animation: qoDot 1.2s infinite ease-in-out; }
+    .qo-dots i:nth-child(2) { animation-delay: .15s; } .qo-dots i:nth-child(3) { animation-delay: .3s; }
+    @keyframes qoDot { 0%,80%,100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: none; } }
+    .qo-inc { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+    .qo-inc span { font-size: 13.5px; color: #4A5568; font-weight: 600; margin-right: 4px; }
+    .qo-chip { min-height: 40px; padding: 0 14px; border-radius: 12px; border: 1.5px solid #E2E7EF; background: #fff; color: #1B2A4A; font-weight: 700; font-size: 14.5px; cursor: pointer; }
+
+    .qo-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 52px; margin-top: 12px; border: 0; border-radius: 16px; background: #FF6B35; color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; text-decoration: none; box-shadow: 0 8px 20px rgba(232,85,28,.28); }
+    .qo-btn.navy { background: #1B2A4A; box-shadow: 0 8px 20px rgba(27,42,74,.22); }
+    .qo-btn.ghost { background: none; color: #1B2A4A; box-shadow: none; border: 1.5px solid #E2E7EF; }
+    .qo-btn.danger { background: #fff; color: #B42318; box-shadow: none; border: 1.5px solid #F3C5BF; }
+    .qo-btn:disabled { opacity: .55; cursor: not-allowed; }
+    .qo-row2 { display: flex; gap: 10px; }
+    .qo-row2 .qo-btn { flex: 1; }
+
+    .qo-rider { display: flex; align-items: center; gap: 14px; }
+    .qo-ava { width: 64px; height: 64px; border-radius: 20px; background: #FFE3D1 center/cover no-repeat; flex: none; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; }
+    .qo-rider b { display: block; font-size: 17px; }
+    .qo-rider small { font-size: 13.5px; color: #4A5568; }
+    .qo-star { color: #E8A100; font-weight: 700; }
+
+    .qo-det summary { list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 17px; font-weight: 700; min-height: 30px; }
+    .qo-det summary::-webkit-details-marker { display: none; }
+    .qo-det summary .sp { flex: 1; }
+    .qo-det summary em { font-style: normal; font-size: 13.5px; color: #E8551C; }
+    .qo-det[open] summary em .o { display: none; }
+    .qo-det:not([open]) summary em .c { display: none; }
+    .qo-line { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #EEF1F5; font-size: 14.5px; }
+    .qo-line:last-child { border-bottom: 0; }
+    .qo-line span { color: #33415C; }
+    .qo-bill div { display: flex; justify-content: space-between; padding: 5px 0; font-size: 14.5px; color: #33415C; }
+    .qo-bill .tot { font-size: 17px; font-weight: 700; color: #1B2A4A; border-top: 1.5px dashed #E2E7EF; margin-top: 6px; padding-top: 10px; }
+    .qo-trip { margin-top: 12px; }
+    .qo-stop { position: relative; padding: 0 0 12px 26px; font-size: 14px; line-height: 1.5; }
+    .qo-stop::before { content: ''; position: absolute; left: 4px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: #1B2A4A; }
+    .qo-stop.drop::before { background: #FF6B35; }
+    .qo-stop small { display: block; font-size: 12px; font-weight: 700; color: #6B7891; }
+
+    .qo-stars { display: flex; gap: 6px; justify-content: center; margin: 4px 0 10px; }
+    .qo-stars button { width: 46px; height: 46px; border: 0; background: none; font-size: 34px; color: #D5DCE8; cursor: pointer; line-height: 1; }
+    .qo-stars button.on { color: #F5B301; }
+    .qo-f textarea { width: 100%; height: 76px; border: 1.5px solid #E2E7EF; border-radius: 14px; padding: 10px 14px; font-size: 15px; resize: none; color: #1B2A4A; }
+    .qo-note { font-size: 13px; color: #6B7891; text-align: center; margin: 10px 0 0; }
+    .qo-link { display: block; width: 100%; margin-top: 10px; min-height: 44px; border: 0; background: none; color: #B42318; font-weight: 700; font-size: 14.5px; cursor: pointer; text-decoration: underline; }
+
+    .qo-empty { text-align: center; padding: 50px 16px; color: #4A5568; font-size: 15.5px; line-height: 1.6; }
+    .qo-empty img { width: 110px; height: 110px; object-fit: contain; display: block; margin: 0 auto 10px; }
+
+    .qo-ov { position: fixed; inset: 0; z-index: 9500; background: rgba(15,23,42,.55); display: flex; align-items: flex-end; justify-content: center; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; }
+    .qo-ov[hidden] { display: none; }
+    .qo-sheet { width: 100%; max-width: 600px; background: #fff; border-radius: 26px 26px 0 0; padding: 22px 18px calc(16px + env(safe-area-inset-bottom)); }
+    .qo-sheet h2 { margin: 0 0 12px; font-size: 20px; }
+    .qo-reasons { display: flex; flex-direction: column; gap: 8px; }
+    .qo-reason { display: flex; align-items: center; gap: 10px; min-height: 50px; padding: 0 14px; border-radius: 14px; border: 1.5px solid #E2E7EF; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .qo-reason input { width: 20px; height: 20px; accent-color: #FF6B35; }
+    .qo-reason:has(input:checked) { border-color: #FF6B35; background: #FFF4EC; }
+    .qo-desc { margin: 0 0 8px; font-size: 15px; line-height: 1.6; color: #1B2A4A; white-space: pre-line; }
+    .qo-photos { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .qo-photos img { width: 84px; height: 84px; object-fit: cover; border-radius: 14px; background: #F3F5F9; cursor: zoom-in; }
+    .qo-ph { display: inline; font-size: 13px; color: #4A5568; font-weight: 600; }
+    .qo-qtot { display: flex; justify-content: space-between; padding: 10px 0 0; margin-top: 4px; border-top: 1.5px dashed #E2E7EF; font-size: 17px; font-weight: 700; }
+    .qo-receipt { display: block; width: 100%; max-height: 260px; object-fit: contain; margin-top: 12px; border-radius: 14px; background: #F3F5F9; cursor: zoom-in; }
+    .qo-sub { margin: 0 0 12px; font-size: 14px; color: #4A5568; line-height: 1.5; }
+    .qo-rv-q { margin: 8px 0 4px; font-weight: 700; color: #1B2A4A; }
+    .qo-due { margin: 0 0 12px; padding: 10px 13px; border-radius: 14px; background: #FFF4E5; color: #9C4A00; font-size: 14px; font-weight: 600; line-height: 1.5; border: 1px dashed #FBC490; }
+    .qo-bad { margin: 0 0 12px; padding: 11px 13px; border-radius: 14px; background: #FDECEA; color: #A3261B; font-size: 14px; font-weight: 600; line-height: 1.5; }
+    .qo-bad[hidden] { display: none; }
+    .qo-opts { display: flex; flex-direction: column; gap: 10px; }
+    .qo-opt { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px 16px; border-radius: 18px; border: 1.5px solid #E2E7EF; background: #fff; color: #1B2A4A; cursor: pointer; }
+    .qo-opt:first-child { border-color: #FF6B35; background: #FFF6F0; }
+    .qo-opt span { flex: 1; min-width: 0; }
+    .qo-opt b { display: block; font-size: 16px; }
+    .qo-opt small { display: block; font-size: 13px; color: #4A5568; }
+    .qo-opt em { font-style: normal; font-size: 20px; font-weight: 700; color: #E8551C; }
+    .qo-paid { background: linear-gradient(135deg, #E3F3EA, #F2FBF6); border: 1.5px solid #BFE5CF; }
+    .qo-paid b { display: block; font-size: 17px; color: #17663F; }
+    .qo-paid span { display: block; font-size: 14px; color: #33415C; margin-top: 2px; }
+    .qo-pay { position: relative; max-height: 92vh; overflow-y: auto; }
+    .qo-x { position: absolute; right: 12px; top: 12px; width: 42px; height: 42px; border-radius: 21px; border: 0; background: #F3F5F9; font-size: 17px; cursor: pointer; color: #1B2A4A; }
+    .qo-methods { display: flex; gap: 10px; margin-bottom: 12px; }
+    .qo-m { flex: 1; min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 16px; border: 2px solid #E2E7EF; background: #fff; color: #1B2A4A; font-size: 16px; font-weight: 700; cursor: pointer; }
+    .qo-m[hidden] { display: none; }
+    .qo-m img { height: 34px; width: auto; max-width: 100%; object-fit: contain; }
+    .qo-paytop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .qo-paylogo { background: #fff; border-radius: 10px; padding: 3px 8px; display: inline-flex; }
+    .qo-paylogo img { height: 22px; width: auto; display: block; }
+    .qo-m.bkash[aria-pressed='true'] { border-color: #E2136E; background: #FDEAF3; }
+    .qo-m.nagad[aria-pressed='true'] { border-color: #F6921E; background: #FEF3E6; }
+    .qo-paynum { border-radius: 18px; padding: 12px 14px; color: #fff; margin-bottom: 4px; }
+    .qo-paynum.bkash { background: linear-gradient(135deg, #C2105E, #E2136E); }
+    .qo-paynum.nagad { background: linear-gradient(135deg, #D8401F, #F6921E); }
+    .qo-paynum small { font-size: 12.5px; font-weight: 600; opacity: .9; }
+    .qo-paynum > div:last-child { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 2px; }
+    .qo-paynum b { font-size: 23px; letter-spacing: 1px; }
+    .qo-copy { min-height: 40px; padding: 0 16px; border-radius: 12px; border: 0; background: rgba(255,255,255,.95); color: #1B2A4A; font-weight: 700; font-size: 14.5px; cursor: pointer; }
+    .qo-pf { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; flex: 1; min-width: 0; }
+    .qo-pf span { font-size: 13px; font-weight: 600; color: #4A5568; }
+    .qo-pf i.required-mark { color: #D14343; font-style: normal; }
+    .qo-pf input { width: 100%; height: 48px; border: 1.5px solid #E2E7EF; border-radius: 14px; padding: 0 14px; font-size: 16px; color: #1B2A4A; background: #FBFCFE; }
+    .qo-pf input[type=file] { height: auto; padding: 10px; font-size: 14px; }
+    .qo-pf input:focus { outline: 0; border-color: #1B2A4A; }
+    .qo-pf.small { flex: 0 0 38%; }
+    .qo-pf-row { display: flex; gap: 10px; }
+    .qo-hint { margin: 6px 0 0; font-size: 12.5px; color: #6B7891; line-height: 1.5; }
+    .qo-opt:focus-visible, .qo-m:focus-visible, .qo-copy:focus-visible, .qo-x:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+    .qo-btn:focus-visible, .qo-round:focus-visible, .qo-chip:focus-visible, .qo-stars button:focus-visible, .qo-link:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { bnNum } from '../../lib/marketApi.js';
+    import { confirmBestPrice, updateAskingPrice, cancelRequest, submitReview } from '../../lib/deliveryClient.js';
+    import { addItem, clearCart } from '../../lib/marketCart.js';
+    import { compressImage } from '../../lib/imageCompress.js';
+
+    const $ = (id) => document.getElementById(id);
+    const reqId = new URLSearchParams(location.search).get('id');
+    let wantReorder = new URLSearchParams(location.search).get('reorder') === '1';
+    const tk = (n) => '৳' + bnNum(Math.round(Number(n) || 0));
+    let req = null;
+    let reviewed = false;
+    let busy = false;
+    let pollTimer = null;
+    let payments = [];
+    let payCfg = { bkash: '', nagad: '' };
+    function lastPay() { return payments[0] || null; }
+
+    function toast(m, t) { if (window.showToast) window.showToast(m, t || 'info'); }
+    function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
+    function icon(n) { const i = mk('img'); i.src = '/market/icons/' + n + '.webp'; i.alt = ''; i.setAttribute('aria-hidden', 'true'); return i; }
+    function card(title, ic) {
+      const c = mk('section', 'qo-card');
+      if (title) { const h = mk('h2', 'qo-h'); if (ic) h.appendChild(icon(ic)); h.appendChild(document.createTextNode(title)); c.appendChild(h); }
+      return c;
+    }
+    function btn(text, cls, onClick) {
+      const b = mk('button', 'qo-btn' + (cls ? ' ' + cls : ''), text);
+      b.type = 'button';
+      b.addEventListener('click', async () => {
+        if (busy) return;
+        busy = true; b.disabled = true;
+        try { await onClick(); } finally { busy = false; b.disabled = false; }
+      });
+      return b;
+    }
+    function timeBn(iso) {
+      if (!iso) return '';
+      try { return new Date(iso).toLocaleTimeString('bn-BD', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dhaka' }); } catch (e) { return ''; }
+    }
+
+    // ---------- অবস্থা ----------
+    function stage(r) {
+      if (r.status === 'cancelled') return 'cancelled';
+      if (r.status === 'disputed') return 'disputed';
+      if (r.status === 'completed' || r.status === 'delivered') return 'done';
+      if (r.status === 'confirmed') {
+        if (r.pickup_done_at) return 'onway';
+        return r.is_market && !r.advance_verified ? 'advance' : 'pickup';
+      }
+      if (r.publish_status === 'pending' || r.publish_status === 'hold') return 'review';
+      if (r.expires_at && new Date(r.expires_at).getTime() < Date.now()) return 'expired';
+      return 'finding';
+    }
+
+    function offers() { return (req.delivery_offers || []).filter((o) => o.status === 'active'); }
+    function bestOffer() { const o = offers(); return o.length ? Math.min(...o.map((x) => Number(x.offer_price))) : null; }
+    function kind() { return req.order_type === 'anything' ? 'anything' : req.order_type === 'send' ? 'send' : 'shop'; }
+    function shopName() {
+      if (kind() === 'anything') return 'অর্ডার এনিথিং';
+      if (kind() === 'send') return 'পাঠান / এনে দাও';
+      const it = Array.isArray(req.order_items) && req.order_items[0];
+      if (it && it.shop_name) return it.shop_name;
+      const m = /কুইক ডেলিভারি · ([^:]+):/.exec(req.description || '');
+      return m ? m[1] : 'দোকান';
+    }
+
+    function advanceHero() {
+      const lp = lastPay();
+      if (lp && lp.status === 'pending') return ['orange', 'অগ্রিম যাচাই হচ্ছে', 'যাচাই হলেই রাইডার রওনা দেবেন।', 'bags', true];
+      if (kind() === 'anything' && req.purchase_total === null) return ['orange', 'রাইডার দাম জানাচ্ছেন…', 'রাইডার দোকানে গিয়ে দাম জানাবেন। চাইলে এখনই শুধু চার্জ দিতে পারেন।', 'basket', true];
+      if (kind() === 'anything') return ['orange', 'দাম এসেছে, অগ্রিম দিন', 'রাইডারের পাঠানো দাম দেখে অগ্রিম দিন।', 'bags', true];
+      if (kind() === 'send') return ['orange', 'অগ্রিম দিন', 'শুধু ডেলিভারি চার্জ দিলেই রাইডার নিতে যাবেন।', 'bags', true];
+      return ['orange', 'অগ্রিম দিন', 'রাইডার ঠিক হয়েছে। অগ্রিম দিলেই দোকানে যাবেন।', 'bags', true];
+    }
+
+    function hero() {
+      const s = stage(req);
+      const map = {
+        review: ['blue', 'অর্ডার যাচাই হচ্ছে', 'স্মার্ট ফেনী টিম অর্ডারটি দেখছে, একটু পরেই রাইডারদের কাছে যাবে।', 'bags', true],
+        finding: ['orange', 'রাইডার খোঁজা হচ্ছে…', offers().length ? 'রাইডাররা অফার দিচ্ছেন। পছন্দ হলে কনফার্ম করুন।' : 'কাছের রাইডারদের জানানো হয়েছে।', 'scooter', true],
+        advance: advanceHero(),
+        pickup: ['blue', kind() === 'send' ? 'রাইডার নিতে যাচ্ছেন' : 'রাইডার দোকানে যাচ্ছেন', kind() === 'send' ? 'পিকআপের জায়গা থেকে জিনিস নেবেন।' : kind() === 'anything' ? 'আপনার জিনিস কিনে আনবেন।' : shopName() + ' থেকে আপনার অর্ডার নেবেন।', 'scooter', true],
+        onway: ['orange', 'রাইডার পথে আছেন', 'আপনার অর্ডার নিয়ে আসছেন। ফোনটা কাছে রাখুন।', 'scooter', true],
+        done: ['green', 'ডেলিভারি হয়েছে', 'অর্ডারটি সম্পন্ন। স্মার্ট ফেনীর সাথে থাকার জন্য ধন্যবাদ!', 'food', false],
+        cancelled: ['grey', 'অর্ডার বাতিল', 'এই অর্ডারটি বাতিল হয়েছে।', 'basket', false],
+        expired: ['grey', 'রাইডার পাওয়া যায়নি', 'সময়ের মধ্যে রাইডার পাওয়া যায়নি। আবার চেষ্টা করুন।', 'basket', false],
+        disputed: ['grey', 'রিপোর্ট জমা হয়েছে', 'অ্যাডমিন বিষয়টি দেখছেন, শিগগিরই যোগাযোগ করা হবে।', 'bags', false],
+      }[s];
+      const h = mk('section', 'qo-hero' + (map[0] === 'blue' ? '' : ' ' + map[0]));
+      h.setAttribute('aria-live', 'polite');
+      h.appendChild(mk('small', '', shopName()));
+      h.appendChild(mk('h2', '', map[1]));
+      h.appendChild(mk('p', '', map[2]));
+      const i = icon(map[3]); if (map[4]) i.className = 'pulse';
+      h.appendChild(i);
+      return h;
+    }
+
+    function timeline() {
+      const s = stage(req);
+      const c = card('অর্ডারের অবস্থা');
+      const ol = mk('ol', 'qo-tl');
+      const curIdx = { review: 1, finding: 2, advance: 3, pickup: 4, onway: 5, done: 6, cancelled: -1, expired: -1, disputed: -1 }[s];
+      const steps = [
+        ['অর্ডার হয়েছে', timeBn(req.created_at)],
+        ['যাচাই হয়েছে', req.published_at ? timeBn(req.published_at) : 'স্মার্ট ফেনী টিম দেখছে'],
+        ['রাইডার কনফার্ম', req.status === 'confirmed' || s === 'done' ? 'রাইডার ঠিক হয়েছে' : 'রাইডারের অফারের অপেক্ষা'],
+        ['অগ্রিম পেমেন্ট', req.advance_verified ? tk(req.advance_verified_amount) + ' পাওয়া গেছে' : lastPay() && lastPay().status === 'pending' ? 'যাচাই হচ্ছে' : 'শুধু চার্জ বা পুরো টাকা'],
+        ['পিকআপ', req.pickup_done_at ? timeBn(req.pickup_done_at) : 'রাইডার দোকান থেকে নেবেন'],
+        ['ডেলিভারি', s === 'done' ? 'সম্পন্ন' : 'আপনার ঠিকানায়'],
+      ];
+      steps.forEach((st, i) => {
+        let cls = 'todo';
+        if (curIdx === -1) cls = i === 0 ? 'done' : 'todo';
+        else if (i < curIdx) cls = 'done';
+        else if (i === curIdx) cls = 'now';
+        if (s === 'done') cls = i === 3 && !req.advance_verified ? 'skip' : 'done';
+        const li = mk('li', cls);
+        li.appendChild(mk('b', '', st[0]));
+        if (st[1]) li.appendChild(mk('span', '', st[1]));
+        ol.appendChild(li);
+      });
+      c.appendChild(ol);
+      return c;
+    }
+
+    // ---------- অ্যাডমিন ডিল ----------
+    function dealCard() {
+      const c = card('স্মার্ট ফেনী টিম', 'bags');
+      if (req.admin_offer_status === 'offered' && req.admin_offer_price) {
+        const o = mk('div', 'qo-offer');
+        o.appendChild(mk('div', 'qo-offer-p', tk(req.admin_offer_price)));
+        const t = mk('div', 'qo-offer-t'); t.appendChild(mk('b', '', 'ডেলিভারি চার্জের প্রস্তাব')); t.appendChild(document.createTextNode('রাজি হলে টিম রাইডার ঠিক করে দেবে।'));
+        o.appendChild(t); c.appendChild(o);
+        const row = mk('div', 'qo-row2');
+        const respond = async (accept) => {
+          const { data, error } = await supabase.rpc('customer_respond_admin_offer', { p_request_id: req.id, p_accept: accept });
+          if (error || !(data && data.ok)) toast('এখন সাড়া দেওয়া যায়নি, আবার চেষ্টা করুন', 'error');
+          else toast(accept ? 'প্রস্তাব নিয়েছেন' : 'প্রস্তাব নাকচ করেছেন', 'success');
+          await load();
+        };
+        row.appendChild(btn('রাজি', '', () => respond(true)));
+        row.appendChild(btn('রাজি না', 'ghost', () => respond(false)));
+        c.appendChild(row);
+      } else if (req.admin_offer_status === 'accepted') {
+        c.appendChild(mk('div', 'qo-wait', 'আপনি ' + tk(req.admin_offer_price) + ' চার্জে রাজি হয়েছেন। টিম রাইডার ঠিক করছে।'));
+      } else {
+        const w = mk('div', 'qo-wait');
+        const d = mk('span', 'qo-dots'); d.appendChild(mk('i')); d.appendChild(mk('i')); d.appendChild(mk('i'));
+        w.appendChild(d); w.appendChild(mk('span', '', 'অর্ডার যাচাই হচ্ছে। দরকার হলে টিম আপনার সাথে কথা বলবে।'));
+        c.appendChild(w);
+      }
+      c.appendChild(btn('টিমের সাথে কথা বলুন', 'ghost', () => {
+        if (window.openChatModal) window.openChatModal({ requestId: req.id, otherPartyName: 'স্মার্ট ফেনী টিম', channel: 'admin' });
+      }));
+      return c;
+    }
+
+    // ---------- রাইডারের অফার ----------
+    function offerCard() {
+      const c = card('রাইডারের অফার', 'scooter');
+      const best = bestOffer();
+      const asking = Number(req.customer_asking_price ?? req.initial_price);
+      if (best === null) {
+        const w = mk('div', 'qo-wait');
+        const d = mk('span', 'qo-dots'); d.appendChild(mk('i')); d.appendChild(mk('i')); d.appendChild(mk('i'));
+        w.appendChild(d); w.appendChild(mk('span', '', 'এখনো কেউ অফার দেয়নি। আপনার চার্জ ' + tk(asking) + '-এ কেউ রাজি হলে সরাসরি কনফার্ম হয়ে যাবে।'));
+        c.appendChild(w);
+      } else {
+        const o = mk('div', 'qo-offer');
+        o.appendChild(mk('div', 'qo-offer-p', tk(best)));
+        const t = mk('div', 'qo-offer-t');
+        t.appendChild(mk('b', '', 'সেরা ডেলিভারি চার্জ'));
+        t.appendChild(document.createTextNode(bnNum(offers().length) + ' জন রাইডার অফার দিয়েছেন'));
+        o.appendChild(t); c.appendChild(o);
+        c.appendChild(btn('এই চার্জে রাইডার কনফার্ম করুন', '', async () => {
+          const { error } = await confirmBestPrice({ requestId: req.id });
+          if (error) toast(error, 'error'); else toast('রাইডার কনফার্ম হয়েছে', 'success');
+          await load();
+        }));
+      }
+      const inc = mk('div', 'qo-inc');
+      inc.appendChild(mk('span', '', 'তাড়াতাড়ি পেতে চার্জ বাড়ান:'));
+      [10, 20, 30].forEach((n) => {
+        const b = mk('button', 'qo-chip', '+' + bnNum(n));
+        b.type = 'button';
+        b.addEventListener('click', async () => {
+          if (busy) return; busy = true; b.disabled = true;
+          const { error } = await updateAskingPrice({ requestId: req.id, newPrice: asking + n });
+          busy = false; b.disabled = false;
+          if (error) toast(error, 'error'); else toast('চার্জ ' + tk(asking + n) + ' করা হয়েছে', 'success');
+          await load();
+        });
+        inc.appendChild(b);
+      });
+      c.appendChild(inc);
+      return c;
+    }
+
+
+    // ---------- অগ্রিম পেমেন্ট ----------
+    function fareNow() { return Math.round(Number(req.final_price || req.current_price || req.initial_price || 0)); }
+    function fullNow() { return Math.round(Number(req.items_total || 0)) + fareNow(); }
+
+    function advanceCard() {
+      const c = card('অগ্রিম পেমেন্ট', 'bags');
+      const lp = lastPay();
+      if (lp && lp.status === 'pending') {
+        const w = mk('div', 'qo-wait');
+        const d = mk('span', 'qo-dots'); d.appendChild(mk('i')); d.appendChild(mk('i')); d.appendChild(mk('i'));
+        w.appendChild(d);
+        w.appendChild(mk('span', '', tk(lp.amount_claimed) + ' (' + (lp.method === 'nagad' ? 'নগদ' : 'বিকাশ') + ') জমা হয়েছে। স্মার্ট ফেনী টিম যাচাই করছে।'));
+        c.appendChild(w);
+        return c;
+      }
+      if (lp && lp.status === 'mismatch') {
+        const e = mk('div', 'qo-bad', 'আগের পেমেন্ট (' + tk(lp.amount_claimed) + ') মেলেনি।' + (lp.admin_note ? ' কারণ: ' + lp.admin_note : '') + ' দেখে আবার জমা দিন।');
+        c.appendChild(e);
+      }
+      c.appendChild(mk('p', 'qo-sub', 'রাইডার দোকানে যাওয়ার আগে অগ্রিম দিন। বাকিটা পণ্য হাতে পেয়ে।'));
+      if (req.market_accepted_at && !(lp && lp.status === 'mismatch')) {
+        const dl = new Date(new Date(req.market_accepted_at).getTime() + 3600000);
+        const hh = dl.toLocaleTimeString('bn-BD', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dhaka' });
+        c.appendChild(mk('div', 'qo-due', '⏰ ' + hh + '-এর মধ্যে অগ্রিম না দিলে অর্ডারটি অটো-বাতিল হবে।'));
+      }
+      const opts = mk('div', 'qo-opts');
+      const k = kind();
+      const noQuote = k === 'anything' && req.purchase_total === null;
+      const opt = [];
+      if (k === 'send') opt.push(['charge', 'ডেলিভারি চার্জ', fareNow(), 'এর বাইরে কিছু দিতে হবে না']);
+      else if (noQuote) opt.push(['charge', 'শুধু ডেলিভারি চার্জ', fareNow(), 'পণ্যের দাম জানার পর বাকিটা']);
+      else {
+        opt.push(['charge', 'শুধু ডেলিভারি চার্জ', fareNow(), 'বাকি ' + tk(fullNow() - fareNow()) + ' পণ্য হাতে পেয়ে']);
+        opt.push(['full', 'পুরো টাকা', fullNow(), 'ডেলিভারিতে আর কিছু দিতে হবে না']);
+      }
+      if (noQuote) c.appendChild(mk('div', 'qo-wait', 'রাইডার দাম জানালে "পুরো টাকা" অপশনও আসবে।'));
+      opt.forEach(([mode, t, amt, sub]) => {
+        const b = mk('button', 'qo-opt');
+        b.type = 'button';
+        const l = mk('span'); l.appendChild(mk('b', '', t)); l.appendChild(mk('small', '', sub));
+        b.appendChild(l);
+        b.appendChild(mk('em', '', tk(amt)));
+        b.addEventListener('click', () => openPay(mode, amt));
+        opts.appendChild(b);
+      });
+      c.appendChild(opts);
+      return c;
+    }
+
+    function paidCard() {
+      const c = mk('section', 'qo-card qo-paid');
+      c.appendChild(mk('b', '', 'অগ্রিম ' + tk(req.advance_verified_amount) + ' পাওয়া গেছে ✓'));
+      const due = Math.round(Number(req.cod_due || 0));
+      c.appendChild(mk('span', '', due > 0 ? 'পণ্য হাতে পেয়ে রাইডারকে দেবেন ' + tk(due) : 'ডেলিভারিতে আর কিছু দিতে হবে না'));
+      return c;
+    }
+
+    let payMode = 'charge';
+    let payMethod = 'bkash';
+    function openPay(mode, amt) {
+      payMode = mode;
+      $('qoPayAmt').value = String(amt);
+      $('qoPayTrx').value = ''; $('qoPayL4').value = ''; $('qoPayFile').value = '';
+      $('qoPayErr').hidden = true;
+      $('qoPayMode').textContent = mode === 'full' ? 'পুরো টাকা' : 'শুধু ডেলিভারি চার্জ';
+      const nag = $('qoMNagad');
+      nag.hidden = !payCfg.nagad;
+      setMethod(payCfg.bkash ? 'bkash' : 'nagad');
+      $('qoPayOv').hidden = false;
+      document.body.style.overflow = 'hidden';
+    }
+    function setMethod(m) {
+      payMethod = m;
+      $('qoMBkash').setAttribute('aria-pressed', String(m === 'bkash'));
+      $('qoMNagad').setAttribute('aria-pressed', String(m === 'nagad'));
+      $('qoPayNum').textContent = (m === 'nagad' ? payCfg.nagad : payCfg.bkash) || '—';
+      $('qoPayNumL').textContent = (m === 'nagad' ? 'নগদ' : 'বিকাশ') + ' নম্বর (Send Money)';
+      $('qoPayBox').className = 'qo-paynum ' + m;
+      $('qoPayLogo').src = '/market/pay/' + m + '.webp';
+    }
+    function closePay() { $('qoPayOv').hidden = true; document.body.style.overflow = ''; }
+    $('qoMBkash').addEventListener('click', () => setMethod('bkash'));
+    $('qoMNagad').addEventListener('click', () => setMethod('nagad'));
+    $('qoPayX').addEventListener('click', closePay);
+    $('qoPayOv').addEventListener('click', (e) => { if (e.target === $('qoPayOv')) closePay(); });
+    $('qoPayCopy').addEventListener('click', async () => {
+      const n = $('qoPayNum').textContent;
+      try { await navigator.clipboard.writeText(n); toast('নম্বর কপি হয়েছে', 'success'); } catch (e) { toast(n); }
+    });
+    $('qoPayGo').addEventListener('click', async () => {
+      const err = (m) => { const e = $('qoPayErr'); e.textContent = m; e.hidden = false; };
+      const amt = Number($('qoPayAmt').value);
+      const trx = $('qoPayTrx').value.trim();
+      const l4 = $('qoPayL4').value.trim();
+      if (!amt || amt <= 0) return err('কত টাকা পাঠিয়েছেন লিখুন');
+      if (!trx && !l4) return err('TrxID অথবা প্রেরক নম্বরের শেষ ৪ ডিজিট দিন');
+      if (l4 && !/^\d{4}$/.test(l4)) return err('শেষ ৪ ডিজিট ঠিকভাবে লিখুন');
+      if (trx && !/^[A-Za-z0-9]{6,30}$/.test(trx)) return err('TrxID ঠিকভাবে লিখুন');
+      if (busy) return;
+      busy = true;
+      const go = $('qoPayGo'); go.disabled = true; go.textContent = 'জমা হচ্ছে…';
+      let path = null;
+      try {
+        const f = $('qoPayFile').files && $('qoPayFile').files[0];
+        if (f) {
+          const { data: { session } } = await supabase.auth.getSession();
+          let blob = f;
+          try { blob = await compressImage(f); } catch (e) { blob = f; }
+          path = 'market/' + session.user.id + '/' + req.id + '-' + Date.now() + '.jpg';
+          const up = await supabase.storage.from('payment-docs').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+          if (up.error) { path = null; if (window.SFReportError) { try { window.SFReportError(up.error, 'market-advance-screenshot'); } catch (_) {} } }
+        }
+        const { data, error } = await supabase.rpc('market_submit_advance', {
+          p_request_id: req.id, p_mode: payMode, p_method: payMethod, p_amount: amt,
+          p_trx: trx || null, p_last4: l4 || null, p_screenshot: path,
+        });
+        if (error || !(data && data.ok)) { err((error && error.message) || 'জমা দেওয়া যায়নি, আবার চেষ্টা করুন'); return; }
+        closePay();
+        toast('পেমেন্ট জমা হয়েছে, যাচাই হলে জানানো হবে', 'success');
+        lastSig = '';
+        await load();
+      } finally {
+        busy = false; go.disabled = false; go.textContent = 'পেমেন্ট জমা দিন';
+      }
+    });
+
+    const signCache = {};
+    async function signed(path) {
+      if (signCache[path]) return signCache[path];
+      try {
+        const { data } = await supabase.storage.from('chat-images').createSignedUrl(path, 3600);
+        signCache[path] = data && data.signedUrl ? data.signedUrl : '';
+      } catch (e) { signCache[path] = ''; }
+      return signCache[path];
+    }
+
+    function quoteCard() {
+      const c = card('রাইডারের পাঠানো দাম', 'basket');
+      (req.purchase_lines || []).forEach((l, i) => {
+        const row = mk('div', 'qo-line');
+        row.appendChild(mk('span', '', l.label || ('দাম ' + bnNum(i + 1))));
+        row.appendChild(mk('b', '', tk(l.amount)));
+        c.appendChild(row);
+      });
+      const t = mk('div', 'qo-qtot'); t.appendChild(mk('span', '', 'পণ্যের মোট')); t.appendChild(mk('b', '', tk(req.purchase_total))); c.appendChild(t);
+      if (req.purchase_receipt_path) {
+        const im = mk('img', 'qo-receipt'); im.alt = 'রসিদের ছবি'; im.loading = 'lazy';
+        signed(req.purchase_receipt_path).then((u) => { if (u) im.src = u; });
+        im.addEventListener('click', () => { if (im.src) window.open(im.src, '_blank', 'noopener'); });
+        c.appendChild(im);
+      }
+      return c;
+    }
+
+    // ---------- রাইডার ----------
+    function riderCard() {
+      const r = req.accepted_rider || {};
+      const p = r.profiles || {};
+      const c = card('আপনার রাইডার');
+      const row = mk('div', 'qo-rider');
+      const av = mk('div', 'qo-ava');
+      if (r.photo_url) av.style.backgroundImage = 'url("' + encodeURI(r.photo_url) + '")';
+      else av.textContent = String(p.full_name || 'র').charAt(0);
+      row.appendChild(av);
+      const t = mk('div');
+      t.appendChild(mk('b', '', p.full_name || 'রাইডার'));
+      const sm = mk('small');
+      if (Number(r.avg_rating) > 0) sm.appendChild(mk('span', 'qo-star', '★ ' + bnNum(Number(r.avg_rating).toFixed(1)) + '  '));
+      sm.appendChild(document.createTextNode({ bike: 'মোটরসাইকেল', cycle: 'সাইকেল', cng: 'সিএনজি' }[r.vehicle_type] || 'রাইডার'));
+      t.appendChild(sm);
+      row.appendChild(t);
+      c.appendChild(row);
+      const acts = mk('div', 'qo-row2');
+      if (p.phone) {
+        const a = mk('a', 'qo-btn navy', 'কল করুন');
+        a.href = 'tel:' + String(p.phone).replace(/[^\d+]/g, '');
+        acts.appendChild(a);
+      }
+      acts.appendChild(btn('চ্যাট', p.phone ? 'ghost' : 'navy', () => {
+        if (window.openChatModal) window.openChatModal({ requestId: req.id, otherPartyName: p.full_name || 'রাইডার' });
+      }));
+      c.appendChild(acts);
+      const fp = Number(req.final_price || req.current_price || 0);
+      if (fp) c.appendChild(mk('p', 'qo-note', 'ডেলিভারি চার্জ ঠিক হয়েছে: ' + tk(fp)));
+      return c;
+    }
+
+    // ---------- বিবরণ ----------
+    function detailCard() {
+      const c = mk('section', 'qo-card');
+      const d = mk('details', 'qo-det');
+      const sm = mk('summary');
+      sm.appendChild(icon('food'));
+      sm.querySelector('img').style.cssText = 'width:26px;height:26px';
+      sm.appendChild(document.createTextNode('অর্ডারের বিবরণ'));
+      sm.appendChild(mk('span', 'sp'));
+      const em = mk('em'); em.appendChild(mk('span', 'o', 'দেখুন ▾')); em.appendChild(mk('span', 'c', 'বন্ধ ▴')); sm.appendChild(em);
+      d.appendChild(sm);
+      const items = kind() === 'shop' && Array.isArray(req.order_items) ? req.order_items : [];
+      const list = mk('div'); list.style.marginTop = '10px';
+      if (kind() !== 'shop') {
+        const txt = String(req.description || '').replace(/^(যেকোনো কিছু|পাঠান)( · [^·]+)?? · /, '');
+        const p = mk('p', 'qo-desc', txt);
+        list.appendChild(p);
+        if (Array.isArray(req.item_photo_paths) && req.item_photo_paths.length) {
+          const g = mk('div', 'qo-photos');
+          req.item_photo_paths.forEach((path) => {
+            const im = mk('img'); im.alt = 'অর্ডারের ছবি'; im.loading = 'lazy';
+            signed(path).then((u) => { if (u) im.src = u; });
+            im.addEventListener('click', () => { if (im.src) window.open(im.src, '_blank', 'noopener'); });
+            g.appendChild(im);
+          });
+          list.appendChild(g);
+        }
+      }
+      items.forEach((it) => {
+        const l = mk('div', 'qo-line');
+        l.appendChild(mk('span', '', it.name + ' × ' + bnNum(it.qty)));
+        l.appendChild(mk('b', '', tk(Number(it.price) * Number(it.qty))));
+        list.appendChild(l);
+      });
+      d.appendChild(list);
+      const fare = Number(req.final_price || req.current_price || req.initial_price || 0);
+      const sub = Number(req.items_total || 0);
+      const bill = mk('div', 'qo-bill');
+      const r1 = mk('div'); r1.appendChild(mk('span', '', kind() === 'shop' ? 'আইটেমের দাম' : 'পণ্যের দাম')); r1.appendChild(mk('b', '', kind() === 'anything' && req.purchase_total === null ? 'রাইডার জানাবেন' : tk(sub)));
+      if (kind() !== 'send') bill.appendChild(r1);
+      const r2 = mk('div'); r2.appendChild(mk('span', '', 'ডেলিভারি চার্জ')); r2.appendChild(mk('b', '', tk(fare))); bill.appendChild(r2);
+      const r3 = mk('div', 'tot'); r3.appendChild(mk('span', '', 'সর্বমোট')); r3.appendChild(mk('span', '', tk(sub + fare))); bill.appendChild(r3);
+      d.appendChild(bill);
+      const trip = mk('div', 'qo-trip');
+      const a = mk('div', 'qo-stop'); a.appendChild(mk('small', '', 'পিকআপ')); a.appendChild(document.createTextNode(kind() === 'shop' ? shopName() + (req.pickup_address && req.pickup_address !== shopName() ? ', ' + req.pickup_address : '') : (req.pickup_address || ''))); trip.appendChild(a);
+      if (req.pickup_contact_phone) a.appendChild(mk('span', 'qo-ph', ' · ফোন ' + req.pickup_contact_phone));
+      const b = mk('div', 'qo-stop drop'); b.appendChild(mk('small', '', 'ডেলিভারি')); b.appendChild(document.createTextNode(req.drop_address || '')); trip.appendChild(b);
+      if (req.drop_contact_phone) b.appendChild(mk('span', 'qo-ph', ' · প্রাপক ' + (req.drop_contact_name ? req.drop_contact_name + ' ' : '') + req.drop_contact_phone));
+      if (req.drop_instructions) trip.appendChild(mk('div', 'qo-note', 'নির্দেশনা: ' + req.drop_instructions));
+      d.appendChild(trip);
+      c.appendChild(d);
+      return c;
+    }
+
+    // ---------- রিভিউ ----------
+    function reviewCard() {
+      const c = card(kind() === 'shop' ? 'অর্ডার কেমন ছিল?' : 'রাইডার কেমন ছিলেন?', 'scooter');
+      if (kind() === 'shop') c.appendChild(mk('p', 'qo-sub qo-rv-q', 'রাইডার কেমন ছিলেন?'));
+      let rating = 0;
+      const stars = mk('div', 'qo-stars');
+      stars.setAttribute('role', 'radiogroup');
+      stars.setAttribute('aria-label', 'রেটিং');
+      for (let i = 1; i <= 5; i++) {
+        const s = mk('button', '', '★');
+        s.type = 'button';
+        s.setAttribute('aria-label', bnNum(i) + ' তারা');
+        s.addEventListener('click', () => { rating = i; Array.from(stars.children).forEach((x, j) => x.classList.toggle('on', j < i)); });
+        stars.appendChild(s);
+      }
+      c.appendChild(stars);
+      let shopRating = 0;
+      const isShop = kind() === 'shop';
+      if (isShop) {
+        const it = Array.isArray(req.order_items) && req.order_items[0];
+        c.appendChild(mk('p', 'qo-sub qo-rv-q', (it && it.shop_name ? it.shop_name : 'দোকান') + '-এর খাবার/পণ্য কেমন ছিল?'));
+        const st2 = mk('div', 'qo-stars');
+        st2.setAttribute('role', 'radiogroup');
+        st2.setAttribute('aria-label', 'দোকানের রেটিং');
+        for (let i = 1; i <= 5; i++) {
+          const s = mk('button', '', '★');
+          s.type = 'button';
+          s.setAttribute('aria-label', 'দোকান ' + bnNum(i) + ' তারা');
+          s.addEventListener('click', () => { shopRating = i; Array.from(st2.children).forEach((x, j) => x.classList.toggle('on', j < i)); });
+          st2.appendChild(s);
+        }
+        c.appendChild(st2);
+      }
+      const f = mk('label', 'qo-f');
+      const ta = mk('textarea'); ta.maxLength = 300; ta.placeholder = 'কিছু বলতে চাইলে লিখুন (ঐচ্ছিক)'; ta.setAttribute('aria-label', 'মন্তব্য');
+      f.appendChild(ta); c.appendChild(f);
+      c.appendChild(btn('রিভিউ দিন', 'navy', async () => {
+        if (!rating) { toast('রাইডারের জন্য তারা বেছে নিন', 'warning'); return; }
+        if (isShop && !shopRating) { toast('দোকানের জন্য তারা বেছে নিন', 'warning'); return; }
+        if (isShop) {
+          const { error: se } = await supabase.rpc('market_submit_shop_review', { p_request_id: req.id, p_rating: shopRating, p_comment: ta.value.trim() });
+          if (se) { toast('দোকানের রিভিউ জমা হয়নি', 'error'); return; }
+        }
+        const { error } = await submitReview({ requestId: req.id, rating, comment: ta.value.trim() });
+        if (error) toast(error, 'error'); else { toast('ধন্যবাদ! রিভিউ জমা হয়েছে', 'success'); reviewed = true; render(); }
+      }));
+      return c;
+    }
+
+    // ---------- আবার অর্ডার ----------
+    function reorder() {
+      if (kind() !== 'shop') { location.href = '/market/anything' + (kind() === 'send' ? '?type=send' : ''); return; }
+      const items = Array.isArray(req.order_items) ? req.order_items : [];
+      if (!items.length) { location.href = '/market'; return; }
+      clearCart();
+      const sid = items[0].shop_id;
+      items.forEach((it) => {
+        for (let i = 0; i < Number(it.qty || 1); i++) addItem({ id: it.shop_id, name: it.shop_name }, { id: it.item_id, name: it.name, price: it.price }, { replace: true });
+      });
+      location.href = '/market/shop?id=' + encodeURIComponent(sid);
+    }
+
+    // ---------- বাতিল ----------
+    const REASONS = [['mistake', 'ভুলে অর্ডার দিয়েছি'], ['no_offer', 'রাইডার পাচ্ছি না / দেরি হচ্ছে'], ['price', 'চার্জ বেশি লাগছে'], ['not_needed', 'আর লাগবে না']];
+    let cancelCode = '';
+    function openCancel() {
+      const box = $('qoReasons');
+      box.textContent = '';
+      cancelCode = '';
+      $('qoCancelGo').disabled = true;
+      REASONS.forEach(([code, label]) => {
+        const l = mk('label', 'qo-reason');
+        const r = mk('input'); r.type = 'radio'; r.name = 'qoReason'; r.value = code;
+        r.addEventListener('change', () => { cancelCode = code; $('qoCancelGo').disabled = false; });
+        l.appendChild(r); l.appendChild(document.createTextNode(label));
+        box.appendChild(l);
+      });
+      $('qoCancelOv').hidden = false;
+    }
+    $('qoCancelNo').addEventListener('click', () => { $('qoCancelOv').hidden = true; });
+    $('qoCancelOv').addEventListener('click', (e) => { if (e.target === $('qoCancelOv')) $('qoCancelOv').hidden = true; });
+    $('qoCancelGo').addEventListener('click', async () => {
+      if (!cancelCode || busy) return;
+      busy = true; $('qoCancelGo').disabled = true;
+      const { error } = await cancelRequest({ requestId: req.id, reasonCode: cancelCode });
+      busy = false;
+      $('qoCancelOv').hidden = true;
+      if (error) toast(error, 'error'); else toast('অর্ডার বাতিল হয়েছে', 'success');
+      await load();
+    });
+
+    function canReport() {
+      if (req.status === 'confirmed') return true;
+      if (req.status === 'completed') return Date.now() - new Date(req.updated_at).getTime() < 60 * 60 * 1000;
+      return false;
+    }
+
+    // ---------- আঁকা ----------
+    function render() {
+      const body = $('qoBody');
+      body.textContent = '';
+      const s = stage(req);
+      $('qoNo').textContent = (req.order_no ? '#' + req.order_no + ' · ' : '') + new Date(req.created_at).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', timeZone: 'Asia/Dhaka' });
+      body.appendChild(hero());
+      if (s === 'review') body.appendChild(dealCard());
+      if (s === 'finding') body.appendChild(offerCard());
+      if (kind() === 'anything' && Array.isArray(req.purchase_lines) && req.purchase_lines.length && s !== 'cancelled') body.appendChild(quoteCard());
+      if (s === 'advance') body.appendChild(advanceCard());
+      if (s === 'advance' || s === 'pickup' || s === 'onway' || (s === 'done' && req.accepted_rider)) body.appendChild(riderCard());
+      if ((s === 'pickup' || s === 'onway') && req.advance_verified) body.appendChild(paidCard());
+      if (s === 'done' && !reviewed && req.accepted_rider) body.appendChild(reviewCard());
+      body.appendChild(timeline());
+      body.appendChild(detailCard());
+
+      if (s === 'review' || s === 'finding') {
+        const b = btn('অর্ডার বাতিল করুন', 'danger', async () => openCancel());
+        body.appendChild(b);
+      }
+      if (s === 'done' || s === 'cancelled' || s === 'expired') {
+        body.appendChild(btn('আবার অর্ডার করুন', s === 'done' ? 'ghost' : '', async () => reorder()));
+      }
+      if (canReport()) {
+        const l = mk('button', 'qo-link', s === 'done' ? 'অর্ডার পাননি বা সমস্যা হয়েছে? রিপোর্ট করুন' : 'সমস্যা হয়েছে? রিপোর্ট করুন');
+        l.type = 'button';
+        l.addEventListener('click', () => { if (window.openDisputeModal) window.openDisputeModal({ requestId: req.id, onSuccess: load }); });
+        body.appendChild(l);
+      }
+    }
+
+    function empty(text) {
+      const body = $('qoBody');
+      body.textContent = '';
+      const d = mk('div', 'qo-empty');
+      d.appendChild(icon('basket'));
+      d.appendChild(mk('div', '', text));
+      const a = mk('a', 'qo-btn', 'কুইক ডেলিভারিতে ফিরুন'); a.href = '/market';
+      d.appendChild(a);
+      body.appendChild(d);
+    }
+
+    let lastSig = '';
+    async function load() {
+      const { data, error } = await supabase
+        .from('delivery_requests')
+        .select(`*,
+          delivery_offers(id, offer_price, status),
+          accepted_rider:delivery_riders!delivery_requests_accepted_rider_id_fkey(profile_id, vehicle_type, photo_url, avg_rating, profiles!delivery_riders_profile_id_fkey(full_name, phone))`)
+        .eq('id', reqId)
+        .maybeSingle();
+      if (error || !data) {
+        if (!req) empty(error ? 'লোড করা যায়নি। একটু পরে আবার চেষ্টা করুন।' : 'অর্ডারটি পাওয়া যায়নি।');
+        return;
+      }
+      req = data;
+      // অর্ডার হিস্টোরির "আবার অর্ডার করুন" থেকে এলে সরাসরি কার্টে
+      if (wantReorder && ['completed', 'delivered', 'cancelled'].indexOf(req.status) !== -1) { wantReorder = false; reorder(); return; }
+      wantReorder = false;
+      if (req.is_market) {
+        const { data: pays } = await supabase.from('delivery_payments').select('id, mode, method, amount_claimed, trx_id, sender_last4, status, verified_amount, admin_note, created_at').eq('request_id', req.id).order('created_at', { ascending: false });
+        payments = pays || [];
+      }
+      if (req.status === 'completed' && !reviewed) {
+        const { data: rv } = await supabase.from('delivery_reviews').select('request_id').eq('request_id', req.id).maybeSingle();
+        reviewed = !!rv;
+      }
+      // কিছু না বদলালে আবার আঁকি না (টাইপ/স্ক্রল নষ্ট হয় না)
+      const sig = [req.advance_verified, payments.map((p) => p.id + p.status).join(','), req.status, req.publish_status, req.pickup_done_at, req.current_price, req.admin_offer_status, req.updated_at, offers().map((o) => o.id + o.offer_price).join(','), reviewed].join('|');
+      if (sig === lastSig) return;
+      lastSig = sig;
+      const active = document.activeElement;
+      if (active && active.tagName === 'TEXTAREA' && $('qoBody').contains(active)) return; // রিভিউ লিখছে
+      render();
+    }
+
+    function live() {
+      try {
+        supabase
+          .channel('qo-' + reqId + '-' + Math.random().toString(36).slice(2, 7))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_requests', filter: 'id=eq.' + reqId }, () => load())
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_offers', filter: 'request_id=eq.' + reqId }, () => load())
+          .subscribe();
+      } catch (e) { /* পোলিং চলবে */ }
+      pollTimer = setInterval(() => { if (!document.hidden) load(); }, 15000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+    }
+
+    async function init() {
+      const body = $('qoBody');
+      if (window.SFLoader) body.innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      if (!reqId) { empty('অর্ডারটি পাওয়া যায়নি।'); return; }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { empty('অর্ডার দেখতে লগইন করুন।'); if (window.openAuthModal) window.openAuthModal(); return; }
+      try {
+        const { data: st } = await supabase.from('site_settings').select('key, value').in('key', ['market_payment_bkash', 'market_payment_nagad']);
+        (st || []).forEach((r) => { if (r.key === 'market_payment_bkash') payCfg.bkash = (r.value || '').trim(); if (r.key === 'market_payment_nagad') payCfg.nagad = (r.value || '').trim(); });
+      } catch (e) { /* নম্বর না পেলে শুধু ফাঁকা */ }
+      await load();
+      if (req) live();
+    }
+    window.addEventListener('beforeunload', () => { if (pollTimer) clearInterval(pollTimer); });
+
+    init();
+  </script>
+</BaseLayout>

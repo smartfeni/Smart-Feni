@@ -1,0 +1,266 @@
+---
+// path: src/pages/admin/delivery-market-payments.astro
+// ============================================================
+// পেজ: কুইক ডেলিভারির অগ্রিম পেমেন্ট যাচাই (/admin/delivery-market-payments)। ব্রান্চ: marketplace, ধাপ ৬।
+// টেবিল: delivery_payments (পড়া: delivery_orders.view), যাচাই RPC admin_verify_advance (delivery_orders.manage)
+// ট্যাব: যাচাই বাকি / হয়েছে / মেলেনি। স্ক্রিনশট private bucket payment-docs থেকে signed URL।
+// নোটিফিকেশন লিংক এই পেজে আসে (permission: '/admin/delivery-market%' → delivery_orders.view)।
+// প্যাটার্ন: adminGuard.js + smartfeni:admin-ready। সব টেক্সট textContent দিয়ে বসানো।
+// ============================================================
+
+export const prerender = false;
+
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="অগ্রিম পেমেন্ট | স্মার্ট ফেনী">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="mpa">
+    <div id="adminLoadingState" class="mpa-loading"><p>যাচাই করা হচ্ছে…</p></div>
+
+    <div id="adminGuardedContent" style="display:none;">
+      <div class="mpa-head">
+        <div class="mpa-head-in">
+          <a href="/admin/delivery-orders" class="mpa-round" aria-label="ডেলিভারি অর্ডারে ফিরুন">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          </a>
+          <div class="mpa-title">
+            <h1>অগ্রিম পেমেন্ট</h1>
+            <span>কুইক ডেলিভারি</span>
+          </div>
+          <img src="/market/icons/bags.webp" alt="" aria-hidden="true" class="mpa-hic" />
+        </div>
+      </div>
+
+      <div class="mpa-body">
+        <div class="mpa-tabs" role="tablist" aria-label="পেমেন্টের অবস্থা">
+          <button type="button" role="tab" class="mpa-tab" data-t="pending" aria-selected="true">যাচাই বাকি <b id="cPending">০</b></button>
+          <button type="button" role="tab" class="mpa-tab" data-t="verified" aria-selected="false">হয়েছে</button>
+          <button type="button" role="tab" class="mpa-tab" data-t="mismatch" aria-selected="false">মেলেনি</button>
+        </div>
+        <div id="mpaList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mpa-ov" id="mpaImgOv" hidden>
+    <button type="button" class="mpa-x" id="mpaImgX" aria-label="বন্ধ করুন">✕</button>
+    <img id="mpaImg" alt="পেমেন্টের স্ক্রিনশট" />
+  </div>
+
+  <style is:global>
+    .mpa { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F4F6FA; min-height: 70vh; padding-bottom: 100px; overflow-x: hidden; }
+    .mpa * { box-sizing: border-box; }
+    .mpa button, .mpa input { font-family: inherit; }
+    .mpa-loading { padding: 120px 0; text-align: center; color: #5B6B86; font-weight: 600; }
+    .mpa-head { position: relative; left: 50%; width: 100vw; margin-left: -50vw; background: linear-gradient(135deg, #1B2A4A, #2C4372); color: #fff; }
+    .mpa-head-in { max-width: 640px; margin: 0 auto; padding: 14px 16px; display: flex; align-items: center; gap: 12px; min-height: 76px; }
+    .mpa-round { width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; flex: none; }
+    .mpa-round svg { width: 21px; height: 21px; fill: none; stroke: #fff; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }
+    .mpa-title { flex: 1; }
+    .mpa-title h1 { margin: 0; font-size: 20px; color: #fff; }
+    .mpa-title span { font-size: 13px; opacity: .8; }
+    .mpa-hic { width: 46px; height: 46px; object-fit: contain; }
+    .mpa-body { max-width: 640px; margin: 0 auto; padding: 14px 16px; }
+    .mpa-tabs { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; }
+    .mpa-tab { flex: none; min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1.5px solid #E2E7EF; background: #fff; color: #1B2A4A; font-weight: 700; font-size: 14.5px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+    .mpa-tab b { min-width: 24px; height: 24px; border-radius: 12px; background: #FF6B35; color: #fff; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; }
+    .mpa-tab[aria-selected='true'] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+
+    .mpa-card { background: #fff; border-radius: 22px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 18px rgba(27,42,74,.06); }
+    .mpa-top { display: flex; align-items: center; gap: 12px; }
+    .mpa-badge { width: 76px; height: 48px; border-radius: 14px; background: #fff; border: 1.5px solid #EEF1F5; display: flex; align-items: center; justify-content: center; flex: none; padding: 4px 6px; }
+    .mpa-badge img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .mpa-top-t { flex: 1; min-width: 0; }
+    .mpa-top-t b { display: block; font-size: 22px; }
+    .mpa-top-t span { font-size: 13px; color: #4A5568; }
+    .mpa-st { font-size: 12.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+    .mpa-st.pending { background: #FFF1E8; color: #B4400F; }
+    .mpa-st.verified { background: #E3F3EA; color: #17663F; }
+    .mpa-st.mismatch { background: #FDECEA; color: #A3261B; }
+    .mpa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .mpa-kv { background: #F6F8FB; border-radius: 12px; padding: 8px 10px; min-width: 0; }
+    .mpa-kv small { display: block; font-size: 11.5px; font-weight: 600; color: #6B7891; }
+    .mpa-kv b { display: block; font-size: 15px; word-break: break-all; }
+    .mpa-kv.hl { background: #FFF6F0; }
+    .mpa-shot { margin-top: 10px; min-height: 42px; border: 1.5px dashed #C9D0DB; border-radius: 12px; background: none; color: #1B2A4A; font-weight: 700; width: 100%; cursor: pointer; }
+    .mpa-act { margin-top: 12px; padding-top: 12px; border-top: 1px solid #EEF1F5; }
+    .mpa-act label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: #4A5568; margin-bottom: 10px; }
+    .mpa-act input { height: 48px; border: 1.5px solid #E2E7EF; border-radius: 14px; padding: 0 14px; font-size: 16px; color: #1B2A4A; }
+    .mpa-act input:focus { outline: 0; border-color: #1B2A4A; }
+    .mpa-row { display: flex; gap: 10px; }
+    .mpa-ok, .mpa-no { flex: 1; min-height: 50px; border-radius: 14px; font-size: 15.5px; font-weight: 700; cursor: pointer; }
+    .mpa-ok { border: 0; background: #1F8A5B; color: #fff; }
+    .mpa-no { border: 1.5px solid #F3C5BF; background: #fff; color: #B42318; }
+    .mpa-ok:disabled, .mpa-no:disabled { opacity: .55; }
+    .mpa-note { margin-top: 10px; font-size: 13.5px; color: #4A5568; }
+    .mpa-link { display: inline-block; margin-top: 8px; font-size: 14px; font-weight: 700; color: #E8551C; text-decoration: none; }
+    .mpa-empty { text-align: center; padding: 50px 16px; color: #4A5568; font-size: 15px; }
+    .mpa-empty img { width: 96px; height: 96px; object-fit: contain; display: block; margin: 0 auto 8px; }
+    .mpa-ov { position: fixed; inset: 0; z-index: 9900; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .mpa-ov[hidden] { display: none; }
+    .mpa-ov img { max-width: 100%; max-height: 90vh; border-radius: 12px; }
+    .mpa-x { position: absolute; top: 14px; right: 14px; width: 46px; height: 46px; border-radius: 23px; border: 0; background: #fff; font-size: 18px; cursor: pointer; }
+    .mpa-tab:focus-visible, .mpa-ok:focus-visible, .mpa-no:focus-visible, .mpa-shot:focus-visible, .mpa-round:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
+  </style>
+
+  <script>
+    import { initAdminGuard } from '../../lib/adminGuard.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { getSignedUrl } from '../../lib/storageSigned.js';
+
+    const $ = (id) => document.getElementById(id);
+    const bn = (n) => String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
+    const tk = (n) => '৳' + bn(Math.round(Number(n) || 0));
+    let tab = 'pending';
+    let rows = [];
+    let busy = false;
+
+    function toast(m, t) { if (window.showToast) window.showToast(m, t || 'info'); }
+    function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
+    function kv(label, value, hl) { const d = mk('div', 'mpa-kv' + (hl ? ' hl' : '')); d.appendChild(mk('small', '', label)); d.appendChild(mk('b', '', value || '—')); return d; }
+    function when(iso) { try { return new Date(iso).toLocaleString('bn-BD', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dhaka' }); } catch (e) { return ''; } }
+
+    function render() {
+      const box = $('mpaList');
+      box.textContent = '';
+      document.querySelectorAll('.mpa-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.t === tab)));
+      const list = rows.filter((r) => r.status === tab);
+      $('cPending').textContent = bn(rows.filter((r) => r.status === 'pending').length);
+      if (!list.length) {
+        const e = mk('div', 'mpa-empty');
+        const i = mk('img'); i.src = '/market/icons/bags.webp'; i.alt = ''; i.setAttribute('aria-hidden', 'true'); e.appendChild(i);
+        e.appendChild(mk('div', '', tab === 'pending' ? 'যাচাই বাকি কোনো পেমেন্ট নেই' : 'এখানে কিছু নেই'));
+        box.appendChild(e);
+        return;
+      }
+      list.forEach((p) => box.appendChild(cardOf(p)));
+    }
+
+    function cardOf(p) {
+      const r = p.delivery_requests || {};
+      const fare = Number(r.final_price || r.current_price || r.initial_price || 0);
+      const full = Number(r.items_total || 0) + fare;
+      const expected = p.mode === 'full' ? full : fare;
+      const c = mk('article', 'mpa-card');
+      const top = mk('div', 'mpa-top');
+      const bd = mk('div', 'mpa-badge');
+      const li = mk('img'); li.src = '/market/pay/' + (p.method === 'nagad' ? 'nagad' : 'bkash') + '.webp'; li.alt = p.method === 'nagad' ? 'নগদ' : 'বিকাশ';
+      bd.appendChild(li);
+      top.appendChild(bd);
+      const tt = mk('div', 'mpa-top-t');
+      tt.appendChild(mk('b', '', tk(p.amount_claimed)));
+      tt.appendChild(mk('span', '', (p.method === 'nagad' ? 'নগদ' : 'বিকাশ') + ' · ' + (p.mode === 'full' ? 'পুরো টাকা' : 'শুধু চার্জ') + ' · ' + when(p.created_at)));
+      top.appendChild(tt);
+      top.appendChild(mk('span', 'mpa-st ' + p.status, { pending: 'যাচাই বাকি', verified: 'হয়েছে', mismatch: 'মেলেনি' }[p.status]));
+      c.appendChild(top);
+
+      const g = mk('div', 'mpa-grid');
+      g.appendChild(kv('TrxID', p.trx_id, !!p.trx_id));
+      g.appendChild(kv('প্রেরকের শেষ ৪ ডিজিট', p.sender_last4 ? bn(p.sender_last4) : '', !!p.sender_last4));
+      g.appendChild(kv('অর্ডার', r.order_no || ''));
+      g.appendChild(kv('যত হওয়ার কথা', tk(expected) + (Math.round(expected) !== Math.round(Number(p.amount_claimed)) ? ' ⚠️' : '')));
+      const cust = p.customer || {};
+      g.appendChild(kv('কাস্টমার', cust.full_name || ''));
+      g.appendChild(kv('ফোন', cust.phone || ''));
+      const cc = cancelCount[p.customer_id] || 0;
+      g.appendChild(kv('আগে বাতিল (৩০ দিন)', bn(cc) + 'টি' + (cc >= 2 ? ' ⚠️' : '')));
+      c.appendChild(g);
+
+      if (p.screenshot_path) {
+        const b = mk('button', 'mpa-shot', 'স্ক্রিনশট দেখুন');
+        b.type = 'button';
+        b.addEventListener('click', async () => {
+          const url = await getSignedUrl(supabase, 'payment-docs', p.screenshot_path);
+          if (!url || url.indexOf('http') !== 0) { toast('স্ক্রিনশট খোলা যায়নি', 'error'); return; }
+          $('mpaImg').src = url;
+          $('mpaImgOv').hidden = false;
+        });
+        c.appendChild(b);
+      }
+
+      if (p.status === 'pending') {
+        const act = mk('div', 'mpa-act');
+        const l1 = mk('label'); l1.appendChild(document.createTextNode('যাচাই-করা টাকা (বিকাশ/নগদ অ্যাপে যা পেয়েছেন)'));
+        const amt = mk('input'); amt.type = 'number'; amt.inputMode = 'numeric'; amt.value = String(Math.round(Number(p.amount_claimed)));
+        l1.appendChild(amt); act.appendChild(l1);
+        const l2 = mk('label'); l2.appendChild(document.createTextNode('নোট (মেলেনি হলে কারণ, ঐচ্ছিক)'));
+        const note = mk('input'); note.maxLength = 200;
+        l2.appendChild(note); act.appendChild(l2);
+        const row = mk('div', 'mpa-row');
+        const ok = mk('button', 'mpa-ok', 'কনফার্ম করুন'); ok.type = 'button';
+        const no = mk('button', 'mpa-no', 'মিলছে না'); no.type = 'button';
+        const run = async (isOk) => {
+          if (busy) return;
+          const v = Number(amt.value);
+          if (isOk && (!v || v <= 0)) { toast('যাচাই-করা টাকা লিখুন', 'warning'); return; }
+          busy = true; ok.disabled = true; no.disabled = true;
+          const { error } = await supabase.rpc('admin_verify_advance', { p_payment_id: p.id, p_ok: isOk, p_amount: isOk ? v : null, p_note: note.value.trim() || null });
+          busy = false; ok.disabled = false; no.disabled = false;
+          if (error) { toast(error.message || 'হলো না', 'error'); return; }
+          toast(isOk ? 'অগ্রিম কনফার্ম হয়েছে, কাস্টমার ও রাইডারকে জানানো হলো' : 'মিলছে না জানানো হলো', 'success');
+          await load();
+        };
+        ok.addEventListener('click', () => run(true));
+        no.addEventListener('click', () => run(false));
+        row.appendChild(ok); row.appendChild(no);
+        act.appendChild(row);
+        c.appendChild(act);
+      } else {
+        const n = mk('p', 'mpa-note', (p.status === 'verified' ? 'যাচাই-করা: ' + tk(p.verified_amount) : 'মেলেনি') + (p.admin_note ? ' · ' + p.admin_note : ''));
+        c.appendChild(n);
+      }
+      const a = mk('a', 'mpa-link', 'অর্ডার দেখুন →');
+      a.href = '/admin/delivery-orders?open=' + encodeURIComponent(p.request_id);
+      c.appendChild(a);
+      return c;
+    }
+
+    // কাস্টমার নিজে কতগুলো কুইক অর্ডার বাতিল করেছে (৩০ দিনে)
+    let cancelCount = {};
+    async function loadCancels() {
+      const ids = Array.from(new Set(rows.map((r) => r.customer_id).filter(Boolean)));
+      cancelCount = {};
+      if (!ids.length) return;
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      const { data } = await supabase.from('delivery_requests').select('customer_profile_id, cancelled_by')
+        .eq('is_market', true).eq('status', 'cancelled').gte('cancelled_at', since).in('customer_profile_id', ids.slice(0, 150));
+      (data || []).forEach((r) => { if (r.cancelled_by && r.cancelled_by === r.customer_profile_id) cancelCount[r.customer_profile_id] = (cancelCount[r.customer_profile_id] || 0) + 1; });
+    }
+
+    async function load() {
+      const box = $('mpaList');
+      if (!rows.length && window.SFLoader) box.innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      const { data, error } = await supabase
+        .from('delivery_payments')
+        .select('id, request_id, customer_id, mode, method, amount_claimed, trx_id, sender_last4, screenshot_path, status, verified_amount, admin_note, created_at, delivery_requests(order_no, items_total, final_price, current_price, initial_price, status), customer:profiles!delivery_payments_customer_id_fkey(full_name, phone)')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (error) {
+        // প্রোফাইল পড়ার অনুমতি না থাকলে কাস্টমার ছাড়াই
+        const r2 = await supabase
+          .from('delivery_payments')
+          .select('id, request_id, customer_id, mode, method, amount_claimed, trx_id, sender_last4, screenshot_path, status, verified_amount, admin_note, created_at, delivery_requests(order_no, items_total, final_price, current_price, initial_price, status)')
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (r2.error) { box.textContent = ''; box.appendChild(mk('p', 'mpa-empty', 'লোড করা যায়নি: ' + r2.error.message)); return; }
+        rows = r2.data || [];
+      } else rows = data || [];
+      await loadCancels();
+      render();
+    }
+
+    document.querySelectorAll('.mpa-tab').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; render(); }));
+    $('mpaImgX').addEventListener('click', () => { $('mpaImgOv').hidden = true; $('mpaImg').src = ''; });
+    $('mpaImgOv').addEventListener('click', (e) => { if (e.target === $('mpaImgOv')) { $('mpaImgOv').hidden = true; $('mpaImg').src = ''; } });
+
+    let started = false;
+    window.addEventListener('smartfeni:admin-ready', () => {
+      if (started) return;
+      started = true;
+      load();
+      setInterval(() => { if (!document.hidden && !busy && !(document.activeElement && document.activeElement.tagName === 'INPUT')) load(); }, 20000);
+    });
+    initAdminGuard();
+  </script>
+</BaseLayout>
