@@ -24,7 +24,8 @@
   var TPL = [];
   Object.keys(DN).forEach(function (k) {
     if (k.indexOf('{}') === -1) return;
-    try { TPL.push([new RegExp('^' + k.split('{}').map(esc).join('(.+?)') + '$'), DN[k]]); } catch (e) {}
+    var lit = k.split('{}').join('').replace(/[^\u0980-\u09E5\u09F0-\u09F2\u09F4-\u09FF]/g, '').length;
+    try { TPL.push([new RegExp('^' + k.split('{}').map(esc).join('(.+?)') + '$'), DN[k], lit]); } catch (e) {}
     delete DN[k];
   });
   TPL.sort(function (a, b) { return b[0].source.length - a[0].source.length; });
@@ -46,7 +47,15 @@
     if (DN[s] !== undefined) return DN[s];
     for (var i = 0; i < TPL.length; i++) {
       var tm = s.match(TPL[i][0]);
-      if (tm) { var k = 1, val = TPL[i][1]; return val.replace(/\{\}/g, function () { var g = tm[k++] || ''; return BNL.test(g) ? core(norm(g)) : g; }); }
+      if (tm && TPL[i][2] < 8 && tm.slice(1).some(function (g) { return BNL.test(g || ''); })) continue; // ছোট টেমপ্লেটে বাংলা শব্দ ধরবে না
+      if (tm) { var k = 1, val = TPL[i][1]; return val.replace(/\{\}/g, function () { var g = tm[k++] || ''; if (!BNL.test(g)) return g; var c = core(norm(g)); return (k > 2 || val.indexOf('{}') > 0) && /^[A-Z][a-z]+$/.test(c) ? c.toLowerCase() : c; }); }
+    }
+    // কয়েকটা বাক্য/অংশ জোড়া থাকলে আলাদা করে অনুবাদ
+    var parts = s.split(/(?<=[।!?])\s+|\s+·\s+/);
+    if (parts.length > 1) {
+      var seps = s.match(/(?<=[।!?])\s+|\s+·\s+/g) || [];
+      var done = parts.map(function (p) { return core(norm(p)); });
+      if (!done.some(function (p) { return BNL.test(p); })) return done.map(function (p, i) { return p + (i < seps.length ? (seps[i].indexOf('·') !== -1 ? ' · ' : ' ') : ''); }).join('');
     }
     var x = s;
     // সময়: "রাত ১০:৩০" / "১০:৩০ রাত"
@@ -59,7 +68,8 @@
     if (m && BNL.test(m[1]) && DN[norm(m[1])] !== undefined) return DN[norm(m[1])] + ' ' + m[2];
     // সংখ্যার পরে টা/টি
     x = x.replace(/([০-৯\d])\s*(টা|টি|জন)(?![ঀ-৿])/g, '$1');
-    if (SUB) x = x.replace(SUB, function (k) { return DN[k]; });
+    // আংশিক শব্দ বদলে মিশ্র লেখা বানানো হয় না; না মিললে পুরো বাংলাই থাকে (ডিকশনারিতে যোগ করতে হবে)
+    if (BNL.test(x)) return s;
     return x;
   }
 
@@ -69,6 +79,7 @@
     if (hit !== undefined) return hit;
     var lead = (s.match(/^\s*/) || [''])[0], trail = (s.match(/\s*$/) || [''])[0];
     var out = core(norm(s));
+    if (BNL.test(out)) { cache[s] = s; return s; } // অনুবাদ নেই: যেমন আছে তেমন
     out = digits(out).replace(/।/g, '.').replace(/\s{2,}/g, ' ').replace(/\s+([,.!?:)%])/g, '$1').replace(/\(\s+/g, '(');
     out = lead + out.trim() + trail;
     cache[s] = out;
@@ -104,11 +115,13 @@
     if (node.nodeType === 3) { doText(node); return; }
     if (node.nodeType !== 1 && node.nodeType !== 11) return;
     if (node.nodeType === 1) {
+      if (node.nodeName === 'TEXTAREA') { doAttrs(node); return; }
       if (SKIP[node.nodeName] || (node.hasAttribute && node.hasAttribute('data-no-i18n'))) return;
       doAttrs(node);
     }
     var w = document.createTreeWalker(node, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
+        if (n.nodeType === 1 && n.nodeName === 'TEXTAREA' && !n.hasAttribute('data-no-i18n')) { doAttrs(n); return NodeFilter.FILTER_REJECT; }
         if (n.nodeType === 1 && (SKIP[n.nodeName] || n.hasAttribute('data-no-i18n') || n.isContentEditable)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
