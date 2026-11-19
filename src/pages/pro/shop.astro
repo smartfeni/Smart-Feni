@@ -67,6 +67,7 @@ const guideSteps = [
         </div>
         <div class="ps-tabs" id="psTabs" role="tablist">
           <button type="button" class="ps-tab active" data-tab="orders" role="tab">অর্ডার <span class="ps-bdg" id="psBdgNew" style="display:none;"></span></button>
+          <button type="button" class="ps-tab" data-tab="preorders" role="tab" id="psPreTab" style="display:none;">প্রি-অর্ডার <span class="ps-bdg" id="psBdgPre" style="display:none;"></span></button>
           <button type="button" class="ps-tab" data-tab="done" role="tab">সম্পন্ন</button>
           <button type="button" class="ps-tab" data-tab="menu" role="tab">মেনু</button>
           <button type="button" class="ps-tab" data-tab="account" role="tab">হিসাব</button>
@@ -488,7 +489,134 @@ const guideSteps = [
       if (list === null) return;
       if (tab === 'menu') { if (!quiet || !menu.length) await loadMenu(); return; }
       if (tab === 'account') { if (!quiet) await renderAccount(); return; }
+      if (tab === 'preorders') { await renderPreorders(quiet); return; }
       renderOrders(list);
+    }
+
+    // ---------- প্রি-অর্ডার (সরাসরি দোকানে; রাইডার ফ্লো নেই) ----------
+    const PO_ST = { pending: ['নতুন · কনফার্ম করুন', '#C2410C', '#FFF1E8'], confirmed: ['কনফার্ম হয়েছে', '#1D4ED8', '#EAF1FF'], dispatched: ['রাইডার দিয়ে পাঠানো', '#6D28D9', '#F3EEFF'], delivered: ['ডেলিভারি হয়েছে', '#17663F', '#E6F6EE'], cancelled: ['বাতিল', '#6B7891', '#F1F4F8'] };
+    let poFilter = 'open';
+    let poSig = '';
+    function dhakaToday() { return new Date(Date.now() + 6 * 3600000).toISOString().slice(0, 10); }
+    function poBtn(text, bg, fg, border) {
+      const b = h('button', '', text); b.type = 'button';
+      b.style.cssText = 'flex:1;min-height:44px;border-radius:12px;font:inherit;font-weight:700;font-size:14px;cursor:pointer;background:' + bg + ';color:' + fg + ';border:1.5px solid ' + (border || bg) + ';';
+      return b;
+    }
+    async function poAct(o, action, date, note) {
+      const { data, error } = await supabase.rpc('shop_preorder_action', { p_id: o.id, p_action: action, p_date: date || null, p_note: note || null });
+      if (error || !data || !data.ok) { toast('হয়নি: ' + ((data && data.reason) || (error && error.message) || ''), 'error'); return false; }
+      return true;
+    }
+    function preCard(o) {
+      const st = PO_ST[o.status] || PO_ST.pending;
+      const c = h('div', 'ps-card');
+      c.style.cssText = 'display:flex;flex-direction:column;gap:10px;' + (o.status === 'pending' ? 'border:2px solid #FFB48F;' : '');
+      const top = h('div', ''); top.style.cssText = 'display:flex;align-items:center;gap:8px;';
+      const no = h('b', '', '#' + (o.order_no || '')); no.style.cssText = 'font-size:16px;';
+      const sp = h('span', '', st[0]); sp.style.cssText = 'margin-left:auto;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;color:' + st[1] + ';background:' + st[2] + ';';
+      top.appendChild(no); top.appendChild(sp); c.appendChild(top);
+      c.appendChild(h('div', 'ps-meta', new Date(o.created_at).toLocaleString('bn-BD', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dhaka' }) + (o.wanted_date ? ' · কাস্টমার চান: ' + new Date(o.wanted_date + 'T00:00:00').toLocaleDateString('bn-BD', { day: 'numeric', month: 'short' }) : '')));
+      // কাস্টমার
+      const cu = h('div', ''); cu.style.cssText = 'background:#F4F6FA;border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;';
+      const cn = h('b', '', o.customer_name || 'কাস্টমার'); cu.appendChild(cn);
+      cu.appendChild(h('div', 'ps-meta', '📍 ' + (o.drop_address || '')));
+      if (o.customer_phone) {
+        const row = h('div', ''); row.style.cssText = 'display:flex;gap:8px;';
+        const call = h('a', '', '📞 কল করুন'); call.href = 'tel:' + o.customer_phone;
+        call.style.cssText = 'flex:1;min-height:42px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:#1B2A4A;color:#fff;font-weight:700;text-decoration:none;';
+        const wa = h('a', '', 'WhatsApp'); wa.href = 'https://wa.me/88' + o.customer_phone; wa.target = '_blank'; wa.rel = 'noopener';
+        wa.style.cssText = 'flex:1;min-height:42px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:#E7F8EE;color:#14803C;font-weight:700;text-decoration:none;';
+        row.appendChild(call); row.appendChild(wa); cu.appendChild(row);
+      }
+      c.appendChild(cu);
+      // আইটেম
+      const items = Array.isArray(o.items) ? o.items : [];
+      const il = h('div', '');
+      items.forEach((it) => {
+        const r = h('div', ''); r.style.cssText = 'display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed #E2E8F0;font-size:14px;';
+        r.appendChild(h('span', '', it.name + ' × ' + bn(it.qty) + (it.unit ? ' (' + it.unit + ')' : '')));
+        r.appendChild(h('b', '', money(Number(it.price) * Number(it.qty))));
+        il.appendChild(r);
+      });
+      const tot = h('div', ''); tot.style.cssText = 'display:flex;justify-content:space-between;padding-top:6px;font-weight:700;';
+      tot.appendChild(h('span', '', 'পণ্যের মোট')); tot.appendChild(h('span', '', money(o.items_total)));
+      il.appendChild(tot);
+      c.appendChild(il);
+      if (o.note) { const n = h('div', 'ps-meta', '📝 ' + o.note); c.appendChild(n); }
+      if (o.delivery_date) c.appendChild(h('div', 'ps-meta', '🗓️ ডেলিভারির দিন: ' + new Date(o.delivery_date + 'T00:00:00').toLocaleDateString('bn-BD', { day: 'numeric', month: 'long' }) + (o.shop_note ? ' · ' + o.shop_note : '')));
+      // অ্যাকশন
+      if (o.status === 'pending' || o.status === 'confirmed') {
+        const box = h('div', ''); box.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+        const dl = h('label', ''); dl.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;';
+        dl.appendChild(h('span', '', 'ডেলিভারির দিন'));
+        const di = h('input'); di.type = 'date'; di.min = dhakaToday(); di.value = o.delivery_date || o.wanted_date || dhakaToday();
+        di.style.cssText = 'flex:1;min-height:42px;border:1.5px solid #E2E8F0;border-radius:12px;padding:0 10px;font:inherit;';
+        dl.appendChild(di); box.appendChild(dl);
+        const ni = h('input'); ni.type = 'text'; ni.maxLength = 300; ni.placeholder = 'কাস্টমারের জন্য নোট (ঐচ্ছিক) — যেমন ডেলিভারি চার্জ, পেমেন্ট'; ni.value = o.shop_note || '';
+        ni.setAttribute('aria-label', 'কাস্টমারের জন্য নোট');
+        ni.style.cssText = 'min-height:42px;border:1.5px solid #E2E8F0;border-radius:12px;padding:0 10px;font:inherit;';
+        box.appendChild(ni);
+        const r1 = h('div', ''); r1.style.cssText = 'display:flex;gap:8px;';
+        const ok = poBtn(o.status === 'pending' ? '✅ কনফার্ম করুন' : 'দিন/নোট আপডেট', '#FF6B35', '#fff');
+        ok.addEventListener('click', async () => { if (!di.value) { toast('ডেলিভারির দিন দিন', 'warning'); return; } ok.disabled = true; if (await poAct(o, 'confirm', di.value, ni.value.trim())) { toast('কনফার্ম হয়েছে, কাস্টমার জানতে পারবেন', 'success'); poSig = ''; refresh(); } ok.disabled = false; });
+        r1.appendChild(ok); box.appendChild(r1);
+        if (o.status === 'confirmed') {
+          const r2 = h('div', ''); r2.style.cssText = 'display:flex;gap:8px;';
+          const self = poBtn('📦 নিজে দিয়েছি', '#fff', '#17663F', '#9AD8B5');
+          self.addEventListener('click', async () => { if (!confirm('অর্ডারটি কাস্টমারের কাছে পৌঁছে দিয়েছেন?')) return; self.disabled = true; if (await poAct(o, 'delivered')) { toast('ডেলিভারি হয়েছে ✓', 'success'); poSig = ''; refresh(); } self.disabled = false; });
+          const rider = poBtn('🛵 রাইডার দিয়ে পাঠান', '#1B2A4A', '#fff');
+          rider.addEventListener('click', async () => {
+            rider.disabled = true;
+            const { data: fare } = await supabase.rpc('shop_preorder_fare', { p_id: o.id });
+            const f = Number(fare) || 60;
+            if (!confirm('স্মার্ট ফেনী রাইডার আপনার দোকান থেকে নিয়ে কাস্টমারকে দেবে।\nডেলিভারি চার্জ আনুমানিক ' + money(f) + ' (কাস্টমার দেবেন)।\nরাইডার কাস্টমার থেকে মোট ' + money(Number(o.items_total) + f) + ' নেবে; পণ্যের টাকা আপনার "হিসাব"-এ পাওনা হিসেবে আসবে।\n\nপাঠাবেন?')) { rider.disabled = false; return; }
+            const { data, error } = await supabase.rpc('shop_preorder_dispatch', { p_id: o.id });
+            rider.disabled = false;
+            if (error || !data || !data.ok) { toast('পাঠানো যায়নি: ' + ((data && data.reason) || (error && error.message) || ''), 'error'); return; }
+            toast('রাইডার খোঁজা শুরু হয়েছে 🛵', 'success'); poSig = ''; refresh();
+          });
+          r2.appendChild(self); r2.appendChild(rider); box.appendChild(r2);
+        }
+        const cx = h('button', '', 'বাতিল করুন'); cx.type = 'button';
+        cx.style.cssText = 'min-height:40px;border:0;background:none;color:#B3261E;font:inherit;font-weight:700;cursor:pointer;';
+        cx.addEventListener('click', async () => { const why = prompt('বাতিলের কারণ লিখুন (কাস্টমার দেখবেন)'); if (!why || why.trim().length < 3) return; if (await poAct(o, 'cancel', null, why.trim())) { toast('বাতিল হয়েছে', 'success'); poSig = ''; refresh(); } });
+        box.appendChild(cx);
+        c.appendChild(box);
+      }
+      return c;
+    }
+    async function renderPreorders(quiet) {
+      const pane = $('psPane');
+      const { data, error } = await supabase.from('market_preorders')
+        .select('id, order_no, status, items, items_total, customer_name, customer_phone, drop_address, note, wanted_date, delivery_date, shop_note, created_at')
+        .eq('shop_id', shop.id).order('created_at', { ascending: false }).limit(150);
+      if (error) { if (!quiet) { pane.textContent = ''; pane.appendChild(h('p', 'ps-meta', 'প্রি-অর্ডার লোড হয়নি')); } return; }
+      const rows = data || [];
+      const sig = poFilter + '|' + rows.map((r) => r.id + r.status + (r.delivery_date || '')).join(',');
+      if (quiet && sig === poSig) return;
+      if (quiet && document.activeElement && pane.contains(document.activeElement) && /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+      poSig = sig;
+      pane.textContent = '';
+      const seg = h('div', ''); seg.style.cssText = 'display:flex;gap:8px;margin:12px 0;';
+      [['open', 'চলমান'], ['done', 'শেষ']].forEach(([k, l]) => {
+        const b = h('button', '', l); b.type = 'button';
+        b.style.cssText = 'flex:1;min-height:42px;border-radius:12px;font:inherit;font-weight:700;cursor:pointer;border:1.5px solid ' + (poFilter === k ? '#1B2A4A;background:#1B2A4A;color:#fff;' : '#E2E8F0;background:#fff;color:#1B2A4A;');
+        b.addEventListener('click', () => { poFilter = k; poSig = ''; renderPreorders(); });
+        seg.appendChild(b);
+      });
+      pane.appendChild(seg);
+      const list = rows.filter((r) => (poFilter === 'open' ? ['pending', 'confirmed'].includes(r.status) : !['pending', 'confirmed'].includes(r.status)));
+      if (!list.length) { pane.appendChild(h('p', 'ps-meta', poFilter === 'open' ? 'এখন কোনো চলমান প্রি-অর্ডার নেই।' : 'এখনো কিছু নেই।')); return; }
+      list.forEach((o) => pane.appendChild(preCard(o)));
+    }
+    async function paintPreBadge() {
+      if (!shop) return;
+      const { count } = await supabase.from('market_preorders').select('id', { count: 'exact', head: true }).eq('shop_id', shop.id).eq('status', 'pending');
+      const n = count || 0;
+      $('psBdgPre').style.display = n ? '' : 'none';
+      $('psBdgPre').textContent = bn(n);
+      if (n || shop.delivery_kind === 'preorder') $('psPreTab').style.display = '';
     }
 
     // ---------- আমার হিসাব (কুইক ডেলিভারির পাওনা, স্মার্ট ফেনী পরিশোধ করে) ----------
@@ -1261,13 +1389,15 @@ const guideSteps = [
     });
 
     async function pickShop(id) {
-      const { data, error } = await supabase.from('delivery_shops').select('id, name, is_open, busy_until, image_url, upazila, union_name, address, lat, lng, owner_id').eq('id', id).single();
+      const { data, error } = await supabase.from('delivery_shops').select('id, name, is_open, busy_until, image_url, upazila, union_name, address, lat, lng, owner_id, delivery_kind').eq('id', id).single();
       if (error || !data) { toast('দোকান লোড হয়নি', 'error'); return; }
       shop = data;
       $('psShopName').textContent = shop.name;
       paintShopEdit();
       paintOpen();
       orders = []; knownNew = new Set();
+      $('psPreTab').style.display = shop.delivery_kind === 'preorder' ? '' : 'none';
+      paintPreBadge();
       await refresh();
     }
 
@@ -1363,8 +1493,10 @@ const guideSteps = [
       const wanted = new URLSearchParams(window.location.search).get('shop');
       const start = shops.find((s) => s.id === wanted) || shops[0];
       if (shops.length > 1) $('psShopSel').value = start.id;
+      if (new URLSearchParams(window.location.search).get('tab') === 'preorders') tab = 'preorders';
       await pickShop(start.id);
-      pollTimer = setInterval(() => refresh(true), POLL_MS);
+      if (tab === 'preorders') { $('psPreTab').style.display = ''; document.querySelectorAll('.ps-tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === 'preorders')); }
+      pollTimer = setInterval(() => { refresh(true); paintPreBadge(); }, POLL_MS);
       document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
     }
 

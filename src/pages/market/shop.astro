@@ -105,6 +105,8 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
     .qs-fav.on svg { fill: #E53E3E; stroke: #E53E3E; }
     .qs-fav.on { animation: qsPop .3s ease; }
     @keyframes qsPop { 50% { transform: scale(1.18); } }
+    .qs-chip.pre { background: linear-gradient(135deg, #EDE7FF, #E0D7FF); color: #4C2FB0; font-weight: 700; }
+    .qs-prenote { margin-top: 12px; padding: 11px 13px; border-radius: 14px; background: #F5F2FF; border: 1px dashed #C9BDFB; color: #3E2A8F; font-size: 14px; font-weight: 600; line-height: 1.5; }
     .qs-chip.star { background: #FFF7E0; color: #975A16; }
     .qs-rv { margin-top: 14px; border: 1px solid #EDF0F5; border-radius: 16px; overflow: hidden; background: #fff; }
     .qs-rv-h { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 0; background: #FFFBF5; font: inherit; font-weight: 700; color: #1B2A4A; cursor: pointer; text-align: left; }
@@ -246,12 +248,13 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       box.appendChild(mk('h1', '', shop.name));
       const sub = [catNames, [shop.union_name, shop.upazila].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
       if (sub) box.appendChild(mk('div', 'qs-sub', sub));
-      const st = shopOpenState(shop);
+      const pre = shop.delivery_kind === 'preorder';
+      const st = pre ? { open: true, label: 'প্রি-অর্ডার' } : shopOpenState(shop);
       const d = getDrop();
       const km = d ? distanceKm(d.lat, d.lng, shop.lat, shop.lng) : null;
       const chips = mk('div', 'qs-chips');
-      chips.appendChild(mk('span', 'qs-chip ' + (st.open ? 'ok' : 'no'), st.label));
-      if (st.open) {
+      chips.appendChild(mk('span', 'qs-chip ' + (pre ? 'pre' : st.open ? 'ok' : 'no'), pre ? '🗓️ প্রি-অর্ডার' : st.label));
+      if (st.open && !pre) {
         const c = mk('span', 'qs-chip'); c.appendChild(svg(['M12 7v5l3 2', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z'])); c.appendChild(document.createTextNode(etaLabel(shop, km))); chips.appendChild(c);
       }
       if (km !== null) {
@@ -261,6 +264,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       if (rating && rating.count) chips.appendChild(mk('span', 'qs-chip star', '★ ' + bnNum(rating.avg.toFixed(1)) + ' · ' + bnNum(rating.count) + 'টি রিভিউ'));
       if (shop.is_test) chips.appendChild(mk('span', 'qs-chip test', 'টেস্ট শপ'));
       box.appendChild(chips);
+      if (pre) box.appendChild(mk('div', 'qs-prenote', 'অর্ডার সরাসরি দোকানে যাবে। দোকান আপনাকে কল করে কনফার্ম করবে, ডেলিভারির দিন ও চার্জ জানাবে।'));
       if (!st.open) {
         let msg = 'দোকান এখন ' + st.label + '। মেনু দেখতে পারবেন, অর্ডার খোলা থাকলে।';
         if (st.label === 'বন্ধ' && shop.opens_at) msg = 'দোকান এখন বন্ধ, খুলবে ' + bnTime(shop.opens_at) + '-এ। মেনু দেখতে পারবেন।';
@@ -347,7 +351,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
 
     function priceRow(it, cls) {
       const p = mk('div', cls || 'qs-price');
-      p.appendChild(mk('span', '', tk(it.price)));
+      p.appendChild(mk('span', '', tk(it.price) + (it.price_unit ? ' / ' + it.price_unit : '')));
       const old = Number(it.old_price);
       if (old && old > Number(it.price)) {
         p.appendChild(mk('s', '', tk(old)));
@@ -598,7 +602,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         if (!shop) { fail('দোকানটি এখন পাওয়া যাচ্ছে না।'); return; }
         document.title = shop.name + ' | কুইক ডেলিভারি';
         const names = (shop.market_category_ids || []).map((id) => { const c = cats.find((x) => x.id === id); return c ? c.name : ''; }).filter(Boolean).join(', ');
-        canAdd = shopOpenState(shop).open; // টেস্ট শপ RLS-এ শুধু স্টাফ পায়
+        canAdd = shop.delivery_kind === 'preorder' || shopOpenState(shop).open; // টেস্ট শপ RLS-এ শুধু স্টাফ পায়
         renderInfo(names);
         renderReviews(reviews);
         paintFav();

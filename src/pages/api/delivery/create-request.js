@@ -98,10 +98,11 @@ async function prepareMarketOrder(client, user, body) {
 
   const { data: shop } = await admin
     .from('delivery_shops')
-    .select('id, name, address, upazila, union_name, lat, lng, is_active, is_test, is_open, busy_until, opens_at, closes_at, weekly_off')
+    .select('id, name, address, upazila, union_name, lat, lng, is_active, is_test, is_open, busy_until, opens_at, closes_at, weekly_off, delivery_kind')
     .eq('id', shopIds[0])
     .maybeSingle();
   if (!shop || (!shop.is_active && !shop.is_test)) return { error: 'দোকানটি এখন অর্ডার নিচ্ছে না', code: 'SHOP_UNAVAILABLE', status: 409 };
+  if (shop.delivery_kind === 'preorder') return { error: 'এই দোকানে প্রি-অর্ডার দিতে হয়', code: 'SHOP_PREORDER', status: 409 };
   if (shop.lat === null || shop.lng === null) return { error: 'দোকানের লোকেশন সেট করা নেই', code: 'SHOP_NO_PIN', status: 409 };
   if (!dhakaOpenNow(shop)) return { error: 'দোকান এখন বন্ধ', code: 'SHOP_CLOSED', status: 409 };
 

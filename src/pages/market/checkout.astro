@@ -47,11 +47,16 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       </div>
       <h2 id="qcDoneT">অর্ডার হয়েছে!</h2>
       <p class="qc-done-no" id="qcDoneNo"></p>
-      <ol class="qc-steps">
+      <ol class="qc-steps" id="qcStepsInstant">
         <li class="on"><b>অর্ডার যাচাই</b><span>স্মার্ট ফেনী টিম অর্ডারটি দেখছে</span></li>
         <li><b>রাইডার কনফার্ম</b><span>রাইডার পেলে আপনাকে জানানো হবে</span></li>
         <li><b>অগ্রিম পেমেন্ট</b><span>শুধু ডেলিভারি চার্জ বা পুরো টাকা (বিকাশ/নগদ)</span></li>
         <li><b>ডেলিভারি</b><span>বাকি টাকা পণ্য হাতে পেয়ে দিন</span></li>
+      </ol>
+      <ol class="qc-steps" id="qcStepsPre" hidden>
+        <li class="on"><b>দোকানে গেছে</b><span>দোকান আপনার অর্ডারটি পেয়েছে</span></li>
+        <li><b>দোকান কনফার্ম করবে</b><span>দোকান আপনাকে কল করে ডেলিভারির দিন জানাবে</span></li>
+        <li><b>ডেলিভারি</b><span>দোকান নিজে বা স্মার্ট ফেনী রাইডার দিয়ে পাঠাবে</span></li>
       </ol>
       <a class="qc-order full" id="qcDoneGo" href="/market">অর্ডার দেখুন</a>
       <a class="qc-home" href="/market">হোমে ফিরুন</a>
@@ -184,8 +189,13 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       return d;
     }
 
+    // প্রি-অর্ডার দোকান: রাইডার/চার্জ নেই, সরাসরি দোকানে যায়
+    let wantDate = '';
+    function isPre() { return !!(shop && shop.delivery_kind === 'preorder'); }
+    function dhakaToday() { return new Date(Date.now() + 6 * 3600000).toISOString().slice(0, 10); }
     async function loadFare() {
       const d = getDrop();
+      if (isPre()) { fare = 0; fareLoading = false; return; }
       if (!shop || !d) { fare = null; return; }
       fareLoading = true;
       try {
@@ -268,12 +278,25 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       ad.appendChild(at);
       ac.appendChild(ad);
       const insF = mk('label', 'qc-f');
-      insF.appendChild(mk('span', '', 'রাইডারের জন্য নির্দেশনা (ঐচ্ছিক)'));
+      insF.appendChild(mk('span', '', isPre() ? 'ঠিকানার নির্দেশনা (ঐচ্ছিক)' : 'রাইডারের জন্য নির্দেশনা (ঐচ্ছিক)'));
       const ins = mk('input'); ins.id = 'qcIns'; ins.maxLength = 200; ins.placeholder = 'যেমন: ৩ তলা, নীল গেট'; ins.value = d && d.instructions ? d.instructions : '';
       ins.addEventListener('change', () => { const x = getDrop(); if (x) setDrop({ ...x, instructions: ins.value.trim() }); });
       insF.appendChild(ins);
       ac.appendChild(insF);
       body.appendChild(ac);
+
+      // প্রি-অর্ডার: কবে লাগবে
+      if (isPre()) {
+        const dc = card('কবে লাগবে?', 'bags');
+        const df = mk('label', 'qc-f');
+        df.appendChild(mk('span', '', 'ঐচ্ছিক — দোকান কথা বলে চূড়ান্ত দিন জানাবে'));
+        const di = mk('input'); di.type = 'date'; di.min = dhakaToday(); di.value = wantDate;
+        const mx = new Date(Date.now() + 6 * 3600000 + 30 * 86400000).toISOString().slice(0, 10); di.max = mx;
+        di.addEventListener('change', () => { wantDate = di.value; });
+        df.appendChild(di);
+        dc.appendChild(df);
+        body.appendChild(dc);
+      }
 
       // যোগাযোগ
       const pc = card('যোগাযোগ', 'gadget');
@@ -305,10 +328,10 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       const bc = card('বিলের হিসাব');
       const bill = mk('div', 'qc-bill');
       const r1 = mk('div'); r1.appendChild(mk('span', '', 'আইটেমের দাম')); r1.appendChild(mk('b', '', tk(sub))); bill.appendChild(r1);
-      const r2 = mk('div'); r2.appendChild(mk('span', '', 'ডেলিভারি চার্জ')); r2.appendChild(mk('b', '', fareLoading ? 'হিসাব হচ্ছে…' : fare !== null ? tk(fare) : '—')); bill.appendChild(r2);
-      const total = sub + (fare || 0);
-      const r3 = mk('div', 'tot'); r3.appendChild(mk('span', '', 'সর্বমোট')); r3.appendChild(mk('span', '', tk(total))); bill.appendChild(r3);
-      bill.appendChild(mk('div', 'muted', 'দাম দোকানের মেনু অনুযায়ী। চার্জ দূরত্ব থেকে হিসাব হয়।'));
+      const r2 = mk('div'); r2.appendChild(mk('span', '', 'ডেলিভারি চার্জ')); r2.appendChild(mk('b', '', isPre() ? 'দোকান জানাবে' : fareLoading ? 'হিসাব হচ্ছে…' : fare !== null ? tk(fare) : '—')); bill.appendChild(r2);
+      const total = sub + (isPre() ? 0 : fare || 0);
+      const r3 = mk('div', 'tot'); r3.appendChild(mk('span', '', isPre() ? 'পণ্যের মোট' : 'সর্বমোট')); r3.appendChild(mk('span', '', tk(total))); bill.appendChild(r3);
+      bill.appendChild(mk('div', 'muted', isPre() ? 'ডেলিভারি চার্জ দোকান কনফার্মের সময় জানাবে।' : 'দাম দোকানের মেনু অনুযায়ী। চার্জ দূরত্ব থেকে হিসাব হয়।'));
       bc.appendChild(bill);
       body.appendChild(bc);
 
@@ -316,18 +339,23 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       const pay = mk('section', 'qc-card qc-pay');
       pay.appendChild(icon('bags'));
       const pt = mk('div');
-      pt.appendChild(mk('b', '', 'পেমেন্ট রাইডার কনফার্ম হলে'));
-      pt.appendChild(mk('span', '', 'এখন টাকা লাগবে না। রাইডার কনফার্ম হলে অগ্রিম দেবেন: শুধু ডেলিভারি চার্জ অথবা পুরো টাকা (বিকাশ/নগদ)। বাকিটা পণ্য হাতে পেয়ে।'));
+      if (isPre()) {
+        pt.appendChild(mk('b', '', 'প্রি-অর্ডার · সরাসরি দোকানে'));
+        pt.appendChild(mk('span', '', 'এখন টাকা লাগবে না। দোকান আপনাকে কল করে কনফার্ম করবে, পেমেন্ট ও ডেলিভারির দিন জানাবে।'));
+      } else {
+        pt.appendChild(mk('b', '', 'পেমেন্ট রাইডার কনফার্ম হলে'));
+        pt.appendChild(mk('span', '', 'এখন টাকা লাগবে না। রাইডার কনফার্ম হলে অগ্রিম দেবেন: শুধু ডেলিভারি চার্জ অথবা পুরো টাকা (বিকাশ/নগদ)। বাকিটা পণ্য হাতে পেয়ে।'));
+      }
       pay.appendChild(pt);
       body.appendChild(pay);
 
       // ফুটার
       $('qcFoot').hidden = false;
       $('qcFootTotal').textContent = tk(total);
-      const open = shopOpenState(shop).open;
+      const open = isPre() || shopOpenState(shop).open;
       const btn = $('qcOrder');
       btn.disabled = busy || !open || !d || !validPhone(phone) || fare === null;
-      btn.textContent = busy ? 'অর্ডার হচ্ছে…' : !open ? 'দোকান এখন বন্ধ' : !d ? 'ঠিকানা দিন' : !validPhone(phone) ? 'মোবাইল নম্বর দিন' : 'অর্ডার দিন · ' + tk(total);
+      btn.textContent = busy ? 'অর্ডার হচ্ছে…' : !open ? 'দোকান এখন বন্ধ' : !d ? 'ঠিকানা দিন' : !validPhone(phone) ? 'মোবাইল নম্বর দিন' : (isPre() ? 'প্রি-অর্ডার দিন · ' : 'অর্ডার দিন · ') + tk(total);
     }
 
     function showErr(msg) {
@@ -343,6 +371,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       const d = getDrop();
       if (!c.lines.length || !d || !shop) return;
       busy = true; render();
+      if (isPre()) { await placePreorder(c, d); return; }
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const res = await fetch('/api/delivery/create-request', {
@@ -371,6 +400,35 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         clearCart();
         $('qcDoneNo').textContent = 'অর্ডার নম্বর: ' + (r.order_no ? '#' + bnNum(r.order_no) : String(r.id || '').slice(0, 8).toUpperCase()) + (r.initial_price ? ' · চার্জ ' + tk(r.initial_price) : '');
         if (r.id) $('qcDoneGo').href = '/market/order?id=' + encodeURIComponent(r.id);
+        try { history.replaceState(null, '', '/market'); } catch (e) {}
+        $('qcDone').hidden = false;
+        document.body.style.overflow = 'hidden';
+      } catch (e) {
+        busy = false; render();
+        showErr('ইন্টারনেটে সমস্যা, আবার চেষ্টা করুন');
+      }
+    }
+    const PRE_ERR = { login: 'লগইন করুন', restricted: 'অর্ডার দেওয়া এখন বন্ধ আছে, পরে চেষ্টা করুন', shop: 'দোকানটি এখন প্রি-অর্ডার নিচ্ছে না', too_many: 'আপনার ৫টি প্রি-অর্ডার চলমান, আগে সেগুলো শেষ হোক', phone: 'প্রোফাইলে সঠিক মোবাইল নম্বর দিন', address: 'ঠিকানা দিন', date: 'দিনটি আজ থেকে ৩০ দিনের মধ্যে দিন', items: 'কার্টে আইটেম নেই', item: 'কোনো আইটেম এখন পাওয়া যাচ্ছে না, মেনু থেকে আবার বাছুন' };
+    async function placePreorder(c, d) {
+      try {
+        const ins = (($('qcIns') && $('qcIns').value) || d.instructions || '').trim();
+        const { data, error } = await supabase.rpc('market_create_preorder', {
+          p_shop_id: shop.id,
+          p_items: c.lines.map((l) => ({ item_id: l.id, qty: l.qty })),
+          p_drop: { address: d.address + (ins ? ' (' + ins + ')' : ''), lat: d.lat, lng: d.lng, upazila: d.upazila || '', union: d.union || '' },
+          p_note: note.trim(),
+          p_wanted_date: wantDate || null,
+        });
+        if (error || !data || !data.ok) {
+          busy = false; render();
+          showErr(error ? 'প্রি-অর্ডার দেওয়া যায়নি, আবার চেষ্টা করুন' : PRE_ERR[data.reason] || 'প্রি-অর্ডার দেওয়া যায়নি');
+          return;
+        }
+        clearCart();
+        $('qcDoneT').textContent = 'প্রি-অর্ডার হয়েছে!';
+        $('qcStepsInstant').hidden = true; $('qcStepsPre').hidden = false;
+        $('qcDoneNo').textContent = 'অর্ডার নম্বর: #' + bnNum(data.order_no || '');
+        $('qcDoneGo').href = '/market/preorder?id=' + encodeURIComponent(data.id);
         try { history.replaceState(null, '', '/market'); } catch (e) {}
         $('qcDone').hidden = false;
         document.body.style.overflow = 'hidden';

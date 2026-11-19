@@ -1,0 +1,178 @@
+---
+// path: src/pages/market/preorder.astro
+// ============================================================
+// পেজ: কাস্টমারের প্রি-অর্ডার (/market/preorder?id=)
+// প্রি-অর্ডার সরাসরি দোকানে যায় (রাইডার ফ্লো নেই)। দোকান কল করে কনফার্ম করে,
+// তারপর নিজে ডেলিভারি দেয় অথবা স্মার্ট ফেনী রাইডার দিয়ে পাঠায় (তখন কুইক ডেলিভারির অর্ডার প্যানেলের লিংক)।
+// টেবিল: market_preorders (RLS: নিজের), বাতিল RPC market_cancel_preorder (শুধু pending)।
+// ============================================================
+export const prerender = false;
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="প্রি-অর্ডার | কুইক ডেলিভারি">
+  <div class="qp">
+    <header class="qp-top">
+      <a href="/my-orders" class="qp-round" aria-label="আমার অর্ডারে ফিরুন">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      </a>
+      <div class="qp-tt"><b>প্রি-অর্ডার</b><span id="qpNo"></span></div>
+    </header>
+    <div id="qpBody" class="qp-body" aria-live="polite"></div>
+  </div>
+
+  <style is:global>
+    #siteNavbar { display: none !important; }
+    .qp { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F5F2FF; min-height: 100vh; padding-bottom: 110px; }
+    .qp-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: linear-gradient(135deg, #4C2FB0, #6D4AFF); color: #fff; }
+    .qp-round { width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; flex: none; }
+    .qp-round svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .qp-tt b { display: block; font-size: 18px; }
+    .qp-tt span { font-size: 13px; opacity: .85; }
+    .qp-body { max-width: 560px; margin: 0 auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+    .qp-hero { border-radius: 24px; padding: 18px; color: #fff; background: radial-gradient(130% 120% at 100% 0%, #9B84FF 0%, #6D4AFF 40%, #3B2490 100%); box-shadow: 0 14px 30px rgba(76,47,176,.3); }
+    .qp-hero small { display: block; font-size: 13px; opacity: .85; font-weight: 600; }
+    .qp-hero b { display: block; font-size: 22px; margin-top: 2px; line-height: 1.3; }
+    .qp-hero p { margin: 8px 0 0; font-size: 14px; opacity: .92; line-height: 1.5; }
+    .qp-steps { display: flex; gap: 6px; margin-top: 14px; }
+    .qp-steps i { flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,.25); }
+    .qp-steps i.on { background: #fff; }
+    .qp-card { background: #fff; border-radius: 20px; padding: 14px 16px; box-shadow: 0 2px 12px rgba(27,42,74,.06); }
+    .qp-card h2 { margin: 0 0 10px; font-size: 16px; }
+    .qp-shop { display: flex; align-items: center; gap: 12px; }
+    .qp-logo { width: 52px; height: 52px; border-radius: 16px; background: #F1ECFF center/cover no-repeat; flex: none; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #6D4AFF; font-size: 20px; }
+    .qp-shop b { display: block; font-size: 16px; }
+    .qp-shop small { color: #5B6B86; font-weight: 600; }
+    .qp-call { margin-left: auto; min-height: 44px; padding: 0 14px; border-radius: 14px; background: #1B2A4A; color: #fff; font-weight: 700; display: inline-flex; align-items: center; text-decoration: none; }
+    .qp-line { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed #E2E8F0; font-size: 14.5px; }
+    .qp-line:last-child { border-bottom: 0; }
+    .qp-tot { display: flex; justify-content: space-between; padding-top: 10px; font-weight: 700; font-size: 16px; }
+    .qp-kv { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; font-size: 14.5px; }
+    .qp-kv span { color: #5B6B86; }
+    .qp-kv b { text-align: right; }
+    .qp-note { margin: 8px 0 0; padding: 10px 12px; background: #F5F2FF; border-radius: 12px; font-size: 14px; line-height: 1.5; }
+    .qp-btn { width: 100%; min-height: 50px; border-radius: 16px; border: 0; font: inherit; font-weight: 700; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; }
+    .qp-btn.go { background: linear-gradient(135deg, #FF8A5B, #FF6B35); color: #fff; box-shadow: 0 8px 20px rgba(255,107,53,.3); }
+    .qp-btn.ghost { background: #fff; color: #B3261E; border: 1.5px solid #FAD4D0; }
+    .qp-empty { text-align: center; padding: 60px 12px; color: #5B6B86; font-weight: 600; }
+    .qp-round:focus-visible, .qp-btn:focus-visible, .qp-call:focus-visible { outline: 3px solid #FF6B35; outline-offset: 2px; }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+
+    const $ = (id) => document.getElementById(id);
+    const BN = (n) => String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
+    const TK = (n) => '৳' + BN(Math.round(Number(n) || 0));
+    const toast = (m, t) => { if (window.showToast) window.showToast(m, t || 'info'); };
+    function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
+    function dateBn(d) { return d ? new Date(d + 'T00:00:00').toLocaleDateString('bn-BD', { weekday: 'long', day: 'numeric', month: 'long' }) : ''; }
+
+    const id = new URLSearchParams(location.search).get('id');
+    const STAGE = {
+      pending: [1, 'দোকান দেখছে', 'দোকান আপনাকে কল করে অর্ডারটি কনফার্ম করবে, ডেলিভারির দিন ও চার্জ জানাবে।'],
+      confirmed: [2, 'কনফার্ম হয়েছে ✓', ''],
+      dispatched: [3, 'রাইডার দিয়ে পাঠানো হচ্ছে 🛵', 'দোকান স্মার্ট ফেনী রাইডার দিয়ে পাঠাচ্ছে। রাইডারের অবস্থা নিচের বাটনে দেখুন।'],
+      delivered: [4, 'ডেলিভারি হয়েছে 🎉', 'অর্ডারটি পৌঁছে গেছে। ধন্যবাদ!'],
+      cancelled: [0, 'বাতিল হয়েছে', ''],
+    };
+    let po = null;
+    let shop = null;
+
+    function render() {
+      const body = $('qpBody');
+      body.textContent = '';
+      $('qpNo').textContent = '#' + (po.order_no || '');
+      const st = STAGE[po.status] || STAGE.pending;
+      const hero = mk('section', 'qp-hero');
+      hero.appendChild(mk('small', '', 'অবস্থা'));
+      hero.appendChild(mk('b', '', st[1]));
+      let msg = st[2];
+      if (po.status === 'confirmed') msg = 'ডেলিভারির দিন: ' + dateBn(po.delivery_date) + (po.shop_note ? '। দোকানের নোট: ' + po.shop_note : '');
+      if (po.status === 'cancelled') msg = po.cancel_reason ? 'কারণ: ' + po.cancel_reason : '';
+      if (msg) hero.appendChild(mk('p', '', msg));
+      if (po.status !== 'cancelled') {
+        const s = mk('div', 'qp-steps');
+        for (let i = 1; i <= 4; i++) s.appendChild(mk('i', i <= st[0] ? 'on' : ''));
+        hero.appendChild(s);
+      }
+      body.appendChild(hero);
+
+      if (shop) {
+        const c = mk('section', 'qp-card');
+        const sh = mk('div', 'qp-shop');
+        const lg = mk('div', 'qp-logo');
+        const pic = shop.logo_url || shop.image_url;
+        if (pic) lg.style.backgroundImage = 'url("' + encodeURI(pic) + '")'; else lg.textContent = String(shop.name || '?').charAt(0);
+        sh.appendChild(lg);
+        const t = mk('div'); t.appendChild(mk('b', '', shop.name)); t.appendChild(mk('small', '', shop.upazila || '')); sh.appendChild(t);
+        if (shop.phone && po.status !== 'cancelled') { const a = mk('a', 'qp-call', '📞 কল'); a.href = 'tel:' + shop.phone; sh.appendChild(a); }
+        c.appendChild(sh);
+        body.appendChild(c);
+      }
+
+      const ic = mk('section', 'qp-card');
+      ic.appendChild(mk('h2', '', 'আপনার অর্ডার'));
+      (Array.isArray(po.items) ? po.items : []).forEach((it) => {
+        const r = mk('div', 'qp-line');
+        r.appendChild(mk('span', '', it.name + ' × ' + BN(it.qty) + (it.unit ? ' (' + it.unit + ')' : '')));
+        r.appendChild(mk('b', '', TK(Number(it.price) * Number(it.qty))));
+        ic.appendChild(r);
+      });
+      const tot = mk('div', 'qp-tot'); tot.appendChild(mk('span', '', 'পণ্যের মোট')); tot.appendChild(mk('span', '', TK(po.items_total))); ic.appendChild(tot);
+      body.appendChild(ic);
+
+      const dc = mk('section', 'qp-card');
+      dc.appendChild(mk('h2', '', 'ডেলিভারি'));
+      const kv = (k, v) => { const r = mk('div', 'qp-kv'); r.appendChild(mk('span', '', k)); r.appendChild(mk('b', '', v)); dc.appendChild(r); };
+      kv('ঠিকানা', po.drop_address || '');
+      if (po.wanted_date) kv('আপনি চেয়েছেন', dateBn(po.wanted_date));
+      if (po.delivery_date) kv('দোকানের দিন', dateBn(po.delivery_date));
+      if (po.note) dc.appendChild(mk('p', 'qp-note', '📝 ' + po.note));
+      body.appendChild(dc);
+
+      if (po.request_id) {
+        const a = mk('a', 'qp-btn go', '🛵 রাইডারের অবস্থা দেখুন'); a.href = '/market/order?id=' + encodeURIComponent(po.request_id);
+        body.appendChild(a);
+      }
+      if (po.status === 'pending') {
+        const b = mk('button', 'qp-btn ghost', 'অর্ডার বাতিল করুন'); b.type = 'button';
+        b.addEventListener('click', async () => {
+          if (!confirm('প্রি-অর্ডারটি বাতিল করবেন?')) return;
+          b.disabled = true;
+          const { data, error } = await supabase.rpc('market_cancel_preorder', { p_id: po.id, p_reason: 'কাস্টমার বাতিল করেছেন' });
+          b.disabled = false;
+          if (error || !data || !data.ok) { toast('বাতিল করা যায়নি' + (data && data.reason === 'status' ? ' — দোকান আগেই কনফার্ম করেছে, দোকানে কল করুন' : ''), 'error'); load(); return; }
+          toast('বাতিল হয়েছে', 'success'); load();
+        });
+        body.appendChild(b);
+      }
+      const more = mk('a', 'qp-btn', 'আরো কেনাকাটা'); more.href = '/market'; more.style.cssText = 'background:#fff;color:#4C2FB0;border:1.5px solid #D9CFFF;';
+      body.appendChild(more);
+    }
+
+    let lastSig = '';
+    async function load() {
+      const { data, error } = await supabase.from('market_preorders').select('*').eq('id', id).maybeSingle();
+      if (error || !data) { $('qpBody').textContent = ''; $('qpBody').appendChild(mk('div', 'qp-empty', 'প্রি-অর্ডারটি পাওয়া যায়নি।')); return; }
+      po = data;
+      if (!shop) {
+        const { data: s } = await supabase.from('delivery_shops').select('id, name, logo_url, image_url, upazila, phone').eq('id', po.shop_id).maybeSingle();
+        shop = s || null;
+      }
+      const sig = [po.status, po.delivery_date, po.shop_note, po.request_id].join('|');
+      if (sig === lastSig) return;
+      lastSig = sig;
+      render();
+    }
+
+    async function init() {
+      if (window.SFLoader) $('qpBody').innerHTML = window.SFLoader.block('লোড হচ্ছে…');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session || !id) { $('qpBody').textContent = ''; $('qpBody').appendChild(mk('div', 'qp-empty', 'দেখতে লগইন করুন।')); if (window.openAuthModal) window.openAuthModal(); return; }
+      await load();
+      setInterval(() => { if (!document.hidden) load(); }, 20000);
+    }
+    init();
+  </script>
+</BaseLayout>

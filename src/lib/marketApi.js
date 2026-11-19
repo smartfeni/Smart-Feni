@@ -23,7 +23,7 @@ export async function fetchMarketCategories() {
 export async function fetchMarketShops() {
   const { data, error } = await supabase
     .from('delivery_shops')
-    .select('id, name, image_url, upazila, union_name, address, lat, lng, is_popular, is_open, busy_until, market_category_ids, prep_minutes, opens_at, closes_at, weekly_off, sort_order, is_test, is_active')
+    .select('id, name, image_url, logo_url, delivery_kind, upazila, union_name, address, lat, lng, is_popular, is_open, busy_until, market_category_ids, prep_minutes, opens_at, closes_at, weekly_off, sort_order, is_test, is_active')
     .order('is_popular', { ascending: false })
     .order('sort_order', { ascending: true })
     .order('name', { ascending: true });
@@ -151,7 +151,7 @@ export function bnNum(n) {
 }
 
 // ---------- শপ পেজ (ধাপ ৩) ----------
-const SHOP_COLS = 'id, name, image_url, upazila, union_name, address, lat, lng, is_popular, is_open, busy_until, market_category_ids, prep_minutes, opens_at, closes_at, weekly_off, sort_order, is_test, is_active';
+const SHOP_COLS = 'id, name, image_url, logo_url, phone, description, delivery_kind, upazila, union_name, address, lat, lng, is_popular, is_open, busy_until, market_category_ids, prep_minutes, opens_at, closes_at, weekly_off, sort_order, is_test, is_active';
 
 // একটা দোকান। RLS: সাধারণ ইউজার শুধু is_active, স্টাফ টেস্ট শপও পায়। না পেলে null।
 export async function fetchMarketShop(id) {
@@ -165,7 +165,7 @@ export async function fetchMarketShop(id) {
 export async function fetchShopMenu(shopId) {
   const [c, i] = await Promise.all([
     supabase.from('delivery_shop_categories').select('id, name, sort_order').eq('shop_id', shopId).order('sort_order', { ascending: true }),
-    supabase.from('delivery_shop_items').select('id, name, price, old_price, image_url, is_available, description, category_id, tags, sort_order').eq('shop_id', shopId).order('sort_order', { ascending: true }).order('name', { ascending: true }),
+    supabase.from('delivery_shop_items').select('id, name, price, old_price, image_url, is_available, description, category_id, tags, sort_order, price_unit').eq('shop_id', shopId).order('sort_order', { ascending: true }).order('name', { ascending: true }),
   ]);
   if (c.error) throw c.error;
   if (i.error) throw i.error;

@@ -2297,10 +2297,11 @@ const ordersGuide = [
     }
 
     // ============ ধরন ফিল্টার ============
-    const TYPE_ORDER = ['shop_order', 'delivery', 'local_ride', 'serial', 'manual_order'];
+    const TYPE_ORDER = ['shop_order', 'preorder', 'delivery', 'local_ride', 'serial', 'manual_order'];
     const TYPE_LABELS = {
       all: 'সব ধরন',
       shop_order: 'অনলাইন শপ',
+      preorder: 'প্রি-অর্ডার',
       delivery: 'ডেলিভারি',
       local_ride: 'লোকাল রাইড',
       serial: 'ডাক্তার সিরিয়াল',
@@ -2341,6 +2342,7 @@ const ordersGuide = [
     // ============ মার্জ ও রেন্ডার ============
     function isOngoingItem(item) {
       if (item.__type === 'local_ride') return item.status === 'open' || item.status === 'confirmed';
+      if (item.__type === 'preorder') return item.status === 'pending' || item.status === 'confirmed';
       if (item.__type === 'manual_order') return ['new', 'rider_assigned', 'picked_up'].includes(item.status);
       if (item.__type === 'shop_order') return item.status === 'pending' || item.status === 'confirmed';
       if (item.__type === 'serial') {
@@ -2396,6 +2398,7 @@ const ordersGuide = [
         ...serialRequests.map((s) => ({ ...s, __type: 'serial' })),
         ...(lastData.manualOrders || []).map((m) => ({ ...m, __type: 'manual_order' })),
         ...(lastData.localRides || []).map((l) => ({ ...l, __type: 'local_ride' })),
+        ...(lastData.preorders || []).map((p) => ({ ...p, __type: 'preorder' })),
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       if (combined.length === 0) {
@@ -2437,7 +2440,8 @@ const ordersGuide = [
 
       visible.forEach((item) => {
         let card;
-        if (item.__type === 'shop_order') card = renderShopOrderCard(item);
+        if (item.__type === 'preorder') card = renderPreorderCard(item);
+        else if (item.__type === 'shop_order') card = renderShopOrderCard(item);
         else if (item.__type === 'manual_order') card = renderManualOrderCard(item);
         else if (item.__type === 'local_ride') card = renderLocalRideCard(item);
         else if (item.__type === 'serial') card = renderSerialCard(item);
@@ -2449,8 +2453,38 @@ const ordersGuide = [
       if (deepTarget) setTimeout(() => scrollToDeepLinkCard(deepTarget), 80);
     }
 
+    let lastPreorders = [];
+    function renderPreorderCard(p) {
+      const a = document.createElement('a');
+      a.className = 'order-card';
+      a.dataset.reqId = p.id;
+      a.href = '/market/preorder?id=' + encodeURIComponent(p.id);
+      a.style.cssText = 'display:flex;align-items:center;gap:12px;text-decoration:none;color:#1B2A4A;';
+      const LBL = { pending: ['দোকান কনফার্ম করবে', '#6D4AFF'], confirmed: ['কনফার্ম হয়েছে', '#1D4ED8'], dispatched: ['রাইডার দিয়ে পাঠানো', '#E8551C'], delivered: ['ডেলিভারি হয়েছে', '#1F8A5B'], cancelled: ['বাতিল', '#6B7891'] };
+      const st = LBL[p.status] || LBL.pending;
+      const img = document.createElement('img');
+      img.src = '/market/icons/bags.webp'; img.alt = ''; img.setAttribute('aria-hidden', 'true');
+      img.style.cssText = 'width:52px;height:52px;object-fit:contain;flex:none;background:#F1ECFF;border-radius:16px;padding:6px;';
+      const mid = document.createElement('div');
+      mid.style.cssText = 'flex:1;min-width:0;';
+      const t1 = document.createElement('b');
+      t1.style.cssText = 'display:block;font-size:1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      t1.textContent = (p.delivery_shops && p.delivery_shops.name) || 'প্রি-অর্ডার';
+      const t2 = document.createElement('span');
+      t2.style.cssText = 'display:block;font-size:0.82rem;color:#4A5568;';
+      t2.textContent = 'প্রি-অর্ডার · #' + (p.order_no || '') + ' · ৳' + toBn(Math.round(Number(p.items_total) || 0));
+      const t3 = document.createElement('span');
+      t3.style.cssText = 'display:inline-block;margin-top:4px;font-size:0.8rem;font-weight:700;color:' + st[1] + ';';
+      t3.textContent = st[0];
+      mid.appendChild(t1); mid.appendChild(t2); mid.appendChild(t3);
+      const ch = document.createElement('i');
+      ch.className = 'fas fa-chevron-right'; ch.setAttribute('aria-hidden', 'true'); ch.style.color = '#9AA6BA';
+      a.appendChild(img); a.appendChild(mid); a.appendChild(ch);
+      return a;
+    }
+
     function renderAll(shopOrders, deliveryRequests, serialRequests, reviewedRequestIds, manualOrders = [], localRides = []) {
-      lastData = { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds, manualOrders, localRides };
+      lastData = { shopOrders, deliveryRequests, serialRequests, reviewedRequestIds, manualOrders, localRides, preorders: lastPreorders };
       paint();
     }
 
@@ -2519,6 +2553,13 @@ const ordersGuide = [
 
       const reviewedRequestIds = new Set((reviewsRes.data || []).map((r) => r.request_id));
 
+      // কুইক ডেলিভারির প্রি-অর্ডার (সরাসরি দোকানে)
+      let preorders = [];
+      try {
+        const po = await supabase.from('market_preorders').select('id, order_no, status, items, items_total, delivery_date, request_id, created_at, delivery_shops(name)').eq('customer_profile_id', userId).order('created_at', { ascending: false }).limit(50);
+        if (!po.error && Array.isArray(po.data)) preorders = po.data;
+      } catch (_) { /* প্রি-অর্ডার লোড না হলেও বাকি অর্ডার দেখাবে */ }
+
       const deliveryRequests = (deliveryRes.data || []).map((req) => ({
         ...req,
         delivery_offers: (req.delivery_offers || []).filter((o) => o.status === 'active'),
@@ -2527,6 +2568,7 @@ const ordersGuide = [
       // ইউজার কিছু টাইপ করছে বা কনফার্ম শিট খোলা থাকলে অটো-রিফ্রেশে কার্ড নতুন করে আঁকব না
       if (silent && isUserInteracting()) return;
 
+      lastPreorders = preorders;
       renderAll(ordersRes.data || [], deliveryRequests, serialRequests, reviewedRequestIds, manualOrders, localRides);
     }
 
