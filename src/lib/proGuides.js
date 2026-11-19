@@ -172,7 +172,9 @@ const ROLE_ORDER = ['rider', 'instant_shop', 'shop', 'club', 'clinic'];
 
 // বোল্ড (**...**) সহ লেখা, textContent দিয়ে (HTML নয়)
 function appendRich(el, text) {
-  String(text).split('**').forEach((part, i) => {
+  // English মোডে পুরো লেখা (বোল্ড চিহ্নসহ) আগে অনুবাদ, তারপর ভাগ
+  const src = typeof window !== 'undefined' && window.SFT ? window.SFT(String(text)) : String(text);
+  src.split('**').forEach((part, i) => {
     if (!part) return;
     if (i % 2 === 1) {
       const b = document.createElement('b');

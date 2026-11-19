@@ -130,9 +130,13 @@
 
   function title() { if (BN.test(document.title)) document.title = tr(document.title); }
 
-  var queue = [], pending = false;
+  var queue = [], pending = false, obs = null, burst = 0, burstT = 0;
   function flush() {
     pending = false;
+    // নিরাপত্তা: পেজের কোনো স্ক্রিপ্টের সাথে লুপ হলে (সেকেন্ডে ৬০+ বার) অনুবাদ থামিয়ে পেজ চালু রাখি
+    var now = Date.now();
+    if (now - burstT > 1000) { burstT = now; burst = 0; }
+    if (++burst > 60) { try { obs && obs.disconnect(); } catch (e) {} queue = []; return; }
     var q = queue; queue = [];
     for (var i = 0; i < q.length; i++) {
       var r = q[i];
@@ -147,7 +151,7 @@
     try {
       walk(document.body);
       title();
-      new MutationObserver(function (list) {
+      obs = new MutationObserver(function (list) {
         for (var i = 0; i < list.length; i++) queue.push(list[i]);
         if (!pending) { pending = true; Promise.resolve().then(flush); }
       }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS.concat(['value', 'label']) });
