@@ -378,6 +378,42 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       box.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
+    // প্রতি ধাপে বাধ্যতামূলক ঘর যাচাই (শেষ ধাপে গিয়ে ফেরত পাঠানোর বদলে এখানেই আটকানো)
+    const BDP = /^01[3-9][0-9]{8}$/;
+    function cleanPhone(v) { let d = String(v || '').replace(/[০-৯]/g, (x) => '০১২৩৪৫৬৭৮৯'.indexOf(x)).replace(/[^0-9]/g, ''); if (d.indexOf('880') === 0) d = d.slice(2); return d; }
+    function stepErr(n) {
+      if (n === 0) {
+        if (String(f.name || '').trim().length < 3) return 'দোকানের নাম দিন (৩ অক্ষরের বেশি)';
+        if (!f.logo_url) return 'লোগো ছবি দিন';
+        if (!f.suggested_category_ids.length) return 'কী বিক্রি করেন — অন্তত ১টা ক্যাটাগরি বাছুন';
+      }
+      if (n === 1) {
+        if (f.lat === null || f.lat === '' || f.lng === null || f.lng === '') return 'ম্যাপে দোকানের পিন বসান';
+        if (!f.upazila) return 'ম্যাপে পিন বসান (উপজেলা পাওয়া যায়নি)';
+        if (String(f.address || '').trim().length < 3) return 'লিখিত ঠিকানা দিন';
+      }
+      if (n === 2) {
+        if (!f.opens_at || !f.closes_at) return 'দোকান খোলা ও বন্ধের সময় দিন';
+      }
+      if (n === 3) {
+        const ok = f.items.filter((x) => String(x.name || '').trim() && Number(x.price) > 0).length;
+        if (ok < 3) return 'নাম ও দামসহ অন্তত ৩টা পণ্য দিন (এখন ' + BN(ok) + 'টা)';
+      }
+      if (n === 4) {
+        if (!BDP.test(cleanPhone(f.phone))) return 'দোকানের সঠিক মোবাইল নম্বর দিন (01XXXXXXXXX)';
+        if (!BDP.test(cleanPhone(f.payout_number))) return 'পাওনা নেওয়ার সঠিক বিকাশ/নগদ নম্বর দিন';
+        if (!f.agreed) return 'শর্তে সম্মতি দিন';
+      }
+      return '';
+    }
+    function stepBlock(msg) {
+      const old = $('saStepErr'); if (old) old.remove();
+      const box = mk('div', 'sa-err', '⚠️ ' + msg); box.id = 'saStepErr'; box.setAttribute('role', 'alert');
+      const body = $('saBody');
+      body.insertBefore(box, body.firstChild.nextSibling);
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
     function renderProg(n) {
       const p = $('saProg'); p.textContent = '';
       for (let i = 0; i < STEPS.length; i++) p.appendChild(mk('i', i <= n ? 'on' : ''));
@@ -426,6 +462,8 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     $('saPrev').addEventListener('click', async () => { if (busy || step === 0) return; busy = true; render(); await save(false); busy = false; step--; render(); window.scrollTo(0, 0); });
     $('saNext').addEventListener('click', async () => {
       if (busy) return;
+      const se = stepErr(step);
+      if (se) { stepBlock(se); return; }
       busy = true; render();
       if (step < STEPS.length - 1) {
         await save(false);
