@@ -116,9 +116,9 @@ window.SF_I18N_EN = {
 "সাইনআপ ব্যর্থ:": "Sign-up failed:",
 "অ্যাকাউন্ট তৈরি হয়েছে ✓": "Account created ✓",
 "লগইন হচ্ছে...": "Logging in...",
-"এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি": "No account found with this email",
-"একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন": "This email is linked to multiple accounts, please log in with your phone number",
-"লগইন ব্যর্থ: ফোন নাম্বার/ইমেইল অথবা পাসওয়ার্ড ভুল": "Login failed: wrong phone/email or password",
+"এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি": "No account was found with this email",
+"একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন": "This email is linked to more than one account, please log in with your phone number",
+"লগইন ব্যর্থ: ফোন নাম্বার/ইমেইল অথবা পাসওয়ার্ড ভুল": "Login failed: wrong phone number/email or password",
 "আপনার একাউন্ট সাসপেন্ড করা হয়েছে। রিভিউ করার জন্য স্মার্ট ফেনী কাস্টমার কেয়ারে যোগাযোগ করুন।": "Your account has been suspended. Contact Smart Feni customer care for a review.",
 "লগইন সফল হয়েছে ✓": "Logged in ✓",
 "পাঠানো হচ্ছে...": "Sending...",
@@ -3385,10 +3385,8 @@ window.SF_I18N_EN = {
 "এই মুহূর্তে লগইন করা যাচ্ছে না, একটু পরে চেষ্টা করুন": "Login isn't available right now, please try again shortly",
 "ইমেইল ও পাসওয়ার্ড দিন": "Enter your email and password",
 "অপ্রত্যাশিত সমস্যা হয়েছে": "Something unexpected went wrong",
-"এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি": "No account was found with this email",
-"একাধিক একাউন্টে এই ইমেইল যুক্ত আছে, দয়া করে ফোন নাম্বার দিয়ে লগইন করুন": "This email is linked to more than one account, please log in with your phone number",
-"লগইন ব্যর্থ: ফোন নাম্বার/ইমেইল অথবা পাসওয়ার্ড ভুল": "Login failed: wrong phone number/email or password",
 "ম্যাপ লোড হয়নি। নেট চেক করে আবার চেষ্টা করুন।": "The map didn't load. Check your connection and try again.",
 "ম্যাপ লোড হয়নি। আবার চেষ্টা করুন, অথবা ঠিকানা লিখে এগিয়ে যান।": "The map didn't load. Try again, or type the address and continue.",
-"ছবি প্রস্তুত হচ্ছে…": "Preparing photo…"
+"ছবি প্রস্তুত হচ্ছে…": "Preparing photo…",
+"{} | কুইক ডেলিভারি": "{} | Quick Delivery"
 };

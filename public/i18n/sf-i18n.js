@@ -12,6 +12,7 @@
   var SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, NOSCRIPT: 1, CODE: 1, PRE: 1, svg: 1, SVG: 1 };
   var ATTRS = ['placeholder', 'title', 'aria-label', 'data-tooltip'];
   var cache = Object.create(null);
+  var tplHit = false; // টেমপ্লেট মিলেছে (ভেতরে ইউজারের বাংলা নাম থাকতে পারে)
 
   function norm(s) { return s.replace(/\s+/g, ' ').trim(); }
   function digits(s) { return s.replace(/[০-৯]/g, function (c) { return String(DIG.indexOf(c)); }); }
@@ -43,7 +44,7 @@
     for (var i = 0; i < TPL.length; i++) {
       var tm = s.match(TPL[i][0]);
       if (tm && TPL[i][2] < 8 && tm.slice(1).some(function (g) { return BNL.test(g || ''); })) continue; // ছোট টেমপ্লেটে বাংলা শব্দ ধরবে না
-      if (tm) { var k = 1, val = TPL[i][1]; return val.replace(/\{\}/g, function () { var g = tm[k++] || ''; if (!BNL.test(g)) return g; var c = core(norm(g)); return (k > 2 || val.indexOf('{}') > 0) && /^[A-Z][a-z]+$/.test(c) ? c.toLowerCase() : c; }); }
+      if (tm) { tplHit = true; var k = 1, val = TPL[i][1]; return val.replace(/\{\}/g, function () { var g = tm[k++] || ''; if (!BNL.test(g)) return g; var c = core(norm(g)); return (k > 2 || val.indexOf('{}') > 0) && /^[A-Z][a-z]+$/.test(c) ? c.toLowerCase() : c; }); }
     }
     // কয়েকটা বাক্য/অংশ জোড়া থাকলে আলাদা করে অনুবাদ
     var marked = s.replace(/([।!?])\s+/g, '$1\u0001').replace(/\s+·\s+/g, '\u0002');
@@ -73,8 +74,9 @@
     var hit = cache[s];
     if (hit !== undefined) return hit;
     var lead = (s.match(/^\s*/) || [''])[0], trail = (s.match(/\s*$/) || [''])[0];
+    tplHit = false;
     var out = core(norm(s));
-    if (BNL.test(out)) { cache[s] = s; return s; } // অনুবাদ নেই: যেমন আছে তেমন
+    if (BNL.test(out) && !tplHit) { cache[s] = s; return s; } // অনুবাদ নেই: যেমন আছে তেমন
     out = digits(out).replace(/।/g, '.').replace(/\s{2,}/g, ' ').replace(/\s+([,.!?:)%])/g, '$1').replace(/\(\s+/g, '(');
     out = lead + out.trim() + trail;
     cache[s] = out;
@@ -128,7 +130,8 @@
     }
   }
 
-  function title() { if (BN.test(document.title)) document.title = tr(document.title); }
+  // শুধু বদলালে লিখি — একই মান আবার বসালে <title>-এর অবজারভার নিজেকে বারবার চালিয়ে পেজ আটকে দিত
+  function title() { var t = document.title; if (!BN.test(t)) return; var o = tr(t); if (o !== t) document.title = o; }
 
   var queue = [], pending = false, obs = null, burst = 0, burstT = 0;
   function flush() {
