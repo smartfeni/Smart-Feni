@@ -163,6 +163,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       const cust = p.customer || {};
       g.appendChild(kv('কাস্টমার', cust.full_name || ''));
       g.appendChild(kv('ফোন', cust.phone || ''));
+      const cc = cancelCount[p.customer_id] || 0;
+      g.appendChild(kv('আগে বাতিল (৩০ দিন)', bn(cc) + 'টি' + (cc >= 2 ? ' ⚠️' : '')));
       c.appendChild(g);
 
       if (p.screenshot_path) {
@@ -214,24 +216,37 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       return c;
     }
 
+    // কাস্টমার নিজে কতগুলো কুইক অর্ডার বাতিল করেছে (৩০ দিনে)
+    let cancelCount = {};
+    async function loadCancels() {
+      const ids = Array.from(new Set(rows.map((r) => r.customer_id).filter(Boolean)));
+      cancelCount = {};
+      if (!ids.length) return;
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      const { data } = await supabase.from('delivery_requests').select('customer_profile_id, cancelled_by')
+        .eq('is_market', true).eq('status', 'cancelled').gte('cancelled_at', since).in('customer_profile_id', ids.slice(0, 150));
+      (data || []).forEach((r) => { if (r.cancelled_by && r.cancelled_by === r.customer_profile_id) cancelCount[r.customer_profile_id] = (cancelCount[r.customer_profile_id] || 0) + 1; });
+    }
+
     async function load() {
       const box = $('mpaList');
       if (!rows.length && window.SFLoader) box.innerHTML = window.SFLoader.block('লোড হচ্ছে…');
       const { data, error } = await supabase
         .from('delivery_payments')
-        .select('id, request_id, mode, method, amount_claimed, trx_id, sender_last4, screenshot_path, status, verified_amount, admin_note, created_at, delivery_requests(order_no, items_total, final_price, current_price, initial_price, status), customer:profiles!delivery_payments_customer_id_fkey(full_name, phone)')
+        .select('id, request_id, customer_id, mode, method, amount_claimed, trx_id, sender_last4, screenshot_path, status, verified_amount, admin_note, created_at, delivery_requests(order_no, items_total, final_price, current_price, initial_price, status), customer:profiles!delivery_payments_customer_id_fkey(full_name, phone)')
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) {
         // প্রোফাইল পড়ার অনুমতি না থাকলে কাস্টমার ছাড়াই
         const r2 = await supabase
           .from('delivery_payments')
-          .select('id, request_id, mode, method, amount_claimed, trx_id, sender_last4, screenshot_path, status, verified_amount, admin_note, created_at, delivery_requests(order_no, items_total, final_price, current_price, initial_price, status)')
+          .select('id, request_id, customer_id, mode, method, amount_claimed, trx_id, sender_last4, screenshot_path, status, verified_amount, admin_note, created_at, delivery_requests(order_no, items_total, final_price, current_price, initial_price, status)')
           .order('created_at', { ascending: false })
           .limit(200);
         if (r2.error) { box.textContent = ''; box.appendChild(mk('p', 'mpa-empty', 'লোড করা যায়নি: ' + r2.error.message)); return; }
         rows = r2.data || [];
       } else rows = data || [];
+      await loadCancels();
       render();
     }
 

@@ -188,3 +188,57 @@ export function bnTime(t) {
   h = h % 12 || 12;
   return part + ' ' + bnNum(h) + ':' + bnNum(m[2]);
 }
+
+// ---------- ধাপ ১০: রেটিং, প্রিয়, আগের অর্ডার ----------
+// সব শপের গড় রেটিং: { shopId: { avg, count } }
+export async function fetchShopRatings() {
+  const { data, error } = await supabase.rpc('market_shop_ratings');
+  if (error) return {};
+  const m = {};
+  (data || []).forEach((r) => { m[r.shop_id] = { avg: Number(r.avg_rating), count: r.review_count }; });
+  return m;
+}
+
+export async function fetchShopReviews(shopId) {
+  const { data, error } = await supabase.rpc('market_shop_recent_reviews', { p_shop_id: shopId });
+  if (error) return [];
+  return data || [];
+}
+
+export function ratingText(r) {
+  if (!r || !r.count) return '';
+  return '★ ' + bnNum(r.avg.toFixed(1)) + ' (' + bnNum(r.count) + ')';
+}
+
+// প্রিয় শপ id-র Set (লগইন না থাকলে খালি)
+export async function fetchFavoriteIds() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return new Set();
+  const { data } = await supabase.from('market_favorites').select('shop_id').eq('profile_id', session.user.id);
+  return new Set((data || []).map((r) => r.shop_id));
+}
+
+// on=true হলে যোগ, false হলে বাদ। সফল হলে true।
+export async function setFavorite(shopId, on) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return false;
+  const q = on
+    ? supabase.from('market_favorites').insert({ profile_id: session.user.id, shop_id: shopId })
+    : supabase.from('market_favorites').delete().eq('profile_id', session.user.id).eq('shop_id', shopId);
+  const { error } = await q;
+  return !error || error.code === '23505';
+}
+
+// আগের সম্পন্ন শপ অর্ডারের শপ id (নতুনটা আগে, ডুপ্লিকেট বাদ)
+export async function fetchPastShopIds(uid) {
+  const { data } = await supabase.from('delivery_requests')
+    .select('order_items, created_at')
+    .eq('customer_profile_id', uid).eq('is_market', true).eq('order_type', 'shop_order').eq('status', 'completed')
+    .order('created_at', { ascending: false }).limit(20);
+  const seen = [];
+  (data || []).forEach((r) => {
+    const sid = Array.isArray(r.order_items) && r.order_items[0] && r.order_items[0].shop_id;
+    if (sid && seen.indexOf(sid) === -1) seen.push(sid);
+  });
+  return seen;
+}

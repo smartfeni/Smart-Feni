@@ -127,6 +127,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     .qd-info { padding: 10px 14px 12px; }
     .qd-name { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .qd-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; font-size: 13px; color: #4A5568; }
+    .qd-meta .star { color: #B7791F; font-weight: 700; }
     .qd-meta i { width: 3px; height: 3px; border-radius: 50%; background: #9AA6BA; display: inline-block; }
     .qd-meta .ok { color: #1F7A4D; font-weight: 700; }
     .qd-meta .no { color: #B42318; font-weight: 700; }
@@ -162,7 +163,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
 
   <script>
     import { supabase } from '../lib/supabase.js';
-    import { fetchMarketCategories, fetchMarketShops, fetchMarketItemIndex, shopOpenState, bnNum, marketAccess, distanceKm, searchNeedles } from '../lib/marketApi.js';
+    import { fetchMarketCategories, fetchMarketShops, fetchMarketItemIndex, shopOpenState, bnNum, marketAccess, distanceKm, searchNeedles, fetchShopRatings, ratingText, fetchFavoriteIds, fetchPastShopIds } from '../lib/marketApi.js';
     import { getDrop } from '../lib/marketCart.js';
 
     const $ = (id) => document.getElementById(id);
@@ -191,6 +192,9 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
 
     let cats = [];
     let shops = [];
+    let ratings = {};
+    let favIds = new Set();
+    let pastIds = [];
     let itemIdx = {};
     let active = null;
     let food = null;
@@ -224,6 +228,8 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       return s;
     }
     const BOLT = 'M13 2 4 14h7l-1 8 9-12h-7l1-8Z';
+    const HEART = 'M12 21s-7.5-4.6-10-9.3C.4 8.6 2.3 4.5 6.2 4.5c2.2 0 3.6 1.2 4.3 2.4h3c.7-1.2 2.1-2.4 4.3-2.4 3.9 0 5.8 4.1 4.2 7.2C19.5 16.4 12 21 12 21Z';
+    const AGAIN = 'M12 4a8 8 0 1 1-7.4 5H2l3.5-4L9 9H6.7A6 6 0 1 0 12 6V4Z';
     const PIN = 'M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z';
 
     // ---------- ঠিকানা ----------
@@ -324,8 +330,10 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       const info = mk('div', 'qd-info');
       info.appendChild(mk('div', 'qd-name', s.name));
       const meta = mk('div', 'qd-meta');
+      const rt = ratingText(ratings[s.id]);
+      if (rt) meta.appendChild(mk('span', 'star', rt));
       const cn = catNames(s);
-      if (cn) meta.appendChild(mk('span', '', cn));
+      if (cn && !(small && rt)) { if (meta.childNodes.length) meta.appendChild(mk('i')); meta.appendChild(mk('span', '', cn)); }
       const km = shopKm(s);
       if (km !== null) { if (meta.childNodes.length) meta.appendChild(mk('i')); meta.appendChild(mk('span', '', bnNum(km < 1 ? km.toFixed(1) : Math.round(km)) + ' কিমি')); }
       if (!small) {
@@ -461,6 +469,20 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       });
 
       if (!q && !food) {
+        const favs = shops.filter((s) => favIds.has(s.id));
+        if (favs.length) {
+          body.appendChild(sec('আপনার প্রিয়', '', HEART));
+          const row = mk('div', 'qd-row');
+          favs.forEach((s) => { const w = mk('div', 'qd-pop'); w.appendChild(shopCard(s, true)); row.appendChild(w); });
+          body.appendChild(row);
+        }
+        const past = pastIds.map((id) => shops.find((s) => s.id === id)).filter(Boolean);
+        if (past.length) {
+          body.appendChild(sec('আবার অর্ডার করুন', '', AGAIN));
+          const row = mk('div', 'qd-row');
+          past.forEach((s) => { const w = mk('div', 'qd-pop'); w.appendChild(shopCard(s, true)); row.appendChild(w); });
+          body.appendChild(row);
+        }
         const pop = list.filter((s) => s.is_popular);
         if (pop.length) {
           body.appendChild(sec('জনপ্রিয়', '', BOLT));
@@ -550,10 +572,13 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       if (!getDrop()) openLoc();
 
       try {
-        const res = await Promise.all([fetchMarketCategories(), fetchMarketShops(), fetchMarketItemIndex().catch(() => ({}))]);
+        const res = await Promise.all([fetchMarketCategories(), fetchMarketShops(), fetchMarketItemIndex().catch(() => ({})), fetchShopRatings(), fetchFavoriteIds().catch(() => new Set()), fetchPastShopIds(session.user.id).catch(() => [])]);
         cats = res[0];
         shops = res[1];
         itemIdx = res[2] || {};
+        ratings = res[3] || {};
+        favIds = res[4];
+        pastIds = res[5];
       } catch (err) {
         if (window.SFReportError) { try { window.SFReportError(err, 'market-load'); } catch (e) {} }
         showMsg(empty('লোড করতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।', 'basket'));
@@ -569,7 +594,10 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     // পেছনে ফিরলে (bfcache) চলমান অর্ডারের পিল আবার দেখি
     window.addEventListener('pageshow', async (e) => {
       if (!e.persisted) return;
-      try { const { data: { session } } = await supabase.auth.getSession(); if (session) showLive(session.user.id); } catch (_) {}
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) { showLive(session.user.id); favIds = await fetchFavoriteIds(); if (shops.length) renderBody(); }
+      } catch (_) {}
     });
 
     init();

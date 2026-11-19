@@ -29,7 +29,12 @@ const { part } = Astro.props;
 const showPopular = part !== 'general';
 const showGeneral = part !== 'popular';
 
-const popularSlugs = ['courier', 'online-shop', 'doctor-directory'];
+// কুইক ডেলিভারি (marketplace) জনপ্রিয়তে ১ নম্বরে; অনলাইন শপ সাধারণে।
+// সুইচ (site_settings.marketplace_enabled) বন্ধ থাকলে নিচের স্ক্রিপ্ট কুইক ডেলিভারি লুকিয়ে
+// অনলাইন শপকে আগের মতো জনপ্রিয়তে দেখায় (স্টাফ সুইচ বন্ধেও কুইক ডেলিভারি দেখে)।
+const popularSlugs = ['courier', 'doctor-directory'];
+const quickDeliveryCat = { id: 'quick-delivery', name: 'কুইক ডেলিভারি', icon: 'fa-bolt', desc: 'খাবার, বাজার, যেকোনো কিছু', slug: 'quick-delivery' };
+const onlineShopCat = categories.find((c) => c.slug === 'online-shop');
 
 // দুইটা কোয়েরি একসাথে শুরু (সমান্তরাল), নিচে await হবে
 const sortPromise = supabase.from('category_settings').select('category_id, sort_order');
@@ -94,6 +99,8 @@ LOCAL_CATEGORY_IMAGES.forEach((s) => {
           <i class="fas fa-fire"></i> জনপ্রিয়
         </div>
         <div class="category-grid category-grid-popular" id="categoryGridPopular">
+          <CategoryCardPopular cat={quickDeliveryCat} imageUrl="/categories/quick-delivery.webp?v=1" href="/market" extraClass="qd-entry" hidden={true} />
+          {onlineShopCat && <CategoryCardPopular cat={onlineShopCat} imageUrl={categoryImageMap['online-shop']} extraClass="qd-fallback" />}
           {popularCategories.map((cat) => (
             <CategoryCardPopular cat={cat} imageUrl={categoryImageMap[cat.slug]} />
           ))}
@@ -104,7 +111,7 @@ LOCAL_CATEGORY_IMAGES.forEach((s) => {
     {showGeneral && (
       <div class="category-grid" id="categoryGrid">
         {otherCategories.map((cat) => (
-          <CategoryCard cat={cat} imageUrl={categoryImageMap[cat.slug]} />
+          <CategoryCard cat={cat} imageUrl={categoryImageMap[cat.slug]} extraClass={cat.slug === 'online-shop' ? 'qd-general-shop' : ''} />
         ))}
       </div>
     )}
@@ -112,6 +119,22 @@ LOCAL_CATEGORY_IMAGES.forEach((s) => {
   </div>
 </section>
 
+
+<script>
+  // কুইক ডেলিভারি দেখানো হবে কিনা (সুইচ চালু, অথবা স্টাফ) — দেখালে অনলাইন শপ সাধারণে যায়
+  import { marketAccess } from '../../lib/marketApi.js';
+  function applyQd(show) {
+    document.querySelectorAll('.qd-entry').forEach((el) => { el.hidden = !show; });
+    document.querySelectorAll('.qd-fallback').forEach((el) => { el.hidden = show; });
+    document.querySelectorAll('.qd-general-shop').forEach((el) => { el.hidden = !show; });
+  }
+  applyQd(false);
+  marketAccess().then((a) => applyQd(!!(a && a.allowed))).catch(() => applyQd(false));
+</script>
+
+<style is:global>
+  .category-card-popular[hidden], .category-card[hidden] { display: none !important; }
+</style>
 
 <style>
   .category-section {

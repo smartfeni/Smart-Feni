@@ -24,6 +24,9 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
         </a>
         <span class="qs-sp"></span>
+        <button type="button" class="qs-round qs-fav" id="qsFav" aria-label="প্রিয়তে রাখুন" aria-pressed="false" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.2-4.4-9.5-8.9C1 8.6 2.8 5 6.4 5c2.1 0 3.5 1.1 4.2 2.3h2.8C14.1 6.1 15.5 5 17.6 5 21.2 5 23 8.6 21.5 11.6 19.2 16.1 12 20.5 12 20.5Z" /></svg>
+        </button>
         <button type="button" class="qs-round" id="qsSearchBtn" aria-label="মেনুতে খুঁজুন">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
         </button>
@@ -99,6 +102,23 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
     .qs-cover-btns { position: absolute; left: 0; right: 0; top: 0; display: flex; gap: 10px; padding: calc(14px + env(safe-area-inset-top)) 14px 0; z-index: 1; }
     .qs-sp { flex: 1; }
     .qs-round { width: 44px; height: 44px; border-radius: 22px; border: 0; background: rgba(255,255,255,.95); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+    .qs-fav.on svg { fill: #E53E3E; stroke: #E53E3E; }
+    .qs-fav.on { animation: qsPop .3s ease; }
+    @keyframes qsPop { 50% { transform: scale(1.18); } }
+    .qs-chip.star { background: #FFF7E0; color: #975A16; }
+    .qs-rv { margin-top: 14px; border: 1px solid #EDF0F5; border-radius: 16px; overflow: hidden; background: #fff; }
+    .qs-rv-h { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 0; background: #FFFBF5; font: inherit; font-weight: 700; color: #1B2A4A; cursor: pointer; text-align: left; }
+    .qs-rv-ic { width: 30px; height: 30px; border-radius: 10px; background: linear-gradient(135deg,#FFC94D,#FF9F1C); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; flex: none; }
+    .qs-rv-t { flex: 1; }
+    .qs-rv-n { background: #FFE8DC; color: #C2410C; border-radius: 10px; padding: 1px 9px; font-size: 13px; }
+    .qs-rv-more { font-size: 13px; color: #FF6B35; }
+    .qs-rv-b { padding: 4px 14px 10px; }
+    .qs-rv-row { padding: 10px 0; border-top: 1px dashed #E2E8F0; }
+    .qs-rv-row:first-child { border-top: 0; }
+    .qs-rv-top { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .qs-rv-top small { margin-left: auto; color: #718096; }
+    .qs-rv-st { color: #F6A609; letter-spacing: 1px; font-size: 13px; }
+    .qs-rv-row p { margin: 4px 0 0; font-size: 14px; color: #4A5568; line-height: 1.5; }
     .qs-round svg { width: 21px; height: 21px; fill: none; stroke: #1B2A4A; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }
 
     .qs-wrap { padding: 0 16px; }
@@ -183,7 +203,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
 
   <script>
     import { supabase } from '../../lib/supabase.js';
-    import { fetchMarketShop, fetchShopMenu, fetchMarketCategories, shopOpenState, bnNum, marketAccess, distanceKm, searchNeedles, etaLabel, bnTime } from '../../lib/marketApi.js';
+    import { fetchMarketShop, fetchShopMenu, fetchMarketCategories, shopOpenState, bnNum, marketAccess, distanceKm, searchNeedles, etaLabel, bnTime, fetchShopRatings, fetchShopReviews, fetchFavoriteIds, setFavorite } from '../../lib/marketApi.js';
     import { getDrop, getCart, addItem, decItem, qtyOf, cartCount, cartTotal } from '../../lib/marketCart.js';
 
     const $ = (id) => document.getElementById(id);
@@ -191,6 +211,8 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
     const shopId = params.get('id');
     let shop = null;
     let menu = { cats: [], items: [] };
+    let rating = null;
+    let reviews = [];
     let canAdd = false;
     let q = params.get('q') || '';
     let qN = searchNeedles(q);
@@ -236,6 +258,7 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         const c = mk('span', 'qs-chip'); c.appendChild(svg(['M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Z'])); c.appendChild(document.createTextNode(bnNum(km < 1 ? km.toFixed(1) : Math.round(km)) + ' কিমি')); chips.appendChild(c);
       }
       if (shop.opens_at && shop.closes_at) chips.appendChild(mk('span', 'qs-chip', bnTime(shop.opens_at) + ' – ' + bnTime(shop.closes_at)));
+      if (rating && rating.count) chips.appendChild(mk('span', 'qs-chip star', '★ ' + bnNum(rating.avg.toFixed(1)) + ' · ' + bnNum(rating.count) + 'টি রিভিউ'));
       if (shop.is_test) chips.appendChild(mk('span', 'qs-chip test', 'টেস্ট শপ'));
       box.appendChild(chips);
       if (!st.open) {
@@ -244,6 +267,59 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
         box.appendChild(mk('div', 'qs-closed', msg));
       }
     }
+
+    // ---------- রিভিউ (ভাঁজ করা) ----------
+    function renderReviews(list) {
+      if (!list.length) return;
+      const wrap = mk('div', 'qs-rv');
+      const head = mk('button', 'qs-rv-h');
+      head.type = 'button';
+      head.setAttribute('aria-expanded', 'false');
+      head.setAttribute('aria-controls', 'qsRvBody');
+      head.appendChild(mk('span', 'qs-rv-ic', '★'));
+      head.appendChild(mk('span', 'qs-rv-t', 'কাস্টমার রিভিউ'));
+      head.appendChild(mk('span', 'qs-rv-n', bnNum(list.length)));
+      head.appendChild(mk('span', 'qs-rv-more', 'দেখুন ▾'));
+      const body = mk('div', 'qs-rv-b');
+      body.id = 'qsRvBody';
+      body.hidden = true;
+      list.forEach((r) => {
+        const row = mk('div', 'qs-rv-row');
+        const top = mk('div', 'qs-rv-top');
+        top.appendChild(mk('b', '', r.reviewer || 'গ্রাহক'));
+        top.appendChild(mk('span', 'qs-rv-st', '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating)));
+        top.appendChild(mk('small', '', new Date(r.created_at).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short' })));
+        row.appendChild(top);
+        if (r.comment) row.appendChild(mk('p', '', r.comment));
+        body.appendChild(row);
+      });
+      head.addEventListener('click', () => {
+        const open = body.hidden;
+        body.hidden = !open;
+        head.setAttribute('aria-expanded', String(open));
+        head.querySelector('.qs-rv-more').textContent = open ? 'বন্ধ ▴' : 'দেখুন ▾';
+      });
+      wrap.appendChild(head);
+      wrap.appendChild(body);
+      $('qsInfo').appendChild(wrap);
+    }
+
+    // ---------- প্রিয় ----------
+    let isFav = false;
+    function paintFav() {
+      const b = $('qsFav');
+      b.hidden = false;
+      b.classList.toggle('on', isFav);
+      b.setAttribute('aria-pressed', String(isFav));
+      b.setAttribute('aria-label', isFav ? 'প্রিয় থেকে সরান' : 'প্রিয়তে রাখুন');
+    }
+    $('qsFav').addEventListener('click', async () => {
+      const next = !isFav;
+      isFav = next; paintFav();
+      const ok = await setFavorite(shopId, next);
+      if (!ok) { isFav = !next; paintFav(); toast('সেভ করা যায়নি, আবার চেষ্টা করুন', 'error'); return; }
+      toast(next ? 'প্রিয়তে রাখা হয়েছে ❤️' : 'প্রিয় থেকে সরানো হয়েছে', 'success');
+    });
 
     // ---------- মেনু ----------
     function itemMatches(it) {
@@ -517,13 +593,16 @@ import MarketLocationSheet from '../../components/market/MarketLocationSheet.ast
       const access = await marketAccess();
       if (!access.allowed) { fail('কুইক ডেলিভারি শীঘ্রই আসছে।', 'scooter'); return; }
       try {
-        const [s, m, cats] = await Promise.all([fetchMarketShop(shopId), fetchShopMenu(shopId), fetchMarketCategories().catch(() => [])]);
-        shop = s; menu = m;
+        const [s, m, cats, rts, favs, rvs] = await Promise.all([fetchMarketShop(shopId), fetchShopMenu(shopId), fetchMarketCategories().catch(() => []), fetchShopRatings(), fetchFavoriteIds().catch(() => new Set()), fetchShopReviews(shopId)]);
+        shop = s; menu = m; rating = rts[shopId] || null; reviews = rvs || [];
+        isFav = favs.has(shopId);
         if (!shop) { fail('দোকানটি এখন পাওয়া যাচ্ছে না।'); return; }
         document.title = shop.name + ' | কুইক ডেলিভারি';
         const names = (shop.market_category_ids || []).map((id) => { const c = cats.find((x) => x.id === id); return c ? c.name : ''; }).filter(Boolean).join(', ');
         canAdd = shopOpenState(shop).open; // টেস্ট শপ RLS-এ শুধু স্টাফ পায়
         renderInfo(names);
+        renderReviews(reviews);
+        paintFav();
       } catch (err) {
         if (window.SFReportError) { try { window.SFReportError(err, 'market-shop-load'); } catch (e) {} }
         fail('লোড করতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।');

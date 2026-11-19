@@ -185,6 +185,8 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     .qo-qtot { display: flex; justify-content: space-between; padding: 10px 0 0; margin-top: 4px; border-top: 1.5px dashed #E2E7EF; font-size: 17px; font-weight: 700; }
     .qo-receipt { display: block; width: 100%; max-height: 260px; object-fit: contain; margin-top: 12px; border-radius: 14px; background: #F3F5F9; cursor: zoom-in; }
     .qo-sub { margin: 0 0 12px; font-size: 14px; color: #4A5568; line-height: 1.5; }
+    .qo-rv-q { margin: 8px 0 4px; font-weight: 700; color: #1B2A4A; }
+    .qo-due { margin: 0 0 12px; padding: 10px 13px; border-radius: 14px; background: #FFF4E5; color: #9C4A00; font-size: 14px; font-weight: 600; line-height: 1.5; border: 1px dashed #FBC490; }
     .qo-bad { margin: 0 0 12px; padding: 11px 13px; border-radius: 14px; background: #FDECEA; color: #A3261B; font-size: 14px; font-weight: 600; line-height: 1.5; }
     .qo-bad[hidden] { display: none; }
     .qo-opts { display: flex; flex-direction: column; gap: 10px; }
@@ -449,6 +451,11 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
         c.appendChild(e);
       }
       c.appendChild(mk('p', 'qo-sub', 'রাইডার দোকানে যাওয়ার আগে অগ্রিম দিন। বাকিটা পণ্য হাতে পেয়ে।'));
+      if (req.market_accepted_at && !(lp && lp.status === 'mismatch')) {
+        const dl = new Date(new Date(req.market_accepted_at).getTime() + 3600000);
+        const hh = dl.toLocaleTimeString('bn-BD', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dhaka' });
+        c.appendChild(mk('div', 'qo-due', '⏰ ' + hh + '-এর মধ্যে অগ্রিম না দিলে অর্ডারটি অটো-বাতিল হবে।'));
+      }
       const opts = mk('div', 'qo-opts');
       const k = kind();
       const noQuote = k === 'anything' && req.purchase_total === null;
@@ -667,7 +674,8 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
 
     // ---------- রিভিউ ----------
     function reviewCard() {
-      const c = card('রাইডার কেমন ছিলেন?', 'scooter');
+      const c = card(kind() === 'shop' ? 'অর্ডার কেমন ছিল?' : 'রাইডার কেমন ছিলেন?', 'scooter');
+      if (kind() === 'shop') c.appendChild(mk('p', 'qo-sub qo-rv-q', 'রাইডার কেমন ছিলেন?'));
       let rating = 0;
       const stars = mk('div', 'qo-stars');
       stars.setAttribute('role', 'radiogroup');
@@ -680,11 +688,33 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
         stars.appendChild(s);
       }
       c.appendChild(stars);
+      let shopRating = 0;
+      const isShop = kind() === 'shop';
+      if (isShop) {
+        const it = Array.isArray(req.order_items) && req.order_items[0];
+        c.appendChild(mk('p', 'qo-sub qo-rv-q', (it && it.shop_name ? it.shop_name : 'দোকান') + '-এর খাবার/পণ্য কেমন ছিল?'));
+        const st2 = mk('div', 'qo-stars');
+        st2.setAttribute('role', 'radiogroup');
+        st2.setAttribute('aria-label', 'দোকানের রেটিং');
+        for (let i = 1; i <= 5; i++) {
+          const s = mk('button', '', '★');
+          s.type = 'button';
+          s.setAttribute('aria-label', 'দোকান ' + bnNum(i) + ' তারা');
+          s.addEventListener('click', () => { shopRating = i; Array.from(st2.children).forEach((x, j) => x.classList.toggle('on', j < i)); });
+          st2.appendChild(s);
+        }
+        c.appendChild(st2);
+      }
       const f = mk('label', 'qo-f');
       const ta = mk('textarea'); ta.maxLength = 300; ta.placeholder = 'কিছু বলতে চাইলে লিখুন (ঐচ্ছিক)'; ta.setAttribute('aria-label', 'মন্তব্য');
       f.appendChild(ta); c.appendChild(f);
       c.appendChild(btn('রিভিউ দিন', 'navy', async () => {
-        if (!rating) { toast('তারা বেছে নিন', 'warning'); return; }
+        if (!rating) { toast('রাইডারের জন্য তারা বেছে নিন', 'warning'); return; }
+        if (isShop && !shopRating) { toast('দোকানের জন্য তারা বেছে নিন', 'warning'); return; }
+        if (isShop) {
+          const { error: se } = await supabase.rpc('market_submit_shop_review', { p_request_id: req.id, p_rating: shopRating, p_comment: ta.value.trim() });
+          if (se) { toast('দোকানের রিভিউ জমা হয়নি', 'error'); return; }
+        }
         const { error } = await submitReview({ requestId: req.id, rating, comment: ta.value.trim() });
         if (error) toast(error, 'error'); else { toast('ধন্যবাদ! রিভিউ জমা হয়েছে', 'success'); reviewed = true; render(); }
       }));
