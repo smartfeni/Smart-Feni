@@ -191,17 +191,29 @@ async function loadSmartFeniStyle() {
 // ------------------------------------------------------------
 const PLACE_RULES = {
   // class: [ন্যূনতম জুম, অগ্রাধিকার (কম = আগে), সাইজ-ক্লাস]
-  city: [7, 0, 'lg'], town: [9, 1, 'lg'], suburb: [12, 2, 'md'], village: [13, 3, 'md'],
-  quarter: [14, 4, 'sm'], neighbourhood: [14, 4, 'sm'], hamlet: [15, 5, 'sm'],
+  city: [7, 0, 'lg'], town: [9, 1, 'lg'], suburb: [12, 2, 'md'], village: [12, 3, 'md'],
+  quarter: [14, 4, 'sm'], neighbourhood: [14, 4, 'sm'], hamlet: [14, 5, 'sm'], isolated_dwelling: [16, 6, 'sm'],
 };
 const POI_MIN_ZOOM = 15;
 const MAX_LABELS = 70;
 const BN_RE = /[\u0980-\u09FF]/;
 
+// OSM-এ অনেক নাম দুই ভাষা মেশানো ("Police Line ফেনী পুলিশ লাইন") — বাংলা অংশটাই রাখি
+function bnPart(name) {
+  if (!/[A-Za-z]/.test(name)) return name;
+  const t = name
+    .replace(/[A-Za-z][A-Za-z.'’\-]*/g, ' ')
+    .replace(/^[^\u0980-\u09FF]+/, '')
+    .replace(/[^\u0980-\u09FF)]+$/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return t || name;
+}
+
 function labelName(p) {
   if (!p) return '';
   if (p['name:bn']) return p['name:bn'];
-  if (p.name && BN_RE.test(p.name)) return p.name;
+  if (p.name && BN_RE.test(p.name)) return bnPart(p.name);
   return p['name:en'] || p.name_en || p['name:latin'] || p.name || '';
 }
 
@@ -275,9 +287,9 @@ function attachLabels(L, map, gl, vectorLayer, opts) {
       if (seen.has(key)) continue; // একই ফিচার পাশের টাইলেও থাকে
       seen.add(key);
       const pt = map.latLngToContainerPoint([lat, lng]);
-      if (pt.x < 0 || pt.y < 0 || pt.x > size.x || pt.y > size.y) continue;
       const w = name.length * (it.cls === 'sfbl-lg' ? 8 : 6.6) + (it.cls === 'sfbl-poi' ? 14 : 8);
       const r = { x: pt.x - w / 2, y: pt.y - it.h / 2, w, h: it.h };
+      if (r.x < 2 || r.y < 2 || r.x + r.w > size.x - 2 || r.y + r.h > size.y - 2) continue; // কিনারায় কাটা লেবেল নয়
       if (taken.some((t) => r.x < t.x + t.w && r.x + r.w > t.x && r.y < t.y + t.h && r.y + r.h > t.y)) continue;
       taken.push(r);
       count++;
