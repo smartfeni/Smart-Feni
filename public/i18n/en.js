@@ -3388,5 +3388,15 @@ window.SF_I18N_EN = {
 "ম্যাপ লোড হয়নি। নেট চেক করে আবার চেষ্টা করুন।": "The map didn't load. Check your connection and try again.",
 "ম্যাপ লোড হয়নি। আবার চেষ্টা করুন, অথবা ঠিকানা লিখে এগিয়ে যান।": "The map didn't load. Try again, or type the address and continue.",
 "ছবি প্রস্তুত হচ্ছে…": "Preparing photo…",
-"{} | কুইক ডেলিভারি": "{} | Quick Delivery"
+"{} | কুইক ডেলিভারি": "{} | Quick Delivery",
+"ম্যাপ টেনে পিন আপনার জায়গায় আনুন": "Drag the map to put the pin on your spot",
+"ম্যাপ টেনে পিন পিকআপের জায়গায় আনুন": "Drag the map to put the pin on the pickup spot",
+"আরেকটু জুম করে পিন ঠিক জায়গায় আনুন": "Zoom in a little and place the pin exactly",
+"জায়গার নাম খোঁজা হচ্ছে…": "Finding the place name…",
+"ফেনী জেলার বাইরে — ফেনীর ভেতরে পিন আনুন": "Outside Feni district — place the pin inside Feni",
+"এই জায়গা": "This place",
+"জায়গা খুঁজুন": "Search places",
+"এলাকা, বাজার, দোকান বা স্কুল": "Area, market, shop or school",
+"জায়গার নাম লিখুন, যেমন মহিপাল বা ট্রাংক রোড": "Type a place name, e.g. Mohipal or Trunk Road",
+"কিছু পাওয়া যায়নি। অন্য নাম লিখে দেখুন, অথবা ম্যাপ টেনে পিন বসান।": "Nothing found. Try another name, or drag the map to place the pin."
 };
