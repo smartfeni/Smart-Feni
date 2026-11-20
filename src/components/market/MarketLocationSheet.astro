@@ -4,7 +4,10 @@
 // কুইক ডেলিভারি — ঠিকানা সেটআপ, পুরো পেজ।
 //   পেছনে সবসময় আসল ফেনীর ম্যাপ (জেলা/উপজেলা/ইউনিয়ন সীমানা)। পুরনো LocationPicker পেজ এখানে ব্যবহার হয় না।
 //   ধাপ ১: দুই বাটন — "বর্তমান লোকেশন" ও "লিখিত ঠিকানা"
-//   ধাপ ২: বর্তমান লোকেশন চাপলে GPS → ম্যাপ নিজে থেকে কাস্টমারের ইউনিয়নে ফোকাস করে, পিন বসে (ট্যাপ/টেনে সরানো যায়)
+//   ধাপ ২: বর্তমান লোকেশন চাপলে GPS → ম্যাপ নিজে থেকে কাস্টমারের জায়গায় যায়।
+//   পিন (ধাপ ২ ও ৪): ফুড ডেলিভারি অ্যাপের মতো ম্যাপের দৃশ্যমান অংশের মাঝে স্থির — ম্যাপ টেনে/জুম করে
+//   ছাড়লে পিনের নিচের জায়গা সিলেক্ট; জুমে সাইজ বদলায় না; উপরে জায়গার নামের বাবল; উপরে "জায়গা খুঁজুন"।
+//   নাম ও সার্চ: src/lib/placeLookup.js
 //   ধাপ ৩: লিখিত ঠিকানা (উপজেলা, ইউনিয়ন, এলাকা, বাসা); চাইলে ম্যাপে পিন (ধাপ ৪)
 // ফলাফল marketCart.setDrop() দিয়ে সংরক্ষিত। ব্যবহার: window.SFMarketLocation.open(onDone?)
 // ঠিকানা সেট না থাকলে বন্ধ করার বাটন নেই।
@@ -13,6 +16,12 @@
 <div class="mls-root" id="mlsRoot" hidden role="dialog" aria-modal="true" aria-labelledby="mlsTitle">
   <div class="mls-map" id="mlsMap"></div>
 
+  <div class="mls-cpin" id="mlsPin" hidden aria-hidden="true">
+    <div class="mls-cpin-bubble" id="mlsPinBubble" data-state="hint"><span class="mls-cpin-t1" id="mlsPinT1"></span><span class="mls-cpin-t2" id="mlsPinT2" hidden></span></div>
+    <svg class="mls-cpin-svg" width="30" height="46" viewBox="0 0 30 46"><rect x="13.8" y="24" width="2.4" height="21.5" rx="1.2" fill="#1B2A4A"/><circle cx="15" cy="14" r="13" fill="#1B2A4A"/><circle cx="15" cy="14" r="5.6" fill="#fff"/><circle cx="15" cy="14" r="2.3" fill="#FF6B35"/></svg>
+    <i class="mls-cpin-ground"></i>
+  </div>
+
   <header class="mls-top">
     <button type="button" class="mls-round" id="mlsBack" aria-label="পেছনে যান" hidden><i class="fas fa-arrow-left" aria-hidden="true"></i></button>
     <button type="button" class="mls-round" id="mlsClose" aria-label="বন্ধ করুন" hidden><i class="fas fa-xmark" aria-hidden="true"></i></button>
@@ -20,7 +29,23 @@
       <span class="mls-logo" aria-hidden="true"><i class="fas fa-location-dot"></i></span>
       <span class="mls-brand-t"><b>স্মার্ট ফেনী</b><small>কুইক ডেলিভারি</small></span>
     </div>
+    <button type="button" class="mls-searchpill" id="mlsSearchBtn" hidden>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5B6B86" stroke-width="2.3" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <span>জায়গা খুঁজুন</span>
+    </button>
   </header>
+
+  <div class="mls-srch" id="mlsSearch" hidden role="dialog" aria-modal="true" aria-label="জায়গা খুঁজুন">
+    <div class="mls-srch-bar">
+      <button type="button" class="mls-round" id="mlsSearchClose" aria-label="বন্ধ করুন"><i class="fas fa-arrow-left" aria-hidden="true"></i></button>
+      <label class="mls-srch-field">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5B6B86" stroke-width="2.3" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" id="mlsSearchInput" placeholder="এলাকা, বাজার, দোকান বা স্কুল" aria-label="জায়গা খুঁজুন" autocomplete="off" enterkeyhint="search" />
+      </label>
+    </div>
+    <p class="mls-srch-note" id="mlsSearchNote">জায়গার নাম লিখুন, যেমন মহিপাল বা ট্রাংক রোড</p>
+    <div class="mls-srch-list" id="mlsSearchList" data-no-i18n></div>
+  </div>
 
   <div class="mls-sheet" id="mlsSheet">
     <div class="mls-grab" aria-hidden="true"></div>
@@ -53,7 +78,7 @@
       </div>
       <p class="mls-addr" id="mlsAddr" hidden></p>
       <label class="mls-f"><span>ঐচ্ছিক নির্দেশনা</span><input type="text" id="mlsIns" maxlength="200" placeholder="বাজার বা এলাকার নাম লিখুন" /></label>
-      <p class="mls-note dim">ঠিক জায়গায় না হলে ম্যাপে ট্যাপ করুন বা পিন টেনে সরান।</p>
+      <p class="mls-note dim">ঠিক জায়গায় না হলে ম্যাপ টেনে পিন ঠিক জায়গায় আনুন, অথবা উপরে খুঁজুন।</p>
       <p class="mls-err" id="mlsErr2" hidden></p>
       <button type="button" class="mls-save" id="mlsSave2">এই লোকেশন নিশ্চিত করুন</button>
     </section>
@@ -80,7 +105,7 @@
     <!-- ধাপ ৪: লিখিত ঠিকানার জন্য ম্যাপে পিন -->
     <section class="mls-step" id="mlsS4" hidden>
       <h2 class="mls-title">ম্যাপে পিন বসান</h2>
-      <p class="mls-note dim" id="mlsPinHint">ম্যাপে আপনার জায়গায় ট্যাপ করুন।</p>
+      <p class="mls-note dim" id="mlsPinHint">ম্যাপ টেনে পিন আপনার জায়গায় আনুন, অথবা উপরে খুঁজুন।</p>
       <button type="button" class="mls-save" id="mlsSave4" disabled>এই পিন নিশ্চিত করুন</button>
       <button type="button" class="mls-link" id="mlsCancel4">বাতিল</button>
     </section>
@@ -92,11 +117,41 @@
   .mls-root { position: fixed; inset: 0; z-index: 9000; isolation: isolate; background: #FFE9DA; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; overflow: hidden; }
   .mls-root[hidden] { display: none; }
   .mls-map { position: absolute; inset: 0; width: 100%; height: 100%; background: #FFE9DA; z-index: 0; }
-  .mls-pinicon { background: none; border: 0; }
-  .mls-pinicon .pd { position: relative; width: 44px; height: 44px; margin: -22px 0 0 -22px; }
-  .mls-pinicon .pr { position: absolute; left: -30px; top: -30px; width: 104px; height: 104px; border-radius: 50%; border: 2px solid #FF6B35; background: rgba(255,107,53,.12); opacity: .6; }
-  .mls-pinicon .pc { position: absolute; inset: 0; border-radius: 50%; background: #FF6B35; border: 4px solid #fff; box-sizing: border-box; box-shadow: 0 6px 16px rgba(27,42,74,.35); display: flex; align-items: center; justify-content: center; }
-  .mls-pinicon .pc i { width: 10px; height: 10px; border-radius: 50%; background: #fff; display: block; }
+  /* মাঝের স্থির পিন — top JS থেকে (--mls-pin-y = ম্যাপের দৃশ্যমান অংশের মাঝ) */
+  .mls-cpin { position: absolute; left: 50%; top: var(--mls-pin-y, 40%); width: 0; height: 0; z-index: 900; pointer-events: none; }
+  .mls-cpin[hidden] { display: none; }
+  .mls-cpin-svg { position: absolute; left: -15px; bottom: 0; display: block; filter: drop-shadow(0 3px 4px rgba(27, 42, 74, 0.3)); transition: transform 0.18s cubic-bezier(.2, .8, .3, 1.2); }
+  .mls-cpin-ground { position: absolute; left: -6px; top: -3px; width: 12px; height: 6px; border-radius: 50%; background: radial-gradient(closest-side, rgba(27, 42, 74, 0.45), rgba(27, 42, 74, 0)); transition: transform 0.18s, opacity 0.18s; }
+  .mls-moving .mls-cpin-svg { transform: translateY(-12px); }
+  .mls-moving .mls-cpin-ground { transform: scale(1.6); opacity: 0.55; }
+  .mls-cpin-bubble { position: absolute; left: 0; bottom: 56px; transform: translateX(-50%); max-width: min(280px, 80vw); background: #fff; border-radius: 14px; padding: 7px 14px 6px; box-shadow: 0 6px 18px rgba(27, 42, 74, 0.2); text-align: center; line-height: 1.25; transition: opacity 0.15s, transform 0.15s; }
+  .mls-cpin-bubble::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: inherit; transform: rotate(45deg); border-radius: 2px; }
+  .mls-cpin-bubble[hidden] { display: none; }
+  .mls-cpin-t1 { display: block; font-size: 14px; font-weight: 700; color: #1B2A4A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mls-cpin-t2 { display: block; font-size: 12px; font-weight: 500; color: #5B6B86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mls-cpin-t2[hidden] { display: none; }
+  .mls-cpin-bubble[data-state="hint"] .mls-cpin-t1, .mls-cpin-bubble[data-state="loading"] .mls-cpin-t1 { font-size: 12.5px; font-weight: 600; color: #5B6B86; }
+  .mls-cpin-bubble[data-state="warn"] { background: #FFF4EC; }
+  .mls-cpin-bubble[data-state="warn"] .mls-cpin-t1 { font-size: 12.5px; color: #C2410C; }
+  .mls-moving .mls-cpin-bubble { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  .mls-searchpill { flex: 1; min-width: 0; height: 44px; display: flex; align-items: center; gap: 9px; padding: 0 16px; border: 0; border-radius: 22px; background: #fff; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.14); color: #5B6B86; font: 600 14.5px 'Hind Siliguri', system-ui, sans-serif; text-align: left; cursor: pointer; }
+  .mls-searchpill[hidden] { display: none; }
+  .mls-searchpill svg { flex: none; }
+  .mls-searchpill:focus-visible, .mls-srch-item:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+  .mls-srch { position: absolute; inset: 0; z-index: 2000; background: #F8FAFC; display: flex; flex-direction: column; }
+  .mls-srch[hidden] { display: none; }
+  .mls-srch-bar { display: flex; align-items: center; gap: 10px; padding: calc(14px + env(safe-area-inset-top)) 16px 12px; background: #fff; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.06); }
+  .mls-srch-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 14px; border: 1.5px solid #E6D8CC; border-radius: 14px; background: #FFFBF8; }
+  .mls-srch-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: 500 16px 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; }
+  .mls-srch-note { margin: 16px 22px 4px; font-size: 14px; color: #5B6B86; text-align: center; line-height: 1.5; }
+  .mls-srch-note[hidden] { display: none; }
+  .mls-srch-list { flex: 1; overflow-y: auto; padding: 8px 16px calc(16px + env(safe-area-inset-bottom)); max-width: 560px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+  .mls-srch-item { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 10px 12px; margin-bottom: 8px; border: 0; border-radius: 16px; background: #fff; box-shadow: 0 1px 6px rgba(27, 42, 74, 0.06); text-align: left; color: #1B2A4A; font-family: inherit; cursor: pointer; }
+  .mls-srch-item svg { flex: none; }
+  .mls-srch-txt { min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+  .mls-srch-txt b { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mls-srch-txt small { font-size: 12.5px; color: #5B6B86; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) { .mls-cpin-svg, .mls-cpin-ground, .mls-cpin-bubble { transition: none; } }
   .mls-note.dim { color: #4A5568; font-weight: 500; margin-top: 8px; }
   .mls-top { position: absolute; left: 0; right: 0; top: 0; padding: 20px 18px 0; display: flex; align-items: center; gap: 12px; z-index: 1000; pointer-events: none; }
   .mls-top > * { pointer-events: auto; }
@@ -104,6 +159,7 @@
   .mls-round { width: 44px; height: 44px; border: 0; border-radius: 22px; background: #fff; color: #1B2A4A; font-size: 17px; box-shadow: 0 2px 8px rgba(27, 42, 74, 0.14); cursor: pointer; display: flex; align-items: center; justify-content: center; }
   .mls-round[hidden] { display: none; }
   .mls-brand { display: flex; align-items: center; gap: 10px; }
+  .mls-brand[hidden] { display: none; }
   .mls-logo { width: 38px; height: 38px; border-radius: 12px; background: #1B2A4A; color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 17px; }
   .mls-brand-t { display: flex; flex-direction: column; line-height: 1.15; }
   .mls-brand-t b { font-size: 18px; font-weight: 700; }
@@ -150,6 +206,7 @@
   import { getCurrentPosition } from '../../lib/native-bridge.js';
   import { loadLeaflet as sfLoadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
   import { addBaseMap } from '../../lib/baseMap.js';
+  import { lookupPlaceName, searchPlaces } from '../../lib/placeLookup.js';
   import {
     UPAZILAS, BORDER_COLORS, getUnionUpazilaId, loadFeniGeo, findAreaAt, getFeniBounds,
     getUpazilaBorders, getDistrictBorder, getLabelPoints, getUnionBn, getUnionsOfUpazilaName,
@@ -161,7 +218,9 @@
   let pickMode = false; // true = শুধু জায়গা বাছাই (পিকআপ), ড্রপ ঠিকানা বদলায় না
   let step = 1;
   let picked = null;       // { lat, lng, address, upazila, union, source }
-  let L = null, geo = null, map = null, marker = null;
+  let L = null, geo = null, map = null;
+  let userMove = false; // ইউজার নিজে ম্যাপ টানছে/জুম করছে (প্রোগ্রাম্যাটিক মুভে সিলেক্ট নয়)
+  const PIN_MIN_ZOOM = 14;
   const unLayers = {};
   let chipLayer = null, labels = null, selUn = null, token = 0;
 
@@ -250,8 +309,7 @@
     const res = await Promise.all([loadLeaflet(), loadFeniGeo().catch(() => null)]);
     L = window.L;
     geo = res[1];
-    map = L.map($('mlsMap'), { zoomControl: false }).setView([23.0159, 91.3976], 10);
-    L.control.zoom({ position: 'topright' }).addTo(map);
+    map = L.map($('mlsMap'), { zoomControl: false }).setView([23.0159, 91.3976], 10); // জুম: পিঞ্চ/স্ক্রল (উপরে সার্চ)
     addBaseMap(L, map); // স্মার্ট ফেনী ভেক্টর + বাংলা HTML লেবেল, ব্যর্থ হলে OSM
     if (geo) {
       map.createPane('mlsAreas').style.zIndex = 421;
@@ -277,54 +335,122 @@
       map.on('zoomend', refreshChips);
       refreshChips();
     }
-    map.on('click', (e) => { if (step === 2 || step === 4) place(e.latlng.lat, e.latlng.lng, false); });
+    wirePin();
   }
 
-  function pinIcon() {
-    return L.divIcon({ className: 'mls-pinicon', iconSize: [0, 0], html: '<div class="pd"><span class="pr"></span><span class="pc"><i></i></span></div>' });
+  // ====================== মাঝের স্থির পিন ======================
+  function pinActive() { return step === 2 || step === 4; }
+
+  // পিনের ডগা = ম্যাপের দৃশ্যমান অংশের (হেডার ও শিটের মাঝের জায়গা) মাঝ
+  function pinY() {
+    const h = $('mlsMap').clientHeight || window.innerHeight;
+    const top = 70;
+    const bottom = h - bottomPad();
+    return Math.round(Math.max(top + 120, Math.min(top + (bottom - top) / 2 + 20, bottom - 24)));
+  }
+  function syncPinY() { root.style.setProperty('--mls-pin-y', pinY() + 'px'); }
+
+  function pinLatLng() {
+    return map.containerPointToLatLng([map.getSize().x / 2, pinY()]);
   }
 
-  async function reverse(lat, lng) {
-    try {
-      const r = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&accept-language=bn&zoom=17&lat=' + lat + '&lon=' + lng);
-      const d = await r.json();
-      return d.display_name || '';
-    } catch (e) { return ''; }
+  // প্রোগ্রাম্যাটিক: lat/lng ঠিক পিনের নিচে আনা
+  function moveTo(lat, lng, zoom) {
+    if (!map) return;
+    userMove = false;
+    const z = zoom || Math.max(map.getZoom(), 16);
+    const pt = map.project([lat, lng], z).add([0, map.getSize().y / 2 - pinY()]);
+    map.setView(map.unproject(pt, z), z);
+  }
+
+  function setBubble(text, state, sub) {
+    const b = $('mlsPinBubble');
+    b.dataset.state = state || 'ok';
+    setText('mlsPinT1', text || '');
+    const t2 = $('mlsPinT2');
+    t2.textContent = sub || '';
+    t2.hidden = !sub;
+    b.hidden = !text;
+  }
+  function hintBubble() { setBubble('ম্যাপ টেনে পিন আপনার জায়গায় আনুন', 'hint'); }
+
+  function selectAtPin() {
+    if (!pinActive()) return;
+    if (map.getZoom() < PIN_MIN_ZOOM) { setBubble('আরেকটু জুম করে পিন ঠিক জায়গায় আনুন', 'hint'); return; }
+    const p = pinLatLng();
+    place(p.lat, p.lng, { fromPin: true });
+  }
+
+  function wirePin() {
+    const el = $('mlsMap');
+    const mark = () => { userMove = true; };
+    el.addEventListener('pointerdown', mark, { passive: true });
+    el.addEventListener('wheel', mark, { passive: true });
+    map.on('movestart', () => { if (userMove && pinActive()) root.classList.add('mls-moving'); });
+    map.on('moveend', () => {
+      root.classList.remove('mls-moving');
+      if (!userMove) return;
+      userMove = false;
+      selectAtPin();
+    });
+    // ট্যাপ করা জায়গা পিনের নিচে চলে আসে (দূর থেকে হলে জুমও), তারপর সিলেক্ট
+    map.on('click', (e) => {
+      if (!pinActive()) return;
+      const c = map.latLngToContainerPoint(e.latlng);
+      const dy = c.y - pinY(), dx = c.x - map.getSize().x / 2;
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) { selectAtPin(); return; }
+      if (map.getZoom() < PIN_MIN_ZOOM) { moveTo(e.latlng.lat, e.latlng.lng, 16); userMove = true; return; }
+      userMove = true;
+      map.panBy([dx, dy]);
+    });
+    new ResizeObserver(() => syncPinY()).observe($('mlsSheet'));
+    window.addEventListener('resize', syncPinY);
+    syncPinY();
   }
 
   function unionLabel(un) { return un ? un + (/পৌরসভা/.test(un) ? '' : ' ইউনিয়ন') : ''; }
 
-  async function place(lat, lng, focus) {
+  // opts: { focus: GPS/সার্চ থেকে — ম্যাপ ওখানে নেওয়া, fromPin: ইউজার ম্যাপ টেনে ছাড়লো, name: জানা নাম }
+  async function place(lat, lng, opts = {}) {
     if (!map) return;
     const area = geo ? findAreaAt(lat, lng, geo) : null;
     if (geo && !area) {
-      const m = 'এই জায়গাটা ফেনীর বাইরে। ম্যাপে ফেনীর ভেতরে ট্যাপ করুন।';
+      const m = 'এই জায়গাটা ফেনীর বাইরে। ফেনীর ভেতরে পিন আনুন।';
       showErr('mlsErr2', m); setText('mlsPinHint', m);
       setText('mlsOkT', 'ফেনীর ভেতরে জায়গা বাছুন'); $('mlsOk').classList.add('wait');
+      setBubble('ফেনী জেলার বাইরে — ফেনীর ভেতরে পিন আনুন', 'warn');
+      if (opts.focus) moveTo(lat, lng, 15);
+      picked = null;
+      $('mlsSave2').disabled = true; $('mlsSave4').disabled = true;
       return;
     }
     const my = ++token;
-    if (!marker) {
-      marker = L.marker([lat, lng], { icon: pinIcon(), draggable: true, zIndexOffset: 1000 }).addTo(map);
-      marker.on('dragend', () => { const p = marker.getLatLng(); place(p.lat, p.lng, false); });
-    } else marker.setLatLng([lat, lng]);
-    if (area) {
-      selectUnion(area.union);
-      if (focus && unLayers[area.union]) {
-        map.fitBounds(unLayers[area.union].getBounds(), { paddingTopLeft: [24, 80], paddingBottomRight: [24, bottomPad() + 12], maxZoom: 16 });
-      } else {
-        map.panTo([lat, lng]);
-      }
-    }
+    if (area) selectUnion(area.union);
+    if (opts.focus) moveTo(lat, lng, 17);
     picked = { lat: lat, lng: lng, address: '', upazila: area ? area.upazilaName : '', union: area ? area.unionBn : '', source: 'map' };
-    setText('mlsOkT', 'আপনার লোকেশন পাওয়া গেছে'); $('mlsOk').classList.remove('wait');
+    setText('mlsOkT', opts.fromPin || opts.name ? 'পিনের জায়গা নেওয়া হয়েছে' : 'আপনার লোকেশন পাওয়া গেছে'); $('mlsOk').classList.remove('wait');
     showErr('mlsErr2', '');
     setText('mlsUp', picked.upazila || '—'); setText('mlsUn', picked.union || '—');
     $('mlsSave2').disabled = false; $('mlsSave4').disabled = false;
     setText('mlsPinHint', (picked.upazila ? picked.upazila + ' · ' : '') + (picked.union || '') + ' — পিন ঠিক থাকলে নিশ্চিত করুন।');
-    const addr = await reverse(lat, lng);
+    const sub = [unionLabel(picked.union), picked.upazila].filter(Boolean).join(', ');
+    const fallback = sub;
+    picked.address = fallback;
+    if (opts.name) {
+      showName(opts.name, sub);
+      return;
+    }
+    setBubble('জায়গার নাম খোঁজা হচ্ছে…', 'loading');
+    const name = await lookupPlaceName(lat, lng);
     if (my !== token) return;
-    picked.address = addr || [unionLabel(picked.union), picked.upazila].filter(Boolean).join(', ');
+    showName(name, sub);
+  }
+
+  function showName(name, sub) {
+    if (!picked) return;
+    if (name) setBubble(name, 'ok', sub);
+    else setBubble(sub || 'এই জায়গা', 'ok', '');
+    picked.address = [name, sub].filter(Boolean).join(', ');
     const a = $('mlsAddr'); a.textContent = picked.address; a.hidden = !picked.address;
   }
 
@@ -334,14 +460,18 @@
     $('mlsBack').hidden = n === 1;
     $('mlsClose').hidden = !(n === 1 && (hasAddress() || pickMode));
     $('mlsBrand').hidden = n !== 1;
+    $('mlsSearchBtn').hidden = !(n === 2 || n === 4);
+    $('mlsPin').hidden = !(n === 2 || n === 4);
+    if (n === 2 || n === 4) setTimeout(syncPinY, 30);
     showErr('mlsErr2', ''); showErr('mlsErr3', '');
     if (map) setTimeout(() => map.invalidateSize(), 50);
   }
 
   function clearPin() {
-    if (marker && map) { map.removeLayer(marker); marker = null; }
     token++;
     selectUnion(null);
+    hintBubble();
+    const a = $('mlsAddr'); if (a) a.hidden = true;
   }
   function backToOne() { clearPin(); picked = null; go(1); setTimeout(fitAll, 80); }
 
@@ -414,12 +544,12 @@
     setText('mlsOkT', 'লোকেশন খোঁজা হচ্ছে...'); $('mlsOk').classList.add('wait');
     showErr('mlsErr2', '');
     getCurrentPosition(
-      (pos) => { b.disabled = false; place(pos.coords.latitude, pos.coords.longitude, true); },
+      (pos) => { b.disabled = false; place(pos.coords.latitude, pos.coords.longitude, { focus: true }); },
       () => {
         b.disabled = false;
         setText('mlsOkT', picked ? 'আগের পিন রাখা আছে' : 'লোকেশন পাওয়া যায়নি');
         if (picked) $('mlsOk').classList.remove('wait');
-        showErr('mlsErr2', 'GPS চালু করে "আবার খুঁজুন" চাপুন, অথবা ম্যাপে নিজের জায়গায় ট্যাপ করুন।');
+        showErr('mlsErr2', 'GPS চালু করে "আবার খুঁজুন" চাপুন, অথবা ম্যাপ টেনে পিন নিজের জায়গায় আনুন।');
       }
     );
   }
@@ -434,7 +564,7 @@
   $('mlsWPin').addEventListener('click', () => {
     picked = null; clearPin();
     $('mlsSave4').disabled = true;
-    setText('mlsPinHint', 'ম্যাপে আপনার জায়গায় ট্যাপ করুন।');
+    setText('mlsPinHint', 'ম্যাপ টেনে পিন আপনার জায়গায় আনুন, অথবা উপরে খুঁজুন।');
     go(4);
     setTimeout(fitAll, 80);
   });
@@ -466,7 +596,57 @@
 
   $('mlsBack').addEventListener('click', () => { if (step === 4) $('mlsCancel4').click(); else backToOne(); });
   $('mlsClose').addEventListener('click', close);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !root.hidden && step === 1 && (hasAddress() || pickMode)) close(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || root.hidden) return;
+    if (!$('mlsSearch').hidden) { $('mlsSearch').hidden = true; return; }
+    if (step === 1 && (hasAddress() || pickMode)) close();
+  });
+
+  // ====================== জায়গা খোঁজা ======================
+  const srch = $('mlsSearch'), srchInput = $('mlsSearchInput'), srchList = $('mlsSearchList'), srchNote = $('mlsSearchNote');
+  const SRCH_HINT = 'জায়গার নাম লিখুন, যেমন মহিপাল বা ট্রাংক রোড';
+  let srchSeq = 0, srchTimer = null;
+  function openSearch() {
+    srchInput.value = ''; srchList.textContent = '';
+    srchNote.textContent = SRCH_HINT; srchNote.hidden = false;
+    srch.hidden = false;
+    setTimeout(() => srchInput.focus(), 60);
+  }
+  function closeSearch() { srch.hidden = true; srchInput.blur(); }
+  async function runSearch(q) {
+    const seq = ++srchSeq;
+    srchNote.textContent = 'খোঁজা হচ্ছে…'; srchNote.hidden = false;
+    const list = await searchPlaces(q, (r) => !geo || !!findAreaAt(r.lat, r.lng, geo));
+    if (seq !== srchSeq) return;
+    srchList.textContent = '';
+    if (!list.length) { srchNote.textContent = 'কিছু পাওয়া যায়নি। অন্য নাম লিখে দেখুন, অথবা ম্যাপ টেনে পিন বসান।'; return; }
+    srchNote.hidden = true;
+    list.forEach((r) => {
+      const area = geo ? findAreaAt(r.lat, r.lng, geo) : null;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mls-srch-item';
+      btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF6B35" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
+      const t = document.createElement('span'); t.className = 'mls-srch-txt';
+      const b = document.createElement('b'); b.textContent = r.name; t.appendChild(b);
+      const subText = area ? [area.unionBn, area.upazilaName].filter(Boolean).join(', ') : r.sub;
+      if (subText) { const sm = document.createElement('small'); sm.textContent = subText; t.appendChild(sm); }
+      btn.appendChild(t);
+      btn.addEventListener('click', () => { closeSearch(); place(r.lat, r.lng, { focus: true, name: r.name }); });
+      srchList.appendChild(btn);
+    });
+  }
+  srchInput.addEventListener('input', () => {
+    clearTimeout(srchTimer);
+    const q = srchInput.value.trim();
+    if (q.length < 2) { srchSeq++; srchList.textContent = ''; srchNote.textContent = SRCH_HINT; srchNote.hidden = false; return; }
+    srchTimer = setTimeout(() => runSearch(q), 350);
+  });
+  srchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); clearTimeout(srchTimer); const q = srchInput.value.trim(); if (q.length >= 2) runSearch(q); }
+  });
+  $('mlsSearchBtn').addEventListener('click', openSearch);
+  $('mlsSearchClose').addEventListener('click', closeSearch);
 
   window.SFMarketLocation = { open, close };
 </script>

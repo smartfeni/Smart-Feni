@@ -3398,5 +3398,10 @@ window.SF_I18N_EN = {
 "জায়গা খুঁজুন": "Search places",
 "এলাকা, বাজার, দোকান বা স্কুল": "Area, market, shop or school",
 "জায়গার নাম লিখুন, যেমন মহিপাল বা ট্রাংক রোড": "Type a place name, e.g. Mohipal or Trunk Road",
-"কিছু পাওয়া যায়নি। অন্য নাম লিখে দেখুন, অথবা ম্যাপ টেনে পিন বসান।": "Nothing found. Try another name, or drag the map to place the pin."
+"কিছু পাওয়া যায়নি। অন্য নাম লিখে দেখুন, অথবা ম্যাপ টেনে পিন বসান।": "Nothing found. Try another name, or drag the map to place the pin.",
+"ঠিক জায়গায় না হলে ম্যাপ টেনে পিন ঠিক জায়গায় আনুন, অথবা উপরে খুঁজুন।": "If it is not the right spot, drag the map to move the pin, or search above.",
+"ম্যাপ টেনে পিন আপনার জায়গায় আনুন, অথবা উপরে খুঁজুন।": "Drag the map to put the pin on your spot, or search above.",
+"এই জায়গাটা ফেনীর বাইরে। ফেনীর ভেতরে পিন আনুন।": "This spot is outside Feni. Place the pin inside Feni.",
+"পিনের জায়গা নেওয়া হয়েছে": "Pin location selected",
+"GPS চালু করে \"আবার খুঁজুন\" চাপুন, অথবা ম্যাপ টেনে পিন নিজের জায়গায় আনুন।": "Turn on GPS and tap \"Find again\", or drag the map to put the pin on your spot."
 };
