@@ -148,6 +148,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     .qo-det summary .sp { flex: 1; }
     .qo-det summary em { font-style: normal; font-size: 13.5px; color: #E8551C; }
     .qo-det[open] summary em .o { display: none; }
+    .qo-det summary .hint { font-size: 13px; font-weight: 600; color: #4A5568; margin-left: 2px; }
     .qo-det:not([open]) summary em .c { display: none; }
     .qo-line { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #EEF1F5; font-size: 14.5px; }
     .qo-line:last-child { border-bottom: 0; }
@@ -482,7 +483,8 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     }
 
     function paidCard() {
-      const c = mk('section', 'qo-card qo-paid');
+      const c = card('অগ্রিম পেমেন্ট', 'bags');
+      c.classList.add('qo-paid');
       c.appendChild(mk('b', '', 'অগ্রিম ' + tk(req.advance_verified_amount) + ' পাওয়া গেছে ✓'));
       const due = Math.round(Number(req.cod_due || 0));
       c.appendChild(mk('span', '', due > 0 ? 'পণ্য হাতে পেয়ে রাইডারকে দেবেন ' + tk(due) : 'ডেলিভারিতে আর কিছু দিতে হবে না'));
@@ -619,6 +621,30 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       return c;
     }
 
+    // ---------- ভাঁজ (ট্যাপে খোলে; রিফ্রেশে খোলা/বন্ধ অবস্থা মনে থাকে) ----------
+    const foldState = {};
+    function foldCard(key, sec, defOpen, hint) {
+      const h = sec.querySelector('.qo-h');
+      const title = h ? h.textContent : '';
+      const ic = h ? h.querySelector('img') : null;
+      if (h) h.remove();
+      const d = mk('details', 'qo-det');
+      const sm = mk('summary');
+      if (ic) { ic.style.cssText = 'width:26px;height:26px'; sm.appendChild(ic); }
+      sm.appendChild(document.createTextNode(title));
+      if (hint) sm.appendChild(mk('span', 'hint', ' · ' + hint));
+      sm.appendChild(mk('span', 'sp'));
+      const em = mk('em'); em.appendChild(mk('span', 'o', 'দেখুন ▾')); em.appendChild(mk('span', 'c', 'বন্ধ ▴')); sm.appendChild(em);
+      d.appendChild(sm);
+      const inner = mk('div'); inner.style.marginTop = '12px';
+      while (sec.firstChild) inner.appendChild(sec.firstChild);
+      d.appendChild(inner);
+      d.open = key in foldState ? foldState[key] : !!defOpen;
+      d.addEventListener('toggle', () => { foldState[key] = d.open; });
+      sec.appendChild(d);
+      return sec;
+    }
+
     // ---------- বিবরণ ----------
     function detailCard() {
       const c = mk('section', 'qo-card');
@@ -630,6 +656,8 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       sm.appendChild(mk('span', 'sp'));
       const em = mk('em'); em.appendChild(mk('span', 'o', 'দেখুন ▾')); em.appendChild(mk('span', 'c', 'বন্ধ ▴')); sm.appendChild(em);
       d.appendChild(sm);
+      d.open = foldState.detail === true;
+      d.addEventListener('toggle', () => { foldState.detail = d.open; });
       const items = kind() === 'shop' && Array.isArray(req.order_items) ? req.order_items : [];
       const list = mk('div'); list.style.marginTop = '10px';
       if (kind() !== 'shop') {
@@ -777,14 +805,19 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       const s = stage(req);
       $('qoNo').textContent = (req.order_no ? '#' + req.order_no + ' · ' : '') + new Date(req.created_at).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', timeZone: 'Asia/Dhaka' });
       body.appendChild(hero());
+      // ১) যে ধাপে কাস্টমারের যা করার, সেটাই সবার উপরে খোলা (কিছু করার না থাকলে শুধু উপরের স্ট্যাটাস)
       if (s === 'review') body.appendChild(dealCard());
       if (s === 'finding') body.appendChild(offerCard());
-      if (kind() === 'anything' && Array.isArray(req.purchase_lines) && req.purchase_lines.length && s !== 'cancelled') body.appendChild(quoteCard());
       if (s === 'advance') body.appendChild(advanceCard());
-      if (s === 'advance' || s === 'pickup' || s === 'onway' || (s === 'done' && req.accepted_rider)) body.appendChild(riderCard());
-      if ((s === 'pickup' || s === 'onway') && req.advance_verified) body.appendChild(paidCard());
       if (s === 'done' && !reviewed && req.accepted_rider) body.appendChild(reviewCard());
-      body.appendChild(timeline());
+      // ২) বাকি সব ভাঁজ করা, ট্যাপে খোলে
+      if (kind() === 'anything' && Array.isArray(req.purchase_lines) && req.purchase_lines.length && s !== 'cancelled') body.appendChild(foldCard('quote', quoteCard(), s === 'advance', ''));
+      if (s === 'advance' || s === 'pickup' || s === 'onway' || (s === 'done' && req.accepted_rider)) {
+        const rn = ((req.accepted_rider || {}).profiles || {}).full_name || '';
+        body.appendChild(foldCard('rider', riderCard(), false, rn));
+      }
+      if ((s === 'pickup' || s === 'onway') && req.advance_verified) body.appendChild(foldCard('paid', paidCard(), false, tk(req.advance_verified_amount) + ' ✓'));
+      body.appendChild(foldCard('tl', timeline(), false, ''));
       body.appendChild(detailCard());
 
       if (s === 'review' || s === 'finding') {
