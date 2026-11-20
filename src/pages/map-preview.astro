@@ -1,0 +1,563 @@
+---
+// path: src/pages/map-preview.astro
+// ============================================================
+// পেজ: ম্যাপ ল্যাব (/map-preview) — শুধু প্রিভিউ/তুলনা, সার্চে ইনডেক্স হবে না।
+// বেস ম্যাপ স্টাইল পাশাপাশি দেখা: স্মার্ট ফেনী (নতুন, ব্র্যান্ড রঙে) / Liberty /
+// Positron / Bright / পুরনো OSM — সাথে ফেনীর সীমানা, ইউনিয়ন ট্যাপ, নিজের লোকেশন।
+// আসল কোড পথ টেস্ট করে: src/lib/baseMap.js + leafletLoader.js + data/feniAreas.js।
+// প্রোডাকশনের কোনো কম্পোনেন্ট বদলায় না। স্টাইল সিদ্ধান্তের পর পেজটা মুছে ফেলা যাবে।
+// লিংক শেয়ার: /map-preview?s=liberty (smartfeni | liberty | positron | bright | osm)
+// ============================================================
+---
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#1B2A4A" />
+  <title>ম্যাপ ল্যাব | স্মার্ট ফেনী</title>
+  <link rel="icon" href="/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style is:global>
+    :root { --sf-or: #FF6B35; --sf-navy: #1B2A4A; --sf-ink2: #5B6B86; --sf-line: #E6EBF2; --sheet-h: 0px; }
+    html, body { margin: 0; height: 100%; }
+    body { font-family: 'Hind Siliguri', system-ui, sans-serif; color: var(--sf-navy); background: #EEF1F4; overflow: hidden; -webkit-tap-highlight-color: transparent; }
+    #map { position: fixed; inset: 0; background: #EEF1F4; }
+    .leaflet-bottom { bottom: var(--sheet-h) !important; }
+    .leaflet-control-attribution { font-size: 10px; background: rgba(255,255,255,.8) !important; border-radius: 8px 0 0 0; }
+
+    /* উপরের বার */
+    .ml-top { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 12px); left: 12px; right: 72px; z-index: 1000; display: flex; gap: 8px; align-items: center; pointer-events: none; }
+    .ml-back, .ml-title { pointer-events: auto; box-shadow: 0 4px 14px rgba(27,42,74,.16); }
+    .ml-back { width: 44px; height: 44px; border-radius: 14px; background: #fff; display: grid; place-items: center; color: var(--sf-navy); flex: none; }
+    .ml-title { background: var(--sf-navy); color: #fff; border-radius: 14px; padding: 6px 14px 5px; line-height: 1.25; }
+    .ml-title b { display: block; font-size: 15px; font-weight: 700; }
+    .ml-title span { display: block; font-size: 12px; opacity: .72; }
+
+    /* ডান পাশের বাটন */
+    .ml-fabs { position: fixed; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 12px); z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
+    .ml-zoom { display: flex; flex-direction: column; background: #fff; border-radius: 14px; box-shadow: 0 4px 14px rgba(27,42,74,.16); overflow: hidden; }
+    .ml-zoom button + button { border-top: 1px solid var(--sf-line); }
+    .ml-fab, .ml-zoom button { width: 44px; height: 44px; border: 0; background: #fff; color: var(--sf-navy); display: grid; place-items: center; cursor: pointer; padding: 0; font-family: inherit; }
+    .ml-fab { border-radius: 14px; box-shadow: 0 4px 14px rgba(27,42,74,.16); }
+    .ml-fab.is-busy svg { animation: ml-spin 1s linear infinite; }
+    button:focus-visible, a:focus-visible { outline: 3px solid rgba(255,107,53,.55); outline-offset: 2px; }
+
+    /* ইউনিয়ন তথ্য কার্ড */
+    .ml-info { position: fixed; left: 12px; right: 12px; bottom: calc(var(--sheet-h) + 12px); max-width: 400px; margin: 0 auto; z-index: 1001; background: #fff; border-radius: 18px; padding: 12px 8px 12px 16px; display: flex; align-items: center; gap: 12px; box-shadow: 0 10px 30px rgba(27,42,74,.2); }
+    .ml-info[hidden] { display: none; }
+    .ml-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; box-shadow: 0 0 0 4px rgba(0,0,0,.05); }
+    .ml-info-txt { flex: 1; min-width: 0; line-height: 1.3; }
+    .ml-info-txt b { display: block; font-size: 17px; font-weight: 700; }
+    .ml-info-txt small { display: block; font-size: 13px; color: var(--sf-ink2); }
+    .ml-x { width: 40px; height: 40px; border: 0; background: #F4F6FA; border-radius: 12px; color: var(--sf-ink2); font-size: 20px; cursor: pointer; flex: none; }
+
+    /* নিচের শিট */
+    .ml-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: #fff; border-radius: 24px 24px 0 0; box-shadow: 0 -8px 30px rgba(27,42,74,.16); padding: 2px 0 calc(env(safe-area-inset-bottom, 0px) + 14px); }
+    @media (min-width: 700px) { .ml-sheet { left: 16px; right: auto; bottom: 16px; width: 420px; border-radius: 24px; padding-bottom: 16px; } }
+    .ml-handle { display: block; margin: 0 auto; width: 72px; height: 22px; border: 0; background: none; cursor: pointer; padding: 0; }
+    .ml-handle i { display: block; width: 40px; height: 5px; border-radius: 5px; background: #D5DCE8; margin: 0 auto; }
+    .ml-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 18px 10px; }
+    .ml-head h1 { font-size: 18px; margin: 0; font-weight: 700; }
+    .ml-status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; padding: 5px 11px 4px; border-radius: 999px; background: #F1F4F8; color: var(--sf-ink2); white-space: nowrap; }
+    .ml-status i { width: 8px; height: 8px; border-radius: 50%; background: #9AA6BF; }
+    .ml-status[data-state=loading] i { background: var(--sf-or); animation: ml-pulse 1s ease-in-out infinite; }
+    .ml-status[data-state=ok] { background: #ECFDF3; color: #166534; }
+    .ml-status[data-state=ok] i { background: #16A34A; }
+    .ml-status[data-state=warn] { background: #FFF7E6; color: #92400E; }
+    .ml-status[data-state=warn] i { background: #F59E0B; }
+    .ml-status[data-state=error] { background: #FEF2F2; color: #991B1B; }
+    .ml-status[data-state=error] i { background: #DC2626; }
+
+    .ml-styles { display: flex; gap: 10px; overflow-x: auto; padding: 2px 18px 14px; scroll-snap-type: x mandatory; scrollbar-width: none; }
+    .ml-styles::-webkit-scrollbar { display: none; }
+    .ml-card { flex: none; width: 136px; scroll-snap-align: start; border: 2px solid var(--sf-line); border-radius: 18px; background: #fff; padding: 6px 6px 8px; text-align: left; cursor: pointer; font-family: inherit; color: inherit; position: relative; transition: border-color .15s, box-shadow .15s, transform .15s; }
+    .ml-card svg { display: block; width: 100%; height: 66px; border-radius: 12px; }
+    .ml-card b { display: block; font-size: 15px; margin: 7px 4px 0; font-weight: 700; line-height: 1.2; }
+    .ml-card small { display: block; font-size: 12.5px; color: var(--sf-ink2); margin: 1px 4px 0; line-height: 1.3; }
+    .ml-card[aria-checked=true] { border-color: var(--sf-or); box-shadow: 0 6px 18px rgba(255,107,53,.2); }
+    .ml-card[aria-checked=true]::after { content: ''; position: absolute; top: 12px; right: 12px; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-sizing: border-box; background: var(--sf-or) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/12px no-repeat; }
+    .ml-card:active { transform: scale(.97); }
+    .ml-badge { position: absolute; top: 12px; left: 12px; background: var(--sf-navy); color: #fff; font-size: 11.5px; font-weight: 700; padding: 1px 8px 0; border-radius: 999px; }
+
+    .ml-toggles { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 18px; }
+    .ml-tog { min-height: 44px; padding: 0 14px 0 12px; border-radius: 999px; border: 1.5px solid #D5DCE8; background: #fff; font-family: inherit; font-size: 14px; font-weight: 600; color: var(--sf-ink2); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+    .ml-tog::before { content: ''; width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid #B8C2D3; box-sizing: border-box; flex: none; }
+    .ml-tog[aria-pressed=true] { border-color: var(--sf-navy); color: var(--sf-navy); background: #F4F6FA; }
+    .ml-tog[aria-pressed=true]::before { border-color: var(--sf-navy); background: var(--sf-navy) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/11px no-repeat; }
+    .ml-note { font-size: 13px; color: #7A879C; margin: 10px 18px 0; line-height: 1.5; }
+
+    /* ম্যাপের ভেতরের লেবেল ও লোকেশন ডট */
+    .ml-label { background: none; border: 0; }
+    .ml-chip { display: inline-block; transform: translate(-50%, -50%); white-space: nowrap; font: 600 12px/1 'Hind Siliguri', system-ui, sans-serif; color: var(--sf-navy); background: rgba(255,255,255,.94); padding: 5px 9px 3px; border-radius: 999px; box-shadow: 0 1px 4px rgba(27,42,74,.2); }
+    .ml-chip.is-on { background: var(--sf-navy); color: #fff; }
+    .ml-me { background: none; border: 0; }
+    .ml-me span { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 50%; background: var(--sf-or); border: 3px solid #fff; box-sizing: border-box; box-shadow: 0 2px 6px rgba(27,42,74,.35); }
+    .ml-me span::after { content: ''; position: absolute; inset: -9px; border-radius: 50%; background: rgba(255,107,53,.28); animation: ml-ring 1.8s ease-out infinite; }
+
+    @keyframes ml-pulse { 50% { opacity: .35; } }
+    @keyframes ml-spin { to { transform: rotate(360deg); } }
+    @keyframes ml-ring { from { transform: scale(.4); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="ফেনী জেলার ম্যাপ"></div>
+
+  <header class="ml-top">
+    <a class="ml-back" href="/" aria-label="হোমে ফিরুন">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+    </a>
+    <div class="ml-title"><b>ম্যাপ ল্যাব</b><span>বেস ম্যাপ প্রিভিউ</span></div>
+  </header>
+
+  <div class="ml-fabs">
+    <div class="ml-zoom">
+      <button type="button" id="zin" aria-label="জুম ইন">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+      <button type="button" id="zout" aria-label="জুম আউট">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14" /></svg>
+      </button>
+    </div>
+    <button type="button" class="ml-fab" id="locate" aria-label="আমার লোকেশন">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF6B35" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></svg>
+    </button>
+    <button type="button" class="ml-fab" id="home" aria-label="পুরো ফেনী দেখুন">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+    </button>
+  </div>
+
+  <div class="ml-info" id="info" role="status" hidden>
+    <span class="ml-dot" id="infoDot"></span>
+    <div class="ml-info-txt"><b id="infoName"></b><small id="infoSub"></small></div>
+    <button type="button" class="ml-x" id="infoClose" aria-label="বন্ধ করুন">×</button>
+  </div>
+
+  <section class="ml-sheet" id="sheet">
+    <button type="button" class="ml-handle" id="handle" aria-expanded="true" aria-controls="sheetBody" aria-label="প্যানেল ছোট/বড় করুন"><i></i></button>
+    <div class="ml-head">
+      <h1>বেস ম্যাপ</h1>
+      <span class="ml-status" id="status" data-state="loading"><i></i><span id="statusText">লোড হচ্ছে</span></span>
+    </div>
+    <div id="sheetBody">
+      <div class="ml-styles" id="styles" role="radiogroup" aria-label="ম্যাপের স্টাইল"></div>
+      <div class="ml-toggles">
+        <button type="button" class="ml-tog" id="togBorder" aria-pressed="true">সীমানা</button>
+        <button type="button" class="ml-tog" id="togNames" aria-pressed="true">ইউনিয়নের নাম</button>
+        <button type="button" class="ml-tog" id="togFocus" aria-pressed="true">বাইরে হালকা</button>
+      </div>
+      <p class="ml-note">ইউনিয়নে ট্যাপ করলে নাম দেখাবে। এই পেজ শুধু তুলনার জন্য, মেনুতে কোথাও লিংক নেই।</p>
+    </div>
+  </section>
+
+  <script>
+    import { addBaseMap } from '../lib/baseMap.js';
+    import { loadLeaflet } from '../lib/leafletLoader.js';
+    import {
+      UPAZILAS,
+      getUnionBn,
+      getUnionUpazilaId,
+      loadFeniGeo,
+      getFeniBounds,
+      getDistrictBorder,
+      BORDER_COLORS,
+    } from '../data/feniAreas.js';
+
+    // ---------------- স্টাইলের তালিকা (pal: bg, water, major road, minor road, green, building)
+    const STYLES = [
+      { id: 'smartfeni', name: 'স্মার্ট ফেনী', sub: 'নতুন, ব্র্যান্ড রঙে', badge: 'নতুন', pal: ['#F7F5F0', '#A9D3EA', '#FF8A57', '#FFFFFF', '#D5E8C8', '#E6E0D6'] },
+      { id: 'liberty', name: 'লিবার্টি', sub: 'গুগল-ঘেঁষা, বিস্তারিত', pal: ['#F8F4F0', '#A0C8F0', '#E9AC77', '#FFFFFF', '#D8E8C8', '#DFDBD7'] },
+      { id: 'positron', name: 'পজিট্রন', sub: 'হালকা, মিনিমাল', pal: ['#F2F3F0', '#C6D2D8', '#FFFFFF', '#FFFFFF', '#E4E8E0', '#E6E6E3'] },
+      { id: 'bright', name: 'ব্রাইট', sub: 'রঙিন, স্পষ্ট', pal: ['#F8F4F0', '#9FC7EE', '#FFC266', '#FFFFFF', '#C8E3B4', '#E5DDD3'] },
+      { id: 'osm', name: 'পুরনো OSM', sub: 'এখন যা চলছে', pal: ['#F2EFE9', '#AAD3DF', '#FCD6A4', '#FFFFFF', '#CDEBB0', '#D9D0C9'] },
+    ];
+
+    // স্মার্ট ফেনী স্টাইলের রং
+    const C = {
+      bg: '#F7F5F0', water: '#A9D3EA', waterLine: '#8FC3E0', green: '#D5E8C8', land: '#F1EDE6',
+      bld: '#E6E0D6', bldLine: '#D9D1C4', motor: '#FF8A57', motorCase: '#E8703E', primary: '#FFB48A',
+      primaryCase: '#EE9A6C', minor: '#FFFFFF', minorCase: '#DDD5C8', boundary: '#9AA6BF',
+      ink: '#1B2A4A', ink2: '#5B6B86', waterInk: '#3F7FA6',
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const bnNum = (s) => String(s).replace(/[0-9]/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+    let L = null;
+    let map = null;
+    let geo = null;
+    let baseLayer = null;
+    let switchToken = 0;
+    let sfStyleCache = null;
+    let selected = null;
+    let meMarker = null;
+    const ov = { lines: null, unions: null, labels: null, mask: null };
+    const chips = {};
+
+    let current = 'smartfeni';
+    try {
+      const s = new URLSearchParams(location.search).get('s');
+      if (STYLES.some((x) => x.id === s)) current = s;
+    } catch (e) { /* ইগনোর */ }
+
+    // ---------------- স্টাইল কার্ড
+    function swatch(p) {
+      const [bg, water, major, minor, green, bld] = p;
+      return (
+        '<svg viewBox="0 0 120 66" preserveAspectRatio="xMidYMid slice" aria-hidden="true">' +
+        '<rect width="120" height="66" fill="' + bg + '"/>' +
+        '<rect x="80" y="6" width="32" height="20" rx="4" fill="' + green + '"/>' +
+        '<rect x="10" y="8" width="13" height="9" rx="2" fill="' + bld + '"/>' +
+        '<rect x="27" y="8" width="9" height="9" rx="2" fill="' + bld + '"/>' +
+        '<rect x="10" y="21" width="9" height="8" rx="2" fill="' + bld + '"/>' +
+        '<path d="M0 48 C24 40 42 60 70 52 S110 42 120 46 V66 H0Z" fill="' + water + '"/>' +
+        '<path d="M50 -4 L60 70" stroke="rgba(27,42,74,.12)" stroke-width="6"/>' +
+        '<path d="M50 -4 L60 70" stroke="' + minor + '" stroke-width="4"/>' +
+        '<path d="M-4 38 L124 16" stroke="rgba(27,42,74,.14)" stroke-width="8.5" stroke-linecap="round"/>' +
+        '<path d="M-4 38 L124 16" stroke="' + major + '" stroke-width="6" stroke-linecap="round"/>' +
+        '</svg>'
+      );
+    }
+
+    function renderCards() {
+      $('styles').innerHTML = STYLES.map((s) =>
+        '<button type="button" class="ml-card" role="radio" data-id="' + s.id + '" aria-checked="' + (s.id === current) + '">' +
+          swatch(s.pal) +
+          (s.badge ? '<span class="ml-badge">' + esc(s.badge) + '</span>' : '') +
+          '<b>' + esc(s.name) + '</b><small>' + esc(s.sub) + '</small>' +
+        '</button>'
+      ).join('');
+    }
+
+    function markCards() {
+      document.querySelectorAll('.ml-card').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.id === current)));
+      const on = document.querySelector('.ml-card[aria-checked="true"]');
+      if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+    }
+
+    function setStatus(state, text) {
+      $('status').dataset.state = state;
+      $('statusText').textContent = text;
+    }
+
+    // ---------------- শিটের উচ্চতা → Leaflet অ্যাট্রিবিউশন ও তথ্য কার্ড শিটের ওপরে
+    function syncSheetHeight() {
+      const desk = window.matchMedia('(min-width: 700px)').matches;
+      const h = desk ? 0 : $('sheet').offsetHeight;
+      document.documentElement.style.setProperty('--sheet-h', h + 'px');
+    }
+
+    function fitPadding() {
+      const desk = window.matchMedia('(min-width: 700px)').matches;
+      const sh = $('sheet').offsetHeight;
+      return {
+        paddingTopLeft: [desk ? 452 : 16, 72],
+        paddingBottomRight: [64, desk ? 24 : sh + 16],
+      };
+    }
+
+    // ---------------- স্মার্ট ফেনী স্টাইল: Liberty-র ওপর ব্র্যান্ড রং বসানো
+    function themeSmartFeni(style) {
+      // বাংলা যুক্তাক্ষর MapLibre ঠিক আঁকে না, তাই বেস ম্যাপের লেবেল ল্যাটিন/ইংরেজি
+      const latin = ['coalesce', ['get', 'name:en'], ['get', 'name:latin'], ['get', 'name']];
+      (style.layers || []).forEach((l) => {
+        const sl = l['source-layer'] || '';
+        const id = l.id || '';
+        const t = l.type;
+        const p = l.paint || (l.paint = {});
+        if (t === 'background') { p['background-color'] = C.bg; return; }
+        if (sl === 'water' && t === 'fill') { p['fill-color'] = C.water; return; }
+        if (sl === 'waterway' && t === 'line') { p['line-color'] = C.waterLine; return; }
+        if (sl === 'park' && t === 'fill') { p['fill-color'] = C.green; return; }
+        if (sl === 'landcover' && t === 'fill') { p['fill-color'] = C.green; p['fill-opacity'] = 0.55; return; }
+        if (sl === 'landuse' && t === 'fill') { p['fill-color'] = C.land; return; }
+        if (sl === 'building') {
+          if (t === 'fill') { p['fill-color'] = C.bld; p['fill-outline-color'] = C.bldLine; }
+          if (t === 'fill-extrusion') { p['fill-extrusion-color'] = C.bld; }
+          return;
+        }
+        if (sl === 'boundary' && t === 'line') { p['line-color'] = C.boundary; return; }
+        if (sl === 'transportation' && t === 'line') {
+          if (/rail|path|track|ferry|aeroway|pedestrian/.test(id)) return;
+          const cas = /casing/.test(id);
+          if (/motorway|trunk/.test(id)) p['line-color'] = cas ? C.motorCase : C.motor;
+          else if (/primary/.test(id)) p['line-color'] = cas ? C.primaryCase : C.primary;
+          else if (/secondary|tertiary|minor|service|street|residential/.test(id)) p['line-color'] = cas ? C.minorCase : C.minor;
+          return;
+        }
+        if (t === 'symbol' && l.layout && l.layout['text-field']) {
+          if (JSON.stringify(l.layout['text-field']).indexOf('name') !== -1) l.layout['text-field'] = latin;
+          p['text-halo-color'] = '#FFFFFF';
+          p['text-halo-width'] = 1.4;
+          p['text-color'] = sl === 'place' ? C.ink : sl === 'water_name' ? C.waterInk : C.ink2;
+        }
+      });
+      return style;
+    }
+
+    async function smartFeniStyle() {
+      if (!sfStyleCache) {
+        const r = await fetch('https://tiles.openfreemap.org/styles/liberty');
+        if (!r.ok) throw new Error('স্টাইল লোড ব্যর্থ: ' + r.status);
+        sfStyleCache = themeSmartFeni(await r.json());
+      }
+      return JSON.parse(JSON.stringify(sfStyleCache)); // MapLibre যেন ক্যাশ বদলাতে না পারে
+    }
+
+    function tilesReady(layer) {
+      return new Promise((resolve) => {
+        const t = setTimeout(resolve, 8000);
+        layer.once('load', () => { clearTimeout(t); resolve(); });
+      });
+    }
+
+    // ---------------- স্টাইল বদল
+    async function applyStyle(id) {
+      const token = ++switchToken;
+      current = id;
+      markCards();
+      setStatus('loading', 'লোড হচ্ছে');
+      try { history.replaceState(null, '', location.pathname + '?s=' + id); } catch (e) { /* ইগনোর */ }
+      if (baseLayer) { try { map.removeLayer(baseLayer); } catch (e) { /* ইগনোর */ } baseLayer = null; }
+
+      const t0 = performance.now();
+      let res;
+      let styleNote = '';
+      try {
+        if (id === 'osm') {
+          const layer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+          }).addTo(map);
+          await tilesReady(layer);
+          res = { kind: 'raster', layer };
+        } else {
+          let style = id;
+          if (id === 'smartfeni') {
+            try { style = await smartFeniStyle(); } catch (e) { console.warn('[map-lab]', e); style = 'positron'; styleNote = ' (পজিট্রন)'; }
+          }
+          res = await addBaseMap(L, map, { style });
+        }
+      } catch (err) {
+        console.warn('[map-lab] স্টাইল লোড ব্যর্থ', err);
+        if (token === switchToken) setStatus('error', 'লোড হয়নি');
+        return;
+      }
+
+      if (token !== switchToken) { try { map.removeLayer(res.layer); } catch (e) { /* ইগনোর */ } return; }
+      baseLayer = res.layer;
+      const sec = bnNum(((performance.now() - t0) / 1000).toFixed(1));
+      const fallback = id !== 'osm' && res.kind === 'raster';
+      if (fallback) setStatus('warn', 'রাস্টার ফলব্যাক · ' + sec + ' সে');
+      else setStatus('ok', (res.kind === 'vector' ? 'ভেক্টর' : 'রাস্টার') + styleNote + ' · ' + sec + ' সে');
+    }
+
+    // ---------------- ফেনীর ওভারলে
+    function unionColor(en) {
+      const up = UPAZILAS.find((u) => u.id === getUnionUpazilaId(en));
+      return up ? up.color : '#FF6B35';
+    }
+
+    const baseUnionStyle = () => ({ color: BORDER_COLORS.union, weight: 1.1, opacity: 0.75, fillColor: '#ffffff', fillOpacity: 0 });
+
+    function drawOverlay() {
+      const border = getDistrictBorder(geo);
+      const rings = Array.isArray(border && border[0] && border[0][0]) ? border : [border];
+
+      ov.mask = L.polygon(
+        [[[-85, -180], [-85, 180], [85, 180], [85, -180]], ...rings],
+        { pane: 'sfMask', stroke: false, fillColor: '#1B2A4A', fillOpacity: 0.13, interactive: false }
+      ).addTo(map);
+
+      ov.lines = L.layerGroup([
+        L.polyline(border, { pane: 'sfLines', color: BORDER_COLORS.district, weight: 14, opacity: 0.18, lineCap: 'round', lineJoin: 'round', interactive: false }),
+        L.polyline(border, { pane: 'sfLines', color: '#ffffff', weight: 7, opacity: 0.95, lineCap: 'round', lineJoin: 'round', interactive: false }),
+        L.polyline(border, { pane: 'sfLines', color: BORDER_COLORS.district, weight: 3.5, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }),
+      ]).addTo(map);
+
+      ov.labels = L.layerGroup();
+      ov.unions = L.geoJSON(geo, {
+        pane: 'sfAreas',
+        style: baseUnionStyle,
+        onEachFeature: (f, layer) => {
+          const en = f.properties && f.properties.shapeName;
+          if (!en) return;
+          layer.on('click', () => selectUnion(f, layer));
+          const chip = L.marker(layer.getBounds().getCenter(), {
+            pane: 'sfLabels',
+            interactive: false,
+            keyboard: false,
+            icon: L.divIcon({ className: 'ml-label', iconSize: [0, 0], html: '<span class="ml-chip">' + esc(getUnionBn(en)) + '</span>' }),
+          });
+          chips[en] = chip;
+          ov.labels.addLayer(chip);
+        },
+      }).addTo(map);
+
+      syncLabels();
+    }
+
+    function syncLabels() {
+      const want = $('togNames').getAttribute('aria-pressed') === 'true' && map.getZoom() >= 11.25;
+      if (want && !map.hasLayer(ov.labels)) ov.labels.addTo(map);
+      if (!want && map.hasLayer(ov.labels)) map.removeLayer(ov.labels);
+    }
+
+    function setChipOn(en, on) {
+      const el = chips[en] && chips[en].getElement && chips[en].getElement();
+      const span = el && el.querySelector('.ml-chip');
+      if (span) span.classList.toggle('is-on', on);
+    }
+
+    function clearSelection() {
+      if (selected) {
+        ov.unions.resetStyle(selected.layer);
+        setChipOn(selected.en, false);
+      }
+      selected = null;
+      $('info').hidden = true;
+    }
+
+    function showInfo(name, sub, color) {
+      $('infoName').textContent = name;
+      $('infoSub').textContent = sub;
+      $('infoDot').style.background = color;
+      $('info').hidden = false;
+    }
+
+    function selectUnion(f, layer, opts = {}) {
+      const en = f.properties.shapeName;
+      if (selected && selected.en === en && !opts.keep) { clearSelection(); return; }
+      if (selected) { ov.unions.resetStyle(selected.layer); setChipOn(selected.en, false); }
+      const col = unionColor(en);
+      layer.setStyle({ color: col, weight: 2.6, opacity: 1, fillColor: col, fillOpacity: 0.16 });
+      layer.bringToFront();
+      selected = { en, layer };
+      setChipOn(en, true);
+      const up = UPAZILAS.find((u) => u.id === getUnionUpazilaId(en));
+      const isPou = /Paurashava/.test(en);
+      showInfo(getUnionBn(en), (opts.prefix || '') + (up ? up.name + ' উপজেলা' : '') + (isPou ? '' : ' · ইউনিয়ন'), col);
+      map.flyToBounds(layer.getBounds(), { ...fitPadding(), maxZoom: 13.5, animate: !reduceMotion, duration: 0.6 });
+    }
+
+    // ---------------- পয়েন্ট কোন ইউনিয়নে (GeoJSON = [lng, lat])
+    function inRing(x, y, ring) {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+        if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+    function inFeature(lng, lat, g) {
+      if (!g) return false;
+      const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+      return polys.some((poly) => inRing(lng, lat, poly[0]) && !poly.slice(1).some((h) => inRing(lng, lat, h)));
+    }
+
+    function fitFeni() {
+      if (!geo) return;
+      map.fitBounds(getFeniBounds(geo, 0), { ...fitPadding(), animate: !reduceMotion });
+    }
+
+    function locateMe() {
+      const btn = $('locate');
+      if (!navigator.geolocation) { showInfo('লোকেশন পাওয়া যায়নি', 'এই ডিভাইসে GPS সাপোর্ট নেই', '#9AA6BF'); return; }
+      btn.classList.add('is-busy');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          btn.classList.remove('is-busy');
+          const lat = pos.coords.latitude, lng = pos.coords.longitude;
+          if (meMarker) map.removeLayer(meMarker);
+          meMarker = L.marker([lat, lng], { interactive: false, keyboard: false, icon: L.divIcon({ className: 'ml-me', iconSize: [0, 0], html: '<span></span>' }) }).addTo(map);
+          let hit = null;
+          if (ov.unions) ov.unions.eachLayer((l) => { if (!hit && inFeature(lng, lat, l.feature && l.feature.geometry)) hit = l; });
+          if (hit) selectUnion(hit.feature, hit, { keep: true, prefix: 'আপনি এখানে · ' });
+          else {
+            clearSelection();
+            showInfo('আপনি ফেনীর বাইরে', 'ম্যাপ আপনার অবস্থানে নেওয়া হলো', '#9AA6BF');
+            map.flyTo([lat, lng], 14, { animate: !reduceMotion });
+          }
+        },
+        () => {
+          btn.classList.remove('is-busy');
+          showInfo('লোকেশন পাওয়া যায়নি', 'লোকেশন পারমিশন চালু আছে কিনা দেখুন', '#9AA6BF');
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+      );
+    }
+
+    // ---------------- টগল
+    function toggle(btn, fn) {
+      btn.addEventListener('click', () => {
+        const on = btn.getAttribute('aria-pressed') !== 'true';
+        btn.setAttribute('aria-pressed', String(on));
+        fn(on);
+      });
+    }
+
+    function bindUi() {
+      $('styles').addEventListener('click', (e) => {
+        const card = e.target.closest('.ml-card');
+        if (card && card.dataset.id !== current) applyStyle(card.dataset.id);
+      });
+      $('zin').addEventListener('click', () => map.zoomIn());
+      $('zout').addEventListener('click', () => map.zoomOut());
+      $('home').addEventListener('click', () => { clearSelection(); fitFeni(); });
+      $('locate').addEventListener('click', locateMe);
+      $('infoClose').addEventListener('click', clearSelection);
+      $('handle').addEventListener('click', () => {
+        const open = $('handle').getAttribute('aria-expanded') !== 'true';
+        $('handle').setAttribute('aria-expanded', String(open));
+        $('sheetBody').hidden = !open;
+      });
+      toggle($('togBorder'), (on) => {
+        [ov.lines, ov.unions].forEach((g) => { if (!g) return; if (on) g.addTo(map); else map.removeLayer(g); });
+        if (!on) clearSelection();
+      });
+      toggle($('togNames'), () => syncLabels());
+      toggle($('togFocus'), (on) => { if (!ov.mask) return; if (on) ov.mask.addTo(map); else map.removeLayer(ov.mask); });
+      map.on('zoomend', syncLabels);
+      new ResizeObserver(() => { syncSheetHeight(); try { map.invalidateSize(); } catch (e) { /* ইগনোর */ } }).observe($('sheet'));
+    }
+
+    // ---------------- শুরু
+    async function start() {
+      renderCards();
+      syncSheetHeight();
+      try {
+        await loadLeaflet();
+      } catch (e) {
+        setStatus('error', 'ম্যাপ লোড হয়নি');
+        return;
+      }
+      L = window.L;
+      map = L.map('map', { zoomControl: false, zoomSnap: 0.25, zoomDelta: 0.5, minZoom: 7 }).setView([23.0, 91.42], 10);
+      map.attributionControl.setPrefix(false);
+      [['sfMask', 405], ['sfAreas', 420], ['sfLines', 440], ['sfLabels', 460]].forEach(([n, z]) => {
+        map.createPane(n);
+        map.getPane(n).style.zIndex = String(z);
+      });
+      map.getPane('sfMask').style.pointerEvents = 'none';
+      map.getPane('sfLabels').style.pointerEvents = 'none';
+
+      bindUi();
+      applyStyle(current);
+      try {
+        geo = await loadFeniGeo();
+        drawOverlay();
+        fitFeni();
+      } catch (e) {
+        console.warn('[map-lab] সীমানা লোড ব্যর্থ', e);
+      }
+      markCards();
+    }
+
+    start();
+  </script>
+</body>
+</html>
