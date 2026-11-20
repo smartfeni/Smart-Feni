@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<!--
+  path: scripts/map-shots/shots.html
+  ম্যাপ ডিজাইন তুলনার স্ক্রিনশট পেজ (সাইটে যায় না, শুধু GitHub Actions-এ চলে)।
+  ?mode=osm  → বর্তমান OSM রাস্টার + একই উপজেলা ওভারলে
+  ?mode=sf   → নতুন "স্মার্ট ফেনী" ভেক্টর (OpenFreeMap Liberty-র ওপর ব্র্যান্ড থিম)
+  ?mode=blank→ বেস ছাড়া (লোকাল টেস্ট)
+  সব বাংলা লেখা HTML-এ আঁকা: MapLibre নিজে বাংলা যুক্তাক্ষর ভেঙে ফেলে, ব্রাউজার ঠিক আঁকে।
+-->
+<html lang="bn">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>map shots</title>
+<link rel="stylesheet" href="/nm/maplibre-gl/dist/maplibre-gl.css" />
+<style>
+  @font-face { font-family: 'Hind Siliguri'; font-weight: 400; src: url(/nm/@fontsource/hind-siliguri/files/hind-siliguri-bengali-400-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'Hind Siliguri'; font-weight: 600; src: url(/nm/@fontsource/hind-siliguri/files/hind-siliguri-bengali-600-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'Hind Siliguri'; font-weight: 700; src: url(/nm/@fontsource/hind-siliguri/files/hind-siliguri-bengali-700-normal.woff2) format('woff2'); }
+  html, body { margin: 0; height: 100%; }
+  body { font-family: 'Hind Siliguri', sans-serif; color: #1B2A4A; background: #F7F5F0; }
+  #map { position: absolute; inset: 0; }
+  .maplibregl-ctrl-attrib { font-size: 9px; }
+  .card { position: absolute; top: 14px; left: 14px; right: 14px; z-index: 5; background: #fff; border-radius: 18px; padding: 12px 16px 10px; box-shadow: 0 6px 22px rgba(27,42,74,.16); display: flex; align-items: center; gap: 12px; }
+  .card.old { background: #F1F3F7; }
+  .tag { flex: none; font-weight: 700; font-size: 13px; padding: 3px 11px 1px; border-radius: 999px; background: #FF6B35; color: #fff; }
+  .old .tag { background: #8A96AB; }
+  .card b { display: block; font-size: 19px; line-height: 1.2; }
+  .card small { display: block; font-size: 13px; color: #5B6B86; line-height: 1.35; }
+  .legend { position: absolute; left: 14px; right: 14px; bottom: 14px; z-index: 5; background: #fff; border-radius: 18px; padding: 10px 12px 8px; box-shadow: 0 6px 22px rgba(27,42,74,.16); display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 4px 8px; }
+  .legend span { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+  .legend i { width: 13px; height: 13px; border-radius: 4px; flex: none; }
+  .lbl { position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none; transform: translate(-50%, -50%); }
+  .lbl-up { font-weight: 700; font-size: 16px; color: #1B2A4A; letter-spacing: .1px; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff, 0 0 8px #fff; }
+  .lbl-un { font-weight: 600; font-size: 10.5px; color: #3E4C66; text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 5px #fff; }
+  .lbl-pl { font-weight: 600; font-size: 11px; color: #6B5E4E; text-shadow: 0 0 2px #fff, 0 0 4px #fff; }
+  #labels { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="labels"></div>
+<div class="card" id="card"></div>
+<div class="legend" id="legend"></div>
+
+<script src="/nm/maplibre-gl/dist/maplibre-gl.js"></script>
+<script type="module">
+import { UPAZILAS, getUnionBn, getUnionUpazilaId, getLabelPoints } from '/src/data/feniAreas.js';
+
+const mode = new URLSearchParams(location.search).get('mode') || 'blank';
+const done = (msg) => { window.__ready = msg || 'ok'; };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+// ---------- কার্ড ও লিজেন্ড
+const card = document.getElementById('card');
+if (mode === 'osm') {
+  card.className = 'card old';
+  card.innerHTML = '<span class="tag">এখন</span><div><b>বর্তমান ম্যাপ (OSM)</b><small>রাস্টার টাইল, ঘিঞ্জি রং, ছোট লেখা</small></div>';
+} else {
+  card.innerHTML = '<span class="tag">নতুন</span><div><b>স্মার্ট ফেনী ম্যাপ</b><small>ভেক্টর বেস, ব্র্যান্ড রং, সব বাংলা লেখা ঠিকঠাক</small></div>';
+}
+document.getElementById('legend').innerHTML = UPAZILAS.map((u) => '<span><i style="background:' + u.color + '"></i>' + esc(u.name) + '</span>').join('');
+
+// ---------- স্মার্ট ফেনী থিম (map-preview.astro-র themeSmartFeni-এর মতো, কিন্তু সব MapLibre লেখা বন্ধ)
+const C = { bg: '#F7F5F0', water: '#A9D3EA', waterLine: '#8FC3E0', green: '#DCEBD2', land: '#F1EDE6', bld: '#E6E0D6', bldLine: '#D9D1C4',
+  motor: '#FF8A57', motorCase: '#E8703E', primary: '#FFC09C', primaryCase: '#EEA57E', minor: '#FFFFFF', minorCase: '#DDD5C8', boundary: '#B9C2D3' };
+function theme(style) {
+  style.layers = (style.layers || []).filter((l) => {
+    if (l.type === 'symbol') return false; // লেখা/আইকন সব HTML-এ (বাংলা ঠিক রাখতে)
+    const sl = l['source-layer'] || '', id = l.id || '', t = l.type, p = l.paint || (l.paint = {});
+    if (t === 'background') p['background-color'] = C.bg;
+    else if (sl === 'water' && t === 'fill') p['fill-color'] = C.water;
+    else if (sl === 'waterway' && t === 'line') p['line-color'] = C.waterLine;
+    else if (sl === 'park' && t === 'fill') p['fill-color'] = C.green;
+    else if (sl === 'landcover' && t === 'fill') { p['fill-color'] = C.green; p['fill-opacity'] = 0.5; }
+    else if (sl === 'landuse' && t === 'fill') p['fill-color'] = C.land;
+    else if (sl === 'building') { if (t === 'fill') { p['fill-color'] = C.bld; p['fill-outline-color'] = C.bldLine; } if (t === 'fill-extrusion') p['fill-extrusion-color'] = C.bld; }
+    else if (sl === 'boundary' && t === 'line') p['line-color'] = C.boundary;
+    else if (sl === 'transportation' && t === 'line' && !/rail|path|track|ferry|aeroway|pedestrian/.test(id)) {
+      const cas = /casing/.test(id);
+      if (/motorway|trunk/.test(id)) p['line-color'] = cas ? C.motorCase : C.motor;
+      else if (/primary/.test(id)) p['line-color'] = cas ? C.primaryCase : C.primary;
+      else if (/secondary|tertiary|minor|service|street|residential/.test(id)) p['line-color'] = cas ? C.minorCase : C.minor;
+    }
+    return true;
+  });
+  return style;
+}
+
+async function baseStyle() {
+  if (mode === 'osm') {
+    return { version: 8, sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap contributors' } },
+      layers: [{ id: 'osm', type: 'raster', source: 'osm' }] };
+  }
+  if (mode === 'sf') {
+    const r = await fetch('https://tiles.openfreemap.org/styles/liberty');
+    return theme(await r.json());
+  }
+  return { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': C.bg } }] };
+}
+
+// ---------- জ্যামিতি
+const geo = await (await fetch('/public/data/feni_unions.geojson')).json();
+let minX = 180, minY = 90, maxX = -180, maxY = -90;
+geo.features.forEach((f) => {
+  const g = f.geometry;
+  const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+  polys.forEach((p) => {
+    p[0].forEach(([x, y]) => { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); });
+  });
+  const upId = getUnionUpazilaId(f.properties.shapeName);
+  const up = UPAZILAS.find((u) => u.id === upId);
+  f.properties.color = up ? up.color : '#999999';
+});
+// উপজেলা ও জেলা: mapshaper দিয়ে ইউনিয়ন dissolve করা (snap + gap-fill), তাই সীমানা ফাঁকহীন
+const feats = (g) => g.features || (g.geometries || []).map((x) => ({ type: 'Feature', properties: {}, geometry: x }));
+const upz = feats(await (await fetch('/scripts/map-shots/data/feni_upazilas.geojson')).json());
+upz.forEach((f) => { const u = UPAZILAS.find((x) => x.id === f.properties.up); f.properties.color = u ? u.color : '#999999'; });
+const upLines = { type: 'FeatureCollection', features: upz };
+const dist = feats(await (await fetch('/scripts/map-shots/data/feni_district.geojson')).json())[0];
+const distLine = dist;
+const outer = (g) => (g.type === 'Polygon' ? [g.coordinates] : g.coordinates).map((p) => p[0]);
+const mask = { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[-179, -85], [179, -85], [179, 85], [-179, 85], [-179, -85]], ...outer(dist.geometry)] } };
+
+const isNew = mode !== 'osm';
+const map = new maplibregl.Map({
+  container: 'map', style: await baseStyle(), attributionControl: { compact: false },
+  bounds: [[minX, minY], [maxX, maxY]], fitBoundsOptions: { padding: { top: 104, bottom: 108, left: 18, right: 18 } },
+  interactive: false, fadeDuration: 0, preserveDrawingBuffer: true,
+});
+
+map.on('load', () => {
+  map.addSource('feni', { type: 'geojson', data: geo });
+  map.addSource('up', { type: 'geojson', data: upLines });
+  map.addSource('dist', { type: 'geojson', data: distLine });
+  map.addSource('mask', { type: 'geojson', data: mask });
+  map.addLayer({ id: 'mask', type: 'fill', source: 'mask', paint: { 'fill-color': '#1B2A4A', 'fill-opacity': isNew ? 0.16 : 0.1 } });
+  map.addLayer({ id: 'un-fill', type: 'fill', source: 'feni', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': isNew ? 0.2 : 0.12 } });
+  map.addLayer({ id: 'un-line', type: 'line', source: 'feni', paint: isNew
+    ? { 'line-color': '#FFFFFF', 'line-width': 1.1, 'line-opacity': 0.95 }
+    : { 'line-color': '#0D9488', 'line-width': 1, 'line-opacity': 0.8 } });
+  map.addLayer({ id: 'up-halo', type: 'line', source: 'up', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': isNew ? 4.5 : 0, 'line-opacity': 0.9 } });
+  map.addLayer({ id: 'up-line', type: 'line', source: 'up', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: isNew
+    ? { 'line-color': ['get', 'color'], 'line-width': 2.2 }
+    : { 'line-color': '#6D28D9', 'line-width': 1.5, 'line-dasharray': [3, 3], 'line-opacity': 0.7 } });
+  map.addLayer({ id: 'dist-glow', type: 'line', source: 'dist', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#FF6B35', 'line-width': 14, 'line-opacity': 0.18 } });
+  map.addLayer({ id: 'dist-halo', type: 'line', source: 'dist', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 7 } });
+  map.addLayer({ id: 'dist-line', type: 'line', source: 'dist', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#FF6B35', 'line-width': 3.2 } });
+});
+
+// ---------- HTML লেবেল (কোলিশন এড়িয়ে): উপজেলা আগে, তারপর ইউনিয়ন, তারপর বেস ম্যাপের জায়গা
+function drawLabels() {
+  const box = document.getElementById('labels');
+  box.innerHTML = '';
+  const taken = [];
+  const free = (r) => !taken.some((t) => r.x < t.x + t.w && r.x + r.w > t.x && r.y < t.y + t.h && r.y + r.h > t.y);
+  const put = (lngLat, text, cls, pad) => {
+    const pt = map.project(lngLat);
+    if (pt.y < 100 || pt.y > innerHeight - 100 || pt.x < 8 || pt.x > innerWidth - 8) return;
+    const el = document.createElement('div');
+    el.className = 'lbl ' + cls;
+    el.textContent = text;
+    el.style.left = pt.x + 'px';
+    el.style.top = pt.y + 'px';
+    box.appendChild(el);
+    const w = el.offsetWidth + pad, h = el.offsetHeight + pad;
+    const r = { x: pt.x - w / 2, y: pt.y - h / 2, w, h };
+    if (free(r)) taken.push(r); else el.remove();
+  };
+  const pts = getLabelPoints(geo);
+  UPAZILAS.forEach((u) => { const p = pts.upazilas[u.id]; if (p) put([p[1], p[0]], u.name, 'lbl-up', 6); });
+  Object.keys(pts.unions).forEach((en) => { const p = pts.unions[en]; put([p[1], p[0]], getUnionBn(en), 'lbl-un', 2); });
+  if (mode === 'sf') {
+    const seen = new Set();
+    (map.querySourceFeatures('openmaptiles', { sourceLayer: 'place' }) || [])
+      .filter((f) => /town|city|village/.test(f.properties.class) && f.properties.name)
+      .sort((a, b) => (a.properties.rank || 99) - (b.properties.rank || 99))
+      .forEach((f) => {
+        const n = f.properties.name;
+        if (seen.has(n) || !/[ঀ-৿]/.test(n)) return;
+        seen.add(n);
+        put(f.geometry.coordinates, n, 'lbl-pl', 8);
+      });
+  }
+}
+
+const timer = setTimeout(() => { try { drawLabels(); } catch (e) { /* ইগনোর */ } done('timeout'); }, 45000);
+map.once('idle', async () => {
+  try { await document.fonts.ready; } catch (e) { /* ইগনোর */ }
+  drawLabels();
+  clearTimeout(timer);
+  setTimeout(() => done('ok'), 300);
+});
+</script>
+</body>
+</html>

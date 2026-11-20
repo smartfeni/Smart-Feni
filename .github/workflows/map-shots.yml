@@ -1,0 +1,60 @@
+# path: .github/workflows/map-shots.yml
+# ম্যাপ ডিজাইনের তুলনামূলক স্ক্রিনশট (বর্তমান OSM বনাম নতুন স্মার্ট ফেনী)।
+# scripts/map-shots/ বদলালে testing-এ push হলে নিজে চলে; ছবি scripts/map-shots/out/-এ কমিট হয়।
+# সাইটে বা অ্যাপে কোনো প্রভাব নেই (Astro শুধু src/ ও public/ বিল্ড করে)।
+name: map-shots
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [testing]
+    paths:
+      - 'scripts/map-shots/shots.html'
+      - 'scripts/map-shots/shoot.mjs'
+      - 'scripts/map-shots/data/**'
+      - '.github/workflows/map-shots.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: map-shots
+  cancel-in-progress: true
+
+jobs:
+  shoot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: testing
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: টুল ইনস্টল (রিপোর package.json ছোঁয়া হয় না)
+        run: |
+          mkdir -p "$RUNNER_TEMP/ms" && cd "$RUNNER_TEMP/ms"
+          npm init -y > /dev/null
+          npm i --no-audit --no-fund playwright@1.48.2 maplibre-gl@4.7.1 @fontsource/hind-siliguri@5
+          npx playwright install --with-deps chromium
+
+      - name: স্ক্রিনশট
+        env:
+          MS_DIR: ${{ runner.temp }}/ms
+        run: node scripts/map-shots/shoot.mjs osm sf
+
+      - name: ছবি testing-এ কমিট
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/map-shots/out/osm.png scripts/map-shots/out/sf.png
+          git diff --cached --quiet && { echo "বদল নেই"; exit 0; }
+          git commit -m "map-shots: স্ক্রিনশট আপডেট [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase origin testing && git push origin HEAD:testing && exit 0
+            sleep 5
+          done
+          exit 1
