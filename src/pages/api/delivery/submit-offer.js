@@ -86,7 +86,7 @@ export async function POST({ request }) {
     // রিকোয়েস্ট যাচাই
     const { data: reqRow, error: reqError } = await client
       .from('delivery_requests')
-      .select('id, status, category, customer_asking_price, vehicle_type, customer_profile_id')
+      .select('id, status, category, customer_asking_price, vehicle_type, customer_profile_id, is_market')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -122,6 +122,17 @@ export async function POST({ request }) {
         JSON.stringify({ error: 'এই ক্যাটাগরিতে তুমি নিবন্ধিত না' }),
         { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // কুইক ডেলিভারি: অগ্রিম রাইডারের বিকাশে আসে, তাই বিকাশ নম্বর ছাড়া অর্ডার নেওয়া যাবে না
+    if (reqRow.is_market) {
+      const { data: bk } = await client.from('rider_bkash').select('bkash_number').eq('rider_id', heroRow.id).maybeSingle();
+      if (!bk || !bk.bkash_number) {
+        return new Response(
+          JSON.stringify({ error: 'কুইক ডেলিভারির অর্ডার নিতে আগে পেজের উপরে আপনার বিকাশ নম্বর দিন', code: 'BKASH_REQUIRED' }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // অনলাইন চেক: এই ক্যাটাগরির (ডেলিভারি/রাইড) টগল অন না থাকলে অর্ডার নেওয়া যাবে না

@@ -246,7 +246,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     let busy = false;
     let pollTimer = null;
     let payments = [];
-    let payCfg = { bkash: '', nagad: '' };
+    let payCfg = { bkash: '', nagad: '', rider: '' };
     function lastPay() { return payments[0] || null; }
 
     function toast(m, t) { if (window.showToast) window.showToast(m, t || 'info'); }
@@ -508,7 +508,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       $('qoMBkash').setAttribute('aria-pressed', String(m === 'bkash'));
       $('qoMNagad').setAttribute('aria-pressed', String(m === 'nagad'));
       $('qoPayNum').textContent = (m === 'nagad' ? payCfg.nagad : payCfg.bkash) || '—';
-      $('qoPayNumL').textContent = (m === 'nagad' ? 'নগদ' : 'বিকাশ') + ' নম্বর (Send Money)';
+      $('qoPayNumL').textContent = (m !== 'nagad' && payCfg.rider ? 'রাইডারের (' + payCfg.rider + ') বিকাশ নম্বর' : (m === 'nagad' ? 'নগদ' : 'বিকাশ') + ' নম্বর') + ' (Send Money)';
       $('qoPayBox').className = 'qo-paynum ' + m;
       $('qoPayLogo').src = '/market/pay/' + m + '.webp';
     }
@@ -868,6 +868,11 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
       try {
         const { data: st } = await supabase.from('site_settings').select('key, value').in('key', ['market_payment_bkash', 'market_payment_nagad']);
         (st || []).forEach((r) => { if (r.key === 'market_payment_bkash') payCfg.bkash = (r.value || '').trim(); if (r.key === 'market_payment_nagad') payCfg.nagad = (r.value || '').trim(); });
+        if (reqId) {
+          // রাইডার-মোডে অগ্রিম যাবে অর্ডারের রাইডারের বিকাশে (না থাকলে অফিসের নম্বর)
+          const { data: pn } = await supabase.rpc('market_order_pay_number', { p_request_id: reqId });
+          if (pn && pn.receiver === 'rider' && pn.bkash) { payCfg.bkash = pn.bkash; payCfg.nagad = ''; payCfg.rider = pn.name || 'রাইডার'; }
+        }
       } catch (e) { /* নম্বর না পেলে শুধু ফাঁকা */ }
       await load();
       if (req) live();

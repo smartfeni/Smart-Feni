@@ -1045,6 +1045,8 @@ const riderGuideSteps = [
     import { getCurrentPosition } from '../../../lib/native-bridge.js';
     import { findMapLink, createNavButton, renderAddressWithNav } from '../../../lib/mapLinks.js';
     import { marketBadge, marketRiderHtml, bindMarketRider } from '../../../lib/marketRider.js';
+    import { mountRiderBkash, scrollToBkashCard } from '../../../lib/riderBkash.js';
+    import { mountAdvanceVerify } from '../../../lib/marketAdvance.js';
 
     const authGate = document.getElementById('authGate');
     const notRiderGate = document.getElementById('notRiderGate');
@@ -1356,6 +1358,7 @@ const riderGuideSteps = [
 
     // ===== চলমান ডেলিভারি (এখন কাস্টমারের তথ্য সহ) =====
     async function loadActiveDeliveries(riderId) {
+      mountRiderBkash(supabase, riderId, riderActiveDeliverySection);
       // Pro: আজকের হিসাব এখন /pro/hero/account পেজে
       // শপ-অর্ডারে রাইডার-কনফার্ম সুইচ (site_settings পাবলিক রিড)
       const shopSwP = supabase.from('site_settings').select('value').eq('key', 'shop_notify_on_rider_confirm').maybeSingle();
@@ -1493,6 +1496,7 @@ const riderGuideSteps = [
             <div class="hu-trip-stop">${huEsc(req.drop_address || '') || '—'}<small>ডেলিভারি</small></div>
           </div>
           ${qdHtml}
+          ${req.is_market && !req.advance_verified && req.market_stage === 'advance_submitted' ? '<div data-adv-verify></div>' : ''}
           ${stageHtml}
           ${(req.status === 'confirmed' && !isPickupDone) ? `<div class="dh-pk-badge" data-pk-for="${huEsc(req.id)}" style="display:none;"></div>` : ''}
           <p class="dh-active-price">${req.is_market ? '<span style="display:block;font-size:0.75rem;font-weight:700;color:#5A6B85;">আপনার ডেলিভারি চার্জ</span>' : ''}৳${Number(req.final_price) || 0}</p>
@@ -1517,6 +1521,7 @@ const riderGuideSteps = [
         addNavButtons(card);
 
         if (req.is_market) bindMarketRider(card, req, supabase, () => loadRiderSection());
+        if (req.is_market) mountAdvanceVerify(card, req, supabase, () => loadRiderSection());
 
         // কুইক ডেলিভারি চেকলিস্ট টিক (শুধু এই ফোনে মনে থাকে)
         card.querySelectorAll('[data-qd-tick]').forEach((cb) => {
@@ -1885,6 +1890,7 @@ const riderGuideSteps = [
           const { error } = await acceptBestPrice({ requestId: req.id });
           if (error) {
             alert(error);
+            if (String(error).includes('বিকাশ')) scrollToBkashCard();
             btn.disabled = false;
             loadOpenRequests(riderRow);
             return;
@@ -1926,6 +1932,7 @@ const riderGuideSteps = [
           const { error } = await submitHeroOffer({ requestId: req.id, offerPrice: price });
           if (error) {
             alert(error);
+            if (String(error).includes('বিকাশ')) scrollToBkashCard();
             return;
           }
           loadOpenRequests(riderRow);
