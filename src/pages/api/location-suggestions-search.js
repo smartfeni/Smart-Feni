@@ -33,6 +33,11 @@ const GOOGLE_GLOBAL_DAY = 300;
 // নিজেদের DB সার্চের সীমা (লগইন ছাড়াও চলে)
 const LOCAL_PER_IP_HOUR = 300;
 
+// Google Places ফলব্যাক বন্ধ (২০ নভে ২০২৬): Google-এর শর্তে ওদের জায়গার ডেটা নিজের ম্যাপ
+// (OSM/Leaflet) বা ডাটাবেসে রাখা/দেখানো চলে না, আর এই ফলব্যাক নাম-কোঅর্ডিনেট-ছবি স্থায়ী জমাত।
+// location_suggestions-এ source='google' সারি ছিল ০। আবার চালু করার আগে শর্ত যাচাই করো।
+const GOOGLE_FALLBACK_ENABLED = false;
+
 function getAdminClient() {
   const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
   const serviceRoleKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -206,7 +211,7 @@ export async function GET({ url, request, clientAddress }) {
 
     const googleApiKey = import.meta.env.GOOGLE_PLACES_API_KEY;
     let googleAllowed = false;
-    if (results.length < 5 && googleApiKey) {
+    if (GOOGLE_FALLBACK_ENABLED && results.length < 5 && googleApiKey) {
       // শুধু লগইন ইউজার (টোকেন যাচাই) + ইউজার/IP/সারাদিনের সীমার মধ্যে থাকলে
       const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
       if (token) {

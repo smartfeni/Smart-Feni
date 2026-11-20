@@ -761,6 +761,87 @@ const {
       navCtrlEl.appendChild(hint);
     }
 
+    // ============ ম্যাপে আশপাশের জায়গার নাম-চিপ (জুম ১৫+) ============
+    // location_suggestions (OSM সিড + কাস্টমারের দেওয়া নাম) থেকে ম্যাপে দেখা এলাকার জায়গা আনে
+    // (/api/location-suggestions-nearby)। চিপ শুধু লেবেল (interactive: false) — ট্যাপ করলে আগের মতোই পিন বসে।
+    // দেখা এলাকা ~১ কিমি গ্রিডে গোল করে চাওয়া হয়, তাই ব্রাউজার ও Vercel ক্যাশ ভালো কাজ করে।
+    const PLACES_MIN_ZOOM = 15;
+    const PLACES_MAX_CHIPS = 80;
+    const PLACES_GRID = 0.01;
+    const PLACES_MAX_SPAN = 0.12; // API-র সীমার সাথে মিল (MAX_SPAN_DEG)
+    const placesCache = new Map<string, any[]>();
+    let placesGroup: any = null;
+    let placesTimer: ReturnType<typeof setTimeout> | undefined;
+    let placesSeq = 0;
+
+    async function refreshPlaces() {
+      if (!map || !placesGroup) return;
+      if (map.getZoom() < PLACES_MIN_ZOOM) {
+        placesGroup.clearLayers();
+        return;
+      }
+      const b = map.getBounds();
+      const south = Math.floor(b.getSouth() / PLACES_GRID) * PLACES_GRID;
+      const west = Math.floor(b.getWest() / PLACES_GRID) * PLACES_GRID;
+      const north = Math.ceil(b.getNorth() / PLACES_GRID) * PLACES_GRID;
+      const east = Math.ceil(b.getEast() / PLACES_GRID) * PLACES_GRID;
+      if (north - south > PLACES_MAX_SPAN || east - west > PLACES_MAX_SPAN) {
+        placesGroup.clearLayers();
+        return;
+      }
+      const qs =
+        `south=${south.toFixed(2)}&west=${west.toFixed(2)}&north=${north.toFixed(2)}&east=${east.toFixed(2)}&limit=150`;
+
+      const mySeq = ++placesSeq;
+      let list = placesCache.get(qs);
+      if (!list) {
+        try {
+          const res = await fetch(`/api/location-suggestions-nearby?${qs}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          list = Array.isArray(data.results) ? data.results : [];
+          if (placesCache.size >= 30) placesCache.delete(placesCache.keys().next().value as string);
+          placesCache.set(qs, list);
+        } catch {
+          return; // নীরবে ইগনোর — ম্যাপ আগের মতোই চলবে
+        }
+      }
+      // এর মধ্যে ইউজার আবার সরিয়ে ফেললে বা জুম আউট করলে পুরনো রেজাল্ট আঁকব না
+      if (mySeq !== placesSeq || !map || !placesGroup || map.getZoom() < PLACES_MIN_ZOOM) return;
+
+      placesGroup.clearLayers();
+      const visible = map.getBounds().pad(0.1);
+      let drawn = 0;
+      for (const p of list) {
+        if (drawn >= PLACES_MAX_CHIPS) break;
+        const lat = Number(p.lat);
+        const lng = Number(p.lng);
+        const name = String(p.name || '').trim();
+        if (!name || !Number.isFinite(lat) || !Number.isFinite(lng) || !visible.contains([lat, lng])) continue;
+        const label = name.length > 26 ? name.slice(0, 25) + '…' : name;
+        L.marker([lat, lng], {
+          pane: 'lpPlaces', interactive: false, keyboard: false,
+          icon: chipIcon(label, '#64748b', 10, 0.9),
+        }).addTo(placesGroup);
+        drawn++;
+      }
+    }
+
+    function setupPlacesLayer() {
+      if (placesGroup || !map) return;
+      map.createPane('lpPlaces');
+      const pane = map.getPane('lpPlaces');
+      pane.style.zIndex = '455';
+      pane.style.pointerEvents = 'none';
+      placesGroup = L.layerGroup().addTo(map);
+      const schedule = () => {
+        clearTimeout(placesTimer);
+        placesTimer = setTimeout(refreshPlaces, 350);
+      };
+      map.on('moveend', schedule);
+      schedule();
+    }
+
     function ensureMap() {
       if (map) return;
       map = L.map(mapEl, { zoomControl: true }).setView(FENI_CENTER, geo ? 10 : 14);
@@ -770,6 +851,7 @@ const {
       }).addTo(map);
 
       drawFeniOverlay();
+      setupPlacesLayer(); // জুম ১৫+ হলে আশপাশের জায়গার নাম-চিপ
 
       // পলিগনের বাইরে (বা geojson ছাড়া) ট্যাপ করলে আগের মতোই পিন
       map.on('click', (e: any) => {
