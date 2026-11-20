@@ -14,7 +14,7 @@ const req = createRequire(path.join(MS_DIR, 'noop.js'));
 let pw;
 try { pw = req('playwright'); } catch (e) { pw = req('playwright-core'); }
 
-const MODES = process.argv.slice(2).length ? process.argv.slice(2) : ['osm', 'sf'];
+const MODES = process.argv.slice(2).length ? process.argv.slice(2) : ['osm', 'sf', 'town', 'zone'];
 const OUT = path.join(ROOT, 'scripts/map-shots/out');
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -40,7 +40,10 @@ for (const mode of MODES) {
   const page = await browser.newPage({ viewport: { width: 540, height: 960 }, deviceScaleFactor: 2 });
   page.on('console', (m) => { if (m.type() === 'error') console.log('[' + mode + '] console:', m.text()); });
   page.on('pageerror', (e) => console.log('[' + mode + '] pageerror:', e.message));
-  await page.goto('http://127.0.0.1:' + port + '/scripts/map-shots/shots.html?mode=' + mode);
+  // town / zone = আসল baseMap.js পথ (lib.html); বাকি = shots.html
+  const LIB = { town: 'z=15', zone: 'z=13&lat=23.0159&lng=91.3976' };
+  const url = LIB[mode] ? '/scripts/map-shots/lib.html?' + LIB[mode] : '/scripts/map-shots/shots.html?mode=' + mode;
+  await page.goto('http://127.0.0.1:' + port + url);
   const state = await page.waitForFunction(() => window.__ready, null, { timeout: 70000 }).then((h) => h.jsonValue()).catch(() => 'fail');
   const file = path.join(OUT, mode + '.png');
   await page.screenshot({ path: file });
