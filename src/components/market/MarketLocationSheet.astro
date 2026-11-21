@@ -54,6 +54,7 @@
     <section class="mls-step" id="mlsS1">
       <h2 class="mls-title" id="mlsTitle">কোথায় পৌঁছে দেব?</h2>
       <p class="mls-cur" id="mlsCur" hidden></p>
+      <button type="button" class="mls-keep" id="mlsKeep" hidden><i class="fas fa-circle-check" aria-hidden="true"></i> <span>এই ঠিকানাই ঠিক আছে</span></button>
       <div class="mls-btns">
         <button type="button" class="mls-btn dark" id="mlsBtnMap">
           <span class="mls-btn-ic"><i class="fas fa-location-crosshairs" aria-hidden="true"></i></span>
@@ -63,6 +64,10 @@
           <span class="mls-btn-ic"><i class="fas fa-pen" aria-hidden="true"></i></span>
           <span class="mls-btn-tx"><b>লিখিত ঠিকানা</b><small>প্রবাস/অন্যের জন্য</small></span>
         </button>
+      </div>
+      <div class="mls-saved" id="mlsSaved" hidden>
+        <p class="mls-saved-h">সংরক্ষিত ঠিকানা</p>
+        <div id="mlsSavedList"></div>
       </div>
     </section>
 
@@ -166,6 +171,18 @@
   .mls-brand-t small { font-size: 11px; font-weight: 500; color: #4A5568; }
   .mls-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-width: 560px; margin: 0 auto; max-height: 60vh; overflow-y: auto; background: #fff; border-radius: 28px 28px 0 0; box-shadow: 0 -8px 32px rgba(27, 42, 74, 0.14); padding: 12px 20px calc(22px + env(safe-area-inset-bottom)); z-index: 1000; }
   .mls-grab { width: 40px; height: 4px; border-radius: 2px; background: #E6D8CC; margin: 0 auto 14px; }
+  .mls-keep { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 56px; margin: 0 0 12px; border: 0; border-radius: 16px; background: #1F7A4D; color: #fff; font: 700 16px 'Hind Siliguri', system-ui, sans-serif; cursor: pointer; }
+  .mls-keep[hidden] { display: none; }
+  .mls-keep:focus-visible, .mls-sv-go:focus-visible, .mls-sv-x:focus-visible { outline: 3px solid #1B2A4A; outline-offset: 2px; }
+  .mls-saved { margin-top: 16px; }
+  .mls-saved[hidden] { display: none; }
+  .mls-saved-h { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: #4A5568; }
+  .mls-sv { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .mls-sv-go { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 52px; padding: 8px 14px; border: 1.5px solid #E6D8CC; border-radius: 14px; background: #FFFBF8; color: #1B2A4A; font-family: inherit; text-align: left; cursor: pointer; }
+  .mls-sv-go b { max-width: 100%; font-size: 14.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mls-sv-go small { max-width: 100%; font-size: 12px; color: #4A5568; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mls-sv-go.cur { border-color: #1F7A4D; background: #F0FAF4; }
+  .mls-sv-x { flex: none; width: 44px; height: 44px; border: 0; border-radius: 22px; background: #F1F4F8; color: #4A5568; font-size: 15px; cursor: pointer; }
   .mls-step[hidden] { display: none; }
   .mls-title { margin: 0 0 12px; font-size: 22px; font-weight: 700; }
   .mls-cur { margin: -4px 0 12px; font-size: 13px; color: #4A5568; }
@@ -202,7 +219,7 @@
 </style>
 
 <script>
-  import { setDrop, getDrop } from '../../lib/marketCart.js';
+  import { setDrop, getDrop, getSavedPlaces, removeSavedPlace, confirmDropToday } from '../../lib/marketCart.js';
   import { getCurrentPosition } from '../../lib/native-bridge.js';
   import { loadLeaflet as sfLoadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
   import { addBaseMap } from '../../lib/baseMap.js';
@@ -215,6 +232,7 @@
   const $ = (id) => document.getElementById(id);
   const root = $('mlsRoot');
   let onDone = null;
+  let daily = false;   // true = প্রতিদিনের "আজ কোথায় পৌঁছে দেব?" নিশ্চিতকরণ
   let pickMode = false; // true = শুধু জায়গা বাছাই (পিকআপ), ড্রপ ঠিকানা বদলায় না
   let step = 1;
   let picked = null;       // { lat, lng, address, upazila, union, source }
@@ -480,13 +498,16 @@
   async function open(cb, opts) {
     onDone = typeof cb === 'function' ? cb : null;
     pickMode = !!(opts && opts.pick);
-    setText('mlsTitle', pickMode ? ((opts && opts.title) || 'কোথা থেকে আনবো?') : 'কোথায় পৌঁছে দেব?');
+    daily = !!(opts && opts.daily) && !pickMode;
+    setText('mlsTitle', pickMode ? ((opts && opts.title) || 'কোথা থেকে আনবো?') : daily ? 'আজ কোথায় পৌঁছে দেব?' : 'কোথায় পৌঁছে দেব?');
     picked = null;
     root.hidden = false;
     document.body.style.overflow = 'hidden';
     const d = pickMode ? null : getDrop();
     const cur = $('mlsCur');
     if (d && d.address) { cur.textContent = 'বর্তমান ঠিকানা: ' + d.address; cur.hidden = false; } else cur.hidden = true;
+    renderSaved(d);
+    $('mlsKeep').hidden = !(daily && d);
     go(1);
     try {
       await initMap();
@@ -500,6 +521,37 @@
     map.invalidateSize();
     fitAll();
     $('mlsBtnMap').focus();
+  }
+
+  // সংরক্ষিত ঠিকানার তালিকা (ট্যাপে সেটাই সেট হয়; ✕ চাপলে তালিকা থেকে মুছে যায়)
+  function renderSaved(cur) {
+    const box = $('mlsSaved'), list = $('mlsSavedList');
+    list.textContent = '';
+    const items = pickMode ? [] : getSavedPlaces();
+    box.hidden = !items.length;
+    items.forEach((p, i) => {
+      const row = document.createElement('div');
+      row.className = 'mls-sv';
+      const isCur = !!(cur && cur.address === p.address && cur.lat === p.lat && cur.lng === p.lng);
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'mls-sv-go' + (isCur ? ' cur' : '');
+      const b = document.createElement('b');
+      b.textContent = (isCur ? '✓ ' : '') + p.address;
+      go.appendChild(b);
+      const sub = [p.instructions, p.union, p.upazila].filter(Boolean).join(' · ');
+      if (sub) { const sm = document.createElement('small'); sm.textContent = sub; go.appendChild(sm); }
+      go.addEventListener('click', () => { finish({ ...p }); });
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'mls-sv-x';
+      x.textContent = '✕';
+      x.setAttribute('aria-label', 'এই ঠিকানা তালিকা থেকে মুছুন');
+      x.addEventListener('click', () => { removeSavedPlace(i); renderSaved(cur); });
+      row.appendChild(go);
+      row.appendChild(x);
+      list.appendChild(row);
+    });
   }
 
   function finish(detail) {
@@ -554,6 +606,11 @@
     );
   }
   $('mlsRelocate').addEventListener('click', locateMe);
+  $('mlsKeep').addEventListener('click', () => {
+    confirmDropToday();
+    close();
+    if (onDone) { const f = onDone; onDone = null; f(); }
+  });
   $('mlsSave2').addEventListener('click', () => {
     if (!picked) { showErr('mlsErr2', 'আগে ম্যাপে লোকেশন বেছে নিন।'); return; }
     finish({ ...picked, instructions: $('mlsIns').value.trim() });

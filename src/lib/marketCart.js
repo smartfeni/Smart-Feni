@@ -9,6 +9,12 @@
 
 const CART_KEY = 'smartfeni_market_cart';
 const DROP_KEY = 'smartfeni_market_drop';
+const DROP_AT_KEY = 'smartfeni_market_drop_at';   // শেষ কবে ঠিকানা নিশ্চিত হয়েছে
+const PLACES_KEY = 'smartfeni_market_places';     // সংরক্ষিত ঠিকানা (সর্বোচ্চ ৫টা)
+const DROP_FRESH_MS = 24 * 60 * 60 * 1000;
+const MAX_PLACES = 5;
+let memDropAt = 0;
+let memPlaces = null;
 const MAX_QTY = 20;
 const MAX_LINES = 30;
 
@@ -119,7 +125,51 @@ export function setDrop(d) {
   };
   memDrop = clean;
   write(DROP_KEY, clean);
+  confirmDropToday();
+  rememberPlace(clean);
   try { window.dispatchEvent(new CustomEvent('smartfeni:market-drop-changed')); } catch (e) {}
+}
+
+// ---------- ঠিকানা: প্রতি দিন একবার নিশ্চিত ----------
+export function confirmDropToday() {
+  memDropAt = Date.now();
+  try { localStorage.setItem(DROP_AT_KEY, String(memDropAt)); } catch (e) { /* মেমরিতে থাকবে */ }
+}
+
+// ঠিকানা আছে কিন্তু ২৪ ঘণ্টার বেশি আগে নিশ্চিত হয়েছিল → true (আবার জিজ্ঞেস করতে হবে)
+export function dropIsStale() {
+  if (!getDrop()) return false;
+  let at = 0;
+  try { at = Number(localStorage.getItem(DROP_AT_KEY)) || 0; } catch (e) { at = memDropAt; }
+  if (!at) { confirmDropToday(); return false; } // আগে থেকে সেট করা ঠিকানা: আজ থেকে গোনা শুরু
+  return Date.now() - at > DROP_FRESH_MS;
+}
+
+// ---------- সংরক্ষিত ঠিকানা ----------
+export function getSavedPlaces() {
+  const p = read(PLACES_KEY, memPlaces);
+  return Array.isArray(p) ? p.filter((x) => x && typeof x.address === 'string' && x.address.trim()) : [];
+}
+
+function samePlace(a, b) {
+  return a.address === b.address && a.lat === b.lat && a.lng === b.lng;
+}
+
+function rememberPlace(clean) {
+  if (!clean || !clean.address) return;
+  const list = getSavedPlaces().filter((p) => !samePlace(p, clean));
+  list.unshift(clean);
+  const out = list.slice(0, MAX_PLACES);
+  memPlaces = out;
+  write(PLACES_KEY, out);
+}
+
+export function removeSavedPlace(i) {
+  const l = getSavedPlaces();
+  if (i < 0 || i >= l.length) return;
+  l.splice(i, 1);
+  memPlaces = l;
+  write(PLACES_KEY, l);
 }
 
 export function clearDrop() {
