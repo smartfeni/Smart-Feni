@@ -80,6 +80,79 @@ export function marketRiderHtml(req, esc) {
   return h;
 }
 
+// ============================================================
+// রাইডারের চলমান কার্ড সাজানো: যে ধাপে রাইডারের যা করার (দাম পাঠানো, অগ্রিম "পেয়েছি/মেলেনি",
+// পিকআপ, ডেলিভারি সম্পন্ন) সেটা সবার উপরে আলাদা বক্সে খোলা; বাকি সব ভাঁজে (ট্যাপে খোলে)।
+// card.innerHTML বসানোর পর, ইভেন্ট বাঁধার আগে ডাকতে হয়। কিছু না মিললে কার্ড যেমন ছিল তেমনই থাকে।
+// খোলা/বন্ধ অবস্থা রিফ্রেশেও মনে থাকে (অর্ডার আইডি ধরে)।
+// ============================================================
+const _foldState = {};
+
+export function foldRiderCard(card, req) {
+  const kids = Array.from(card.children);
+  const iDesc = kids.findIndex((e) => e.classList.contains('dh-req-desc'));
+  const iPrice = kids.findIndex((e) => e.classList.contains('dh-active-price'));
+  if (iDesc < 0 || iPrice < iDesc) return;
+
+  const quote = card.querySelector('[data-qd-quote]');
+  const isTop = (e) => e.matches('.dh-stage-box, .dh-pk-badge, [data-adv-verify], .btn-confirm-delivery');
+  const head = kids.slice(0, iDesc);
+  const mid = kids.slice(iDesc, iPrice + 1).filter((e) => !isTop(e));
+  const rest = kids.slice(iPrice + 1).filter((e) => !isTop(e));
+  const topKids = kids.filter(isTop);
+
+  const topNodes = [];
+  if (quote) topNodes.push(quote);
+  topKids.forEach((e) => {
+    if (e.matches('.btn-confirm-delivery') && req.is_market && req.advance_verified && req.pickup_done_at) {
+      const due = document.createElement('div');
+      due.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin:8px 0;padding:12px 14px;border-radius:14px;background:#1B2A4A;color:#fff;';
+      const l = document.createElement('span'); l.style.fontWeight = '700'; l.textContent = 'কাস্টমারের কাছে নেবেন';
+      const v = document.createElement('b'); v.style.fontSize = '1.45rem'; v.textContent = TK(isFinite(Number(req.cod_due)) ? Number(req.cod_due) : 0);
+      due.appendChild(l); due.appendChild(v);
+      topNodes.push(due);
+    }
+    topNodes.push(e);
+  });
+
+  const mkFold = (key, title, nodes, defOpen) => {
+    if (!nodes.length) return null;
+    const d = document.createElement('details');
+    d.style.cssText = 'margin:10px 0;border:1.5px solid #E5EAF0;border-radius:16px;background:#fff;padding:0 12px;';
+    const s = document.createElement('summary');
+    s.style.cssText = 'display:flex;align-items:center;gap:8px;min-height:48px;cursor:pointer;font-weight:800;color:#1B2A4A;font-size:0.95rem;';
+    const t = document.createElement('span'); t.style.flex = '1'; t.textContent = title;
+    const a = document.createElement('span'); a.style.cssText = 'font-size:0.8rem;font-weight:700;color:#E8551C;';
+    s.appendChild(t); s.appendChild(a); d.appendChild(s);
+    const body = document.createElement('div'); body.style.paddingBottom = '12px';
+    nodes.forEach((n) => body.appendChild(n));
+    d.appendChild(body);
+    const k = String(req.id) + ':' + key;
+    d.open = k in _foldState ? _foldState[k] : !!defOpen;
+    const sync = () => { a.textContent = d.open ? 'বন্ধ ▴' : 'দেখুন ▾'; };
+    sync();
+    d.addEventListener('toggle', () => { _foldState[k] = d.open; sync(); });
+    return d;
+  };
+
+  const out = [];
+  head.forEach((e) => out.push(e));
+  if (topNodes.length) {
+    const box = document.createElement('div');
+    box.style.cssText = 'margin:10px 0;padding:8px;border-radius:20px;background:#FFF8F3;border:2px solid #FF6B35;';
+    topNodes.forEach((n) => box.appendChild(n));
+    out.push(box);
+  }
+  // দাম পাঠানোর ফর্ম থাকলে (অর্ডার এনিথিং) কী কিনবেন তা আগে দেখা দরকার, তাই বিবরণ খোলা
+  const f1 = mkFold('d', 'অর্ডারের বিবরণ', mid, !!quote);
+  if (f1) out.push(f1);
+  const f2 = mkFold('c', 'কাস্টমার ও অন্যান্য', rest, false);
+  if (f2) out.push(f2);
+
+  card.textContent = '';
+  out.forEach((e) => card.appendChild(e));
+}
+
 function qRow(label, amount) {
   return '<div data-qd-row style="display:flex;gap:8px;margin-bottom:8px;">'
     + '<input data-qd-lbl maxlength="80" placeholder="কী (যেমন: চাল ২ কেজি)" value="' + label + '" style="flex:1;min-width:0;height:46px;border:1.5px solid #E2E7EF;border-radius:12px;padding:0 10px;font-size:15px;font-family:inherit;" />'
