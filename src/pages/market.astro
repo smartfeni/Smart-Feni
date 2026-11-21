@@ -66,7 +66,6 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     .qd-toprow { display: flex; align-items: center; gap: 10px; }
     .qd-toprow .qd-loc { flex: 1; min-width: 0; }
     .qd-cats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 14px 0 0; padding: 2px 0 6px; }
-    .qd.qd-landing .qd-cats { display: none; }
     .qd-cat { min-width: 0; border: 0; background: none; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; color: #1B2A4A; }
     .qd-cat-tile { width: 100%; max-width: 78px; aspect-ratio: 1; border-radius: 22px; background: rgba(255,255,255,.72); border: 2px solid transparent; display: flex; align-items: center; justify-content: center; transition: transform .15s ease, background .15s ease; box-shadow: 0 1px 2px rgba(27,42,74,.06); }
     .qd-cat-more .qd-cat-tile { background: linear-gradient(135deg,#fff,#FFE8DA); border: 2px dashed #FFB48F; position: relative; }
@@ -235,7 +234,6 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     }
     let itemIdx = {};
     let active = null;
-    let landing = true; // true = আগে সব ক্যাটাগরির পেজ; ক্যাটাগরি বাছলে false
     let food = null;
     let q = '';
     let slideTimer = null;
@@ -286,21 +284,13 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       try { if (sessionStorage.getItem('sf_market_daily_asked')) return; sessionStorage.setItem('sf_market_daily_asked', '1'); } catch (e) {}
       if (window.SFMarketLocation) window.SFMarketLocation.open(() => { showLoc(); renderBody(); }, { daily: true });
     }
-    // ২৪ ঘণ্টা পর প্রথমবার খুললে: "এই ঠিকানাই ঠিক আছে" / সংরক্ষিত ঠিকানা / নতুন ঠিকানা (সেশনে একবারই)
-    function openDaily() {
-      try { if (sessionStorage.getItem('sf_market_daily_asked')) return; sessionStorage.setItem('sf_market_daily_asked', '1'); } catch (e) {}
-      if (window.SFMarketLocation) window.SFMarketLocation.open(() => { showLoc(); renderBody(); }, { daily: true });
-    }
 
     // ---------- ক্যাটাগরি ----------
     function catOf(id) { return cats.find((c) => c.id === id); }
     // সারিতে ৪টা (যেকোনো কিছু + প্রথম ৩টা), বাকিগুলো "আরো দেখুন" শিটে; শিট থেকে বাছলে সেটা ৪র্থ ঘরে বসে
     function pickCat(id) {
-      if (!landing && active === id) return;
-      const fromLanding = landing;
-      landing = false;
+      if (active === id) return;
       active = id; food = null; favOnly = false; paintFavBtn();
-      if (fromLanding) { try { history.pushState({ qdCat: 1 }, ''); } catch (e) {} window.scrollTo(0, 0); }
       renderCats(); setPlaceholder(); renderBody();
     }
     function openMoreCats() {
@@ -372,7 +362,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     function setPlaceholder() {
       const c = catOf(active);
       const k = c ? c.icon || c.slug : '';
-      $('qdQ').placeholder = landing || active === ANY ? 'দোকান বা পণ্য খুঁজুন' : PLACEHOLDER[k] || 'দোকান খুঁজুন';
+      $('qdQ').placeholder = active === ANY ? 'দোকান বা পণ্য খুঁজুন' : PLACEHOLDER[k] || 'দোকান খুঁজুন';
     }
 
     // ---------- দোকানের হিসাব ----------
@@ -550,40 +540,11 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       }
     }
 
-    // ---------- আগে সব ক্যাটাগরি ----------
-    function renderLanding(body) {
-      if (q) {
-        // সার্চ করলে সব ক্যাটাগরির দোকান/খাবার একসাথে
-        const all = shops.filter(matchesQ);
-        body.appendChild(sec('খোঁজার ফল', bnNum(all.length) + 'টি দোকান'));
-        if (!all.length) body.appendChild(empty('"' + q + '" নামে কিছু পাওয়া যায়নি।'));
-        all.forEach((s) => body.appendChild(shopCard(s)));
-        return;
-      }
-      body.appendChild(slides());
-      const list = [{ id: ANY, name: 'যেকোনো কিছু', icon: 'any' }].concat(cats);
-      body.appendChild(sec('কী লাগবে আজ?', bnNum(list.length) + 'টি ক্যাটাগরি'));
-      const g = mk('div', 'qd-msh-grid');
-      g.style.marginBottom = '8px';
-      list.forEach((c) => {
-        const b = mk('button', 'qd-msh-c');
-        b.type = 'button';
-        const key = c.id === ANY ? 'any' : CAT_IMG[c.icon] || CAT_IMG[c.slug] || 'bags';
-        b.appendChild(img(key));
-        b.appendChild(mk('span', '', c.name));
-        b.addEventListener('click', () => pickCat(c.id));
-        g.appendChild(b);
-      });
-      body.appendChild(g);
-    }
-
     // ---------- মূল তালিকা ----------
     function renderBody() {
       const body = $('qdBody');
       body.textContent = '';
-      $('qd').classList.toggle('qd-landing', landing);
-      if (cats.length) $('qdFav').hidden = landing || active === ANY;
-      if (landing) { renderLanding(body); return; }
+      if (cats.length) $('qdFav').hidden = active === ANY;
       if (active === ANY) { renderAny(body); return; }
 
       if (!q && !favOnly) body.appendChild(slides());
@@ -657,7 +618,6 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       // প্রথমবার: ঠিকানা না দিলে হোম দেখা যাবে না
       if (!getDrop()) openLoc();
       else if (dropIsStale()) openDaily();
-      else if (dropIsStale()) openDaily();
 
       try {
         const res = await Promise.all([fetchMarketCategories(), fetchMarketShops(), fetchMarketItemIndex().catch(() => ({})), fetchShopRatings(), session ? fetchFavoriteIds().catch(() => new Set()) : Promise.resolve(new Set())]);
@@ -671,8 +631,8 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
         showMsg(empty('লোড করতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করুন।', 'basket'));
         return;
       }
-      active = null;
-      landing = true;
+      const foodCat = cats.find((c) => c.icon === 'food' || c.slug === 'food');
+      active = foodCat ? foodCat.id : cats.length ? cats[0].id : ANY;
       renderCats();
       setPlaceholder();
       paintFavBtn();
@@ -688,20 +648,6 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
         const { data: { session } } = await supabase.auth.getSession();
         if (session) { favIds = await fetchFavoriteIds(); if (shops.length) renderBody(); }
       } catch (_) {}
-    });
-
-    // ফোনের ব্যাক: ক্যাটাগরির ভেতর থেকে আবার সব ক্যাটাগরির পেজে
-    window.addEventListener('popstate', () => {
-      if (!cats.length) return;
-      if (history.state && history.state.qdCat) {
-        if (landing && active) { landing = false; renderCats(); setPlaceholder(); renderBody(); }
-        return;
-      }
-      if (!landing) {
-        landing = true; food = null; favOnly = false; paintFavBtn();
-        setPlaceholder(); renderBody();
-        window.scrollTo(0, 0);
-      }
     });
 
     init();
