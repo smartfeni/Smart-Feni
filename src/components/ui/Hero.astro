@@ -23,6 +23,9 @@
 //        .hero-তে overflow:hidden ছিল (absolute ড্রপডাউন হিরোর সীমা পেরোলে
 //        কেটে যেত)। overflow:hidden ও কমলা glow (::before) সরানো হয়েছে,
 //        এখন ড্রপডাউন ফটোর উপরে ভাসে।
+// ফিক্স ৫: সাইট-ওয়াইড সার্চ — সার্ভিসের পাশাপাশি প্রোডাক্ট, শপ, লিস্টিং,
+//        ডাক্তার, ক্লাব, ইনস্ট্যান্ট শপ (লগইন করলে) DB RPC search_site থেকে
+//        আসে (৩০০ms ডিবাউন্স)। সার্ভিসের ফল আগের মতো সাথে সাথে।
 // ============================================================
 ---
 
@@ -57,10 +60,13 @@
 </section>
 
 <script>
+  import { supabase } from '../../lib/supabase.js';
+
   const services = [
     { name: 'বাসা ভাড়া', category: 'বাড়ি ভাড়া/ক্রয়', slug: 'housing', keywords: ['house rent', 'rent', 'housing', 'flat', 'apartment', 'basa vara'] },
     { name: 'চাকরির খবর', category: 'চাকরি পোস্ট/খোঁজ', slug: 'job', keywords: ['job', 'jobs', 'vacancy', 'career', 'chakri'] },
     { name: 'রিপেয়ার সার্ভিস', category: 'মেরামত সার্ভিস', slug: 'repair', keywords: ['repair', 'fix', 'service', 'maintenance', 'mistri'] },
+    { name: 'লোকাল রাইড', category: 'সিএনজি, অটো ও গাড়ি', slug: 'local-ride', keywords: ['local ride', 'ride', 'cng', 'auto', 'rickshaw', 'taxi', 'অটো', 'রাইড'] },
     { name: 'গাড়ি ভাড়া সার্ভিস', category: 'গাড়ি/মাইক্রো/সিএনজি', slug: 'car-rental', keywords: ['car rental', 'car rent', 'car', 'cng', 'microbus', 'gari vara'] },
     { name: 'কুরিয়ার/ডেলিভারি সার্ভিস', category: 'ডেলিভারি', slug: 'courier', keywords: ['courier', 'delivery', 'parcel', 'shipment'] },
     { name: 'ইমার্জেন্সি কন্টাক্ট', category: 'জরুরি যোগাযোগ', slug: 'emergency', keywords: ['emergency', 'emergency contact', 'urgent', 'help', 'sos'] },
@@ -89,7 +95,7 @@
     window.scrollTo({ top: Math.max(targetY, 0), behavior: 'smooth' });
   }
 
-  function handleSearch(query: string) {
+  function renderServiceResults(query: string) {
     const resultsContainer = document.getElementById('searchResults');
     const hint = document.getElementById('rotatingHint');
     if (!resultsContainer) return;
@@ -114,7 +120,7 @@
     });
 
     if (filtered.length === 0) {
-      resultsContainer.innerHTML = `<p style="color:#5A6E85; padding:8px 4px; margin:0;">🔍 কোনো সেবা পাওয়া যায়নি</p>`;
+      resultsContainer.innerHTML = `<p id="svcEmpty" style="color:#5A6E85; padding:8px 4px; margin:0;">🔍 কিছু পাওয়া যায়নি</p>`;
     } else {
       resultsContainer.innerHTML = filtered
         .map(
@@ -140,6 +146,146 @@
       scrollSearchIntoView();
       wasResultsVisible = true;
     }
+  }
+
+  // ============================================================
+  // সাইট-ওয়াইড সার্চ: প্রোডাক্ট, শপ, লিস্টিং, ডাক্তার, ক্লাব, ইনস্ট্যান্ট শপ।
+  // DB RPC search_site, ডিবাউন্স ৩০০ms; সার্ভিসের ফল সাথে সাথে আসে।
+  // ইনস্ট্যান্ট শপ/মেনু শুধু লগইন করা ইউজার পায় (RLS)।
+  // ইউজার/DB-র সব টেক্সট esc() দিয়ে এস্কেপ করা।
+  // ============================================================
+  const SITE_GROUPS = [
+    { kind: 'product', label: 'প্রোডাক্ট', icon: 'fa-box' },
+    { kind: 'shop', label: 'শপ', icon: 'fa-store' },
+    { kind: 'listing', label: 'লিস্টিং', icon: 'fa-list' },
+    { kind: 'doctor', label: 'ডাক্তার', icon: 'fa-user-md' },
+    { kind: 'club', label: 'ক্লাব', icon: 'fa-users' },
+    { kind: 'instant_shop', label: 'ইনস্ট্যান্ট শপ', icon: 'fa-bolt' },
+    { kind: 'instant_item', label: 'ইনস্ট্যান্ট শপের মেনু', icon: 'fa-utensils' },
+  ];
+  const SITE_DEBOUNCE_MS = 300;
+
+  let siteSeq = 0;
+  let siteTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastSiteHtml = '';
+
+  function esc(s: any): string {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => {
+      const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+      return map[c] || c;
+    });
+  }
+
+  function siteHref(r: any): string {
+    switch (r.kind) {
+      case 'listing':
+        return '/listing/' + encodeURIComponent(r.id);
+      case 'product':
+        return '/product/' + encodeURIComponent(r.id);
+      case 'shop':
+      case 'club':
+        return r.slug ? '/' + encodeURIComponent(r.slug) : '';
+      case 'doctor':
+        return '/doctor/' + encodeURIComponent(r.id);
+      case 'instant_shop':
+      case 'instant_item':
+        return '/services/courier';
+    }
+    return '';
+  }
+
+  function sitePriceText(price: any): string {
+    const p = String(price ?? '').trim();
+    if (!p) return '';
+    return /^[0-9০-৯][0-9০-৯.,]*$/.test(p) ? '৳' + p : p;
+  }
+
+  function siteRowHtml(r: any, icon: string): string {
+    const href = siteHref(r);
+    if (!href) return '';
+    const meta: string[] = [];
+    if (r.kind === 'listing' && r.category) {
+      const sv = services.find((s) => s.slug === r.category);
+      if (sv) meta.push(sv.name);
+    }
+    if (r.upazila) meta.push(r.upazila);
+    const priceText = sitePriceText(r.price);
+    const ell = 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+    return `
+      <a href="${esc(href)}"
+         style="display:flex; align-items:center; gap:10px; padding:10px 12px; background:#F8FAFC; border-radius:12px; margin-bottom:6px; text-decoration:none; color:#1B2A4A;"
+         onmouseover="this.style.background='#FFF0EA'"
+         onmouseout="this.style.background='#F8FAFC'">
+        <span style="flex:none; width:34px; height:34px; border-radius:10px; background:#FFF0EA; color:#FF6B35; display:flex; align-items:center; justify-content:center;"><i class="fas ${icon}"></i></span>
+        <span style="flex:1; min-width:0; display:flex; flex-direction:column; gap:1px;">
+          <strong style="font-size:0.92rem; font-weight:600; ${ell}">${esc(r.title)}</strong>
+          ${r.subtitle ? `<span style="color:#5A6E85; font-size:0.76rem; ${ell}">${esc(r.subtitle)}</span>` : ''}
+          ${meta.length ? `<span style="color:#FF6B35; font-size:0.74rem; ${ell}">${esc(meta.join(' · '))}</span>` : ''}
+        </span>
+        ${priceText ? `<span style="flex:none; font-weight:700; font-size:0.84rem; color:#1B2A4A;">${esc(priceText)}</span>` : ''}
+      </a>`;
+  }
+
+  function buildSiteHtml(rows: any[]): string {
+    let html = '';
+    for (const g of SITE_GROUPS) {
+      const items = rows.filter((r) => r.kind === g.kind);
+      if (items.length === 0) continue;
+      const rowsHtml = items.map((r) => siteRowHtml(r, g.icon)).join('');
+      if (!rowsHtml) continue;
+      html += `<div style="font-size:0.72rem; font-weight:800; color:#5A6E85; margin:10px 4px 6px;">${g.label}</div>${rowsHtml}`;
+    }
+    return html ? `<div id="siteResults">${html}</div>` : '';
+  }
+
+  function applySiteHtml(container: HTMLElement, html: string) {
+    container.querySelector('#siteResults')?.remove();
+    if (html) {
+      container.querySelector('#svcEmpty')?.remove();
+      container.insertAdjacentHTML('beforeend', html);
+    }
+  }
+
+  function scheduleSiteSearch(query: string) {
+    const container = document.getElementById('searchResults');
+    if (!container) return;
+    const q = (query || '').trim();
+    if (siteTimer) clearTimeout(siteTimer);
+    siteSeq++;
+    const mySeq = siteSeq;
+
+    const empty = container.querySelector('#svcEmpty');
+    if (q.length < 2) {
+      lastSiteHtml = '';
+      return;
+    }
+
+    // আগের সাইট-ফল সাথে সাথে ধরে রাখি (টাইপ করার সময় ফ্লিকার এড়াতে)
+    if (lastSiteHtml) applySiteHtml(container, lastSiteHtml);
+    else if (empty) empty.textContent = '🔍 খুঁজছি…';
+
+    siteTimer = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase.rpc('search_site', { p_q: q, p_limit: 4 });
+        if (mySeq !== siteSeq) return; // এর মধ্যে নতুন কিছু টাইপ হয়েছে
+        if (error) throw error;
+        const html = buildSiteHtml((data as any[]) || []);
+        lastSiteHtml = html;
+        applySiteHtml(container, html);
+        const emptyNow = container.querySelector('#svcEmpty');
+        if (emptyNow && !html) emptyNow.textContent = '🔍 কিছু পাওয়া যায়নি';
+      } catch (err) {
+        if (mySeq !== siteSeq) return;
+        console.warn('search_site failed:', err);
+        const emptyNow = container.querySelector('#svcEmpty');
+        if (emptyNow) emptyNow.textContent = '🔍 কিছু পাওয়া যায়নি';
+      }
+    }, SITE_DEBOUNCE_MS);
+  }
+
+  function handleSearch(query: string) {
+    renderServiceResults(query); // সার্ভিসের ফল সাথে সাথে (আগের মতো)
+    scheduleSiteSearch(query); // বাকি সব ডিবাউন্সে
   }
 
   function handleSearchButtonClick() {
@@ -365,7 +511,7 @@
     padding: 12px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.1);
     z-index: 20;
-    max-height: 320px;
+    max-height: min(60vh, 440px);
     overflow-y: auto;
   }
 
