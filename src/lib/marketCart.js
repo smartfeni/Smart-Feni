@@ -148,7 +148,10 @@ export function dropIsStale() {
 // ---------- সংরক্ষিত ঠিকানা ----------
 export function getSavedPlaces() {
   const p = read(PLACES_KEY, memPlaces);
-  return Array.isArray(p) ? p.filter((x) => x && typeof x.address === 'string' && x.address.trim()) : [];
+  const list = Array.isArray(p) ? p.filter((x) => x && typeof x.address === 'string' && x.address.trim()) : [];
+  // আগে থেকে সেট করা ঠিকানা তালিকায় নেই: বর্তমান ঠিকানাই দেখাই
+  if (!list.length) { const d = getDrop(); if (d) return [d]; }
+  return list;
 }
 
 function samePlace(a, b) {
