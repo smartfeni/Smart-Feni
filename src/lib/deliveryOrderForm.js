@@ -11,6 +11,7 @@
 // ============================================================
 
 import { supabase } from './supabase.js';
+import { proxyImg } from './imgProxy.js';
 import { UNION_BN } from '../data/feniAreas.js';
 
 // ---------- বাংলা সংখ্যা ----------
@@ -61,7 +62,9 @@ export async function fetchDeliveryShops() {
   if (error) return { shops: [], error: error.message || 'দোকান লোড করা যায়নি' };
   // মালিক "ব্যস্ত" মোডে দিলে সেই সময় পর্যন্ত দোকান তালিকায় আসে না (সার্ভারেও আটকানো আছে)
   const nowMs = Date.now();
-  const shops = (shopsRaw || []).filter((s) => !s.busy_until || new Date(s.busy_until).getTime() <= nowMs);
+  const shops = (shopsRaw || [])
+    .filter((s) => !s.busy_until || new Date(s.busy_until).getTime() <= nowMs)
+    .map((s) => ({ ...s, image_url: proxyImg(s.image_url) }));
   if (shops.length === 0) return { shops: [], error: null };
 
   const ids = shops.map((s) => s.id);
@@ -91,7 +94,7 @@ export async function fetchDeliveryShops() {
 
   const byShop = {};
   (items || []).forEach((it) => {
-    (byShop[it.shop_id] = byShop[it.shop_id] || []).push(it);
+    (byShop[it.shop_id] = byShop[it.shop_id] || []).push({ ...it, image_url: proxyImg(it.image_url) });
   });
 
   const result = shops

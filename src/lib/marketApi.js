@@ -7,6 +7,7 @@
 // - shopOpenState(): খোলা/বন্ধ/ব্যস্ত/ছুটি, সব হিসাব ঢাকার সময়ে (UTC+6)
 // ============================================================
 import { supabase } from './supabase.js';
+import { proxyImg } from './imgProxy.js';
 
 const DHAKA_MS = 6 * 60 * 60 * 1000;
 
@@ -29,7 +30,9 @@ export async function fetchMarketShops() {
     .order('name', { ascending: true });
   if (error) throw error;
   // দেখানো হবে: সক্রিয় দোকান, অথবা (শুধু স্টাফ যা পায়) টেস্ট দোকান। ম্যাপ পিন ছাড়া দোকান দেখানো হবে না।
-  return (data || []).filter((s) => (s.is_active || s.is_test) && s.lat !== null && s.lng !== null);
+  return (data || [])
+    .filter((s) => (s.is_active || s.is_test) && s.lat !== null && s.lng !== null)
+    .map((s) => ({ ...s, image_url: proxyImg(s.image_url), logo_url: proxyImg(s.logo_url) }));
 }
 
 // সার্চ ও খাবারের ধরন ফিল্টারের জন্য আইটেমের নাম (দোকান পিছু)। ফেরত: { [shop_id]: 'নাম ট্যাগ ...' (ছোট হাতের) }
@@ -158,7 +161,7 @@ export async function fetchMarketShop(id) {
   const { data, error } = await supabase.from('delivery_shops').select(SHOP_COLS).eq('id', id).maybeSingle();
   if (error) throw error;
   if (!data || (!data.is_active && !data.is_test)) return null;
-  return data;
+  return { ...data, image_url: proxyImg(data.image_url), logo_url: proxyImg(data.logo_url) };
 }
 
 // মেনু: { cats: [{id,name}], items: [...] } — সাজানো sort_order অনুযায়ী
@@ -169,7 +172,7 @@ export async function fetchShopMenu(shopId) {
   ]);
   if (c.error) throw c.error;
   if (i.error) throw i.error;
-  return { cats: c.data || [], items: i.data || [] };
+  return { cats: c.data || [], items: (i.data || []).map((it) => ({ ...it, image_url: proxyImg(it.image_url) })) };
 }
 
 // আনুমানিক ডেলিভারি সময় ('২৫–৩৫ মিনিট')
