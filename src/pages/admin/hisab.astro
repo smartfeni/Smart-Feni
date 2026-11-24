@@ -1,7 +1,7 @@
 ---
 // ============================================================
-// পেজ: হিসাব (/admin/hisab) — ম্যানেজারের কাছে জমা টাকার হিসাব
-// শুধু সুপার অ্যাডমিন (DB: is_admin()); স্টাফ/মডারেটর ঢুকলে /admin-এ ফেরত
+// পেজ: হিসাব (/admin/hisab) — কোম্পানির কাছে জমা টাকার হিসাব
+// সুপার অ্যাডমিন, অথবা রোলে hisab.view থাকা স্টাফ (এন্ট্রি/এডিট/বাতিল: hisab.manage); বাকিরা /admin-এ ফেরত
 // ডেটা: টেবিল hisab_entries (শুধু পড়া) + RPC: hisab_add_entry, hisab_edit_entry,
 //        hisab_cancel_entry, hisab_summary, hisab_daily, hisab_monthly
 // ব্যালেন্স = জমা + আয় − খরচ (বাতিল এন্ট্রি ধরা হয় না)। সব তারিখ বাংলাদেশ সময়ে।
@@ -27,7 +27,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
         <a href="/admin" class="hs-back"><i class="fas fa-arrow-left"></i> অ্যাডমিন ড্যাশবোর্ড</a>
         <h1 class="hs-title">হিসাব</h1>
-        <p class="hs-sub">ম্যানেজারের কাছে জমা টাকার হিসাব</p>
+        <p class="hs-sub">কোম্পানির কাছে জমা টাকার হিসাব</p>
 
         <!-- ===== উপরের সংখ্যা ===== -->
         <section class="hs-bal" aria-live="polite">
@@ -318,7 +318,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
       expense: { label: 'খরচ', sign: -1, cls: 'hs-c-expense' },
     };
     const HINT = {
-      joma: 'যেমন: ম্যানেজারকে জমা',
+      joma: 'যেমন: কোম্পানিকে জমা',
       income: 'যেমন: ডেলিভারি ইনকাম',
       expense: 'যেমন: সেন্ড মানি খরচ, অফিস ভাড়া',
     };
@@ -390,6 +390,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 
     // ---------- অবস্থা ----------
     let cats = [];
+    let canManage = false; // hisab.manage (বা সুপার অ্যাডমিন)
     let tab = 'daily';
     let freshId = null;
     let sheet = { mode: 'add', id: null, type: 'income', locked: false, timeOpen: false, auto: '', entry: null };
@@ -546,7 +547,7 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
         const side = el('div', 'hs-r-side');
         side.appendChild(el('div', 'hs-r-amt ' + t.cls, money(t.sign * Number(r.amount), true)));
         side.appendChild(el('div', 'hs-r-type', t.label));
-        if (!cx) {
+        if (!cx && canManage) {
           const tools = el('div', 'hs-r-tools');
           const eb = el('button', 'hs-ic'); eb.type = 'button'; eb.setAttribute('aria-label', 'এডিট'); eb.innerHTML = '<i class="fas fa-pen"></i>';
           eb.addEventListener('click', () => openSheet('edit', r));
@@ -875,12 +876,17 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
     $('xlBtn').addEventListener('click', exportExcel);
 
     window.addEventListener('smartfeni:admin-ready', (e) => {
-      // শুধু সুপার অ্যাডমিন; স্টাফ/মডারেটর হলে ড্যাশবোর্ডে ফেরত
-      if (e.detail?.role !== 'admin') {
+      // সুপার অ্যাডমিন, অথবা রোলে "হিসাব — দেখা" থাকা স্টাফ; বাকিরা ড্যাশবোর্ডে ফেরত
+      const acc = e.detail?.access;
+      const isSuper = e.detail?.role === 'admin';
+      const canView = isSuper || !!(acc && acc.isStaff && acc.can('hisab.view'));
+      if (!canView) {
         $('adminGuardedContent').style.display = 'none';
         window.location.href = '/admin';
         return;
       }
+      canManage = isSuper || !!(acc && acc.isStaff && acc.can('hisab.manage'));
+      $('addBtn').style.display = canManage ? '' : 'none';
       const t = todayStr();
       $('fMonth').value = t.slice(0, 7);
       buildYearOptions();

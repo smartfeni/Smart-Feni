@@ -58,6 +58,7 @@ const AREA_BY_SEGMENT = {
   'scratch-cards': 'scratch_card',
   'local-drivers': 'local_ride',
   'local-ride': 'local_ride',
+  'hisab': 'hisab',
 };
 
 // '/admin/doctors?x=1' বা '/admin/doctors/abc' → 'doctors'; অজানা পেজ → null
