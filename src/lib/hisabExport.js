@@ -69,7 +69,7 @@ export function buildHisabXlsx({ title, daily, entries }) {
   const sheet1 = sheetXml([14, 18, 14, 14, 14, 20], rows1);
 
   // ---- শিট ২: সব এন্ট্রি ----
-  const eHead = ['সিরিয়াল', 'তারিখ', 'সময়', 'ধরন', 'খাত', 'পরিমাণ', 'নোট', 'অবস্থা'];
+  const eHead = ['সিরিয়াল', 'তারিখ', 'সময়', 'ধরন', 'খাত', 'পরিমাণ', 'নোট', 'অবস্থা', 'এন্ট্রিকারী', 'বাতিল করেছেন'];
   r = 1;
   let rows2 = `<row r="${r}">${textCell(0, r, `${title} — সব এন্ট্রি`, 1)}</row>`;
   r += 1;
@@ -86,9 +86,11 @@ export function buildHisabXlsx({ title, daily, entries }) {
       numCell(5, r, e.amount) +
       textCell(6, r, e.note || '') +
       textCell(7, r, e.status === 'cancelled' ? 'বাতিল' : 'চালু') +
+      textCell(8, r, e.created_by_name || '') +
+      textCell(9, r, e.cancelled_by_name || '') +
       `</row>`;
   });
-  const sheet2 = sheetXml([10, 14, 14, 10, 24, 14, 36, 10], rows2);
+  const sheet2 = sheetXml([10, 14, 14, 10, 24, 14, 36, 10, 18, 18], rows2);
 
   const styles =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
