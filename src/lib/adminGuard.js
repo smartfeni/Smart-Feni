@@ -165,5 +165,8 @@ export async function initAdminGuard({ redirectTo = '/' } = {}) {
   const detail = { role: profile.role, profile, session, access };
   window.dispatchEvent(new CustomEvent('smartfeni:admin-ready', { detail }));
 
+  // দ্রুত মেনু (ভাসমান ☰) — ফেইল করলেও পেজ ভাঙে না
+  import('./adminQuickNav.js').then((m) => m.mountAdminQuickNav(detail)).catch(() => {});
+
   return detail;
 }
