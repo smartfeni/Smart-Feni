@@ -15,7 +15,8 @@ import { ADMIN_GROUPS, ADMIN_PAGES } from './adminPages.js';
 import { getFavs, getRecent, pushRecent, getBadges, bn } from './adminShortcuts.js';
 
 const CSS = `
-.sfqn-fab{position:fixed;right:16px;bottom:calc(20px + env(safe-area-inset-bottom));z-index:1400;width:56px;height:56px;border:0;border-radius:18px;background:#1B2A4A;color:#fff;font-size:1.25rem;display:grid;place-items:center;cursor:pointer;box-shadow:0 8px 20px rgba(27,42,74,.28)}
+.sfqn-fab{position:fixed;left:0;top:0;z-index:1400;width:56px;height:56px;border:0;border-radius:18px;background:#1B2A4A;color:#fff;font-size:1.25rem;display:grid;place-items:center;cursor:grab;box-shadow:0 8px 20px rgba(27,42,74,.28);touch-action:none;user-select:none;-webkit-user-select:none;transition:left .18s ease,top .18s ease}
+.sfqn-fab.is-drag{transition:none;cursor:grabbing;opacity:.92}
 .sfqn-fab:focus-visible,.sfqn-sheet button:focus-visible,.sfqn-sheet a:focus-visible,.sfqn-sheet input:focus-visible{outline:2px solid #1B2A4A;outline-offset:2px}
 .sfqn{position:fixed;inset:0;z-index:2000}
 .sfqn[hidden]{display:none}
@@ -129,6 +130,72 @@ function build({ role, access }) {
   root.append(overlay, sheet);
   document.body.append(fab, root);
 
+  // ===== বাটন টেনে সরানো (নিচের নেভ বার/অন্য ভাসমান কিছুর সাথে ঠেকলে) =====
+  // টানলে সরে, ছেড়ে দিলে বাঁ/ডান কিনারায় লেগে যায়; জায়গা ডিভাইসে মনে থাকে। শুধু ট্যাপ করলে মেনু খোলে।
+  const POS_KEY = 'sf_admin_qn_pos';
+  const SIZE = 56;
+  const EDGE = 8;
+  const DEFAULT_BOTTOM = 96; // নিচের নেভ বারের উপরে
+  const clamp01 = (n) => Math.min(1, Math.max(0, n));
+  function readPos() {
+    try {
+      const o = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
+      if (o && typeof o.fx === 'number' && typeof o.fy === 'number') return { fx: clamp01(o.fx), fy: clamp01(o.fy) };
+    } catch (_) { /* বাদ */ }
+    return null;
+  }
+  function savePos(p) {
+    try { localStorage.setItem(POS_KEY, JSON.stringify(p)); } catch (_) { /* বাদ */ }
+  }
+  function spanX() { return Math.max(1, window.innerWidth - SIZE - 2 * EDGE); }
+  function spanY() { return Math.max(1, window.innerHeight - SIZE - 2 * EDGE); }
+  function defaultPos() { return { fx: 1, fy: clamp01((window.innerHeight - SIZE - DEFAULT_BOTTOM - EDGE) / spanY()) }; }
+  let pos = readPos() || defaultPos();
+  function place(p) {
+    fab.style.left = (EDGE + p.fx * spanX()) + 'px';
+    fab.style.top = (EDGE + p.fy * spanY()) + 'px';
+  }
+  place(pos);
+  window.addEventListener('resize', () => place(pos));
+
+  let drag = null;
+  let moved = false;
+  fab.addEventListener('pointerdown', (e) => {
+    if (e.button != null && e.button !== 0) return;
+    const r = fab.getBoundingClientRect();
+    drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top };
+    moved = false;
+    try { fab.setPointerCapture(e.pointerId); } catch (_) { /* বাদ */ }
+  });
+  fab.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.sx;
+    const dy = e.clientY - drag.sy;
+    if (!moved && Math.hypot(dx, dy) < 6) return;
+    moved = true;
+    fab.classList.add('is-drag');
+    const x = Math.min(window.innerWidth - SIZE - EDGE, Math.max(EDGE, drag.ox + dx));
+    const y = Math.min(window.innerHeight - SIZE - EDGE, Math.max(EDGE, drag.oy + dy));
+    fab.style.left = x + 'px';
+    fab.style.top = y + 'px';
+    e.preventDefault();
+  });
+  function endDrag(e) {
+    if (!drag || (e && e.pointerId !== drag.id)) return;
+    drag = null;
+    fab.classList.remove('is-drag');
+    if (!moved) return;
+    const r = fab.getBoundingClientRect();
+    const cx = r.left + SIZE / 2;
+    pos = { fx: cx < window.innerWidth / 2 ? 0 : 1, fy: clamp01((r.top - EDGE) / spanY()) };
+    place(pos);
+    savePos(pos);
+    // টানার শেষে আসা click-এ মেনু খুলবে না
+    setTimeout(() => { moved = false; }, 0);
+  }
+  fab.addEventListener('pointerup', endDrag);
+  fab.addEventListener('pointercancel', endDrag);
+
   function shortcutList() {
     const badges = getBadges();
     const favs = getFavs().filter((h) => byHref[h]);
@@ -200,7 +267,7 @@ function build({ role, access }) {
     fab.focus();
   }
 
-  fab.addEventListener('click', open);
+  fab.addEventListener('click', () => { if (moved) return; open(); });
   closeBtn.addEventListener('click', close);
   overlay.addEventListener('click', close);
   input.addEventListener('input', () => render(input.value.trim().toLowerCase()));
