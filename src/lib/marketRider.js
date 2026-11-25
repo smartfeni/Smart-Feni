@@ -39,7 +39,7 @@ export function marketRiderHtml(req, esc) {
   h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><img src="/market/icons/' + (isSend ? 'scooter' : 'bags') + '.webp" alt="" aria-hidden="true" style="width:28px;height:28px;object-fit:contain;" /><b style="flex:1;color:#1B2A4A;font-size:1rem;">' + (isSend ? 'কী নিতে হবে' : 'কী কিনবেন') + '</b>' + (isSend && req.parcel_size ? '<span style="font-size:0.78rem;font-weight:800;color:#9A3412;background:#FFE3D1;padding:3px 9px;border-radius:999px;">সাইজ: ' + (SIZE[req.parcel_size] || '') + '</span>' : '') + '</div>';
   h += '<p style="margin:0 0 8px;font-size:0.98rem;line-height:1.6;color:#1B2A4A;white-space:pre-line;font-weight:600;">' + esc(cleanDesc(req)) + '</p>';
   if (photos.length) {
-    h += '<div data-qd-photos style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' + photos.map((p) => '<img data-qd-path="' + esc(p) + '" alt="অর্ডারের ছবি" style="width:78px;height:78px;object-fit:cover;border-radius:12px;background:#F3F5F9;cursor:zoom-in;" />').join('') + '</div>';
+    h += '<div data-qd-photos style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' + photos.map((p) => '<img loading="lazy" decoding="async" data-qd-path="' + esc(p) + '" alt="অর্ডারের ছবি" style="width:78px;height:78px;object-fit:cover;border-radius:12px;background:#F3F5F9;cursor:zoom-in;" />').join('') + '</div>';
   }
   if (isSend) {
     h += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0;">' + telBtn(req.pickup_contact_phone, 'পিকআপে কল') + (req.drop_contact_phone ? telBtn(req.drop_contact_phone, 'প্রাপককে কল' + (req.drop_contact_name ? ' (' + esc(req.drop_contact_name) + ')' : '')) : '') + '</div>';
