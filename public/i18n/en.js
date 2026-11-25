@@ -1026,6 +1026,7 @@ window.SF_I18N_EN = {
 "না, ফিরে যান": "No, go back",
 "অ্যাডভান্স দিয়েছেন": "Advance paid",
 "লোড হচ্ছে": "Loading",
+"চ্যাট লোড করা যায়নি, আবার চেষ্টা করুন": "Could not load chat, please try again",
 "অপেক্ষা করুন…": "Please wait…",
 "গতকাল": "Yesterday",
 "মিনিট আগে": "min ago",
