@@ -54,7 +54,22 @@ function shuffle(array) {
  *                             হলে dataset key হবে 'upazilaName')
  * @param {'shuffle'|'latest'} mode
  */
+// সার্ভার-সাইড পেজিনেশন (listingQuery.js) যাতে "নিজের উপজেলা আগে" সাজাতে পারে,
+// তাই সেভ করা উপজেলা cookie-তেও রাখা হয় (শুধু slug, ১ বছর)।
+export function syncUpazilaCookie() {
+  try {
+    const slug = localStorage.getItem('smartfeni_upazila') || '';
+    const want = UPAZILA_SLUG_TO_NAME[slug] ? slug : '';
+    const has = (document.cookie.match(/(?:^|;\s*)sf_upazila=([^;]*)/) || [])[1] || '';
+    if (has === want) return;
+    document.cookie = want
+      ? 'sf_upazila=' + want + '; path=/; max-age=31536000; samesite=lax'
+      : 'sf_upazila=; path=/; max-age=0; samesite=lax';
+  } catch (_) { /* উপেক্ষা */ }
+}
+
 export function reorderByUserLocation(grid, dataAttr = 'upazilaName', mode = 'shuffle') {
+  syncUpazilaCookie();
   if (!grid) return;
 
   const savedSlug = localStorage.getItem('smartfeni_upazila');
