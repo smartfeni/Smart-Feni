@@ -56,12 +56,19 @@ export function readListingParams(Astro) {
 
 // ইউজার নিজে লেখা টাইপ (যেমন "সাইকেল", "বই") কোনো পিলে পড়ে না — তাই knownTypes দিলে
 // type='other' মানে "জানা টাইপগুলোর বাইরে সব"।
-function baseQuery(supabase, { category, columns, type, q, knownTypes }, countOnly = false) {
+// eq: অতিরিক্ত হুবহু-মিল ফিল্টার, যেমন { upazila: 'ফেনী সদর', union_name: '...' } (খালি মান বাদ)
+// searchCols: সার্চ কোন কলামে হবে (ডিফল্ট title, description, upazila)
+function baseQuery(supabase, { category, columns, type, q, knownTypes, eq, searchCols }, countOnly = false) {
   let query = supabase
     .from('listings')
     .select(columns, countOnly ? { count: 'exact', head: true } : { count: 'exact' })
     .eq('category', category)
     .eq('status', 'active');
+  if (eq) {
+    Object.entries(eq).forEach(([k, v]) => {
+      if (v) query = query.eq(k, v);
+    });
+  }
   // একাধিক or() গ্রুপ একসাথে হলে একটা or(and(...))-এ জোড়া (PostgREST-এ দুবার or দেওয়া ঝুঁকিপূর্ণ)
   const groups = [];
   if (type === 'other' && knownTypes && knownTypes.length) {
@@ -70,7 +77,10 @@ function baseQuery(supabase, { category, columns, type, q, knownTypes }, countOn
   } else if (type && type !== 'all') {
     query = query.eq('type', type);
   }
-  if (q) groups.push(`title.ilike."%${q}%",description.ilike."%${q}%",upazila.ilike."%${q}%"`);
+  if (q) {
+    const cols = searchCols && searchCols.length ? searchCols : ['title', 'description', 'upazila'];
+    groups.push(cols.map((c) => `${c}.ilike."%${q}%"`).join(','));
+  }
   if (groups.length === 1) query = query.or(groups[0]);
   else if (groups.length > 1) query = query.or(`and(${groups.map((g) => `or(${g})`).join(',')})`);
   return query;

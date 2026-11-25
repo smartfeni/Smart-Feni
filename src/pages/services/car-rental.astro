@@ -15,8 +15,10 @@ export const prerender = false;
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import ServiceSeoBlock from '../../components/shared/ServiceSeoBlock.astro';
 import AddListingModal from '../../components/ui/AddListingModal.astro';
-import { UPAZILAS } from '../../data/feniAreas.js';
+import { UPAZILAS, getUnionsOfUpazilaName } from '../../data/feniAreas.js';
 import { supabase } from '../../lib/supabase.js';
+import Pagination from '../../components/shared/Pagination.astro';
+import { readListingParams, fetchListingPage, fetchTypeCounts } from '../../lib/listingQuery.js';
 
 const typeOptions = [
   { id: 'cng', label: 'সিএনজি' },
@@ -45,14 +47,37 @@ const typeDefaultImages = {
 // সিএনজি ও অটো রিক্সা আগের মতো (লিস্টিং ছবি/ডিফল্ট ছবি)। আসল ছবি লিস্টিং পেজে দেখা যায়।
 const iconTypes = new Set(['ambulance', 'pickup', 'car', 'microbus', 'truck', 'other']);
 
-const { data: carListings } = await supabase
-  .from('listings')
-  .select('*')
-  .eq('category', 'car-rental')
-  .eq('status', 'active')
-  .order('created_at', { ascending: false });
+// পেজিনেশন (২০টা করে) — src/lib/listingQuery.js
+// সার্চ, ধরন, উপজেলা, ইউনিয়ন এখন URL প্যারামিটারে (?q= ?type= ?upazila= ?union= ?page=)
+const params = readListingParams(Astro);
+const sp = Astro.url.searchParams;
+const validUpazila = UPAZILAS.some((u) => u.name === sp.get('upazila')) ? sp.get('upazila') : '';
+const unionOptions = validUpazila ? getUnionsOfUpazilaName(validUpazila) : [];
+const validUnion = unionOptions.includes(sp.get('union') || '') ? sp.get('union') : '';
+const knownTypes = typeOptions.map((t) => t.id);
+const [result, counts] = await Promise.all([
+  fetchListingPage(supabase, {
+    category: 'car-rental',
+    columns: 'id,title,type,price,upazila,union_name,images,description,created_at',
+    knownTypes,
+    eq: { upazila: validUpazila, union_name: validUnion },
+    searchCols: ['title', 'description', 'upazila', 'union_name'],
+    ...params,
+  }),
+  fetchTypeCounts(supabase, 'car-rental', knownTypes),
+]);
 
-const listings = carListings || [];
+const listings = result.rows;
+const activeType = params.type || 'all';
+const hasFilter = !!(params.q || params.type || validUpazila);
+function filterHref(type) {
+  const u = new URLSearchParams();
+  if (type && type !== 'all') u.set('type', type);
+  if (params.q) u.set('q', params.q);
+  if (validUpazila) u.set('upazila', validUpazila);
+  if (validUnion) u.set('union', validUnion);
+  return `?${u.toString()}#listings`;
+}
 
 function getAreaName(description) {
   if (!description) return '';
@@ -66,9 +91,9 @@ function toBanglaDigits(num) {
 
 const typeCounts = {};
 typeOptions.forEach((opt) => {
-  typeCounts[opt.id] = listings.filter((item) => (item.type || 'other') === opt.id).length;
+  typeCounts[opt.id] = counts.byType[opt.id] || 0;
 });
-const totalCount = listings.length;
+const totalCount = counts.all;
 ---
 
 <BaseLayout
@@ -86,37 +111,45 @@ const totalCount = listings.length;
     </div>
   </section>
 
-  <section class="car-section">
+  <section class="car-section" id="listings">
     <div class="container">
-      <div class="search-box">
-        <i class="fas fa-magnifying-glass"></i>
-        <input type="text" id="searchInput" placeholder="আপনার এলাকার নাম লিখে ড্রাইভার খুঁজুন..." />
-      </div>
+      <form id="carFilterForm" method="get" action="#listings" role="search">
+        <div class="search-box">
+          <i class="fas fa-magnifying-glass"></i>
+          <input type="search" name="q" id="searchInput" value={params.q} enterkeyhint="search" placeholder="আপনার এলাকার নাম লিখে ড্রাইভার খুঁজুন..." />
+        </div>
+        {params.type && <input type="hidden" name="type" value={params.type} />}
 
-      <div class="loc-filter-row">
-        <select id="upazilaFilter" class="loc-select" aria-label="উপজেলা">
-          <option value="">সব উপজেলা</option>
-          {UPAZILAS.map((u) => (
-            <option value={u.name}>{u.name}</option>
-          ))}
-        </select>
-        <select id="unionFilter" class="loc-select" aria-label="ইউনিয়ন" disabled>
-          <option value="">সব ইউনিয়ন</option>
-        </select>
-      </div>
+        <div class="loc-filter-row">
+          <select id="upazilaFilter" name="upazila" class="loc-select" aria-label="উপজেলা">
+            <option value="">সব উপজেলা</option>
+            {UPAZILAS.map((u) => (
+              <option value={u.name} selected={u.name === validUpazila}>{u.name}</option>
+            ))}
+          </select>
+          <select id="unionFilter" name="union" class="loc-select" aria-label="ইউনিয়ন" disabled={!validUpazila}>
+            <option value="">সব ইউনিয়ন</option>
+            {unionOptions.map((n) => (
+              <option value={n} selected={n === validUnion}>{n}</option>
+            ))}
+          </select>
+        </div>
+      </form>
 
       <div class="filter-row" id="filterRow">
-        <button class="filter-pill active" data-type="all" type="button">
+        <a class={`filter-pill${activeType === 'all' ? ' active' : ''}`} href={filterHref('all')} style="text-decoration:none;">
           সব <span class="pill-count">({toBanglaDigits(totalCount)})</span>
-        </button>
+        </a>
         {typeOptions.map((opt) => (
-          <button class="filter-pill" data-type={opt.id} type="button">
+          <a class={`filter-pill${activeType === opt.id ? ' active' : ''}`} href={filterHref(opt.id)} style="text-decoration:none;">
             {opt.label} <span class="pill-count">({toBanglaDigits(typeCounts[opt.id])})</span>
-          </button>
+          </a>
         ))}
       </div>
 
-      {listings.length === 0 ? (
+      {listings.length === 0 && hasFilter ? (
+        <p class="no-results" id="noResults">কোনো ফলাফল পাওয়া যায়নি</p>
+      ) : listings.length === 0 ? (
         <div class="empty-state">
           <i class="fas fa-car-side"></i>
           <p>এখনো কোনো গাড়ি ভাড়া লিস্টিং যোগ হয়নি</p>
@@ -138,7 +171,6 @@ const totalCount = listings.length;
                   data-target-id={item.id}
                   data-upazila-name={item.upazila || ''}
                   data-union-name={item.union_name || ''}
-                  data-search={`${item.title || ''} ${item.description || ''} ${item.upazila || ''} ${item.union_name || ''}`.toLowerCase()}
                 >
                   <button class="like-btn-preview" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
                     <i class="fas fa-heart"></i>
@@ -167,7 +199,7 @@ const totalCount = listings.length;
             })}
           </div>
 
-          <p class="no-results" id="noResults" style="display:none;">কোনো ফলাফল পাওয়া যায়নি</p>
+          <Pagination page={result.page} pages={result.pages} anchor="listings" />
         </>
       )}
     </div>
@@ -512,67 +544,21 @@ const totalCount = listings.length;
 
   const grid = document.getElementById('carGrid');
   const cards = document.querySelectorAll('.car-card');
+  // সার্চ, ধরন, উপজেলা, ইউনিয়ন এখন সার্ভারে (URL প্যারামিটার), পেজিনেশন listingQuery.js।
+  const form = document.getElementById('carFilterForm');
   const searchInput = document.getElementById('searchInput');
-  const noResults = document.getElementById('noResults');
-  const filterPills = document.querySelectorAll('.filter-pill');
   const upazilaFilter = document.getElementById('upazilaFilter');
   const unionFilter = document.getElementById('unionFilter');
 
-  let activeUpazila = '';
-  let activeUnion = '';
-
-  let activeType = 'all';
-
-  function applyFilters() {
-    const keyword = (searchInput?.value || '').trim().toLowerCase();
-    let visibleCount = 0;
-
-    cards.forEach((card) => {
-      const matchesType = activeType === 'all' || card.dataset.type === activeType;
-      const matchesSearch = keyword === '' || (card.dataset.search || '').includes(keyword);
-      const matchesUpazila = activeUpazila === '' || card.dataset.upazilaName === activeUpazila;
-      const matchesUnion = activeUnion === '' || card.dataset.unionName === activeUnion;
-      const matches = matchesType && matchesSearch && matchesUpazila && matchesUnion;
-
-      if (matches) {
-        card.classList.remove('hidden');
-        visibleCount++;
-      } else {
-        card.classList.add('hidden');
-      }
-    });
-
-    if (noResults) {
-      noResults.style.display = visibleCount === 0 ? 'block' : 'none';
-    }
-  }
-
-  searchInput?.addEventListener('input', applyFilters);
-
-  // উপজেলা বদলালে ইউনিয়ন ড্রপডাউন সেই উপজেলার ইউনিয়ন দিয়ে ভরে, ইউনিয়ন ফিল্টার রিসেট
+  searchInput?.addEventListener('search', () => {
+    if (!searchInput.value && new URLSearchParams(location.search).get('q')) form?.submit();
+  });
+  // উপজেলা বদলালে ইউনিয়ন রিসেট করে নতুন ফলাফল
   upazilaFilter?.addEventListener('change', () => {
-    activeUpazila = upazilaFilter.value;
-    activeUnion = '';
-    const list = getUnionsOfUpazilaName(activeUpazila);
-    unionFilter.innerHTML = '<option value="">সব ইউনিয়ন</option>' +
-      list.map((u) => `<option value="${u}">${u}</option>`).join('');
-    unionFilter.disabled = !activeUpazila;
-    applyFilters();
+    if (unionFilter) unionFilter.value = '';
+    form?.submit();
   });
-
-  unionFilter?.addEventListener('change', () => {
-    activeUnion = unionFilter.value;
-    applyFilters();
-  });
-
-  filterPills.forEach((pill) => {
-    pill.addEventListener('click', () => {
-      filterPills.forEach((p) => p.classList.remove('active'));
-      pill.classList.add('active');
-      activeType = pill.dataset.type;
-      applyFilters();
-    });
-  });
+  unionFilter?.addEventListener('change', () => form?.submit());
 
   reorderByUserLocation(grid, 'upazilaName');
 

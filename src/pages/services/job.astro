@@ -16,6 +16,8 @@ import BaseLayout from '../../components/layout/BaseLayout.astro';
 import ServiceSeoBlock from '../../components/shared/ServiceSeoBlock.astro';
 import AddListingModal from '../../components/ui/AddListingModal.astro';
 import { supabase } from '../../lib/supabase.js';
+import Pagination from '../../components/shared/Pagination.astro';
+import { readListingParams, fetchListingPage, fetchTypeCounts } from '../../lib/listingQuery.js';
 
 const typeOptions = [
   { id: 'fulltime', label: 'ফুল-টাইম' },
@@ -25,20 +27,24 @@ const typeOptions = [
 
 const typeNameMap = Object.fromEntries(typeOptions.map((t) => [t.id, t.label]));
 
-const { data: jobListings } = await supabase
-  .from('listings')
-  .select('*')
-  .eq('category', 'job')
-  .eq('status', 'active')
-  .order('created_at', { ascending: false });
+// পেজিনেশন (২০টা করে) — src/lib/listingQuery.js; সার্চ/টাইপ এখন URL প্যারামিটারে (?q= ?type= ?page=)
+const params = readListingParams(Astro);
+const knownTypes = typeOptions.map((t) => t.id);
+const [result, counts] = await Promise.all([
+  fetchListingPage(supabase, { category: 'job', columns: 'id,title,type,price,upazila,images,created_at', knownTypes, ...params }),
+  fetchTypeCounts(supabase, 'job', knownTypes),
+]);
 
-const listings = jobListings || [];
+const listings = result.rows;
+const activeType = params.type || 'all';
+const hasFilter = !!(params.q || params.type);
+const typeHref = (id) => (id === 'all' ? '' : `type=${id}`) + (params.q ? `${id === 'all' ? '' : '&'}q=${encodeURIComponent(params.q)}` : '');
 
 const typeCounts = {};
 typeOptions.forEach((opt) => {
-  typeCounts[opt.id] = listings.filter((item) => (item.type || 'other') === opt.id).length;
+  typeCounts[opt.id] = counts.byType[opt.id] || 0;
 });
-const totalCount = listings.length;
+const totalCount = counts.all;
 ---
 
 <BaseLayout
@@ -55,39 +61,31 @@ const totalCount = listings.length;
     </div>
   </section>
 
-  <section class="job-section">
+  <section class="job-section" id="listings">
     <div class="container">
-      <div class="search-box">
+      <form class="search-box" method="get" action="#listings" role="search">
         <i class="fas fa-magnifying-glass"></i>
-        <input type="text" id="searchInput" placeholder="পদবী, প্রতিষ্ঠান বা যেকোনো কিছু খুঁজুন..." />
-      </div>
+        <input type="search" name="q" id="searchInput" value={params.q} enterkeyhint="search" placeholder="পদবী, প্রতিষ্ঠান বা যেকোনো কিছু খুঁজুন..." />
+        {params.type && <input type="hidden" name="type" value={params.type} />}
+      </form>
 
-      {listings.length > 0 && (
-
+      {totalCount > 0 && (
         <div class="filter-row" id="filterRow">
-
-          <button class="filter-pill active" data-type="all" type="button">
-
+          <a class={`filter-pill${activeType === 'all' ? ' active' : ''}`} href={`?${typeHref('all')}#listings`} style="text-decoration:none;">
             সব <span class="pill-count">({totalCount})</span>
-
-          </button>
-
+          </a>
           {typeOptions.map((opt) => (
-
-            <button class="filter-pill" data-type={opt.id} type="button">
-
+            <a class={`filter-pill${activeType === opt.id ? ' active' : ''}`} href={`?${typeHref(opt.id)}#listings`} style="text-decoration:none;">
               {opt.label} <span class="pill-count">({typeCounts[opt.id]})</span>
-
-            </button>
-
+            </a>
           ))}
-
         </div>
-
       )}
 
 
-      {listings.length === 0 ? (
+      {listings.length === 0 && hasFilter ? (
+        <p class="no-results" id="noResults">কোনো ফলাফল পাওয়া যায়নি</p>
+      ) : listings.length === 0 ? (
         <div class="empty-state">
           <i class="fas fa-briefcase"></i>
           <p>এখনো কোনো চাকরির বিজ্ঞপ্তি যোগ হয়নি</p>
@@ -103,7 +101,6 @@ const totalCount = listings.length;
                 data-target-id={item.id}
                 data-type={item.type || 'other'}
                 data-upazila-name={item.upazila || ''}
-                data-search={`${item.title || ''} ${item.description || ''} ${typeNameMap[item.type] || ''}`.toLowerCase()}
               >
                 <button class="like-btn-preview" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
                   <i class="fas fa-heart"></i>
@@ -132,7 +129,7 @@ const totalCount = listings.length;
             ))}
           </div>
 
-          <p class="no-results" id="noResults" style="display:none;">কোনো ফলাফল পাওয়া যায়নি</p>
+          <Pagination page={result.page} pages={result.pages} anchor="listings" />
         </>
       )}
     </div>
@@ -437,43 +434,11 @@ const totalCount = listings.length;
 
   const grid = document.getElementById('jobGrid');
   const cards = document.querySelectorAll('.job-card');
+  // সার্চ ও টাইপ-ফিল্টার এখন সার্ভারে (URL ?q= ?type=), পেজিনেশন listingQuery.js।
+  // সার্চ খালি করে Enter দিলে সব দেখায়।
   const searchInput = document.getElementById('searchInput');
-  const noResults = document.getElementById('noResults');
-  const filterPills = document.querySelectorAll('.filter-pill');
-
-  let activeType = 'all';
-
-  function applyFilters() {
-    const keyword = (searchInput?.value || '').trim().toLowerCase();
-    let visibleCount = 0;
-
-    cards.forEach((card) => {
-      const matchesType = activeType === 'all' || card.dataset.type === activeType;
-      const matchesSearch = keyword === '' || (card.dataset.search || '').includes(keyword);
-      const matches = matchesType && matchesSearch;
-
-      if (matches) {
-        card.classList.remove('hidden');
-        visibleCount++;
-      } else {
-        card.classList.add('hidden');
-      }
-    });
-
-    if (noResults) {
-      noResults.style.display = visibleCount === 0 ? 'block' : 'none';
-    }
-  }
-
-  searchInput?.addEventListener('input', applyFilters);
-
-  filterPills.forEach((pill) => {
-    pill.addEventListener('click', () => {
-      filterPills.forEach((p) => p.classList.remove('active'));
-      pill.classList.add('active');
-      activeType = pill.dataset.type;
-      applyFilters();
-    });
+  searchInput?.addEventListener('search', () => {
+    if (!searchInput.value && new URLSearchParams(location.search).get('q')) searchInput.form?.submit();
   });
 
   reorderByUserLocation(grid, 'upazilaName', 'latest');

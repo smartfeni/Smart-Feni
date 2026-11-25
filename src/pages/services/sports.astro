@@ -15,6 +15,8 @@ export const prerender = false;
 import BaseLayout from '../../components/layout/BaseLayout.astro';
 import AddListingModal from '../../components/ui/AddListingModal.astro';
 import { supabase } from '../../lib/supabase.js';
+import Pagination from '../../components/shared/Pagination.astro';
+import { readListingParams, fetchListingPage } from '../../lib/listingQuery.js';
 
 const typeOptions = [
   { id: 'sports', label: 'খেলা' },
@@ -36,14 +38,16 @@ const typeIcons = {
   other: 'fa-calendar-alt',
 };
 
-const { data: sportsListings } = await supabase
-  .from('listings')
-  .select('*')
-  .eq('category', 'sports')
-  .eq('status', 'active')
-  .order('created_at', { ascending: false });
-
-const events = sportsListings || [];
+// পেজিনেশন (২০টা করে) — src/lib/listingQuery.js; সার্চ URL প্যারামিটারে (?q= ?page=)
+const params = readListingParams(Astro);
+const result = await fetchListingPage(supabase, {
+  category: 'sports',
+  columns: 'id,title,type,price,upazila,images,created_at',
+  ...params,
+  type: '',
+});
+const events = result.rows;
+const hasFilter = !!params.q;
 ---
 
 <BaseLayout title="খেলাধুলা ও ইভেন্ট | স্মার্ট ফেনী">
@@ -57,14 +61,16 @@ const events = sportsListings || [];
     </div>
   </section>
 
-  <section class="event-section">
+  <section class="event-section" id="listings">
     <div class="container">
-      <div class="search-box">
+      <form class="search-box" method="get" action="#listings" role="search">
         <i class="fas fa-magnifying-glass"></i>
-        <input type="text" id="searchInput" placeholder="ইভেন্টের নাম বা স্থান খুঁজুন..." />
-      </div>
+        <input type="search" name="q" id="searchInput" value={params.q} enterkeyhint="search" placeholder="ইভেন্টের নাম বা স্থান খুঁজুন..." />
+      </form>
 
-      {events.length === 0 ? (
+      {events.length === 0 && hasFilter ? (
+        <p class="no-results" id="noResults">কোনো ইভেন্ট পাওয়া যায়নি</p>
+      ) : events.length === 0 ? (
         <div class="empty-state">
           <i class="fas fa-calendar-plus"></i>
           <p>এখনো কোনো ইভেন্ট তালিকাভুক্ত হয়নি</p>
@@ -79,7 +85,6 @@ const events = sportsListings || [];
                 class="sports-card"
                 data-target-id={item.id}
                 data-upazila-name={item.upazila || ''}
-                data-search={`${item.title || ''} ${item.description || ''} ${item.type || ''}`.toLowerCase()}
               >
                 <button class="like-btn-preview" type="button" data-like-btn aria-label="লাইক করুন" style="display:none;">
                   <i class="fas fa-heart"></i>
@@ -108,7 +113,7 @@ const events = sportsListings || [];
             ))}
           </div>
 
-          <p class="no-results" id="noResults" style="display:none;">কোনো ইভেন্ট পাওয়া যায়নি</p>
+          <Pagination page={result.page} pages={result.pages} anchor="listings" />
         </>
       )}
     </div>
@@ -373,29 +378,11 @@ const events = sportsListings || [];
 
   const grid = document.getElementById('sportsGrid');
   const cards = document.querySelectorAll('.sports-card');
+  // সার্চ এখন সার্ভারে (URL ?q=), পেজিনেশন listingQuery.js। খালি করে Enter দিলে সব দেখায়।
   const searchInput = document.getElementById('searchInput');
-  const noResults = document.getElementById('noResults');
-
-  if (searchInput && cards.length) {
-    searchInput.addEventListener('input', () => {
-      const keyword = searchInput.value.trim().toLowerCase();
-      let visibleCount = 0;
-
-      cards.forEach((card) => {
-        const matches = keyword === '' || (card.dataset.search || '').includes(keyword);
-        if (matches) {
-          card.classList.remove('hidden');
-          visibleCount++;
-        } else {
-          card.classList.add('hidden');
-        }
-      });
-
-      if (noResults) {
-        noResults.style.display = visibleCount === 0 ? 'block' : 'none';
-      }
-    });
-  }
+  searchInput?.addEventListener('search', () => {
+    if (!searchInput.value && new URLSearchParams(location.search).get('q')) searchInput.form?.submit();
+  });
 
   reorderByUserLocation(grid, 'upazilaName');
 
