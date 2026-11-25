@@ -54,14 +54,25 @@ export function readListingParams(Astro) {
   };
 }
 
-function baseQuery(supabase, { category, columns, type, q }, countOnly = false) {
+// ইউজার নিজে লেখা টাইপ (যেমন "সাইকেল", "বই") কোনো পিলে পড়ে না — তাই knownTypes দিলে
+// type='other' মানে "জানা টাইপগুলোর বাইরে সব"।
+function baseQuery(supabase, { category, columns, type, q, knownTypes }, countOnly = false) {
   let query = supabase
     .from('listings')
     .select(columns, countOnly ? { count: 'exact', head: true } : { count: 'exact' })
     .eq('category', category)
     .eq('status', 'active');
-  if (type && type !== 'all') query = query.eq('type', type);
-  if (q) query = query.or(`title.ilike."%${q}%",description.ilike."%${q}%",upazila.ilike."%${q}%"`);
+  // একাধিক or() গ্রুপ একসাথে হলে একটা or(and(...))-এ জোড়া (PostgREST-এ দুবার or দেওয়া ঝুঁকিপূর্ণ)
+  const groups = [];
+  if (type === 'other' && knownTypes && knownTypes.length) {
+    const known = knownTypes.filter((k) => k !== 'other');
+    groups.push(`type.is.null,type.not.in.(${known.join(',')})`);
+  } else if (type && type !== 'all') {
+    query = query.eq('type', type);
+  }
+  if (q) groups.push(`title.ilike."%${q}%",description.ilike."%${q}%",upazila.ilike."%${q}%"`);
+  if (groups.length === 1) query = query.or(groups[0]);
+  else if (groups.length > 1) query = query.or(`and(${groups.map((g) => `or(${g})`).join(',')})`);
   return query;
 }
 
@@ -123,7 +134,7 @@ export async function fetchListingPage(supabase, opts) {
 }
 
 // ফিল্টার-পিলের সংখ্যা: শুধু type কলাম আনে (হালকা), সার্চ ছাড়া পুরো ক্যাটাগরির হিসাব
-export async function fetchTypeCounts(supabase, category) {
+export async function fetchTypeCounts(supabase, category, knownTypes = null) {
   const { data } = await supabase
     .from('listings')
     .select('type')
@@ -131,7 +142,8 @@ export async function fetchTypeCounts(supabase, category) {
     .eq('status', 'active');
   const byType = {};
   (data || []).forEach((r) => {
-    const t = r.type || 'other';
+    let t = r.type || 'other';
+    if (knownTypes && !knownTypes.includes(t)) t = 'other';
     byType[t] = (byType[t] || 0) + 1;
   });
   return { all: (data || []).length, byType };
