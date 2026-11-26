@@ -101,8 +101,8 @@ export const MENU = [
     icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     items: [
       { name: 'লিস্টিং', desc: 'সব লিস্টিং খোঁজা, এডিট, এডিট রিভিউ ও রিপোর্ট', href: '/console/listings', perm: '/admin/listings', keys: 'পোস্ট বাসা টিউশন' },
-      { name: 'জরুরি নম্বর', desc: 'পুলিশ, ফায়ার, হাসপাতালের নম্বর', href: '/admin/emergency-contacts', keys: 'ইমার্জেন্সি' },
-      { name: 'টিউটোরিয়াল ও ইনফো', desc: 'ইনফো বাটনের লেখা ও ভিডিও', href: '/admin/tutorials', adminOnly: true, keys: 'ভিডিও' },
+      { name: 'জরুরি নম্বর', desc: 'পুলিশ, ফায়ার, হাসপাতালের নম্বর', href: '/console/emergency', perm: '/admin/emergency-contacts', keys: 'ইমার্জেন্সি' },
+      { name: 'টিউটোরিয়াল ও ইনফো', desc: 'ইনফো বাটনের লেখা ও ভিডিও', href: '/console/tutorials', adminOnly: true, keys: 'ভিডিও' },
     ],
   },
   {
