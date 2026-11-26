@@ -1,0 +1,411 @@
+---
+// ============================================================
+// /console/shop?id=<delivery_shops.id> — একটা দোকানের সব তথ্য এক জায়গায় (নতুন অ্যাপ, ধাপ ৫.১)
+// ডাটা (নতুন DB বদল নেই):
+//   delivery_shops · delivery_shop_items · delivery_shop_staff · delivery_market_categories · profiles
+//   market_preorders (সাম্প্রতিক প্রি-অর্ডার, RLS mpo_read)
+// কাজ:
+//   দেখাবে/লুকানো, জনপ্রিয় → delivery_shops update (RLS: delivery_shops.manage), টেস্ট দোকান চালু নয়
+//   কমিশন % ও ডেলিভারির ধরন → RPC admin_set_shop_market_opts (শুধু সুপার অ্যাডমিন)
+//   তথ্য/ছবি/লোকেশন/মেনু/মালিক বদল → এখনো পুরনো পেজ /admin/delivery-shops?edit=<id> (৫.২-এ এখানে আসবে)
+// প্রতিটা বদল অ্যাক্টিভিটি লগে ওঠে (delivery_shops-এ zz_admin_audit)।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="দোকান" active="menu">
+  <div class="cs-pad cm-page sd-page">
+    <a class="sd-back" href="/console/shops" id="sdBack">← দোকানের তালিকা</a>
+    <div id="sdBody"></div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .sd-back { font-size: 13.5px; font-weight: 600; color: #5F6B7E; text-decoration: none; margin-top: 4px; }
+  #sdBody { display: flex; flex-direction: column; gap: 12px; }
+  .sd-head { display: flex; gap: 14px; align-items: center; }
+  .sd-pic { width: 68px; height: 68px; flex: none; border-radius: 16px; background: #EFEBE5 center/cover no-repeat; display: flex; align-items: center; justify-content: center; font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-weight: 700; font-size: 26px; color: #5F6B7E; }
+  .sd-ht { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .sd-ht h1 { margin: 0; font-size: 22px; overflow-wrap: anywhere; }
+  .sd-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .sd-tag { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: #EEF1F5; color: #3D4A60; }
+  .sd-tag.on { background: #E6F6EE; color: #17663F; }
+  .sd-tag.warn { background: #FDECEA; color: #B3261E; }
+  .sd-links { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sd-link { flex: 1 1 150px; display: inline-flex; align-items: center; justify-content: center; height: 42px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font-size: 13.5px; font-weight: 600; text-decoration: none; }
+  .sd-link.primary { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .sd-card { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 4px 16px; display: flex; flex-direction: column; }
+  .sd-card > h2 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; color: #5F6B7E; }
+  .sd-sw { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+  .sd-sw + .sd-sw { border-top: 1px solid #EFEBE5; }
+  .sd-sw-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .sd-sw-t b { font-size: 15px; font-weight: 600; }
+  .sd-sw-t small { font-size: 12.5px; color: #5F6B7E; line-height: 1.45; }
+  .sd-toggle { position: relative; width: 48px; height: 28px; flex: none; border-radius: 999px; border: 0; background: #CBD2DC; cursor: pointer; transition: background .15s; }
+  .sd-toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s; }
+  .sd-toggle[aria-checked="true"] { background: #17663F; }
+  .sd-toggle[aria-checked="true"]::after { transform: translateX(20px); }
+  .sd-toggle:disabled { opacity: .5; cursor: default; }
+  .sd-kv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; font-size: 14px; margin: 6px 0 12px; }
+  .sd-kv dt { color: #5F6B7E; }
+  .sd-kv dd { margin: 0; overflow-wrap: anywhere; }
+  .sd-kv a { color: #1B2A4A; font-weight: 600; }
+  .sd-row { display: flex; align-items: center; gap: 10px; padding: 11px 0; font-size: 14px; }
+  .sd-row + .sd-row { border-top: 1px solid #EFEBE5; }
+  .sd-row-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .sd-row-t small { font-size: 12.5px; color: #5F6B7E; }
+  .sd-row a { color: #1B2A4A; font-weight: 600; font-size: 13.5px; }
+  .sd-muted { font-size: 13px; color: #5F6B7E; padding: 10px 0 12px; margin: 0; }
+  .sd-seg { display: inline-flex; background: #EFEBE5; border-radius: 10px; padding: 3px; gap: 3px; }
+  .sd-seg button { height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 13.5px; font-weight: 600; color: #3D4A60; cursor: pointer; }
+  .sd-seg button[aria-pressed="true"] { background: #fff; color: #1B2A4A; box-shadow: 0 1px 2px rgba(27,42,74,.12); }
+  .sd-pct { display: inline-flex; align-items: center; gap: 4px; }
+  .sd-pct input { width: 76px; height: 38px; box-sizing: border-box; border: 1px solid #E7E2DA; border-radius: 10px; padding: 0 10px; font: inherit; font-size: 15px; text-align: right; }
+  .sd-save { height: 42px; padding: 0 20px; border-radius: 12px; border: 0; background: #1B2A4A; color: #fff; font: inherit; font-weight: 600; cursor: pointer; align-self: flex-start; margin: 4px 0 14px; }
+  .sd-save:disabled { opacity: .45; cursor: default; }
+  .sd-fold { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: 0; padding: 12px 0; font: inherit; font-size: 13px; font-weight: 600; color: #5F6B7E; cursor: pointer; text-align: left; }
+  .sd-fold span:last-child { color: #1B2A4A; }
+  .sd-item { display: flex; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid #EFEBE5; font-size: 14px; }
+  .sd-item img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: #EFEBE5; flex: none; }
+  .sd-item .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .sd-item.na .t { color: #9AA3B2; text-decoration: line-through; }
+  .sd-item b { white-space: nowrap; }
+  .sd-empty { padding: 30px 16px; text-align: center; display: flex; flex-direction: column; gap: 4px; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, canOpenAdminPath, bn, dayLabel, agoLabel } from '../../lib/consoleApp.js';
+  import { shopOpenState } from '../../lib/marketApi.js';
+  import { thumbUrl } from '../../lib/thumb.js';
+
+  const $ = (id) => document.getElementById(id);
+  const body = $('sdBody');
+  const id = (new URLSearchParams(location.search).get('id') || '').trim();
+  const DAYS = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+  const PO_ST = { pending: 'নতুন', confirmed: 'কনফার্ম', dispatched: 'পাঠানো', delivered: 'ডেলিভারড', cancelled: 'বাতিল' };
+  let ctx = null;
+  let canManage = false;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  const toast = (t, type = 'success') => window.showToast?.(t, type);
+  const taka = (n) => '৳' + bn(Math.round(Number(n) || 0));
+  function time12(t) {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ''));
+    if (!m) return '';
+    let h = parseInt(m[1], 10);
+    const part = h < 5 ? 'রাত' : h < 12 ? 'সকাল' : h < 15 ? 'দুপুর' : h < 18 ? 'বিকেল' : h < 20 ? 'সন্ধ্যা' : 'রাত';
+    h = h % 12 || 12;
+    return part + ' ' + bn(h) + ':' + bn(m[2]);
+  }
+
+  function showEmpty(title, sub) {
+    body.textContent = '';
+    const e = el('div', 'sd-empty');
+    e.appendChild(el('b', null, title));
+    if (sub) e.appendChild(el('span', 'cs-muted', sub));
+    body.appendChild(e);
+  }
+
+  function card(title) {
+    const c = el('section', 'sd-card');
+    if (title) c.appendChild(el('h2', null, title));
+    body.appendChild(c);
+    return c;
+  }
+
+  function kv(dl, k, v) {
+    if (v == null || v === '') return;
+    dl.appendChild(el('dt', null, k));
+    const dd = el('dd');
+    if (v instanceof Node) dd.appendChild(v); else dd.textContent = v;
+    dl.appendChild(dd);
+  }
+
+  function tel(p) {
+    const a = el('a', null, p);
+    a.href = 'tel:' + String(p).replace(/[^\d+]/g, '');
+    return a;
+  }
+
+  function toggleRow(parent, title, desc, on, opts, onChange) {
+    const row = el('div', 'sd-sw');
+    const t = el('div', 'sd-sw-t');
+    t.appendChild(el('b', null, title));
+    const small = el('small', null, desc);
+    t.appendChild(small);
+    row.appendChild(t);
+    const b = el('button', 'sd-toggle');
+    b.type = 'button';
+    b.setAttribute('role', 'switch');
+    b.setAttribute('aria-checked', String(!!on));
+    b.setAttribute('aria-label', title);
+    b.disabled = !!opts.disabled;
+    b.addEventListener('click', async () => {
+      const next = b.getAttribute('aria-checked') !== 'true';
+      if (opts.confirmOff && !next && !window.confirm(opts.confirmOff)) return;
+      b.disabled = true;
+      const ok = await onChange(next);
+      b.disabled = false;
+      if (ok) b.setAttribute('aria-checked', String(next));
+    });
+    row.appendChild(b);
+    parent.appendChild(row);
+    return { row, small };
+  }
+
+  function foldCard(title, n, build) {
+    const c = el('section', 'sd-card');
+    const btn = el('button', 'sd-fold');
+    btn.type = 'button';
+    const inner = el('div');
+    inner.id = 'sdf-' + Math.random().toString(36).slice(2, 8);
+    inner.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-controls', inner.id);
+    btn.appendChild(el('span', null, title + ' (' + bn(n) + ')'));
+    const lbl = el('span', null, 'দেখুন ▾');
+    btn.appendChild(lbl);
+    btn.addEventListener('click', () => {
+      const open = inner.hidden;
+      inner.hidden = !open;
+      btn.setAttribute('aria-expanded', String(open));
+      lbl.textContent = open ? 'বন্ধ ▴' : 'দেখুন ▾';
+    });
+    c.append(btn, inner);
+    build(inner);
+    body.appendChild(c);
+  }
+
+  async function load() {
+    if (!id) { showEmpty('কোনো দোকান বাছা হয়নি', 'তালিকা থেকে একটা দোকান বেছে নিন।'); return; }
+    body.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('profile', 1) + window.SFSkeleton.html('row', 4) : '';
+
+    const { data: s, error } = await supabase.from('delivery_shops').select('*').eq('id', id).maybeSingle();
+    if (error || !s) { showEmpty(error ? 'লোড করা যায়নি' : 'দোকানটি পাওয়া যায়নি', error ? 'একটু পরে আবার চেষ্টা করুন।' : null); return; }
+
+    const [ir, sr, cr, pr, dr] = await Promise.all([
+      supabase.from('delivery_shop_items').select('id, name, price, price_unit, image_url, is_available, sort_order').eq('shop_id', id).order('sort_order', { ascending: true }).order('name', { ascending: true }),
+      supabase.from('delivery_shop_staff').select('profile_id').eq('shop_id', id),
+      supabase.from('delivery_market_categories').select('id, name'),
+      supabase.from('market_preorders').select('id, order_no, status, items_total, customer_name, created_at').eq('shop_id', id).order('created_at', { ascending: false }).limit(5),
+      supabase.from('site_settings').select('value').eq('key', 'market_commission_pct').maybeSingle(),
+    ]);
+    const items = ir.data || [];
+    const staffIds = (sr.data || []).map((r) => r.profile_id);
+    const people = {};
+    const pids = [s.owner_id, s.created_by, ...staffIds].filter(Boolean);
+    if (pids.length) {
+      const { data } = await supabase.from('profiles').select('id, full_name, phone').in('id', [...new Set(pids)]);
+      (data || []).forEach((p) => { people[p.id] = p; });
+    }
+    const catName = {};
+    (cr.data || []).forEach((c) => { catName[c.id] = c.name; });
+    const defaultPct = dr.data ? Number(dr.data.value) || 0 : 0;
+
+    body.textContent = '';
+    document.title = (s.name || 'দোকান') + ' | Smart Feni Admin';
+
+    // ---- মাথা ----
+    const head = el('div', 'sd-head');
+    const pic = el('div', 'sd-pic');
+    const url = s.logo_url || s.image_url;
+    if (url) pic.style.backgroundImage = 'url("' + encodeURI(thumbUrl(url)) + '")';
+    else pic.textContent = String(s.name || '?').trim().charAt(0);
+    head.appendChild(pic);
+    const ht = el('div', 'sd-ht');
+    ht.appendChild(el('h1', 'cs-h', s.name || 'নামহীন দোকান'));
+    const tags = el('div', 'sd-tags');
+    const os = shopOpenState(s);
+    tags.appendChild(el('span', 'sd-tag ' + (s.is_active ? 'on' : ''), s.is_active ? 'কাস্টমার দেখছে' : s.is_test ? 'টেস্ট (শুধু স্টাফ)' : 'লুকানো'));
+    tags.appendChild(el('span', 'sd-tag ' + (os.open ? 'on' : 'warn'), 'এখন ' + os.label));
+    tags.appendChild(el('span', 'sd-tag', s.delivery_kind === 'preorder' ? 'প্রি-অর্ডার' : 'এখনই (রাইডার)'));
+    if (s.legacy_shop_id) tags.appendChild(el('span', 'sd-tag', 'অনলাইন শপ থেকে'));
+    ht.appendChild(tags);
+    ht.appendChild(el('span', 'cs-muted', [s.union_name, s.upazila].filter(Boolean).join(', ') || 'এলাকা দেওয়া নেই'));
+    head.appendChild(ht);
+    body.appendChild(head);
+
+    const links = el('div', 'sd-links');
+    if (canManage) {
+      const ed = el('a', 'sd-link primary', 'তথ্য, ছবি ও মেনু এডিট ↗');
+      ed.href = '/admin/delivery-shops?edit=' + encodeURIComponent(s.id);
+      links.appendChild(ed);
+    }
+    const cp = el('a', 'sd-link', 'কাস্টমার যেমন দেখে ↗');
+    cp.href = '/market/shop?id=' + encodeURIComponent(s.id);
+    cp.target = '_blank';
+    cp.rel = 'noopener';
+    links.appendChild(cp);
+    body.appendChild(links);
+
+    // ---- সুইচ ----
+    const sw = card('সুইচ');
+    const live = toggleRow(sw, 'কাস্টমারকে দেখাবে',
+      s.is_test ? 'টেস্ট দোকান: শুধু স্টাফ দেখে। চালু করতে আগে এডিটে "টেস্ট" বন্ধ করুন।' : 'বন্ধ করলে দোকানটা মার্কেট থেকে লুকিয়ে যায়, নতুন অর্ডার আসে না।',
+      s.is_active, { disabled: !canManage || (s.is_test && !s.is_active), confirmOff: '"' + (s.name || '') + '" দোকান মার্কেট থেকে লুকাবেন?' },
+      async (v) => {
+        const { error: e } = await supabase.from('delivery_shops').update({ is_active: v }).eq('id', s.id);
+        if (e) { toast('বদলানো যায়নি', 'error'); return false; }
+        toast(v ? 'দোকান আবার দেখাচ্ছে' : 'দোকান লুকানো হয়েছে');
+        return true;
+      });
+    toggleRow(sw, 'জনপ্রিয়', 'চালু থাকলে মার্কেটে "জনপ্রিয়" ব্যাজ পায় ও উপরের দিকে আসে।', s.is_popular, { disabled: !canManage },
+      async (v) => {
+        const { error: e } = await supabase.from('delivery_shops').update({ is_popular: v }).eq('id', s.id);
+        if (e) { toast('বদলানো যায়নি', 'error'); return false; }
+        toast(v ? 'জনপ্রিয় করা হয়েছে' : 'জনপ্রিয় থেকে সরানো হয়েছে');
+        return true;
+      });
+    if (!canManage) sw.appendChild(el('p', 'sd-muted', 'বদলানোর অনুমতি নেই, শুধু দেখা যাবে।'));
+    void live;
+
+    // ---- কমিশন ও ডেলিভারির ধরন ----
+    const cm = card('কমিশন ও ডেলিভারির ধরন');
+    if (ctx.isSuper) {
+      let kind = s.delivery_kind === 'preorder' ? 'preorder' : 'instant';
+      const row = el('div', 'sd-sw');
+      const t = el('div', 'sd-sw-t');
+      t.appendChild(el('b', null, 'ডেলিভারির ধরন'));
+      t.appendChild(el('small', null, 'এখনই = রাইডার নিয়ে যায়। প্রি-অর্ডার = দোকান নিজে আগাম অর্ডার নেয় ও দিন ঠিক করে।'));
+      row.appendChild(t);
+      const seg = el('div', 'sd-seg');
+      seg.setAttribute('role', 'group');
+      seg.setAttribute('aria-label', 'ডেলিভারির ধরন');
+      row.appendChild(seg);
+      cm.appendChild(row);
+
+      const row2 = el('div', 'sd-sw');
+      const t2 = el('div', 'sd-sw-t');
+      t2.appendChild(el('b', null, 'কমিশন'));
+      t2.appendChild(el('small', null, 'দোকানের পাওনা থেকে কাটা হয়। সাধারণ কমিশন এখন ' + bn(defaultPct) + '%।'));
+      row2.appendChild(t2);
+      const pct = el('label', 'sd-pct');
+      const inp = el('input');
+      inp.type = 'number'; inp.min = '0'; inp.max = '100'; inp.step = '0.5'; inp.inputMode = 'decimal';
+      inp.value = String(Number(s.commission_pct || 0));
+      inp.setAttribute('aria-label', 'কমিশন %');
+      pct.append(inp, el('span', null, '%'));
+      row2.appendChild(pct);
+      cm.appendChild(row2);
+
+      const save = el('button', 'sd-save', 'সেভ করুন');
+      save.type = 'button';
+      const dirty = () => { save.disabled = kind === s.delivery_kind && Number(inp.value) === Number(s.commission_pct || 0); };
+      [['instant', 'এখনই'], ['preorder', 'প্রি-অর্ডার']].forEach(([k, l]) => {
+        const b = el('button', null, l);
+        b.type = 'button';
+        b.setAttribute('aria-pressed', String(kind === k));
+        b.addEventListener('click', () => { kind = k; seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); dirty(); });
+        seg.appendChild(b);
+      });
+      inp.addEventListener('input', dirty);
+      dirty();
+      save.addEventListener('click', async () => {
+        const v = Number(inp.value);
+        if (!Number.isFinite(v) || v < 0 || v > 100) { toast('কমিশন ০ থেকে ১০০-এর মধ্যে দিন', 'warning'); return; }
+        if (kind !== s.delivery_kind && !window.confirm('ডেলিভারির ধরন "' + (kind === 'preorder' ? 'প্রি-অর্ডার' : 'এখনই') + '" করবেন? কাস্টমার এরপর থেকে সেভাবে অর্ডার দেবে।')) return;
+        save.disabled = true;
+        const { data, error: e } = await supabase.rpc('admin_set_shop_market_opts', { p_shop_id: s.id, p_commission: v, p_kind: kind });
+        if (e || !data || !data.ok) { toast('সেভ হয়নি', 'error'); dirty(); return; }
+        s.commission_pct = v; s.delivery_kind = kind;
+        dirty();
+        toast('সেভ হয়েছে');
+      });
+      cm.appendChild(save);
+    } else {
+      const dl = el('dl', 'sd-kv');
+      kv(dl, 'ধরন', s.delivery_kind === 'preorder' ? 'প্রি-অর্ডার (দোকান নিজে)' : 'এখনই (রাইডার)');
+      kv(dl, 'কমিশন', bn(Number(s.commission_pct || 0)) + '%');
+      cm.appendChild(dl);
+      cm.appendChild(el('p', 'sd-muted', 'এগুলো শুধু সুপার অ্যাডমিন বদলাতে পারেন।'));
+    }
+
+    // ---- তথ্য ----
+    const info = card('দোকানের তথ্য');
+    const dl = el('dl', 'sd-kv');
+    kv(dl, 'ফোন', s.phone ? tel(s.phone) : '');
+    kv(dl, 'ঠিকানা', s.address || '');
+    kv(dl, 'খোলার সময়', s.opens_at && s.closes_at ? time12(s.opens_at) + ' থেকে ' + time12(s.closes_at) : 'দেওয়া নেই');
+    kv(dl, 'সাপ্তাহিক ছুটি', s.weekly_off != null ? DAYS[s.weekly_off] || '' : 'নেই');
+    kv(dl, 'তৈরির সময়', s.prep_minutes ? bn(s.prep_minutes) + ' মিনিট' : '');
+    kv(dl, 'ক্যাটাগরি', (s.market_category_ids || []).map((c) => catName[c]).filter(Boolean).join(', ') || 'নেই');
+    if (s.payout_number) kv(dl, 'টাকা নেয়', (s.payout_method === 'nagad' ? 'নগদ' : s.payout_method === 'bkash' ? 'বিকাশ' : (s.payout_method || '')) + ' · ' + s.payout_number);
+    kv(dl, 'যোগ হয়েছে', s.created_at ? dayLabel(s.created_at) : '');
+    info.appendChild(dl);
+    if (s.description) {
+      const d = el('p', 'sd-muted', s.description);
+      d.style.whiteSpace = 'pre-wrap';
+      d.style.paddingTop = '0';
+      info.appendChild(d);
+    }
+
+    // ---- মালিক ও স্টাফ ----
+    const team = card('মালিক ও স্টাফ');
+    const person = (pid, role) => {
+      const p = people[pid] || {};
+      const r = el('div', 'sd-row');
+      const t = el('div', 'sd-row-t');
+      t.appendChild(el('span', null, p.full_name || 'নাম নেই'));
+      t.appendChild(el('small', null, role));
+      r.appendChild(t);
+      if (p.phone) r.appendChild(tel(p.phone));
+      team.appendChild(r);
+    };
+    if (s.owner_id) person(s.owner_id, 'মালিক');
+    staffIds.forEach((pid) => person(pid, 'স্টাফ'));
+    if (!s.owner_id && !staffIds.length) team.appendChild(el('p', 'sd-muted', 'এখনো কেউ যুক্ত নেই। মালিক যোগ করতে "এডিট" খুলুন।'));
+
+    // ---- মেনু (ভাঁজ করা) ----
+    const avail = items.filter((i) => i.is_available !== false).length;
+    foldCard('মেনু · ' + bn(avail) + 'টা পাওয়া যাচ্ছে, মোট', items.length, (box) => {
+      if (!items.length) { box.appendChild(el('p', 'sd-muted', 'কোনো পণ্য নেই।')); return; }
+      items.forEach((i) => {
+        const r = el('div', 'sd-item' + (i.is_available === false ? ' na' : ''));
+        const img = el('img');
+        img.alt = '';
+        img.loading = 'lazy';
+        if (i.image_url) img.src = thumbUrl(i.image_url);
+        r.appendChild(img);
+        r.appendChild(el('span', 't', i.name || 'পণ্য'));
+        r.appendChild(el('b', null, taka(i.price) + (i.price_unit ? ' / ' + i.price_unit : '')));
+        box.appendChild(r);
+      });
+    });
+
+    // ---- সাম্প্রতিক প্রি-অর্ডার ----
+    const pos = pr.data || [];
+    if (pos.length) {
+      const pc = card('সাম্প্রতিক প্রি-অর্ডার');
+      pos.forEach((p) => {
+        const r = el('div', 'sd-row');
+        const t = el('div', 'sd-row-t');
+        t.appendChild(el('span', null, '#' + (p.order_no || '') + ' · ' + (p.customer_name || 'কাস্টমার')));
+        t.appendChild(el('small', null, (PO_ST[p.status] || p.status) + ' · ' + taka(p.items_total) + ' · ' + agoLabel(p.created_at)));
+        r.appendChild(t);
+        pc.appendChild(r);
+      });
+      const a = el('a', 'sd-link', 'সব প্রি-অর্ডার');
+      a.href = '/console/preorders';
+      a.style.margin = '4px 0 12px';
+      pc.appendChild(a);
+    }
+  }
+
+  if (document.referrer && new URL(document.referrer, location.href).pathname === '/console/shops') {
+    $('sdBack').addEventListener('click', (e) => { e.preventDefault(); history.back(); });
+  }
+
+  onConsoleReady((data) => {
+    ctx = data;
+    if (!canOpenAdminPath('/admin/delivery-shops', data)) { showEmpty('এই পেজ দেখার অনুমতি নেই', 'দোকান দেখার অনুমতি লাগবে।'); return; }
+    canManage = !!(data.isSuper || !data.access.isStaff || data.access.can('delivery_shops.manage'));
+    load();
+  });
+</script>

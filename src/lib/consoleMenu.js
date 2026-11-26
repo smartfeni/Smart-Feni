@@ -67,7 +67,8 @@ export const MENU = [
     id: 'market', name: 'মার্কেটপ্লেস', desc: 'কুইক ডেলিভারির দোকান ও মেনু',
     icon: '<path d="M4 9h16l-1.5-5h-13z"/><path d="M5 9v11h14V9"/><path d="M10 20v-6h4v6"/>',
     items: [
-      { name: 'দোকান ও মেনু', desc: 'দোকান যোগ, আইটেম, দাম, ছবি, দোকানের ক্রম', href: '/admin/delivery-shops', keys: 'রেস্টুরেন্ট আইটেম' },
+      { name: 'দোকান', desc: 'সব দোকান খোঁজা, চালু/লুকানো, জনপ্রিয়, কমিশন, মালিক, মেনু ও প্রি-অর্ডার', href: '/console/shops', perm: '/admin/delivery-shops', keys: 'রেস্টুরেন্ট আইটেম মেনু দোকান ও মেনু' },
+      { name: 'নতুন দোকান যোগ ও মেনু এডিট', desc: 'দোকান যোগ, ছবি, লোকেশন, পণ্য, দাম, দোকানের ক্রম', href: '/admin/delivery-shops', keys: 'আইটেম দাম ছবি' },
       { name: 'শপ ক্যাটাগরি', desc: 'মার্কেটের ক্যাটাগরি (খাবার, মুদি…)', href: '/admin/delivery-categories', adminOnly: true },
       { name: 'দোকানপ্রতি কমিশন', desc: 'কোন দোকান থেকে কত % কমিশন', href: '/admin/delivery-shop-settings', keys: 'কমিশন' },
     ],
