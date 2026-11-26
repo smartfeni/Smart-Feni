@@ -1,13 +1,21 @@
 // path: src/lib/riderBkash.js
 // ============================================================
-// রাইডারের বিকাশ নম্বর কার্ড (delivery-hero ও pro/hero/delivery দুই জায়গায় একই)।
+// রাইডারের বিকাশ নম্বর / ওয়ালেট কার্ড (delivery-hero ও pro/hero/delivery দুই জায়গায় একই)।
 // কুইক ডেলিভারিতে অগ্রিম সরাসরি রাইডারের বিকাশে যায় (site_settings.market_advance_receiver = rider),
 // তাই নম্বর না থাকলে কুইক ডেলিভারির অর্ডারে অফার/Accept করা যায় না (submit-offer, accept-best-price)।
 // নম্বর থাকে আলাদা টেবিল rider_bkash-এ (শুধু নিজে ও স্টাফ পড়ে), সেভ হয় rider_set_bkash RPC দিয়ে।
 // ============================================================
+import { mountWalletCard, walletHref } from './riderWallet.js';
+
 const BN = (s) => String(s).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
 
+// SF (২৬ নভে ২০২৬): এই জায়গায় এখন ওয়ালেট কার্ড; বিকাশ নম্বর যোগ/বদল ওয়ালেট পেজের ভেতরে।
+// পুরনো ফর্ম (mountRiderBkashLegacy) রেখে দেওয়া, কোথাও ব্যবহার হয় না।
 export async function mountRiderBkash(supabase, riderId, anchorEl) {
+  return mountWalletCard(supabase, riderId, anchorEl);
+}
+
+export async function mountRiderBkashLegacy(supabase, riderId, anchorEl) {
   if (!riderId || !anchorEl || !anchorEl.parentNode) return;
   let box = document.getElementById('heroBkashCard');
   let num = '';
@@ -58,7 +66,7 @@ function renderForm(supabase, riderId, box, current) {
       const { error } = await supabase.rpc('rider_set_bkash', { p_number: v });
       if (error) { err(error.message || 'সেভ হয়নি'); btn.disabled = false; btn.textContent = old; return; }
       if (window.showToast) window.showToast('বিকাশ নম্বর সেভ হয়েছে', 'success');
-      await mountRiderBkash(supabase, riderId, box);
+      await mountRiderBkashLegacy(supabase, riderId, box);
     } catch (_) {
       err('ইন্টারনেটে সমস্যা, আবার চেষ্টা করুন'); btn.disabled = false; btn.textContent = old;
     }
@@ -66,6 +74,8 @@ function renderForm(supabase, riderId, box, current) {
 }
 
 export function scrollToBkashCard() {
+  // নম্বর না থাকলে সরাসরি ওয়ালেটের নম্বর-ফর্মে
+  if (!window.SF_HERO_BKASH) { window.location.href = walletHref('bkash=1'); return; }
   const c = document.getElementById('heroBkashCard');
   if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); const i = c.querySelector('input'); if (i) setTimeout(() => i.focus(), 400); }
 }
