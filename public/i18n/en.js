@@ -3524,6 +3524,6 @@ window.SF_I18N_EN = {
 "কোনো দোকান পাওয়া যায়নি।": "No shops found.",
 "দোকান লোড করা যায়নি। একটু পরে আবার চেষ্টা করুন।": "Could not load shops. Please try again shortly.",
 "দোকানের নম্বর": "Shop number",
-"ফেনীর অনলাইন শপ: প্রি-অর্ডারে হোম মেড ও দোকানের পণ্য, সরাসরি দোকানের নম্বর।": "Feni online shops: home-made and shop products by pre-order, with direct shop numbers.",
+"ফেনীর অনলাইন শপ: প্রি-অর্ডারে হোম মেড ও দোকানের পণ্য।": "Feni online shops: home-made and shop products by pre-order.",
 "অনলাইন শপ | স্মার্ট ফেনী": "Online shop | Smart Feni",
 };
