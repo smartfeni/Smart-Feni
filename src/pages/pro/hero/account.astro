@@ -4,7 +4,8 @@
 // পেজ: Pro রাইডারের হিসাব ও সম্পন্ন অর্ডার (/pro/hero/account)
 // মেনু → "হিসাব ও সম্পন্ন অর্ডার" থেকে আসে।
 // - উপরে: রেটিং, মোট সম্পন্ন, এই সপ্তাহের আয়, মোট আয়
-// - আজকের হিসাব (কুইক ডেলিভারি COD/দোকানে দেওয়া/আয় → অফিসের সাথে লেনদেন)
+// - আমার ওয়ালেট কার্ড (riderWallet.js mountWalletCard → /pro/hero/wallet)। অফিসের সাথে টাকার হিসাব এখন শুধু ওয়ালেটে
+//   (SF, ২৬ নভে ২০২৬); আগের "আজকের হিসাব"/দেবেন-পাবেন ব্যাজ পুরনো নিয়মে গুনত, তাই সরানো।
 // - আগের হিসাব: দিনভিত্তিক (৩০ দিন), ডিফল্টে ভাঁজ করা
 // - সম্পন্ন অর্ডার: আজ / ৭ দিন / ৩০ দিন; ১ ঘণ্টার মধ্যে রিপোর্ট
 // ডেটা শুধু পড়া (RLS: রাইডার নিজের অর্ডার পড়ে)। সময় বাংলাদেশ (UTC+6) অনুযায়ী।
@@ -111,6 +112,7 @@ import DisputeReasonModal from '../../../components/delivery/DisputeReasonModal.
   <script>
     import { supabase } from '../../../lib/supabase.js';
     import { proLoginUrl } from '../../../lib/proRoles.js';
+    import { mountWalletCard } from '../../../lib/riderWallet.js';
 
     const root = document.getElementById('raRoot');
     const DH = 6 * 3600 * 1000; // বাংলাদেশ UTC+6
@@ -139,8 +141,6 @@ import DisputeReasonModal from '../../../components/delivery/DisputeReasonModal.
       }
       return 'ডেলিভারি' + (o.description ? ': ' + String(o.description).slice(0, 40) : '');
     }
-    // কুইক অর্ডারে অফিসের সাথে নিট: + হলে রাইডার অফিসকে দেবে, − হলে অফিস রাইডারকে দেবে
-    function net(o) { return o.is_market ? Number(o.rider_cod_collected || 0) - Number(o.rider_purchase_paid || 0) - Number(o.rider_earning || 0) : 0; }
 
     function state(text, link) {
       root.textContent = '';
@@ -179,30 +179,6 @@ import DisputeReasonModal from '../../../components/delivery/DisputeReasonModal.
       return s;
     }
 
-    function balance(list) {
-      const pend = list.filter((o) => o.is_market && !o.rider_settled_at).reduce((a, o) => a + net(o), 0);
-      const b = mk('div', 'ra-bal ' + (pend > 0 ? 'pay' : pend < 0 ? 'get' : 'done'));
-      b.appendChild(mk('span', '', pend > 0 ? 'আপনি অফিসকে দেবেন' : pend < 0 ? 'অফিস আপনাকে দেবে' : 'হিসাব শেষ ✓'));
-      b.appendChild(mk('b', '', TK(Math.abs(pend))));
-      return b;
-    }
-
-    function todayCard() {
-      const list = orders.filter((o) => dayKey(doneAt(o)) === todayKey());
-      const c = mk('section', 'ra-today');
-      c.setAttribute('aria-label', 'আজকের হিসাব');
-      const h = mk('div', 'ra-today-h'); h.appendChild(mk('b', '', 'আজকের হিসাব')); h.appendChild(mk('span', '', BN(list.length) + 'টি অর্ডার')); c.appendChild(h);
-      if (!list.length) { c.appendChild(mk('div', 'ra-today-empty', 'আজ এখনো কোনো অর্ডার সম্পন্ন হয়নি।')); return c; }
-      const sum = (k) => list.reduce((a, o) => a + Number(o[k] || 0), 0);
-      const cells = mk('div', 'ra-cells');
-      [['COD আদায়', sum('rider_cod_collected')], ['দোকানে দিয়েছি', sum('rider_purchase_paid')], ['আমার আয়', list.reduce((a, o) => a + earn(o), 0)]].forEach(([l, v]) => {
-        const x = mk('div', 'ra-cell'); x.appendChild(mk('small', '', l)); x.appendChild(mk('b', '', TK(v))); cells.appendChild(x);
-      });
-      c.appendChild(cells);
-      c.appendChild(balance(list));
-      return c;
-    }
-
     function daysList() {
       const groups = {};
       orders.forEach((o) => { const k = dayKey(doneAt(o)); (groups[k] = groups[k] || []).push(o); });
@@ -221,10 +197,6 @@ import DisputeReasonModal from '../../../components/delivery/DisputeReasonModal.
         m.appendChild(mk('b', '', 'আয় ' + TK(list.reduce((a, o) => a + earn(o), 0))));
         m.appendChild(mk('small', '', BN(list.length) + 'টি অর্ডার'));
         h.appendChild(m);
-        const mk2 = list.filter((o) => o.is_market);
-        const pend = mk2.filter((o) => !o.rider_settled_at).reduce((a, o) => a + net(o), 0);
-        const unsettled = mk2.some((o) => !o.rider_settled_at && net(o) !== 0);
-        if (mk2.length) h.appendChild(mk('span', 'ra-badge ' + (unsettled ? 'due' : 'ok'), unsettled ? (pend > 0 ? 'দেবেন ' : 'পাবেন ') + TK(Math.abs(pend)) : 'হিসাব শেষ ✓'));
         h.appendChild(icon('fa-chevron-down ra-chev'));
         const b = mk('div', 'ra-day-b'); b.id = bid; b.hidden = true;
         const sum = (key) => list.reduce((a, o) => a + Number(o[key] || 0), 0);
@@ -262,7 +234,7 @@ import DisputeReasonModal from '../../../components/delivery/DisputeReasonModal.
       if (o.is_market) {
         kv('COD আদায়', TK(o.rider_cod_collected));
         kv('দোকানে দিয়েছি', TK(o.rider_purchase_paid));
-        kv('অফিসের সাথে', o.rider_settled_at ? 'হিসাব শেষ ✓' : net(o) > 0 ? 'আপনি দেবেন ' + TK(net(o)) : net(o) < 0 ? 'অফিস দেবে ' + TK(-net(o)) : 'কিছু নেই');
+        if (Number(o.rider_advance_held)) kv('আমার বিকাশে অগ্রিম', TK(o.rider_advance_held));
       } else {
         kv('ডেলিভারি চার্জ', TK(o.final_price));
       }
@@ -302,8 +274,10 @@ import DisputeReasonModal from '../../../components/delivery/DisputeReasonModal.
     function render() {
       root.textContent = '';
       root.appendChild(hero());
-      root.appendChild(sec('আজকের হিসাব', 'fa-wallet', 'linear-gradient(135deg,#FF8A5B,#FF6B35)'));
-      root.appendChild(todayCard());
+      root.appendChild(sec('আমার ওয়ালেট', 'fa-wallet', 'linear-gradient(135deg,#FF8A5B,#FF6B35)'));
+      const wAnchor = mk('div');
+      root.appendChild(wAnchor);
+      mountWalletCard(supabase, rider.id, wAnchor);
       root.appendChild(sec('আগের হিসাব', 'fa-calendar-days', 'linear-gradient(135deg,#5B7BD5,#3B5BA9)', 'শেষ ৩০ দিন'));
       root.appendChild(daysList());
       root.appendChild(sec('সম্পন্ন অর্ডার', 'fa-circle-check', 'linear-gradient(135deg,#2BB673,#1F8A5B)'));
@@ -314,7 +288,7 @@ import DisputeReasonModal from '../../../components/delivery/DisputeReasonModal.
       const from = new Date(Date.now() - 31 * 86400000).toISOString();
       const { data, error } = await supabase
         .from('delivery_requests')
-        .select('id, order_no, status, is_market, order_type, order_items, description, final_price, drop_address, updated_at, market_completed_at, rider_cod_collected, rider_purchase_paid, rider_earning, rider_settled_at')
+        .select('id, order_no, status, is_market, order_type, order_items, description, final_price, drop_address, updated_at, market_completed_at, rider_cod_collected, rider_purchase_paid, rider_earning, rider_settled_at, rider_advance_held')
         .eq('accepted_rider_id', rider.id)
         .eq('category', 'delivery')
         .in('status', ['completed', 'disputed'])
