@@ -1,0 +1,339 @@
+---
+// ============================================================
+// /console/preorders — প্রি-অর্ডার ট্র্যাকিং (মার্কেটের দোকানে যাওয়া আগাম অর্ডার)
+// ডাটা: market_preorders (RLS mpo_read: has_permission('delivery_orders.view')) — শুধু পড়া।
+// কনফার্ম/বাতিল দোকান নিজে করে (Pro /pro/shop)। এখানে অ্যাডমিন শুধু নজর রাখে।
+// দেরি হাইলাইট: নতুন অর্ডার ২৪ ঘণ্টায় কনফার্ম না হলে, বা ডেলিভারির দিন পার হলে লাল।
+// নতুন DB বদল নেই।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="প্রি-অর্ডার" active="orders">
+  <div class="cs-pad cm-page po-page">
+    <div>
+      <h1 class="cs-h cm-title">প্রি-অর্ডার</h1>
+      <p class="cs-muted po-sub">কাস্টমার দোকানে যে আগাম অর্ডার দেয়। কনফার্ম ও বাতিল দোকান নিজে করে, এখানে শুধু নজর রাখা যায়।</p>
+    </div>
+
+    <div class="po-deny cm-body" id="poDeny" hidden>
+      <div class="po-empty"><b>এই পেজ দেখার অনুমতি নেই</b><span class="cs-muted">ডেলিভারি অর্ডার দেখার অনুমতি লাগবে।</span></div>
+    </div>
+
+    <div id="poMain" hidden>
+      <div class="al-chips po-chips" id="poTabs" role="group" aria-label="অবস্থা"></div>
+      <div class="po-search">
+        <input type="search" id="poQ" placeholder="অর্ডার নম্বর, নাম বা ফোন" aria-label="খুঁজুন" />
+      </div>
+      <div class="po-list" id="poList"></div>
+      <button type="button" class="po-more" id="poMore" hidden>আরও দেখুন</button>
+    </div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .po-sub { margin: 2px 0 0; }
+  .po-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .po-chips button { flex-shrink: 0; height: 38px; padding: 0 14px; border-radius: 999px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .po-chips button[aria-pressed="true"] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .po-chips button i { font-style: normal; font-size: 12px; opacity: .75; }
+  .po-chips button.hot i { color: #fff; background: #C2410C; opacity: 1; border-radius: 999px; padding: 0 6px; }
+  .po-search input { width: 100%; box-sizing: border-box; height: 44px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; padding: 0 14px; font: inherit; font-size: 15px; color: #1B2A4A; }
+  .po-search input:focus { outline: 2px solid #1B2A4A; outline-offset: -1px; }
+  .po-list { display: flex; flex-direction: column; gap: 10px; }
+  .po-card { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .po-card.late { border-color: #F2B8A0; box-shadow: inset 3px 0 0 #C2410C; }
+  .po-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .po-no { font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-weight: 700; font-size: 16px; }
+  .po-st { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px; }
+  .po-time { margin-left: auto; font-size: 12.5px; color: #5F6B7E; }
+  .po-shop { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+  .po-warn { font-size: 13px; font-weight: 600; color: #B23A0B; }
+  .po-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13.5px; margin: 0; }
+  .po-kv dt { color: #5F6B7E; }
+  .po-kv dd { margin: 0; overflow-wrap: anywhere; }
+  .po-kv a { color: #1B2A4A; font-weight: 600; }
+  .po-items { border-top: 1px solid #EFEBE5; padding-top: 8px; }
+  .po-items > button { background: none; border: 0; padding: 0; font: inherit; font-size: 13.5px; font-weight: 600; color: #1B2A4A; cursor: pointer; }
+  .po-items ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
+  .po-items li { display: flex; gap: 8px; }
+  .po-items li span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .po-note { font-size: 13px; background: #F7F5F2; border-radius: 10px; padding: 8px 10px; overflow-wrap: anywhere; }
+  .po-note b { font-weight: 600; }
+  .po-link { align-self: flex-start; font-size: 13px; font-weight: 600; color: #C2410C; text-decoration: none; }
+  .po-empty { padding: 26px 16px; text-align: center; display: flex; flex-direction: column; gap: 4px; }
+  .po-empty b { font-size: 15px; }
+  .po-more { align-self: center; height: 42px; padding: 0 22px; border-radius: 999px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-weight: 600; cursor: pointer; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, canOpenAdminPath, bn, dayLabel, timeLabel, agoLabel } from '../../lib/consoleApp.js';
+
+  const $ = (id) => document.getElementById(id);
+  const PAGE = 30;
+
+  const ST = {
+    pending:    ['নতুন · দোকানের কনফার্মের অপেক্ষায়', '#C2410C', '#FFF1E8'],
+    confirmed:  ['দোকান কনফার্ম করেছে', '#1D4ED8', '#EAF1FF'],
+    dispatched: ['রাইডার দিয়ে পাঠানো', '#6D28D9', '#F3EEFF'],
+    delivered:  ['ডেলিভারি হয়েছে', '#17663F', '#E6F6EE'],
+    cancelled:  ['বাতিল', '#6B7891', '#F1F4F8'],
+  };
+  const TABS = [
+    { k: 'pending', name: 'নতুন' },
+    { k: 'confirmed', name: 'কনফার্ম' },
+    { k: 'dispatched', name: 'পাঠানো' },
+    { k: 'delivered', name: 'ডেলিভারড' },
+    { k: 'cancelled', name: 'বাতিল' },
+    { k: 'all', name: 'সব' },
+  ];
+  const COLS = 'id, order_no, shop_id, customer_profile_id, items, items_total, customer_name, customer_phone, drop_address, drop_upazila, drop_union, note, wanted_date, status, delivery_by, delivery_date, shop_note, request_id, cancel_reason, cancelled_by, confirmed_at, delivered_at, cancelled_at, created_at';
+
+  let tab = 'pending';
+  let offset = 0;
+  let q = '';
+  let seq = 0;
+  const shopNames = new Map();
+  const people = new Map();
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  const taka = (n) => '৳' + bn(Math.round(Number(n) || 0));
+  const dateOnly = (d) => new Date(d + 'T00:00:00').toLocaleDateString('bn-BD', { day: 'numeric', month: 'long' });
+  const whenLabel = (d) => dayLabel(d) + ', ' + timeLabel(d);
+  const todayStr = () => { const t = new Date(); return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0'); };
+
+  function lateReason(o) {
+    if (o.status === 'pending' && Date.now() - new Date(o.created_at).getTime() > 24 * 3600000) {
+      return 'এক দিনের বেশি হয়ে গেছে, দোকান এখনো কনফার্ম করেনি';
+    }
+    if ((o.status === 'confirmed' || o.status === 'dispatched') && o.delivery_date && o.delivery_date < todayStr()) {
+      return 'ডেলিভারির দিন পার হয়ে গেছে, এখনো ডেলিভারড হয়নি';
+    }
+    return '';
+  }
+
+  function cleanQ(s) {
+    return String(s || '').replace(/[%,()*\\:"']/g, ' ').trim().slice(0, 40);
+  }
+
+  function applyFilter(query) {
+    if (tab !== 'all') query = query.eq('status', tab);
+    if (q) {
+      const like = '%' + q + '%';
+      query = query.or(`order_no.ilike.${like},customer_name.ilike.${like},customer_phone.ilike.${like}`);
+    }
+    return query;
+  }
+
+  async function loadCounts() {
+    const keys = ['pending', 'confirmed', 'dispatched', 'delivered', 'cancelled'];
+    const res = await Promise.all(keys.map((k) =>
+      supabase.from('market_preorders').select('id', { count: 'exact', head: true }).eq('status', k)));
+    const counts = {};
+    keys.forEach((k, i) => { counts[k] = res[i].count || 0; });
+    counts.all = keys.reduce((s, k) => s + counts[k], 0);
+    renderTabs(counts);
+  }
+
+  function renderTabs(counts) {
+    const box = $('poTabs');
+    box.textContent = '';
+    TABS.forEach((t) => {
+      const b = el('button', t.k === 'pending' && counts && counts.pending > 0 ? 'hot' : null);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(t.k === tab));
+      b.appendChild(document.createTextNode(t.name));
+      if (counts) b.appendChild(el('i', null, bn(counts[t.k] || 0)));
+      b.addEventListener('click', () => {
+        if (tab === t.k) return;
+        tab = t.k;
+        box.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        loadList(true);
+      });
+      box.appendChild(b);
+    });
+  }
+
+  async function fillNames(rows) {
+    const sIds = [...new Set(rows.map((r) => r.shop_id).filter((id) => id && !shopNames.has(id)))];
+    const pIds = [...new Set(rows.map((r) => r.cancelled_by).filter((id) => id && !people.has(id)))];
+    const jobs = [];
+    if (sIds.length) jobs.push(supabase.from('delivery_shops').select('id, name').in('id', sIds)
+      .then(({ data }) => (data || []).forEach((s) => shopNames.set(s.id, s.name))));
+    if (pIds.length) jobs.push(supabase.from('profiles').select('id, full_name').in('id', pIds)
+      .then(({ data }) => (data || []).forEach((p) => people.set(p.id, p.full_name))));
+    await Promise.all(jobs);
+  }
+
+  function cancelledByLabel(o) {
+    if (!o.cancelled_by) return 'জানা নেই';
+    if (o.cancelled_by === o.customer_profile_id) return 'কাস্টমার';
+    return people.get(o.cancelled_by) || 'দোকান/অ্যাডমিন';
+  }
+
+  function kv(dl, k, v) {
+    if (v == null || v === '') return;
+    dl.appendChild(el('dt', null, k));
+    const dd = el('dd');
+    if (v instanceof Node) dd.appendChild(v); else dd.textContent = v;
+    dl.appendChild(dd);
+  }
+
+  function card(o) {
+    const late = lateReason(o);
+    const c = el('article', 'po-card' + (late ? ' late' : ''));
+
+    const top = el('div', 'po-top');
+    top.appendChild(el('span', 'po-no', '#' + (o.order_no || '')));
+    const st = ST[o.status] || [o.status, '#3D4A60', '#EEF1F5'];
+    const s = el('span', 'po-st', st[0]);
+    s.style.color = st[1]; s.style.background = st[2];
+    top.appendChild(s);
+    top.appendChild(el('span', 'po-time', agoLabel(o.created_at)));
+    c.appendChild(top);
+
+    c.appendChild(el('div', 'po-shop', shopNames.get(o.shop_id) || 'দোকান'));
+    if (late) c.appendChild(el('div', 'po-warn', late));
+
+    const dl = el('dl', 'po-kv');
+    let phone = null;
+    if (o.customer_phone) {
+      phone = el('a', null, o.customer_phone);
+      phone.href = 'tel:' + String(o.customer_phone).replace(/[^\d+]/g, '');
+    }
+    kv(dl, 'কাস্টমার', o.customer_name || '');
+    kv(dl, 'ফোন', phone);
+    kv(dl, 'ঠিকানা', [o.drop_address, o.drop_union, o.drop_upazila].filter(Boolean).join(', '));
+    kv(dl, 'অর্ডার দিয়েছেন', whenLabel(o.created_at));
+    kv(dl, 'কাস্টমার চান', o.wanted_date ? dateOnly(o.wanted_date) : '');
+    kv(dl, 'ডেলিভারির দিন', o.delivery_date ? dateOnly(o.delivery_date) : '');
+    kv(dl, 'কে পৌঁছাবে', o.delivery_by === 'shop' ? 'দোকান নিজে' : o.delivery_by === 'rider' ? 'রাইডার' : '');
+    kv(dl, 'মোট', taka(o.items_total));
+    if (o.confirmed_at) kv(dl, 'কনফার্ম', whenLabel(o.confirmed_at));
+    if (o.delivered_at) kv(dl, 'ডেলিভারড', whenLabel(o.delivered_at));
+    if (o.status === 'cancelled') {
+      kv(dl, 'বাতিল করেছেন', cancelledByLabel(o));
+      if (o.cancelled_at) kv(dl, 'বাতিলের সময়', whenLabel(o.cancelled_at));
+      kv(dl, 'কারণ', o.cancel_reason || 'কারণ লেখা নেই');
+    }
+    c.appendChild(dl);
+
+    if (o.note) {
+      const n = el('div', 'po-note');
+      n.appendChild(el('b', null, 'কাস্টমারের নোট: '));
+      n.appendChild(document.createTextNode(o.note));
+      c.appendChild(n);
+    }
+    if (o.shop_note) {
+      const n = el('div', 'po-note');
+      n.appendChild(el('b', null, 'দোকানের নোট: '));
+      n.appendChild(document.createTextNode(o.shop_note));
+      c.appendChild(n);
+    }
+
+    const items = Array.isArray(o.items) ? o.items : [];
+    if (items.length) {
+      const wrap = el('div', 'po-items');
+      const btn = el('button', null, 'পণ্য ' + bn(items.length) + 'টা · দেখুন ▾');
+      btn.type = 'button';
+      const listId = 'poi-' + o.id;
+      btn.setAttribute('aria-expanded', 'false');
+      btn.setAttribute('aria-controls', listId);
+      const ul = el('ul');
+      ul.id = listId;
+      ul.hidden = true;
+      items.forEach((it) => {
+        const li = el('li');
+        li.appendChild(el('span', null, (it.name || 'পণ্য') + ' × ' + bn(it.qty || 1) + (it.unit ? ' ' + it.unit : '')));
+        li.appendChild(el('span', null, taka((Number(it.price) || 0) * (Number(it.qty) || 1))));
+        ul.appendChild(li);
+      });
+      btn.addEventListener('click', () => {
+        const open = ul.hidden;
+        ul.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+        btn.textContent = 'পণ্য ' + bn(items.length) + 'টা · ' + (open ? 'বন্ধ ▴' : 'দেখুন ▾');
+      });
+      wrap.appendChild(btn);
+      wrap.appendChild(ul);
+      c.appendChild(wrap);
+    }
+
+    if (o.request_id) {
+      const a = el('a', 'po-link', 'রাইডারের ডেলিভারি অর্ডার দেখুন ↗');
+      a.href = '/admin/delivery-orders?open=' + encodeURIComponent(o.request_id);
+      c.appendChild(a);
+    }
+    return c;
+  }
+
+  function empty(title, sub) {
+    const box = el('div', 'cm-body');
+    const e = el('div', 'po-empty');
+    e.appendChild(el('b', null, title));
+    e.appendChild(el('span', 'cs-muted', sub));
+    box.appendChild(e);
+    return box;
+  }
+
+  async function loadList(reset) {
+    const my = ++seq;
+    const list = $('poList');
+    const more = $('poMore');
+    if (reset) {
+      offset = 0;
+      list.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('order', 3) : '';
+      more.hidden = true;
+    }
+    let query = supabase.from('market_preorders').select(COLS);
+    query = applyFilter(query).order('created_at', { ascending: tab === 'pending' }).range(offset, offset + PAGE - 1);
+    const { data, error } = await query;
+    if (my !== seq) return;
+    if (reset) list.textContent = '';
+    if (error) {
+      list.appendChild(empty('লোড করা যায়নি', 'একটু পরে আবার চেষ্টা করুন।'));
+      return;
+    }
+    const rows = data || [];
+    await fillNames(rows);
+    if (my !== seq) return;
+    if (reset && !rows.length) {
+      list.appendChild(empty(q ? 'কিছু পাওয়া যায়নি' : 'এখানে কোনো প্রি-অর্ডার নেই', q ? 'অন্য নম্বর বা নাম দিয়ে খুঁজুন।' : 'নতুন প্রি-অর্ডার এলে এখানে দেখাবে।'));
+    }
+    rows.forEach((o) => list.appendChild(card(o)));
+    offset += rows.length;
+    more.hidden = rows.length < PAGE;
+  }
+
+  onConsoleReady((data) => {
+    if (!canOpenAdminPath('/admin/delivery-orders', data)) {
+      $('poDeny').hidden = false;
+      return;
+    }
+    $('poMain').hidden = false;
+    renderTabs(null);
+    loadCounts();
+    loadList(true);
+
+    let t = 0;
+    $('poQ').addEventListener('input', (e) => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const v = cleanQ(e.target.value);
+        if (v === q) return;
+        q = v;
+        loadList(true);
+      }, 350);
+    });
+    $('poMore').addEventListener('click', () => loadList(false));
+
+    setInterval(() => { if (document.visibilityState === 'visible') loadCounts(); }, 60000);
+  });
+</script>
