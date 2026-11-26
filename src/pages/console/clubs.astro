@@ -1,0 +1,760 @@
+---
+// ============================================================
+// /console/clubs — ক্লাব (নতুন অ্যাপ, ধাপ ১০)
+// পুরনো /admin/clubs থেকে তৈরি; একই টেবিল/API/RPC, শুধু সুপার অ্যাডমিন। DB বদল নেই।
+// API রুটের টোকেন getFreshToken() থেকে।
+// ============================================================
+export const prerender = false;
+
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="ক্লাব" active="menu">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="cxDeny" class="cx-deny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+
+      <div id="adminGuardedContent" class="admin-content" hidden>
+
+        <div class="admin-header">
+          <h1>ক্লাব ম্যানেজমেন্ট</h1>
+          <p class="admin-subtitle" id="resultCount"></p>
+        </div>
+
+        <button class="cta-toggle-btn" id="showCreateFormBtn" type="button">
+          <i class="fas fa-plus"></i> নতুন ক্লাব যোগ করুন
+        </button>
+
+        <div class="create-card" id="createFormBox" style="display:none;">
+          <h2 class="create-title"><i class="fas fa-users"></i> নতুন ক্লাব যোগ করুন</h2>
+
+          <p class="form-message" id="createMessage"></p>
+
+          <label class="form-label">ক্লাবের নাম (বাংলা)<span class="required-mark">*</span></label>
+          <input type="text" class="form-input" id="clubNameInput" required placeholder="যেমন: ফেনী স্পোর্টিং ক্লাব" />
+          <div class="field-error-msg" data-error-for="clubNameInput">
+            <i class="fas fa-circle-exclamation"></i><span>ক্লাবের নাম দিন</span>
+          </div>
+
+          <label class="form-label">স্লাগ (ইংরেজি, URL এ ব্যবহার হবে)<span class="required-mark">*</span></label>
+          <input type="text" class="form-input" id="clubSlugInput" required placeholder="feni-sporting-club" />
+          <div class="field-error-msg" data-error-for="clubSlugInput">
+            <i class="fas fa-circle-exclamation"></i><span>স্লাগ দিন</span>
+          </div>
+          <p class="url-preview" id="slugPreview">smartfeni.com/</p>
+
+          <label class="form-label">উপজেলা</label>
+          <select class="form-input" id="clubUpajilaInput">
+            <option value="">নির্বাচন করুন</option>
+            <option value="feni-sadar">ফেনী সদর</option>
+            <option value="chhagalnaiya">ছাগলনাইয়া</option>
+            <option value="daganbhuiyan">দাগনভূঞা</option>
+            <option value="parshuram">পরশুরাম</option>
+            <option value="fulgazi">ফুলগাজী</option>
+            <option value="sonagazi">সোনাগাজী</option>
+          </select>
+
+          <label class="form-label">ফোন নম্বর (লগইন আইডি হিসেবে ব্যবহার হবে)<span class="required-mark">*</span></label>
+          <input type="text" class="form-input" id="clubPhoneInput" required placeholder="01xxxxxxxxx" />
+          <div class="field-error-msg" data-error-for="clubPhoneInput">
+            <i class="fas fa-circle-exclamation"></i><span>ফোন নম্বর দিন</span>
+          </div>
+
+          <label class="form-label">পাসওয়ার্ড<span class="required-mark">*</span></label>
+          <input type="password" class="form-input" id="clubPasswordInput" required placeholder="কমপক্ষে ৬ অক্ষর" />
+          <div class="field-error-msg" data-error-for="clubPasswordInput">
+            <i class="fas fa-circle-exclamation"></i><span>পাসওয়ার্ড দিন</span>
+          </div>
+
+          <button class="create-btn" id="createClubBtn" type="button">
+            <i class="fas fa-plus"></i> <span id="createBtnText">ক্লাব তৈরি করুন</span>
+          </button>
+        </div>
+
+        <!-- ===== পেন্ডিং ক্লাব আবেদন ===== -->
+        <div id="requestsBox" class="req-box" style="display:none;">
+          <h2 class="req-title"><i class="fas fa-inbox"></i> ক্লাব আবেদন <span class="req-count" id="requestsCount">0</span></h2>
+          <div id="requestsList" class="req-list"></div>
+        </div>
+
+        <div class="modal-overlay" id="approveOverlay">
+          <div class="modal-box">
+            <button class="modal-close" id="approveClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+            <h2 class="modal-title"><i class="fas fa-circle-check"></i> আবেদন Approve</h2>
+            <p class="modal-club-name" id="approveInfo"></p>
+            <p class="modal-message" id="approveMessage"></p>
+            <label class="form-label">স্লাগ (ইংরেজি, URL এ ব্যবহার হবে)<span class="required-mark">*</span></label>
+            <input type="text" class="form-input" id="approveSlugInput" required placeholder="feni-sporting-club" />
+            <div class="field-error-msg" data-error-for="approveSlugInput">
+              <i class="fas fa-circle-exclamation"></i><span>স্লাগ দিন</span>
+            </div>
+            <p class="url-preview" id="approveSlugPreview">smartfeni.com/</p>
+            <button class="create-btn" id="approveSubmitBtn" type="button">
+              <i class="fas fa-check"></i> <span id="approveBtnText">Approve করুন</span>
+            </button>
+          </div>
+        </div>
+
+        <style is:global>
+          .req-box { background: #FFF8F3; border: 1.5px solid #FFD3BC; border-radius: 20px; padding: 18px 16px; margin-bottom: 24px; }
+          .req-title { font-size: 1rem; font-weight: 700; color: #1B2A4A; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+          .req-title i { color: #FF6B35; }
+          .req-count { background: #FF6B35; color: #fff; border-radius: 20px; font-size: 0.74rem; padding: 2px 9px; }
+          .req-list { display: flex; flex-direction: column; gap: 10px; }
+          .req-card { background: #fff; border-radius: 14px; padding: 14px; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05); }
+          .req-card p { margin: 0; }
+          .req-name { font-size: 0.95rem; font-weight: 700; color: #1B2A4A; }
+          .req-meta { font-size: 0.8rem; color: #5A6E85; margin-top: 3px !important; }
+          .req-msg { font-size: 0.8rem; color: #44506B; background: #F4F7FC; border-radius: 10px; padding: 8px 10px; margin-top: 8px !important; }
+          .req-actions { display: flex; gap: 8px; margin-top: 12px; }
+        </style>
+
+        <div class="rc-bar">
+          <button type="button" class="rc-btn" id="clubReorderBtn"><i class="fas fa-arrows-up-down"></i> ক্লাবের ক্রম বদলান</button>
+          <p class="rc-hint" id="clubReorderHint" style="display:none;">ক্লাব চেপে ধরে ওপর-নিচে টেনে ক্রম সাজান। এই ক্রমেই পাবলিক ক্লাব পেজে দেখাবে। শেষ হলে ✓ চাপুন।</p>
+        </div>
+        <div id="clubsContainer" class="clubs-container"></div>
+
+        <div id="emptyState" class="empty-state" style="display:none;">
+          <i class="fas fa-users"></i>
+          <p>এখনো কোনো ক্লাব যোগ করা হয়নি</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ওউনার পরিবর্তন মোডাল ===== -->
+  <div class="modal-overlay" id="reassignOverlay">
+    <div class="modal-box">
+      <button class="modal-close" id="reassignClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      <h2 class="modal-title"><i class="fas fa-user-pen"></i> ওউনার পরিবর্তন</h2>
+      <p class="modal-club-name" id="reassignClubName"></p>
+      <p class="modal-message" id="reassignMessage"></p>
+      <label class="form-label">নতুন ওউনারের ফোন নম্বর (তার অ্যাকাউন্ট আগে থেকে থাকতে হবে)<span class="required-mark">*</span></label>
+      <input type="text" class="form-input" id="reassignPhoneInput" required placeholder="01xxxxxxxxx" />
+      <div class="field-error-msg" data-error-for="reassignPhoneInput">
+        <i class="fas fa-circle-exclamation"></i><span>ফোন নম্বর দিন</span>
+      </div>
+      <button class="create-btn" id="reassignSubmitBtn" type="button">
+        <i class="fas fa-check"></i> <span id="reassignBtnText">পরিবর্তন করুন</span>
+      </button>
+    </div>
+  </div>
+
+  <style>
+    .admin-page { min-height: 60vh; padding: 14px 0 40px; }
+    #adminGuardedContent[hidden], .cx-deny[hidden] { display: none !important; }
+    .cx-deny { padding: 40px 16px; text-align: center; color: #64748B; font-weight: 600; }
+    .admin-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .admin-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .back-link { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: 0.88rem; margin-bottom: 20px; }
+    .back-link:hover { color: #FF6B35; }
+    .admin-header { margin-bottom: 24px; }
+    .admin-header h1 { font-size: 1.6rem; font-weight: 700; color: #1B2A4A; }
+    .admin-subtitle { font-size: 0.85rem; color: #8FA0BC; margin-top: 4px; font-weight: 600; }
+    .cta-toggle-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; background: #FFF0EA; color: #FF6B35; border: 1.5px dashed #FFD3BC; padding: 14px; border-radius: 16px; font-weight: 700; font-size: 0.9rem; cursor: pointer; margin-bottom: 24px; }
+    .cta-toggle-btn:hover { background: #FF6B35; color: #fff; border-color: #FF6B35; }
+    .create-card { background: #fff; border-radius: 20px; padding: 24px 22px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06); margin-bottom: 28px; }
+    .create-title { font-size: 1.05rem; font-weight: 700; color: #1B2A4A; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .create-title i { color: #FF6B35; }
+    .form-message { display: none; font-size: 0.82rem; font-weight: 600; padding: 10px 14px; border-radius: 12px; margin-bottom: 12px; text-align: center; }
+    .form-message.show-error { display: block; background: #FFF0EA; color: #D14343; }
+    .form-message.show-success { display: block; background: #EAFBF0; color: #1B7A3C; }
+    .form-label { display: block; font-size: 0.82rem; font-weight: 600; color: #1B2A4A; margin-bottom: 6px; margin-top: 14px; }
+    .form-label:first-of-type { margin-top: 0; }
+    .form-input { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1.5px solid #E5EAF0; font-size: 0.9rem; font-family: inherit; color: #1B2A4A; background: #FBFCFE; }
+    .form-input:focus { outline: none; border-color: #FF6B35; background: #fff; }
+    .url-preview { font-size: 0.78rem; color: #8FA0BC; margin-top: 6px; font-weight: 600; }
+    .url-preview span { color: #FF6B35; }
+    .create-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; background: #FF6B35; color: #fff; border: none; padding: 14px; border-radius: 14px; font-weight: 700; font-size: 0.92rem; cursor: pointer; margin-top: 20px; }
+    .create-btn:disabled { opacity: 0.65; cursor: not-allowed; }
+    .clubs-container { display: flex; flex-direction: column; gap: 12px; }
+    .empty-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px 0; color: #B0BCCB; }
+    .empty-state i { font-size: 2.4rem; }
+
+    /* ===== ওউনার পরিবর্তন মোডাল (admin/shops.astro এর সাথে কনসিস্টেন্ট) ===== */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
+    .modal-overlay.open { display: flex; }
+    .modal-box { background: #fff; border-radius: 20px; padding: 26px 22px; max-width: 420px; width: 100%; position: relative; }
+    .modal-close { position: absolute; top: 16px; right: 16px; background: #F4F7FC; border: none; width: 32px; height: 32px; border-radius: 50%; color: #5A6E85; cursor: pointer; }
+    .modal-title { font-size: 1.05rem; font-weight: 700; color: #1B2A4A; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .modal-title i { color: #FF6B35; }
+    .modal-club-name { font-size: 0.85rem; color: #8FA0BC; margin-bottom: 14px; }
+    .modal-message { display: none; font-size: 0.82rem; font-weight: 600; padding: 10px 14px; border-radius: 12px; margin-bottom: 12px; text-align: center; }
+    .modal-message.show-error { display: block; background: #FFF0EA; color: #D14343; }
+    .modal-message.show-success { display: block; background: #EAFBF0; color: #1B7A3C; }
+  </style>
+
+  <script>
+    import { onConsoleReady } from '../../lib/consoleApp.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { makeSortable } from '../../lib/sortable.js';
+import { authFetch, getFreshToken } from '../../lib/authToken.js';
+
+    const UPAZILA_LABELS = {
+      'feni-sadar': 'ফেনী সদর', 'chhagalnaiya': 'ছাগলনাইয়া', 'daganbhuiyan': 'দাগনভূঞা',
+      'parshuram': 'পরশুরাম', 'fulgazi': 'ফুলগাজী', 'sonagazi': 'সোনাগাজী',
+    };
+
+    function showToast(text, type = 'success') {
+      window.showToast(text, type);
+    }
+
+    const container = document.getElementById('clubsContainer');
+    const emptyState = document.getElementById('emptyState');
+    const resultCount = document.getElementById('resultCount');
+    const createMessage = document.getElementById('createMessage');
+    const createBtn = document.getElementById('createClubBtn');
+    const createBtnText = document.getElementById('createBtnText');
+    const slugInput = document.getElementById('clubSlugInput');
+    const slugPreview = document.getElementById('slugPreview');
+
+    let currentAccessToken = null;
+
+    document.getElementById('showCreateFormBtn')?.addEventListener('click', () => {
+      document.getElementById('createFormBox').style.display = 'block';
+      document.getElementById('showCreateFormBtn').style.display = 'none';
+    });
+
+    slugInput?.addEventListener('input', () => {
+      const val = slugInput.value.trim().toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
+      slugPreview.innerHTML = `smartfeni.com/<span>${val || '...'}</span>`;
+    });
+
+    function showMsg(text, type = 'error') {
+      createMessage.textContent = text;
+      createMessage.className = `form-message ${type === 'error' ? 'show-error' : 'show-success'}`;
+    }
+
+    function clearMsg() {
+      createMessage.textContent = '';
+      createMessage.className = 'form-message';
+    }
+
+    // ===== ওউনার পরিবর্তন মোডাল =====
+    const reassignOverlay = document.getElementById('reassignOverlay');
+    const reassignClose = document.getElementById('reassignClose');
+    const reassignClubName = document.getElementById('reassignClubName');
+    const reassignMessage = document.getElementById('reassignMessage');
+    const reassignPhoneInput = document.getElementById('reassignPhoneInput');
+    const reassignSubmitBtn = document.getElementById('reassignSubmitBtn');
+    const reassignBtnText = document.getElementById('reassignBtnText');
+    let reassignTargetClub = null;
+
+    function showModalMsg(text, type = 'error') {
+      reassignMessage.textContent = text;
+      reassignMessage.className = `modal-message ${type === 'error' ? 'show-error' : 'show-success'}`;
+    }
+
+    function clearModalMsg() {
+      reassignMessage.textContent = '';
+      reassignMessage.className = 'modal-message';
+    }
+
+    function openReassign(club) {
+      reassignTargetClub = club;
+      reassignClubName.textContent = club.name;
+      reassignPhoneInput.value = '';
+      clearModalMsg();
+      reassignOverlay.classList.add('open');
+    }
+
+    function closeReassign() {
+      reassignOverlay.classList.remove('open');
+      reassignTargetClub = null;
+    }
+
+    reassignClose?.addEventListener('click', closeReassign);
+    reassignOverlay?.addEventListener('click', (e) => {
+      if (e.target === reassignOverlay) closeReassign();
+    });
+
+    reassignSubmitBtn?.addEventListener('click', async () => {
+      clearModalMsg();
+
+      if (!window.SFValidateForm(document.querySelector('#reassignOverlay .modal-box'))) {
+        return;
+      }
+
+      const newPhone = reassignPhoneInput.value.trim();
+
+      if (!currentAccessToken) {
+        showModalMsg('সেশন পাওয়া যায়নি, আবার লগইন করুন');
+        return;
+      }
+
+      reassignBtnText.textContent = 'পরিবর্তন হচ্ছে...';
+      reassignSubmitBtn.disabled = true;
+
+      try {
+        const res = await authFetch('/api/reassign-club-owner', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentAccessToken}`,
+          },
+          body: JSON.stringify({ clubId: reassignTargetClub.id, newOwnerPhone: newPhone }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          showModalMsg(result.error || 'পরিবর্তন ব্যর্থ');
+        } else {
+          window.showToast('ওউনার পরিবর্তন হয়েছে ✓', 'success');
+          setTimeout(() => {
+            closeReassign();
+            loadClubs();
+          }, 800);
+        }
+      } catch (err) {
+        showModalMsg('নেটওয়ার্ক ত্রুটি: ' + err.message);
+      }
+
+      reassignBtnText.textContent = 'পরিবর্তন করুন';
+      reassignSubmitBtn.disabled = false;
+    });
+
+    createBtn?.addEventListener('click', async () => {
+      clearMsg();
+
+      if (!window.SFValidateForm(document.getElementById('createFormBox'))) {
+        return;
+      }
+
+      const clubName = document.getElementById('clubNameInput').value.trim();
+      const slug = document.getElementById('clubSlugInput').value.trim();
+      const upajila = document.getElementById('clubUpajilaInput').value;
+      const phone = document.getElementById('clubPhoneInput').value.trim();
+      const password = document.getElementById('clubPasswordInput').value;
+
+      createBtnText.textContent = 'তৈরি হচ্ছে...';
+      createBtn.disabled = true;
+
+      try {
+        const res = await authFetch('/api/create-club', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clubName, slug, phone, password, upajila }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          showMsg(result.error || 'ক্লাব তৈরি ব্যর্থ');
+        } else {
+          window.showToast(`ক্লাব সফলভাবে তৈরি হয়েছে ✓ (smartfeni.com/${result.slug})`, 'success');
+          document.getElementById('clubNameInput').value = '';
+          document.getElementById('clubSlugInput').value = '';
+          document.getElementById('clubUpajilaInput').value = '';
+          document.getElementById('clubPhoneInput').value = '';
+          document.getElementById('clubPasswordInput').value = '';
+          slugPreview.innerHTML = 'smartfeni.com/';
+          loadClubs();
+        }
+      } catch (err) {
+        showMsg('নেটওয়ার্ক ত্রুটি: ' + err.message);
+      }
+
+      createBtnText.textContent = 'ক্লাব তৈরি করুন';
+      createBtn.disabled = false;
+    });
+
+    function renderClub(club) {
+      const card = document.createElement('div');
+      card.style.cssText = `background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;flex-direction:column;gap:12px;min-width:0;${club.is_active ? '' : 'opacity:0.6;'}`;
+
+      const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const upazilaLabel = club.upajila ? UPAZILA_LABELS[club.upajila] || club.upajila : '';
+
+      card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+          <div style="width:44px;height:44px;border-radius:12px;background:#FFF0EA;color:#FF6B35;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">
+            <i class="fas fa-users"></i>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <p style="font-size:0.95rem;font-weight:700;color:#1B2A4A;line-height:1.35;overflow-wrap:anywhere;">
+              ${esc(club.name) || '(নামহীন ক্লাব)'} ${club.is_verified ? '<i class="fas fa-circle-check" style="color:#2563EB;font-size:0.8rem;"></i>' : ''}
+            </p>
+            <p style="font-size:0.8rem;color:#8FA0BC;overflow-wrap:anywhere;">
+              /${esc(club.slug)} ${upazilaLabel ? '· ' + esc(upazilaLabel) : ''} ${club.is_active ? '' : '· নিষ্ক্রিয়'}
+            </p>
+          </div>
+        </div>
+        <div class="club-actions" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+      `;
+
+      const actions = card.querySelector('.club-actions');
+
+      const verifyBtn = document.createElement('button');
+      verifyBtn.textContent = club.is_verified ? 'আনভেরিফাই' : 'ভেরিফাই';
+      verifyBtn.style.cssText = club.is_verified
+        ? 'background:#F4F7FC;color:#5A6E85;border:none;padding:8px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap;'
+        : 'background:#EAF2FF;color:#2563EB;border:none;padding:8px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+      verifyBtn.addEventListener('click', () => toggleVerified(club.id, !club.is_verified));
+      actions.appendChild(verifyBtn);
+
+      const reassignBtn = document.createElement('button');
+      reassignBtn.innerHTML = '<i class="fas fa-user-pen"></i> ওউনার';
+      reassignBtn.title = 'ওউনার পরিবর্তন';
+      reassignBtn.style.cssText = 'background:#EFF6FF;color:#2563EB;border:none;padding:8px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+      reassignBtn.addEventListener('click', () => openReassign(club));
+      actions.appendChild(reassignBtn);
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.textContent = club.is_active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন';
+      toggleBtn.style.cssText = club.is_active
+        ? 'background:#FFF0EA;color:#D14343;border:none;padding:8px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap;'
+        : 'background:#EAFBF0;color:#1B7A3C;border:none;padding:8px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+      toggleBtn.addEventListener('click', () => toggleActive(club.id, !club.is_active));
+      actions.appendChild(toggleBtn);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+      deleteBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:8px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+      deleteBtn.addEventListener('click', () => deleteClub(club.id, club.name));
+      actions.appendChild(deleteBtn);
+      Array.from(actions.children).forEach((b) => {
+        b.style.minHeight = '44px';
+        b.style.padding = '10px 14px';
+        b.style.flex = '1 1 auto';
+      });
+      deleteBtn.style.flex = '0 0 auto';
+      deleteBtn.setAttribute('aria-label', 'ক্লাব ডিলিট করুন');
+
+      return card;
+    }
+
+    async function toggleActive(id, newValue) {
+      const { error } = await supabase.rpc('admin_set_club_active', {
+        target_club_id: id,
+        new_value: newValue,
+      });
+      if (error) {
+        showToast('আপডেট ব্যর্থ: ' + error.message, 'error');
+        return;
+      }
+      showToast(newValue ? 'সক্রিয় করা হয়েছে ✓' : 'নিষ্ক্রিয় করা হয়েছে', 'success');
+      loadClubs();
+    }
+
+    async function toggleVerified(id, newValue) {
+      const { error } = await supabase.rpc('admin_set_club_verified', {
+        target_club_id: id,
+        new_value: newValue,
+      });
+      if (error) {
+        showToast('আপডেট ব্যর্থ: ' + error.message, 'error');
+        return;
+      }
+      showToast(newValue ? 'ভেরিফাই করা হয়েছে ✓' : 'আনভেরিফাই করা হয়েছে', 'success');
+      loadClubs();
+    }
+
+    async function deleteClub(id, name) {
+      if (!confirm(`"${name}" ক্লাবটি স্থায়ীভাবে ডিলিট করতে চান? এর সব সদস্য/পোস্ট/নোটিফিকেশন মুছে যাবে, এই কাজ আর ফেরানো যাবে না।`)) return;
+
+      if (!currentAccessToken) {
+        showToast('সেশন পাওয়া যায়নি, আবার লগইন করুন', 'error');
+        return;
+      }
+
+      const res = await fetch('/api/delete-club', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clubId: id, accessToken: (await getFreshToken()) || currentAccessToken }),
+      });
+      const result = await res.json();
+
+      if (!res.ok) {
+        showToast('ডিলিট ব্যর্থ: ' + (result.error || 'অজানা ত্রুটি'), 'error');
+        return;
+      }
+      if (result.warning) {
+        showToast(result.warning, 'error');
+      } else {
+        showToast('ক্লাব ডিলিট করা হয়েছে', 'success');
+      }
+      loadClubs();
+    }
+
+    let reorderMode = false;
+    let clubsCache = [];
+    let stopClubSort = null;
+
+    (function injectReorderCss() {
+      const st = document.createElement('style');
+      st.textContent =
+        '.rc-bar{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;}' +
+        '.rc-btn{align-self:flex-start;min-height:44px;border:1.5px solid #D5DCE8;background:#fff;border-radius:14px;padding:0 16px;font:inherit;font-weight:700;font-size:0.9rem;color:#1B2A4A;cursor:pointer;}' +
+        '.rc-btn.on{background:#FFF0EA;border-color:#FF6B35;color:#FF6B35;}' +
+        '.rc-hint{margin:0 2px;font-size:0.8rem;color:#5A6E85;line-height:1.45;}' +
+        '.rc-row{display:flex;align-items:center;gap:10px;background:#fff;border-radius:14px;padding:8px 10px;min-height:60px;box-shadow:0 2px 10px rgba(15,23,42,0.05);min-width:0;}' +
+        '.rc-ic{width:40px;height:40px;border-radius:12px;background:#FFF0EA;color:#FF6B35;display:flex;align-items:center;justify-content:center;flex:none;overflow:hidden;}' +
+        '.rc-ic img{width:100%;height:100%;object-fit:cover;display:block;}' +
+        '.rc-body{flex:1;min-width:0;}' +
+        '.rc-name{font-size:0.93rem;font-weight:700;color:#1B2A4A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+        '.rc-sub{font-size:0.76rem;color:#8FA0BC;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+        '.rc-grip{width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:#8A97AE;flex:none;}';
+      document.head.appendChild(st);
+    })();
+
+    function renderClubsView() {
+      if (stopClubSort) { stopClubSort(); stopClubSort = null; }
+      container.innerHTML = '';
+      const list = clubsCache;
+      if (list.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+      emptyState.style.display = 'none';
+      if (!reorderMode) {
+        list.forEach((club) => container.appendChild(renderClub(club)));
+        return;
+      }
+      list.forEach((club) => {
+        const row = document.createElement('div');
+        row.className = 'rc-row';
+        row.setAttribute('data-id', club.id);
+        const ic = document.createElement('div');
+        ic.className = 'rc-ic';
+        if (club.logo_image) {
+          const im = document.createElement('img');
+          im.src = club.logo_image;
+          im.alt = '';
+          im.loading = 'lazy';
+          im.onerror = () => { im.remove(); ic.innerHTML = '<i class="fas fa-users"></i>'; };
+          ic.appendChild(im);
+        } else {
+          ic.innerHTML = '<i class="fas fa-users"></i>';
+        }
+        const body = document.createElement('div');
+        body.className = 'rc-body';
+        const nm = document.createElement('div');
+        nm.className = 'rc-name';
+        nm.textContent = club.name || '(নামহীন ক্লাব)';
+        const sb = document.createElement('div');
+        sb.className = 'rc-sub';
+        sb.textContent = '/' + (club.slug || '') + (club.is_active ? '' : ' · নিষ্ক্রিয়');
+        body.appendChild(nm);
+        body.appendChild(sb);
+        const g = document.createElement('span');
+        g.className = 'rc-grip';
+        g.setAttribute('data-sort-handle', '1');
+        g.setAttribute('aria-hidden', 'true');
+        g.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+        row.appendChild(ic);
+        row.appendChild(body);
+        row.appendChild(g);
+        container.appendChild(row);
+      });
+      if (list.length > 1) stopClubSort = makeSortable(container, { itemSelector: '.rc-row', onChange: saveClubOrder });
+    }
+
+    async function saveClubOrder(ids) {
+      ids.forEach((id, n) => {
+        const c = clubsCache.find((x) => x.id === id);
+        if (c) c.sort_order = (n + 1) * 10;
+      });
+      clubsCache.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      const { data, error } = await supabase.rpc('admin_reorder_clubs', { p_ids: ids });
+      if (error || !data || !data.ok) {
+        window.showToast?.('ক্রম সেভ হয়নি, আবার চেষ্টা করুন', 'error');
+        await loadClubs();
+        return;
+      }
+      window.showToast?.('ক্লাবের ক্রম সেভ হয়েছে ✓', 'success', 1500);
+    }
+
+    document.getElementById('clubReorderBtn').addEventListener('click', () => {
+      reorderMode = !reorderMode;
+      const b = document.getElementById('clubReorderBtn');
+      b.classList.toggle('on', reorderMode);
+      b.innerHTML = reorderMode ? '<i class="fas fa-check"></i> ক্রম ঠিক আছে' : '<i class="fas fa-arrows-up-down"></i> ক্লাবের ক্রম বদলান';
+      document.getElementById('clubReorderHint').style.display = reorderMode ? '' : 'none';
+      renderClubsView();
+    });
+
+    async function loadClubs() {
+      container.innerHTML = (window.SFSkeleton ? window.SFSkeleton.html('row', 5) : '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>');
+
+      const { data, error } = await supabase
+        .from('clubs')
+        .select('*')
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        container.textContent = '';
+        const p = document.createElement('p');
+        p.style.cssText = 'text-align:center;color:#D14343;padding:40px 0;';
+        p.textContent = 'লোড করা যায়নি: ' + error.message;
+        container.appendChild(p);
+        return;
+      }
+
+      clubsCache = data || [];
+      resultCount.textContent = `মোট ${clubsCache.length} টি ক্লাব`;
+      renderClubsView();
+    }
+
+    // ===== পেন্ডিং ক্লাব আবেদন: লোড / Approve (স্লাগসহ) / Reject =====
+    const reqBox = document.getElementById('requestsBox');
+    const reqList = document.getElementById('requestsList');
+    const reqCount = document.getElementById('requestsCount');
+    const approveOverlay = document.getElementById('approveOverlay');
+    const approveInfo = document.getElementById('approveInfo');
+    const approveMessage = document.getElementById('approveMessage');
+    const approveSlugInput = document.getElementById('approveSlugInput');
+    const approveSlugPreview = document.getElementById('approveSlugPreview');
+    const approveSubmitBtn = document.getElementById('approveSubmitBtn');
+    const approveBtnText = document.getElementById('approveBtnText');
+    let approveTarget = null;
+
+    const escH = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const REQ_BTN = (bg, color) => `background:${bg};color:${color};border:none;padding:9px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;`;
+
+    function approveMsg(text, type = 'error') {
+      approveMessage.textContent = text || '';
+      approveMessage.className = text ? `modal-message ${type === 'error' ? 'show-error' : 'show-success'}` : 'modal-message';
+    }
+
+    function cleanSlug(val) {
+      return String(val || '').trim().toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
+    }
+
+    function openApprove(r) {
+      approveTarget = r;
+      approveInfo.textContent = r.club_name;
+      approveSlugInput.value = '';
+      approveSlugPreview.innerHTML = 'smartfeni.com/';
+      approveMsg('');
+      approveOverlay.classList.add('open');
+    }
+
+    function closeApprove() {
+      approveOverlay.classList.remove('open');
+      approveTarget = null;
+    }
+
+    document.getElementById('approveClose')?.addEventListener('click', closeApprove);
+    approveOverlay?.addEventListener('click', (e) => { if (e.target === approveOverlay) closeApprove(); });
+    approveSlugInput?.addEventListener('input', () => {
+      approveSlugPreview.innerHTML = `smartfeni.com/<span>${escH(cleanSlug(approveSlugInput.value)) || '...'}</span>`;
+    });
+
+    approveSubmitBtn?.addEventListener('click', async () => {
+      approveMsg('');
+      if (!window.SFValidateForm(document.querySelector('#approveOverlay .modal-box'))) return;
+      if (!approveTarget) return;
+
+      if (!currentAccessToken) {
+        approveMsg('সেশন পাওয়া যায়নি, আবার লগইন করুন');
+        return;
+      }
+
+      approveBtnText.textContent = 'তৈরি হচ্ছে...';
+      approveSubmitBtn.disabled = true;
+
+      try {
+        const res = await authFetch('/api/approve-club-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentAccessToken}` },
+          body: JSON.stringify({ requestId: approveTarget.id, slug: cleanSlug(approveSlugInput.value) }),
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          approveMsg(result.error || 'Approve ব্যর্থ');
+        } else {
+          window.showToast(`ক্লাব তৈরি হয়েছে ✓ (smartfeni.com/${result.slug})`, 'success');
+          closeApprove();
+          loadRequests();
+          loadClubs();
+        }
+      } catch (err) {
+        approveMsg('নেটওয়ার্ক ত্রুটি: ' + err.message);
+      }
+
+      approveBtnText.textContent = 'Approve করুন';
+      approveSubmitBtn.disabled = false;
+    });
+
+    async function rejectRequest(r) {
+      if (!confirm(`"${r.club_name}" ক্লাবের আবেদন বাতিল করবেন?`)) return;
+      const { error } = await supabase.from('club_requests').update({ status: 'rejected' }).eq('id', r.id);
+      if (error) {
+        showToast('বাতিল ব্যর্থ: ' + error.message, 'error');
+        return;
+      }
+      showToast('আবেদন বাতিল করা হয়েছে', 'success');
+      loadRequests();
+    }
+
+    function renderRequest(r, p) {
+      const card = document.createElement('div');
+      card.className = 'req-card';
+      const upazilaLabel = r.upajila ? UPAZILA_LABELS[r.upajila] || r.upajila : '';
+      const applicant = p ? `${p.full_name || '(নামহীন)'}${p.phone ? ' · ' + p.phone : ''}` : '';
+
+      card.innerHTML = `
+        <p class="req-name">${escH(r.club_name)}</p>
+        <p class="req-meta"><i class="fas fa-user"></i> ${escH(applicant)}</p>
+        <p class="req-meta"><i class="fas fa-phone"></i> ${escH(r.phone)}${upazilaLabel ? ' · ' + escH(upazilaLabel) : ''}</p>
+        ${r.message ? `<p class="req-msg">${escH(r.message)}</p>` : ''}
+        <div class="req-actions"></div>
+      `;
+
+      const actions = card.querySelector('.req-actions');
+
+      const approveBtn = document.createElement('button');
+      approveBtn.type = 'button';
+      approveBtn.innerHTML = '<i class="fas fa-check"></i> Approve';
+      approveBtn.style.cssText = REQ_BTN('#EAFBF0', '#1B7A3C');
+      approveBtn.addEventListener('click', () => openApprove(r));
+      actions.appendChild(approveBtn);
+
+      const rejectBtn = document.createElement('button');
+      rejectBtn.type = 'button';
+      rejectBtn.innerHTML = '<i class="fas fa-xmark"></i> বাতিল';
+      rejectBtn.style.cssText = REQ_BTN('#FFF0EA', '#D14343');
+      rejectBtn.addEventListener('click', () => rejectRequest(r));
+      actions.appendChild(rejectBtn);
+
+      return card;
+    }
+
+    async function loadRequests() {
+      const { data, error } = await supabase
+        .from('club_requests')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true });
+
+      if (error || !data || data.length === 0) {
+        reqBox.style.display = 'none';
+        return;
+      }
+
+      const ids = [...new Set(data.map((r) => r.user_id))];
+      const { data: profs } = await supabase.from('profiles').select('id, full_name, phone').in('id', ids);
+      const pmap = {};
+      (profs || []).forEach((p) => { pmap[p.id] = p; });
+
+      reqCount.textContent = data.length;
+      reqList.innerHTML = '';
+      data.forEach((r) => reqList.appendChild(renderRequest(r, pmap[r.user_id])));
+      reqBox.style.display = 'block';
+    }
+
+    onConsoleReady(async (ctx) => {
+      // শুধু সুপার অ্যাডমিন (পুরনো পেজের একই নিয়ম)
+      if (!ctx.isSuper) { document.getElementById('cxDeny').hidden = false; return; }
+      document.getElementById('adminGuardedContent').hidden = false;
+      currentAccessToken = await getFreshToken();
+      loadRequests();
+      loadClubs();
+    });
+  </script>
+</ConsoleShell>

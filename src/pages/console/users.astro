@@ -1,0 +1,751 @@
+---
+// ============================================================
+// /console/users — ইউজার (নতুন অ্যাপ, ধাপ ১০)
+// পুরনো /admin/users থেকে তৈরি; একই টেবিল/API, DB বদল নেই।
+// দেখা: সুপার অ্যাডমিন, রোলহীন পুরনো মডেরেটর, বা users.view (পুরনো পেজের একই নিয়ম)।
+// API রুটের টোকেন getFreshToken() থেকে।
+// ============================================================
+export const prerender = false;
+
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="ইউজার" active="menu">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="cxDeny" class="cx-deny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+
+      <div id="adminGuardedContent" class="admin-content" hidden>
+
+        <div class="admin-header">
+          <h1>ইউজার ম্যানেজমেন্ট</h1>
+          <p class="admin-subtitle" id="resultCount"></p>
+        </div>
+
+        <div class="search-bar">
+          <i class="fas fa-magnifying-glass"></i>
+          <input type="text" id="searchInput" placeholder="নাম বা ফোন নম্বর দিয়ে খুঁজুন" />
+        </div>
+
+        <!-- ===== অ্যাকাউন্ট ডিলিট স্ট্যাট (শুধু admin দেখে) ===== -->
+        <div id="delStats" class="del-stats" style="display:none;">
+          <div class="del-stats-grid">
+            <div class="del-stat"><span class="del-stat-num" id="delStatPending">0</span><span class="del-stat-label">৭ দিনের অপেক্ষায়</span></div>
+            <div class="del-stat"><span class="del-stat-num" id="delStatCompleted">0</span><span class="del-stat-label">ডিলিট হয়েছে</span></div>
+            <div class="del-stat"><span class="del-stat-num" id="delStatRestored">0</span><span class="del-stat-label">ফিরিয়ে এনেছে</span></div>
+          </div>
+          <button type="button" class="del-stats-toggle" id="delStatsToggle">
+            <i class="fas fa-chart-simple"></i> ডিলিটের বিস্তারিত <i class="fas fa-chevron-down"></i>
+          </button>
+          <div class="del-stats-body" id="delStatsBody" style="display:none;">
+            <p class="del-stats-sub" id="delStatLast30"></p>
+            <h4 class="del-stats-h">কারণ অনুযায়ী</h4>
+            <div id="delStatReasons"></div>
+            <h4 class="del-stats-h">সাম্প্রতিক অনুরোধ</h4>
+            <div id="delStatRecent"></div>
+          </div>
+        </div>
+
+        <div class="filter-tabs" id="filterTabs" style="display:none;">
+          <button type="button" class="filter-tab active" data-filter="all">সব ইউজার</button>
+          <button type="button" class="filter-tab" data-filter="pending">ডিলিটের অপেক্ষায় <span id="pendingTabCount"></span></button>
+        </div>
+
+        <div id="usersContainer" class="users-container"></div>
+
+        <div id="emptyState" class="empty-state" style="display:none;">
+          <i class="fas fa-user-slash"></i>
+          <p>কোনো ইউজার পাওয়া যায়নি</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .admin-page {
+      min-height: 60vh;
+      padding: 14px 0 40px;
+    }
+    #adminGuardedContent[hidden], .cx-deny[hidden] { display: none !important; }
+    .cx-deny { padding: 40px 16px; text-align: center; color: #64748B; font-weight: 600; }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 20px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .search-bar {
+      position: relative;
+      margin-bottom: 22px;
+    }
+
+    .search-bar i {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #B0BCCB;
+      font-size: 0.85rem;
+    }
+
+    .search-bar input {
+      width: 100%;
+      padding: 13px 16px 13px 42px;
+      border-radius: 14px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+
+    .search-bar input:focus {
+      outline: none;
+      border-color: #FF6B35;
+    }
+
+    .users-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 80px 0;
+      color: #B0BCCB;
+    }
+
+    .empty-state i {
+      font-size: 2.4rem;
+    }
+
+    /* অ্যাকাউন্ট ডিলিট স্ট্যাট + ফিল্টার ট্যাব */
+    .del-stats {
+      background: #fff;
+      border-radius: 18px;
+      padding: 16px 18px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      margin-bottom: 16px;
+    }
+
+    .del-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .del-stat {
+      background: #F8FAFC;
+      border-radius: 14px;
+      padding: 12px 8px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .del-stat-num {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: #1B2A4A;
+    }
+
+    .del-stat-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #8FA0BC;
+    }
+
+    .del-stats-toggle {
+      margin-top: 12px;
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #5A6E85;
+      cursor: pointer;
+    }
+
+    .del-stats-body {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #F0F3F8;
+    }
+
+    .del-stats-sub {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #5A6E85;
+      margin-bottom: 10px;
+    }
+
+    .del-stats-h {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #8FA0BC;
+      margin: 10px 0 6px;
+    }
+
+    .filter-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .filter-tab {
+      background: #fff;
+      border: 1.5px solid #E5EAF0;
+      color: #5A6E85;
+      padding: 8px 14px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .filter-tab.active {
+      background: #FF6B35;
+      border-color: #FF6B35;
+      color: #fff;
+    }
+  </style>
+
+  <script>
+    import { onConsoleReady } from '../../lib/consoleApp.js';
+    import { getFreshToken } from '../../lib/authToken.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { categories } from '../../data/services.js';
+
+    const categoryNameMap = Object.fromEntries(categories.map((c) => [c.id, c.name]));
+
+    const container = document.getElementById('usersContainer');
+    const emptyState = document.getElementById('emptyState');
+    const resultCount = document.getElementById('resultCount');
+    const searchInput = document.getElementById('searchInput');
+
+    let allUsers = [];
+    let currentUserId = null;
+    let currentUserRole = null;
+    let currentAccessToken = null;
+
+    // ===== অ্যাকাউন্ট ডিলিট (৭ দিনের অপেক্ষা) =====
+    let pendingDeletions = {}; // user_id -> {requested_at, scheduled_for, reason, ...}
+    let activeFilter = 'all';
+
+    const deletionReasonLabels = {
+      not_using: 'আর ব্যবহার করে না',
+      privacy: 'প্রাইভেসি নিয়ে চিন্তা',
+      notifications: 'বেশি নোটিফিকেশন',
+      found_alternative: 'অন্য সার্ভিস পেয়েছে',
+      other: 'অন্য কারণ / বলেনি',
+    };
+    const deletionKindLabels = { user: 'সাধারণ ইউজার', rider: 'রাইডার', donor: 'ডোনার' };
+    const deletionStatusLabels = {
+      pending: { text: 'অপেক্ষায়', color: '#B36B00', bg: '#FFF3E0' },
+      restored: { text: 'ফিরিয়েছে', color: '#1B7A3C', bg: '#EAFBF0' },
+      completed: { text: 'ডিলিট হয়েছে', color: '#D14343', bg: '#FFF0EA' },
+    };
+
+    function escHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function bnNum(n) {
+      return Number(n || 0).toLocaleString('bn-BD');
+    }
+
+    function daysLeft(iso) {
+      const ms = new Date(iso).getTime() - Date.now();
+      return Math.max(0, Math.ceil(ms / 86400000));
+    }
+
+    function renderDeletionStats(stats) {
+      document.getElementById('delStatPending').textContent = bnNum(stats.pending);
+      document.getElementById('delStatCompleted').textContent = bnNum(stats.completed);
+      document.getElementById('delStatRestored').textContent = bnNum(stats.restored);
+      document.getElementById('delStatLast30').textContent = `গত ৩০ দিনে ${bnNum(stats.last30_requested)} জন ডিলিটের অনুরোধ করেছেন`;
+
+      const reasonsEl = document.getElementById('delStatReasons');
+      const reasons = Object.entries(stats.by_reason || {}).sort((a, b) => b[1] - a[1]);
+      reasonsEl.innerHTML = reasons.length
+        ? reasons
+            .map(
+              ([k, c]) =>
+                `<div style="display:flex;justify-content:space-between;font-size:0.82rem;padding:5px 0;color:#1B2A4A;"><span>${escHtml(deletionReasonLabels[k] || k)}</span><strong>${bnNum(c)}</strong></div>`
+            )
+            .join('')
+        : '<p style="font-size:0.8rem;color:#B0BCCB;">এখনো কোনো তথ্য নেই</p>';
+
+      const recentEl = document.getElementById('delStatRecent');
+      const recent = stats.recent || [];
+      recentEl.innerHTML = recent.length
+        ? recent
+            .map((r) => {
+              const st = deletionStatusLabels[r.status] || deletionStatusLabels.pending;
+              return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:0.78rem;padding:6px 0;border-bottom:1px solid #F4F7FC;">
+                <span style="color:#5A6E85;">${escHtml(formatDate(r.requested_at))} · ${escHtml(deletionKindLabels[r.user_kind] || 'ইউজার')} · ${escHtml(deletionReasonLabels[r.reason] || 'অন্য কারণ / বলেনি')}</span>
+                <span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap;background:${st.bg};color:${st.color};">${st.text}</span>
+              </div>`;
+            })
+            .join('')
+        : '<p style="font-size:0.8rem;color:#B0BCCB;">এখনো কোনো অনুরোধ নেই</p>';
+    }
+
+    async function loadDeletionData() {
+      pendingDeletions = {};
+      // স্ট্যাট ও রিস্টোর শুধু admin-এর জন্য (RPC নিজেও admin চেক করে)
+      if (currentUserRole !== 'admin') return;
+
+      const [statsRes, pendingRes] = await Promise.all([
+        supabase.rpc('admin_deletion_stats'),
+        supabase.rpc('admin_pending_deletions'),
+      ]);
+
+      if (!pendingRes.error) {
+        (pendingRes.data || []).forEach((d) => {
+          if (d.user_id) pendingDeletions[d.user_id] = d;
+        });
+      }
+
+      if (!statsRes.error && statsRes.data) {
+        renderDeletionStats(statsRes.data);
+        document.getElementById('delStats').style.display = '';
+        document.getElementById('filterTabs').style.display = 'flex';
+        const cnt = Object.keys(pendingDeletions).length;
+        document.getElementById('pendingTabCount').textContent = cnt > 0 ? `(${bnNum(cnt)})` : '';
+      }
+    }
+
+    async function restoreDeletedAccount(userId, btnEl) {
+      if (!confirm('এই ইউজারের অ্যাকাউন্ট রিস্টোর করবেন? লিস্টিং আবার চালু হবে ও ডিলিট বাতিল হবে।')) return;
+
+      btnEl.disabled = true;
+      btnEl.textContent = 'রিস্টোর হচ্ছে...';
+
+      const { data, error } = await supabase.rpc('admin_restore_account', { p_user_id: userId });
+
+      if (error || !data || !data.ok) {
+        alert('রিস্টোর ব্যর্থ: ' + ((error && error.message) || 'অজানা ত্রুটি'));
+        btnEl.disabled = false;
+        btnEl.textContent = 'রিস্টোর করুন';
+        return;
+      }
+
+      loadUsers();
+    }
+
+    const roleLabels = {
+      admin: { text: 'অ্যাডমিন', bg: '#FFF0EA', color: '#FF6B35' },
+      moderator: { text: 'মডারেটর', bg: '#EAF2FF', color: '#2563EB' },
+      user: { text: 'ইউজার', bg: '#F4F7FC', color: '#5A6E85' },
+    };
+
+    const listingStatusLabels = {
+      pending: { text: 'রিভিউ বাকি', bg: '#FFF3E0', color: '#B36B00' },
+      active: { text: 'সক্রিয়', color: '#1B7A3C', bg: '#EAFBF0' },
+      rejected: { text: 'বাতিল', color: '#D14343', bg: '#FFF0EA' },
+    };
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    // moderator target user কে ব্লক/আনব্লক করার অনুমতি রাখে কিনা
+    function canManageBlock(targetUser) {
+      if (targetUser.is_club_owner || targetUser.is_shop_owner) return false;
+      if (currentUserRole === 'admin') return true;
+      if (currentUserRole === 'moderator') return targetUser.role === 'user';
+      return false;
+    }
+
+    function renderUser(user) {
+      const role = roleLabels[user.role] || roleLabels.user;
+      const isMe = user.id === currentUserId;
+      const isUniqueAccount = user.is_club_owner || user.is_shop_owner;
+
+      const card = document.createElement('div');
+      card.style.cssText = `background:#fff;border-radius:18px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);${user.is_blocked ? 'opacity:0.6;' : ''}`;
+
+      card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:14px;">
+          ${user.avatar_url
+            ? `<img loading="lazy" decoding="async" src="${escHtml(user.avatar_url)}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;flex-shrink:0;" />`
+            : `<div style="width:52px;height:52px;border-radius:50%;background:#F4F7FC;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#B0BCCB;font-size:1.2rem;"><i class="fas fa-user"></i></div>`
+          }
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <h3 style="font-size:0.95rem;font-weight:700;color:#1B2A4A;">${escHtml(user.full_name || '(নামহীন)')}</h3>
+              <span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:${role.bg};color:${role.color};">${role.text}</span>
+              ${isMe ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#F4F7FC;color:#8FA0BC;">আপনি</span>` : ''}
+              ${user.is_club_owner ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#FF6B35;"><i class="fas fa-users"></i> ক্লাব ওনার</span>` : ''}
+              ${user.is_shop_owner ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#FF6B35;"><i class="fas fa-store"></i> শপ ওনার</span>` : ''}
+              ${user.is_blocked ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF0EA;color:#D14343;">ব্লকড</span>` : ''}
+              ${pendingDeletions[user.id] ? `<span style="font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:#FFF3E0;color:#B36B00;"><i class="fas fa-hourglass-half"></i> ডিলিটের অপেক্ষায় · ${bnNum(daysLeft(pendingDeletions[user.id].scheduled_for))} দিন বাকি</span>` : ''}
+            </div>
+            <p style="font-size:0.82rem;color:#8FA0BC;margin-top:3px;">
+              ${escHtml(user.phone || '')}${user.upazila ? ' · ' + escHtml(user.upazila) : ''}${user.blood_group ? ' · ' + escHtml(user.blood_group) : ''}
+            </p>
+            <button class="listing-count-toggle" style="font-size:0.78rem;color:#5A6E85;margin-top:4px;font-weight:600;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
+              <i class="fas fa-list-check" style="color:#FF6B35;"></i> ${user.listingCount} টি লিস্টিং পোস্ট করেছেন
+              ${user.listingCount > 0 ? '<i class="fas fa-chevron-down" style="font-size:0.65rem;margin-left:4px;"></i>' : ''}
+            </button>
+          </div>
+          <div class="user-action" style="flex-shrink:0;display:flex;flex-direction:column;gap:6px;align-items:flex-end;"></div>
+        </div>
+        <div class="listing-detail-panel" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #F0F3F8;"></div>
+      `;
+
+      const detailPanel = card.querySelector('.listing-detail-panel');
+      const countToggle = card.querySelector('.listing-count-toggle');
+
+      if (user.listingCount > 0) {
+        countToggle.addEventListener('click', () => {
+          const isOpen = detailPanel.style.display !== 'none';
+          detailPanel.style.display = isOpen ? 'none' : 'flex';
+          detailPanel.style.flexDirection = 'column';
+          detailPanel.style.gap = '8px';
+
+          if (!isOpen) {
+            renderListingDetailRows(detailPanel, user);
+          }
+        });
+      }
+
+      const actionWrap = card.querySelector('.user-action');
+
+      // ডিলিটের অপেক্ষায় থাকা ইউজারকে admin রিস্টোর করতে পারে
+      if (pendingDeletions[user.id] && currentUserRole === 'admin') {
+        const restoreBtn = document.createElement('button');
+        restoreBtn.textContent = 'রিস্টোর করুন';
+        restoreBtn.style.cssText = 'background:#EAFBF0;color:#1B7A3C;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+        restoreBtn.addEventListener('click', () => restoreDeletedAccount(user.id, restoreBtn));
+        actionWrap.appendChild(restoreBtn);
+      }
+
+      if (!isMe) {
+        // ===== ক্লাব/শপ ওনার — এখান থেকে কোনো অ্যাকশন না, শুধু নোট =====
+        if (isUniqueAccount) {
+          const label = document.createElement('span');
+          const targetPage = user.is_club_owner ? 'admin/clubs' : 'admin/shops';
+          label.textContent = `${targetPage} থেকে ম্যানেজ করুন`;
+          label.style.cssText = 'font-size:0.72rem;color:#8FA0BC;font-weight:600;padding:8px 4px;white-space:nowrap;text-align:right;';
+          actionWrap.appendChild(label);
+        } else if (canManageBlock(user)) {
+          const toggleBtn = document.createElement('button');
+          let confirming = false;
+
+          function setBtnState() {
+            if (user.is_blocked) {
+              toggleBtn.textContent = 'আনব্লক করুন';
+              toggleBtn.style.cssText = 'background:#EAFBF0;color:#1B7A3C;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+            } else {
+              toggleBtn.textContent = confirming ? 'নিশ্চিত?' : 'ব্লক করুন';
+              toggleBtn.style.cssText = confirming
+                ? 'background:#D14343;color:#fff;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;'
+                : 'background:#FFF0EA;color:#D14343;border:none;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+            }
+          }
+
+          setBtnState();
+
+          toggleBtn.addEventListener('click', () => {
+            if (user.is_blocked) {
+              toggleBlock(user.id, false);
+              return;
+            }
+            if (!confirming) {
+              confirming = true;
+              setBtnState();
+              return;
+            }
+            toggleBlock(user.id, true);
+          });
+
+          actionWrap.appendChild(toggleBtn);
+        } else if (currentUserRole === 'moderator' && (user.role === 'admin' || user.role === 'moderator')) {
+          // moderator কে admin/moderator এর উপর অনুমতি নেই — disabled label
+          const label = document.createElement('span');
+          label.textContent = 'অনুমতি নেই';
+          label.style.cssText = 'font-size:0.76rem;color:#B0BCCB;font-weight:600;padding:8px 12px;white-space:nowrap;';
+          actionWrap.appendChild(label);
+        }
+
+        // ===== স্থায়ী ডিলিট — শুধু admin, শুধু সাধারণ ইউজারের জন্য, ক্লাব/শপ ওনার বাদে =====
+        if (currentUserRole === 'admin' && user.role === 'user' && !isUniqueAccount) {
+          const deleteBtn = document.createElement('button');
+          let deleteConfirming = false;
+
+          function setDeleteBtnState() {
+            deleteBtn.textContent = deleteConfirming ? 'নিশ্চিত? (স্থায়ী)' : 'স্থায়ী ডিলিট';
+            deleteBtn.style.cssText = 'background:transparent;color:#D14343;border:1.5px solid #FFD3D3;padding:8px 14px;border-radius:10px;font-size:0.78rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+          }
+
+          setDeleteBtnState();
+
+          deleteBtn.addEventListener('click', () => {
+            if (!deleteConfirming) {
+              deleteConfirming = true;
+              setDeleteBtnState();
+              return;
+            }
+            permanentlyDeleteUser(user.id, deleteBtn);
+          });
+
+          actionWrap.appendChild(deleteBtn);
+        }
+      }
+
+      return card;
+    }
+
+    function renderListingDetailRows(detailPanel, user) {
+      detailPanel.innerHTML = '';
+      user.userListings.forEach((l) => {
+        const st = listingStatusLabels[l.status] || listingStatusLabels.pending;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;background:#FBFCFE;padding:10px 12px;border-radius:12px;';
+        row.innerHTML = `
+          <div style="min-width:0;">
+            <p style="font-size:0.85rem;font-weight:700;color:#1B2A4A;">${escHtml(l.title || '(শিরোনামহীন)')}</p>
+            <p style="font-size:0.76rem;color:#8FA0BC;">${escHtml(categoryNameMap[l.category] || l.category)} · ${formatDate(l.created_at)}</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span style="font-size:0.7rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;background:${st.bg};color:${st.color};">${st.text}</span>
+            <button class="listing-delete-btn" style="background:#FFF0EA;color:#D14343;border:none;width:28px;height:28px;border-radius:8px;font-size:0.7rem;cursor:pointer;flex-shrink:0;"><i class="fas fa-trash"></i></button>
+          </div>
+        `;
+
+        const delBtn = row.querySelector('.listing-delete-btn');
+        let confirming = false;
+        delBtn.addEventListener('click', () => {
+          if (!confirming) {
+            confirming = true;
+            delBtn.style.background = '#D14343';
+            delBtn.style.color = '#fff';
+            delBtn.innerHTML = '<i class="fas fa-check"></i>';
+            return;
+          }
+          deleteListingFromPanel(l.id, user);
+        });
+
+        detailPanel.appendChild(row);
+      });
+    }
+
+    async function deleteListingFromPanel(listingId, user) {
+      const { error } = await supabase.from('listings').delete().eq('id', listingId);
+      if (error) {
+        alert('লিস্টিং ডিলিট ব্যর্থ: ' + error.message);
+        return;
+      }
+      user.userListings = user.userListings.filter((l) => l.id !== listingId);
+      user.listingCount = user.userListings.length;
+      loadUsers();
+    }
+
+    async function permanentlyDeleteUser(userId, btnEl) {
+      btnEl.textContent = 'ডিলিট হচ্ছে...';
+      btnEl.disabled = true;
+
+      const res = await fetch('/api/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId: userId, accessToken: currentAccessToken }),
+      });
+      const result = await res.json();
+
+      if (!res.ok) {
+        alert('ডিলিট ব্যর্থ: ' + (result.error || 'অজানা ত্রুটি'));
+        btnEl.textContent = 'স্থায়ী ডিলিট';
+        btnEl.disabled = false;
+        return;
+      }
+
+      loadUsers();
+    }
+
+    async function toggleBlock(id, blockedState) {
+      const { error } = await supabase.from('profiles').update({ is_blocked: blockedState }).eq('id', id);
+      if (error) {
+        alert('আপডেট ব্যর্থ: ' + error.message);
+        return;
+      }
+      loadUsers();
+    }
+
+    function renderList(users) {
+      container.innerHTML = '';
+      resultCount.textContent = `মোট ${users.length} জন ইউজার`;
+
+      if (users.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+      emptyState.style.display = 'none';
+      users.forEach((u) => container.appendChild(renderUser(u)));
+    }
+
+    function applySearch() {
+      const q = searchInput.value.trim().toLowerCase();
+      let base = allUsers;
+      if (activeFilter === 'pending') {
+        base = base.filter((u) => pendingDeletions[u.id]);
+      }
+      if (!q) {
+        renderList(base);
+        return;
+      }
+      const qDigits = q.replace(/\D/g, '').replace(/^88/, '');
+      const filtered = base.filter((u) => {
+        if ((u.full_name || '').toLowerCase().includes(q)) return true;
+        const phone = u.phone || '';
+        if (phone.includes(q)) return true;
+        // +৮৮ / স্পেস / ড্যাশ ভিন্ন ফরম্যাটেও নম্বর মেলে
+        return qDigits.length >= 5 && phone.replace(/\D/g, '').replace(/^88/, '').includes(qDigits);
+      });
+      renderList(filtered);
+    }
+
+    async function loadUsers() {
+      container.innerHTML = (window.SFSkeleton ? window.SFSkeleton.html('row', 6) : '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>');
+
+      // Supabase একবারে সর্বোচ্চ ১০০০ রো দেয়, তাই পেজ ধরে ধরে সব আনা হয় (আগে ১০০০-এর পরের ইউজার লিস্টে আসত না)
+      const PAGE = 1000;
+      async function fetchAllRows(buildQuery) {
+        const rows = [];
+        for (let from = 0; ; from += PAGE) {
+          const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+          if (error) return { data: null, error };
+          rows.push(...(data || []));
+          if (!data || data.length < PAGE) break;
+        }
+        return { data: rows, error: null };
+      }
+
+      const [{ data: profiles, error: profileError }, { data: listings, error: listingError }] = await Promise.all([
+        fetchAllRows(() =>
+          supabase.from('profiles').select('*').order('created_at', { ascending: false }).order('id', { ascending: true })
+        ),
+        fetchAllRows(() =>
+          supabase
+            .from('listings')
+            .select('id, user_id, title, category, status, price, upazila, created_at')
+            .neq('category', 'online-shop') // শপ প্রোডাক্ট এখানে গণনা হবে না — ম্যানেজ হয় admin/shops থেকে
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: true })
+        ),
+      ]);
+
+      if (profileError) {
+        container.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${escHtml(profileError.message)}</p>`;
+        return;
+      }
+
+      const countMap = {};
+      const listingsByUser = {};
+      (listings || []).forEach((l) => {
+        countMap[l.user_id] = (countMap[l.user_id] || 0) + 1;
+        if (!listingsByUser[l.user_id]) listingsByUser[l.user_id] = [];
+        listingsByUser[l.user_id].push(l);
+      });
+
+      await loadDeletionData();
+
+      allUsers = (profiles || []).map((p) => ({
+        ...p,
+        listingCount: countMap[p.id] || 0,
+        userListings: listingsByUser[p.id] || [],
+      }));
+      applySearch();
+    }
+
+    searchInput.addEventListener('input', applySearch);
+
+    document.querySelectorAll('.filter-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        activeFilter = btn.getAttribute('data-filter') || 'all';
+        document.querySelectorAll('.filter-tab').forEach((b) => b.classList.toggle('active', b === btn));
+        applySearch();
+      });
+    });
+
+    document.getElementById('delStatsToggle')?.addEventListener('click', () => {
+      const body = document.getElementById('delStatsBody');
+      if (body) body.style.display = body.style.display === 'none' ? 'block' : 'none';
+    });
+
+    onConsoleReady(async (ctx) => {
+      const acc = ctx.access;
+      const ok = ctx.isSuper || !(acc && acc.isStaff) || acc.can('users.view');
+      if (!ok) { document.getElementById('cxDeny').hidden = false; return; }
+      document.getElementById('adminGuardedContent').hidden = false;
+      currentUserId = ctx.profile?.id || null;
+      currentUserRole = ctx.profile?.role || null;
+      currentAccessToken = await getFreshToken();
+      loadUsers();
+    });
+  </script>
+</ConsoleShell>
