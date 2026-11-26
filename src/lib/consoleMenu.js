@@ -13,19 +13,38 @@
 // ============================================================
 
 export const TODO_ITEMS = [
-  { name: 'লিস্টিং অনুমোদন ও এডিট রিভিউ', desc: 'নতুন লিস্টিং ও লিস্টিংয়ের বদল অনুমোদন বা রিজেক্ট', href: '/admin/listings', keys: 'পোস্ট বিজ্ঞাপন' },
-  { name: 'ডেলিভারি হিরো ভেরিফিকেশন', desc: 'নতুন রাইডারের কাগজ দেখে অনুমোদন', href: '/admin/delivery-riders', keys: 'রাইডার আবেদন' },
-  { name: 'লোকাল ড্রাইভার ভেরিফিকেশন', desc: 'সিএনজি/অটো ড্রাইভারের আবেদন যাচাই', href: '/admin/local-drivers', keys: 'সিএনজি অটো' },
-  { name: 'দোকানের আবেদন', desc: 'কুইক ডেলিভারিতে যুক্ত হতে চাওয়া দোকান', href: '/admin/delivery-shop-applications', keys: 'শপ' },
-  { name: 'অগ্রিম পেমেন্ট যাচাই', desc: 'কাস্টমারের বিকাশ/নগদ অগ্রিম মিলিয়ে দেখা', href: '/admin/delivery-market-payments', keys: 'বিকাশ নগদ টাকা' },
-  { name: 'ক্লাব আবেদন', desc: 'নতুন ক্লাব খোলার আবেদন অনুমোদন', href: '/admin/clubs', adminOnly: true, keys: 'সংগঠন' },
-  { name: 'ক্লিনিক প্রতিনিধির আবেদন', desc: 'ক্লিনিকের প্রতিনিধি হতে চাওয়া আবেদন', href: '/admin/clinics', adminOnly: true, keys: 'রিপ্রেজেন্টেটিভ' },
-  { name: 'ডাক্তারের সিরিয়াল রিকোয়েস্ট', desc: 'রোগীর সিরিয়াল অনুরোধ দেখা ও নিশ্চিত করা', href: '/admin/doctors', keys: 'সিরিয়াল' },
-  { name: 'ডেলিভারি ডিসপিউট', desc: 'কাস্টমার বা রাইডারের অভিযোগ মীমাংসা', href: '/admin/delivery-disputes', keys: 'অভিযোগ সমস্যা' },
-  { name: 'লোকাল রাইড রিপোর্ট', desc: 'লোকাল রাইড নিয়ে আসা রিপোর্ট', href: '/admin/local-rides', keys: 'অভিযোগ' },
-  { name: 'রেফারের উইথড্র', desc: 'পয়েন্ট তুলতে চাওয়া ইউজারকে টাকা পাঠানো', href: '/admin/referrals', adminOnly: true, keys: 'পয়েন্ট বিকাশ' },
-  { name: 'স্ক্রেচ কার্ড বিজয়ীর পেমেন্ট', desc: 'বিজয়ীর নম্বর যাচাই ও টাকা পাঠানো', href: '/admin/scratch-cards', adminOnly: true, keys: 'পুরস্কার' },
+  { name: 'লিস্টিং অনুমোদন ও এডিট রিভিউ', desc: 'নতুন লিস্টিং ও লিস্টিংয়ের বদল অনুমোদন বা রিজেক্ট', href: '/admin/listings', keys: 'পোস্ট বিজ্ঞাপন', types: ['listing', 'listing_edit'] },
+  { name: 'লিস্টিং রিপোর্ট', desc: 'ইউজারদের রিপোর্ট করা লিস্টিং দেখা', href: '/admin/listings', keys: 'অভিযোগ', types: ['listing_report'] },
+  { name: 'ডেলিভারি হিরো ভেরিফিকেশন', desc: 'নতুন রাইডারের কাগজ দেখে অনুমোদন', href: '/admin/delivery-riders', keys: 'রাইডার আবেদন', types: ['rider'] },
+  { name: 'লোকাল ড্রাইভার ভেরিফিকেশন', desc: 'সিএনজি/অটো ড্রাইভারের আবেদন যাচাই', href: '/admin/local-drivers', keys: 'সিএনজি অটো', types: ['local_driver'] },
+  { name: 'দোকানের আবেদন', desc: 'কুইক ডেলিভারিতে যুক্ত হতে চাওয়া দোকান', href: '/admin/delivery-shop-applications', keys: 'শপ', types: ['shop_app'] },
+  { name: 'অগ্রিম পেমেন্ট যাচাই', desc: 'কাস্টমারের বিকাশ/নগদ অগ্রিম মিলিয়ে দেখা', href: '/admin/delivery-market-payments', keys: 'বিকাশ নগদ টাকা', types: ['payment'] },
+  { name: 'ক্লাব আবেদন', desc: 'নতুন ক্লাব খোলার আবেদন অনুমোদন', href: '/admin/clubs', adminOnly: true, keys: 'সংগঠন', types: ['club'] },
+  { name: 'ক্লিনিক প্রতিনিধির আবেদন', desc: 'ক্লিনিকের প্রতিনিধি হতে চাওয়া আবেদন', href: '/admin/clinics', adminOnly: true, keys: 'রিপ্রেজেন্টেটিভ', types: ['clinic_rep'] },
+  { name: 'ডাক্তারের সিরিয়াল রিকোয়েস্ট', desc: 'রোগীর সিরিয়াল অনুরোধ দেখা ও নিশ্চিত করা', href: '/admin/doctors', keys: 'সিরিয়াল', types: ['serial'] },
+  { name: 'ডেলিভারি ডিসপিউট', desc: 'কাস্টমার বা রাইডারের অভিযোগ মীমাংসা', href: '/admin/delivery-disputes', keys: 'অভিযোগ সমস্যা', types: ['dispute'] },
+  { name: 'লোকাল রাইড রিপোর্ট', desc: 'লোকাল রাইড নিয়ে আসা রিপোর্ট', href: '/admin/local-rides', keys: 'অভিযোগ', types: ['ride_report'] },
+  { name: 'রেফারের উইথড্র', desc: 'পয়েন্ট তুলতে চাওয়া ইউজারকে টাকা পাঠানো', href: '/admin/referrals', adminOnly: true, keys: 'পয়েন্ট বিকাশ', types: ['withdraw'] },
+  { name: 'স্ক্রেচ কার্ড বিজয়ীর পেমেন্ট', desc: 'বিজয়ীর নম্বর যাচাই ও টাকা পাঠানো', href: '/admin/scratch-cards', adminOnly: true, keys: 'পুরস্কার', types: ['scratch'] },
 ];
+
+// admin_todo() RPC-র ধরন → দেখানো নাম ও লিংক
+export const TODO_TYPE = {
+  listing: { name: 'নতুন লিস্টিং', href: '/admin/listings' },
+  listing_edit: { name: 'লিস্টিং এডিট', href: '/admin/listings' },
+  listing_report: { name: 'লিস্টিং রিপোর্ট', href: '/admin/listings' },
+  rider: { name: 'রাইডার আবেদন', href: '/admin/delivery-riders' },
+  local_driver: { name: 'লোকাল ড্রাইভার', href: '/admin/local-drivers' },
+  ride_report: { name: 'রাইড রিপোর্ট', href: '/admin/local-rides' },
+  shop_app: { name: 'দোকানের আবেদন', href: '/admin/delivery-shop-applications' },
+  payment: { name: 'অগ্রিম পেমেন্ট', href: '/admin/delivery-market-payments' },
+  dispute: { name: 'ডিসপিউট', href: '/admin/delivery-disputes' },
+  serial: { name: 'সিরিয়াল রিকোয়েস্ট', href: '/admin/doctors' },
+  club: { name: 'ক্লাব আবেদন', href: '/admin/clubs' },
+  clinic_rep: { name: 'প্রতিনিধি আবেদন', href: '/admin/clinics' },
+  withdraw: { name: 'রেফার উইথড্র', href: '/admin/referrals' },
+  scratch: { name: 'স্ক্রেচ কার্ড পেমেন্ট', href: '/admin/scratch-cards' },
+};
 
 export const MENU = [
   {

@@ -1,26 +1,138 @@
 ---
 // ============================================================
-// /console/todo — করণীয়: সব অনুমোদন/যাচাই/অভিযোগ/পেমেন্ট এক তালিকায়
-// এই ধাপে: তালিকা ও লিংক (পুরনো প্যানেলে খোলে)। পরের ধাপে সংখ্যা ও একটানা তালিকা।
+// /console/todo — করণীয়: সব অনুমোদন/যাচাই/অভিযোগ/পেমেন্ট
+// ডাটা: admin_todo() (সংখ্যা + এক তালিকা, পুরনোটা আগে; স্টাফ শুধু নিজের অনুমতির ধরন)।
+// কাজ করতে এখনো পুরনো প্যানেলের পেজে যায় (consoleMenu TODO_ITEMS / TODO_TYPE)।
+// ২৪ ঘণ্টার বেশি অপেক্ষা = লাল। ৬০ সেকেন্ডে রিফ্রেশ।
 // ============================================================
 export const prerender = false;
 import ConsoleShell from '../../components/console/ConsoleShell.astro';
 ---
 
 <ConsoleShell title="করণীয়" active="todo">
-  <div class="cs-pad cm-page">
-    <h1 class="cs-h cm-title">করণীয়</h1>
-    <p class="cs-muted" style="margin:0">অপেক্ষায় থাকা অনুমোদন, যাচাই, অভিযোগ ও পেমেন্ট</p>
-    <div class="cm-body cs-card" id="tdList"></div>
+  <div class="cs-pad cm-page td-page">
+    <div>
+      <h1 class="cs-h cm-title">করণীয়</h1>
+      <p class="cs-muted td-sub" id="tdSub">অপেক্ষায় থাকা অনুমোদন, যাচাই, অভিযোগ ও পেমেন্ট</p>
+    </div>
+
+    <section class="cm-sec">
+      <h2 class="cm-group">অপেক্ষার তালিকা · পুরনোটা আগে</h2>
+      <div class="cm-body" id="tdQueue"></div>
+    </section>
+
+    <section class="cm-sec">
+      <h2 class="cm-group">ধরন অনুযায়ী</h2>
+      <div class="cm-body" id="tdTypes"></div>
+    </section>
   </div>
 </ConsoleShell>
 
+<style is:global>
+  .td-sub { margin: 2px 0 0; }
+  .td-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; min-height: 56px; box-sizing: border-box; }
+  .td-row + .td-row { border-top: 1px solid #EFEBE5; }
+  a.td-row:hover { background: #FBFAF8; }
+  .td-row-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .td-row-t b { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+  .td-row-t small { font-size: 12.5px; color: #5F6B7E; }
+  .td-row-t small.late { color: #B23A0B; font-weight: 600; }
+  .td-type { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: #EEF1F5; color: #3D4A60; white-space: nowrap; }
+  .td-n { font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-weight: 700; font-size: 20px; color: #9AA3B2; min-width: 28px; text-align: right; }
+  .td-row.hot .td-n { color: #C2410C; }
+  .td-empty { padding: 26px 16px; text-align: center; display: flex; flex-direction: column; gap: 4px; }
+  .td-empty b { font-size: 15px; }
+</style>
+
 <script>
-  import { TODO_ITEMS, visibleItem, itemEl } from '../../lib/consoleMenu.js';
-  import { onConsoleReady, canOpenAdminPath } from '../../lib/consoleApp.js';
+  import { supabase } from '../../lib/supabase.js';
+  import { TODO_ITEMS, TODO_TYPE, visibleItem } from '../../lib/consoleMenu.js';
+  import { onConsoleReady, canOpenAdminPath, bn, agoLabel } from '../../lib/consoleApp.js';
+
+  const $ = (id) => document.getElementById(id);
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function waitLabel(at) {
+    const h = (Date.now() - new Date(at).getTime()) / 3600000;
+    if (h < 1) return { text: 'এইমাত্র এসেছে', late: false };
+    if (h < 24) return { text: bn(Math.floor(h)) + ' ঘণ্টা ধরে অপেক্ষায়', late: false };
+    return { text: bn(Math.floor(h / 24)) + ' দিন ধরে অপেক্ষায়', late: true };
+  }
+
+  function renderQueue(items) {
+    const box = $('tdQueue');
+    box.textContent = '';
+    if (!items.length) {
+      const e = el('div', 'td-empty');
+      e.appendChild(el('b', null, 'সব কাজ শেষ'));
+      e.appendChild(el('span', 'cs-muted', 'এখন কিছু অপেক্ষায় নেই।'));
+      box.appendChild(e);
+      return;
+    }
+    items.forEach((it) => {
+      const meta = TODO_TYPE[it.type] || { name: it.type, href: '/console/menu' };
+      const a = el('a', 'td-row');
+      a.href = meta.href;
+      const t = el('span', 'td-row-t');
+      t.appendChild(el('b', null, it.label || meta.name));
+      const w = waitLabel(it.at);
+      t.appendChild(el('small', w.late ? 'late' : null, w.text));
+      a.appendChild(t);
+      a.appendChild(el('span', 'td-type', meta.name));
+      box.appendChild(a);
+    });
+  }
+
+  function renderTypes(counts, data) {
+    const box = $('tdTypes');
+    box.textContent = '';
+    const rows = TODO_ITEMS
+      .filter((it) => visibleItem(it, data, canOpenAdminPath))
+      .map((it) => ({ it, n: (it.types || []).reduce((s, k) => s + (Number(counts[k]) || 0), 0) }))
+      .sort((x, y) => (y.n > 0) - (x.n > 0));
+    rows.forEach(({ it, n }) => {
+      const a = el('a', 'td-row' + (n > 0 ? ' hot' : ''));
+      a.href = it.href;
+      const t = el('span', 'td-row-t');
+      t.appendChild(el('b', null, it.name));
+      t.appendChild(el('small', null, it.desc));
+      a.appendChild(t);
+      a.appendChild(el('span', 'td-n', bn(n)));
+      box.appendChild(a);
+    });
+    return rows.reduce((s, r) => s + r.n, 0);
+  }
+
+  async function load(data, first) {
+    if (first) {
+      $('tdQueue').innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 3) : '';
+      $('tdTypes').innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 4) : '';
+    }
+    const { data: res, error } = await supabase.rpc('admin_todo', { p_limit: 80 });
+    if (error || !res) {
+      if (first) {
+        $('tdQueue').textContent = '';
+        const e = el('div', 'td-empty');
+        e.appendChild(el('b', null, 'লোড করা যায়নি'));
+        e.appendChild(el('span', 'cs-muted', 'একটু পরে আবার চেষ্টা করুন।'));
+        $('tdQueue').appendChild(e);
+        $('tdTypes').textContent = '';
+      }
+      return;
+    }
+    renderQueue(res.items || []);
+    const total = renderTypes(res.counts || {}, data);
+    $('tdSub').textContent = total ? bn(total) + 'টা কাজ অপেক্ষায় · ' + agoLabel(res.generated_at) + ' আপডেট' : 'এখন কিছু অপেক্ষায় নেই';
+  }
 
   onConsoleReady((data) => {
-    const box = document.getElementById('tdList');
-    TODO_ITEMS.filter((it) => visibleItem(it, data, canOpenAdminPath)).forEach((it) => box.appendChild(itemEl(it)));
+    load(data, true);
+    setInterval(() => { if (document.visibilityState === 'visible') load(data, false); }, 60000);
   });
 </script>

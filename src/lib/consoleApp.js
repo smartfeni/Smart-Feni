@@ -96,6 +96,22 @@ export async function initConsole() {
 
   show('csContent');
   waiters.splice(0).forEach((cb) => { try { cb(readyData); } catch (e) { console.error(e); } });
+
+  refreshTodoBadge();
+  setInterval(() => { if (document.visibilityState === 'visible') refreshTodoBadge(); }, 120000);
+}
+
+// নিচের "করণীয়" ট্যাবে মোট অপেক্ষার সংখ্যা (admin_todo, অনুমতি অনুযায়ী)
+async function refreshTodoBadge() {
+  try {
+    const { data } = await supabase.rpc('admin_todo', { p_limit: 1 });
+    const counts = (data && data.counts) || {};
+    const total = Object.values(counts).reduce((s, v) => s + (Number(v) || 0), 0);
+    document.querySelectorAll('[data-cs-todo-badge]').forEach((b) => {
+      b.textContent = total > 99 ? '৯৯+' : bn(total);
+      b.hidden = total === 0;
+    });
+  } catch (_) { /* উপেক্ষা */ }
 }
 
 // ---------- তারিখ/সময় ----------
