@@ -27,7 +27,8 @@ function phoneToEmail(phone) {
 // next শুধু /pro, /pro/..., /pro?... বা /pro#... হলে মানা হবে; নইলে /pro
 export function safeNext(next) {
   if (typeof next !== 'string') return '/pro';
-  if (!/^\/pro(?:[\/?#]|$)/.test(next)) return '/pro';
+  // /console = নতুন অ্যাডমিন অ্যাপ (লগইন পেজ শেয়ার করে)
+  if (!/^\/(?:pro|console)(?:[\/?#]|$)/.test(next)) return '/pro';
   if (next.indexOf('\\') !== -1 || next.indexOf('//') !== -1) return '/pro';
   return next;
 }

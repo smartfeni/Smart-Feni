@@ -1,0 +1,129 @@
+---
+// ============================================================
+// /console — নতুন অ্যাডমিন অ্যাপের হোম
+// এই ধাপে: দ্রুত যাওয়ার পেজ + সাম্প্রতিক কাজ (শুধু সুপার অ্যাডমিন)।
+// KPI ও "করণীয়" আসবে admin_dashboard_summary() RPC-র পরের ধাপে।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="হোম" active="home">
+  <div class="cs-pad hm-page">
+    <div class="hm-head">
+      <span class="cs-muted" id="hmDate"></span>
+      <h1 class="cs-h">স্বাগতম</h1>
+    </div>
+
+    <section>
+      <div class="cs-sec-head"><h2 class="cs-h">দ্রুত যান</h2><a href="/console/pages" class="hm-link">সব পেজ</a></div>
+      <div class="hm-quick" id="hmQuick"></div>
+    </section>
+
+    <section id="hmRecentSec" hidden>
+      <div class="cs-sec-head">
+        <h2 class="cs-h">সাম্প্রতিক কাজ</h2>
+        <span class="hm-right">
+          <span class="cs-muted hm-lock"><svg viewBox="0 0 24 24" aria-hidden="true" style="width:12px;height:12px"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>শুধু সুপার অ্যাডমিন</span>
+          <a href="/console/activity" class="hm-link">সব দেখুন</a>
+        </span>
+      </div>
+      <div class="cs-card" id="hmRecent"></div>
+    </section>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .hm-page { display: flex; flex-direction: column; gap: 26px; }
+  .hm-head { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+  .hm-head h1 { margin: 0; font-size: 26px; }
+  .hm-link { font-size: 13px; color: #C2410C !important; font-weight: 600; padding: 6px 0; }
+  .hm-right { display: flex; align-items: center; gap: 10px; }
+  .hm-lock { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .hm-quick { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(150px, 46%), 1fr)); gap: 10px; }
+  .hm-q { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 14px; min-height: 84px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; }
+  .hm-q:hover { border-color: #D8D1C6; }
+  .hm-q i { color: #3D4A60; font-size: 17px; }
+  .hm-q span { font-weight: 600; font-size: 14.5px; }
+  .hm-r { display: flex; gap: 12px; padding: 13px 16px; }
+  .hm-r + .hm-r { border-top: 1px solid #EFEBE5; }
+  .hm-r .al-ini { width: 32px; height: 32px; border-radius: 50%; background: #EEF1F5; font-weight: 600; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .hm-r-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .hm-r-text > span:first-child { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+  .hm-r-text b { font-weight: 600; }
+  .hm-r-sub { font-size: 12.5px; color: #5F6B7E; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hm-empty { padding: 22px 16px; text-align: center; color: #5F6B7E; font-size: 14px; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { ADMIN_PAGES } from '../../lib/adminPages.js';
+  import { onConsoleReady, canOpenAdminPath, agoLabel, ENTITY_BN, ACTION_META } from '../../lib/consoleApp.js';
+
+  // ঘনঘন দরকারি পেজ (অনুমতি থাকলে দেখায়)
+  const QUICK = ['/admin/delivery-orders', '/admin/manual-orders', '/admin/listings', '/admin/users',
+    '/admin/delivery-shops', '/admin/doctors', '/admin/notifications', '/admin/errors'];
+
+  document.getElementById('hmDate').textContent =
+    new Date().toLocaleDateString('bn-BD', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function renderQuick(data) {
+    const box = document.getElementById('hmQuick');
+    QUICK.map((h) => ADMIN_PAGES.find((p) => p.href === h))
+      .filter((p) => p && canOpenAdminPath(p.href, data, p.adminOnly))
+      .forEach((p) => {
+        const a = el('a', 'hm-q');
+        a.href = p.href;
+        const i = el('i', 'fas ' + p.icon);
+        i.setAttribute('aria-hidden', 'true');
+        a.appendChild(i);
+        a.appendChild(el('span', null, p.short || p.name));
+        box.appendChild(a);
+      });
+  }
+
+  async function renderRecent() {
+    document.getElementById('hmRecentSec').hidden = false;
+    const box = document.getElementById('hmRecent');
+    box.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 3) : '';
+    const { data, error } = await supabase
+      .from('admin_audit_log')
+      .select('id, created_at, actor_name, action, entity, entity_label')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    box.textContent = '';
+    if (error || !data || !data.length) {
+      box.appendChild(el('div', 'hm-empty', error ? 'লোড করা যায়নি' : 'এখনো কোনো কাজ লগ হয়নি'));
+      return;
+    }
+    data.forEach((r) => {
+      const meta = ACTION_META[r.action] || ACTION_META.other;
+      const row = el('div', 'hm-r');
+      row.appendChild(el('span', 'al-ini', (r.actor_name || '?').trim().charAt(0)));
+      const t = el('div', 'hm-r-text');
+      const line = el('span');
+      line.appendChild(el('b', null, r.actor_name || 'অজানা'));
+      line.appendChild(document.createTextNode(' ' + (ENTITY_BN[r.entity] || r.entity) + ' ' + meta.verb));
+      t.appendChild(line);
+      t.appendChild(el('span', 'hm-r-sub', [r.entity_label, agoLabel(r.created_at)].filter(Boolean).join(' · ')));
+      row.appendChild(t);
+      const tag = el('span', 'cs-tag', meta.tag);
+      tag.style.background = meta.bg;
+      tag.style.color = meta.fg;
+      row.appendChild(tag);
+      box.appendChild(row);
+    });
+  }
+
+  onConsoleReady((data) => {
+    renderQuick(data);
+    if (data.isSuper) renderRecent();
+  });
+</script>

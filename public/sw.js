@@ -47,7 +47,7 @@ function isProPage(pathname) {
 // এই পাথের নেভিগেশন কখনো ক্যাশ হবে না বা ক্যাশ থেকে ফেরত যাবে না —
 // সংবেদনশীল/ব্যক্তিগত/লেনদেন-সম্পর্কিত পেজ
 const NEVER_CACHE_PATH_PREFIXES = [
-  "/api/", "/admin", "/cart", "/checkout", "/my-listings", "/my-orders",
+  "/api/", "/admin", "/console", "/cart", "/checkout", "/my-listings", "/my-orders",
   "/my-shop", "/my-club", "/profile", "/reset-password", "/become-a-shop-owner",
   "/services/blood/",
 ];

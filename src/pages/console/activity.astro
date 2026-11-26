@@ -1,0 +1,275 @@
+---
+// ============================================================
+// /console/activity — অ্যাক্টিভিটি লগ (শুধু সুপার অ্যাডমিন)
+// ডাটা: public.admin_audit_log (RLS: শুধু role=admin পড়তে পারে; কেউ বদলাতে পারে না)।
+// ফিল্টার: কাজের ধরন, মানুষ, সময়, লেখা খোঁজ। ৩০টা করে, "আরও দেখুন"।
+// সব লেখা DOM/textContent দিয়ে বসানো (ইউজারের নাম/শিরোনাম এস্কেপ ঝুঁকি নেই)।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="অ্যাক্টিভিটি লগ" active="activity">
+  <div class="cs-pad al-page">
+    <div class="al-head">
+      <h1 class="cs-h">অ্যাক্টিভিটি লগ</h1>
+      <p class="cs-muted al-lock">
+        <svg viewBox="0 0 24 24" aria-hidden="true" style="width:13px;height:13px"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        শুধু সুপার অ্যাডমিন · বদলানো বা মোছা যায় না
+      </p>
+    </div>
+
+    <div id="alNoAccess" class="cs-card al-empty" hidden>
+      <b>এই পেজ শুধু সুপার অ্যাডমিনের জন্য</b>
+      <span class="cs-muted">অ্যাক্টিভিটি লগ দেখার অনুমতি আপনার নেই।</span>
+    </div>
+
+    <div id="alBody" hidden>
+      <form id="alSearch" class="al-search" role="search">
+        <label class="al-input">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span class="al-sr">লগে খুঁজুন</span>
+          <input type="search" id="alQ" placeholder="লিস্টিং, শপ, ইউজারের নাম খুঁজুন" enterkeyhint="search" maxlength="60" />
+        </label>
+      </form>
+
+      <div class="al-chips" id="alChips" role="group" aria-label="কাজের ধরন">
+        <button type="button" data-a="" aria-pressed="true">সব</button>
+        <button type="button" data-a="approve" aria-pressed="false">অনুমোদন</button>
+        <button type="button" data-a="reject" aria-pressed="false">রিজেক্ট</button>
+        <button type="button" data-a="edit" aria-pressed="false">এডিট</button>
+        <button type="button" data-a="create" aria-pressed="false">তৈরি</button>
+        <button type="button" data-a="delete" aria-pressed="false">ডিলিট</button>
+        <button type="button" data-a="role" aria-pressed="false">রোল</button>
+      </div>
+
+      <div class="al-selects">
+        <label class="al-sel"><span class="al-sr">মানুষ</span>
+          <select id="alActor"><option value="">সব মানুষ</option></select>
+        </label>
+        <label class="al-sel"><span class="al-sr">সময়</span>
+          <select id="alRange">
+            <option value="1">আজ</option>
+            <option value="7" selected>শেষ ৭ দিন</option>
+            <option value="30">শেষ ৩০ দিন</option>
+            <option value="365">শেষ ১ বছর</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="alList" class="al-list" aria-live="polite"></div>
+      <button type="button" id="alMore" class="al-more" hidden>আরও দেখুন</button>
+    </div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .al-page { display: flex; flex-direction: column; gap: 14px; }
+  .al-head h1 { margin: 6px 0 2px; font-size: 26px; }
+  .al-lock { display: flex; align-items: center; gap: 5px; margin: 0; }
+  .al-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+  .al-search { margin: 0; }
+  .al-input { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 14px; background: #fff; border: 1px solid #E7E2DA; border-radius: 12px; max-width: 560px; }
+  .al-input svg { width: 18px; height: 18px; color: #5F6B7E; }
+  .al-input input { border: 0; outline: 0; background: transparent; flex: 1; min-width: 0; font: inherit; font-size: 14.5px; color: inherit; }
+  .al-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .al-chips button { flex-shrink: 0; height: 38px; padding: 0 15px; border-radius: 999px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+  .al-chips button[aria-pressed="true"] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .al-selects { display: flex; gap: 8px; max-width: 560px; }
+  .al-sel { flex: 1; min-width: 0; }
+  .al-sel select { width: 100%; height: 42px; border-radius: 10px; border: 1px solid #E7E2DA; background: #fff; padding: 0 10px; font: inherit; font-size: 13.5px; color: #1B2A4A; }
+  .al-list { display: flex; flex-direction: column; gap: 18px; }
+  .al-day h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #5F6B7E; letter-spacing: .02em; }
+  .al-row { display: flex; flex-direction: column; gap: 8px; padding: 13px 16px; }
+  .al-row + .al-row { border-top: 1px solid #EFEBE5; }
+  .al-row-top { display: flex; gap: 12px; }
+  .al-ini { width: 32px; height: 32px; border-radius: 50%; background: #EEF1F5; font-weight: 600; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .al-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .al-text > span:first-child { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+  .al-text b { font-weight: 600; }
+  .al-sub { font-size: 12.5px; color: #5F6B7E; overflow-wrap: anywhere; }
+  .al-diff { margin-left: 44px; background: #F7F5F2; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+  .al-diff div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; overflow-wrap: anywhere; }
+  .al-diff .f { color: #5F6B7E; }
+  .al-diff .o { text-decoration: line-through; color: #7A8597; }
+  .al-diff .n { font-weight: 600; }
+  .al-empty { padding: 26px 20px; display: flex; flex-direction: column; gap: 4px; text-align: center; }
+  .al-more { align-self: center; min-height: 44px; padding: 0 22px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; font: inherit; font-weight: 600; color: #1B2A4A; cursor: pointer; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, dayLabel, timeLabel, ENTITY_BN, ACTION_META, diffRows } from '../../lib/consoleApp.js';
+
+  const PAGE = 30;
+  const $ = (id) => document.getElementById(id);
+  const state = { action: '', actor: '', range: 7, q: '', offset: 0, loading: false };
+  let lastDay = null;
+  let lastDayBox = null;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function rowEl(r) {
+    const meta = ACTION_META[r.action] || ACTION_META.other;
+    const row = el('div', 'al-row');
+    const top = el('div', 'al-row-top');
+    top.appendChild(el('span', 'al-ini', (r.actor_name || '?').trim().charAt(0)));
+
+    const text = el('div', 'al-text');
+    const line = el('span');
+    line.appendChild(el('b', null, r.actor_name || 'অজানা'));
+    const what = ENTITY_BN[r.entity] || r.entity;
+    line.appendChild(document.createTextNode(' ' + what + ' ' + meta.verb));
+    text.appendChild(line);
+    const sub = [r.entity_label, timeLabel(r.created_at)].filter(Boolean).join(' · ');
+    text.appendChild(el('span', 'al-sub', sub));
+    top.appendChild(text);
+
+    const tag = el('span', 'cs-tag', meta.tag);
+    tag.style.background = meta.bg;
+    tag.style.color = meta.fg;
+    top.appendChild(tag);
+    row.appendChild(top);
+
+    const diffs = diffRows(r.changes).slice(0, 8);
+    if (diffs.length) {
+      const box = el('div', 'al-diff');
+      diffs.forEach((d) => {
+        const line2 = el('div');
+        line2.appendChild(el('span', 'f', d.field));
+        if ('value' in d) {
+          line2.appendChild(el('span', 'n', d.value));
+        } else {
+          line2.appendChild(el('span', 'o', d.from));
+          line2.appendChild(el('span', 'f', '→'));
+          line2.appendChild(el('span', 'n', d.to));
+        }
+        box.appendChild(line2);
+      });
+      row.appendChild(box);
+    }
+    return row;
+  }
+
+  function appendRows(rows) {
+    const list = $('alList');
+    rows.forEach((r) => {
+      const label = dayLabel(r.created_at);
+      if (label !== lastDay) {
+        lastDay = label;
+        const sec = el('section', 'al-day');
+        sec.appendChild(el('h2', null, label));
+        lastDayBox = el('div', 'cs-card');
+        sec.appendChild(lastDayBox);
+        list.appendChild(sec);
+      }
+      lastDayBox.appendChild(rowEl(r));
+    });
+  }
+
+  async function load(reset) {
+    if (state.loading) return;
+    state.loading = true;
+    const list = $('alList');
+    const more = $('alMore');
+    if (reset) {
+      state.offset = 0;
+      lastDay = null;
+      lastDayBox = null;
+      list.textContent = '';
+      list.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 6) : '';
+      more.hidden = true;
+    } else {
+      more.disabled = true;
+      more.textContent = 'লোড হচ্ছে…';
+    }
+
+    const since = new Date(Date.now() - state.range * 86400000).toISOString();
+    let query = supabase
+      .from('admin_audit_log')
+      .select('id, created_at, actor_name, action, entity, entity_label, changes')
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .range(state.offset, state.offset + PAGE - 1);
+    if (state.action) query = query.eq('action', state.action);
+    if (state.actor) query = query.eq('actor_id', state.actor);
+    if (state.q) query = query.ilike('entity_label', '%' + state.q + '%');
+
+    const { data, error } = await query;
+    state.loading = false;
+    more.disabled = false;
+    more.textContent = 'আরও দেখুন';
+    if (reset) list.textContent = '';
+
+    if (error) {
+      list.textContent = '';
+      const box = el('div', 'cs-card al-empty');
+      box.appendChild(el('b', null, 'লগ লোড করা যায়নি'));
+      box.appendChild(el('span', 'cs-muted', 'একটু পরে আবার চেষ্টা করুন।'));
+      list.appendChild(box);
+      return;
+    }
+
+    const rows = data || [];
+    if (reset && rows.length === 0) {
+      const box = el('div', 'cs-card al-empty');
+      box.appendChild(el('b', null, 'এই ফিল্টারে কোনো কাজ নেই'));
+      box.appendChild(el('span', 'cs-muted', 'সময় বা ধরন বদলে দেখুন।'));
+      list.appendChild(box);
+    }
+    appendRows(rows);
+    state.offset += rows.length;
+    more.hidden = rows.length < PAGE;
+  }
+
+  async function loadActors() {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, full_name, role')
+      .in('role', ['admin', 'moderator'])
+      .order('full_name');
+    const sel = $('alActor');
+    (data || []).forEach((p) => {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = (p.full_name || 'নাম নেই') + (p.role === 'admin' ? ' (সুপার অ্যাডমিন)' : '');
+      sel.appendChild(o);
+    });
+  }
+
+  onConsoleReady(({ isSuper }) => {
+    if (!isSuper) {
+      $('alNoAccess').hidden = false;
+      return;
+    }
+    $('alBody').hidden = false;
+
+    $('alChips').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-a]');
+      if (!b) return;
+      $('alChips').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      state.action = b.dataset.a;
+      load(true);
+    });
+    $('alActor').addEventListener('change', (e) => { state.actor = e.target.value; load(true); });
+    $('alRange').addEventListener('change', (e) => { state.range = Number(e.target.value) || 7; load(true); });
+    $('alSearch').addEventListener('submit', (e) => {
+      e.preventDefault();
+      state.q = $('alQ').value.replace(/[%_,()\\]/g, ' ').trim().slice(0, 60);
+      load(true);
+    });
+    $('alQ').addEventListener('search', () => {
+      if (!$('alQ').value && state.q) { state.q = ''; load(true); }
+    });
+    $('alMore').addEventListener('click', () => load(false));
+
+    loadActors();
+    load(true);
+  });
+
+</script>

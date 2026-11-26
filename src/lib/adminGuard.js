@@ -78,7 +78,8 @@ function openAccess(role) {
   };
 }
 
-async function loadAccess(role) {
+// /console (নতুন অ্যাডমিন অ্যাপ) থেকেও ব্যবহার হয়
+export async function loadAccess(role) {
   const open = openAccess(role);
   if (role === 'admin') return open;
   try {
