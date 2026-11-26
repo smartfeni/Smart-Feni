@@ -164,12 +164,13 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
       .eq('id', id).maybeSingle();
     if (error || !r) { showEmpty(error ? 'লোড করা যায়নি' : 'রাইডার পাওয়া যায়নি'); return; }
     const canOrders = canOpenAdminPath('/admin/delivery-orders', ctx);
-    const [idUrl, ordRes, reviewer] = await Promise.all([
+    const [idUrl, ordRes, reviewer, wal] = await Promise.all([
       signedRiderDoc(r.id_card_photo_url),
       canOrders
         ? supabase.from('delivery_requests').select('id, order_no, status, eff_status:status, publish_status, price, created_at, drop_union, upazila').eq('accepted_rider_id', r.id).order('created_at', { ascending: false }).limit(8)
         : Promise.resolve({ data: null }),
       r.reviewed_by ? supabase.from('profiles').select('full_name').eq('id', r.reviewed_by).maybeSingle() : Promise.resolve({ data: null }),
+      canOrders ? supabase.from('rider_wallet_entries').select('amount').eq('rider_id', r.id) : Promise.resolve({ data: null }),
     ]);
     const p = r.profiles || {};
     const photo = publicPhoto(r.photo_url);
@@ -204,6 +205,15 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
       st('রেটিং', Number(r.avg_rating) > 0 ? '★ ' + bn(Number(r.avg_rating).toFixed(1)) : '—');
       st('মোট আয়', money(r.total_earned || 0));
       body.appendChild(stats);
+    }
+    if (wal.data) {
+      const bal = wal.data.reduce((a, x) => a + Number(x.amount || 0), 0);
+      const wa = el('a', 'rv-stat');
+      wa.href = '/console/wallets?tab=riders&rider=' + encodeURIComponent(r.id);
+      wa.style.cssText = 'text-decoration:none;color:inherit;';
+      wa.append(el('small', null, 'ওয়ালেট · ' + (bal < 0 ? 'কোম্পানিকে দেবেন' : bal > 0 ? 'কোম্পানি দেবে' : 'সমান') + ' →'), el('b', null, money(Math.abs(bal))));
+      if (bal < 0) wa.lastChild.style.color = '#B3261E';
+      body.appendChild(wa);
     }
 
     // ---- সুইচ (শুধু চালু রাইডার) ----

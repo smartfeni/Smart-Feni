@@ -1,0 +1,374 @@
+---
+// ============================================================
+// /console/wallets — রাইডার ওয়ালেট (নতুন অ্যাপ, ধাপ ৭ ওয়ালেট)
+// নিয়ম (SF, ২৬ নভে ২০২৬): ব্যালেন্স = rider_wallet_entries-এর যোগফল
+//   + = কোম্পানি রাইডারকে দেবে, − = রাইডার কোম্পানিকে দেবে। লাইন বদল/মোছা যায় না।
+// ট্যাব:
+//   অনুরোধ  — rider_wallet_requests (অগ্রিম/জমা/তোলা) → RPC admin_wallet_decide(p_id, p_approve, p_trx_id, p_note)
+//             অগ্রিম ও তোলায় অনুমোদনে নিজের পাঠানো TrxID লাগে (নগদ হাতে দিলে লাগে না)
+//   রাইডার  — RPC admin_rider_wallets() (সবচেয়ে বেশি দেনা আগে); চাপলে খাতা (rider_wallet_entries)
+//             সুপার অ্যাডমিন: সংশোধনী লাইন → RPC admin_wallet_adjust (কারণ বাধ্যতামূলক)
+// অনুমতি: দেখা delivery_orders.view, কাজ delivery_orders.manage (RPC-তেও চেক)
+// URL: ?tab=requests|riders&rider=<id>
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="রাইডার ওয়ালেট" active="menu">
+  <div class="cs-pad cm-page wl-page">
+    <div>
+      <h1 class="cs-h cm-title">রাইডার ওয়ালেট</h1>
+      <p class="cs-muted wl-sub" id="wlSub">অগ্রিম, জমা ও তোলার অনুরোধ, আর প্রতিটা রাইডারের হিসাব</p>
+    </div>
+    <div class="wl-deny" id="wlDeny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+    <div class="wl-main" id="wlMain" hidden>
+      <div class="wl-tabs" id="wlTabs" role="tablist" aria-label="ওয়ালেট"></div>
+      <div class="wl-list" id="wlList"></div>
+    </div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .wl-sub { margin: 2px 0 0; }
+  .wl-main { display: flex; flex-direction: column; gap: 10px; }
+  .wl-tabs { display: grid; grid-template-columns: 1fr 1fr; background: #EFEBE5; border-radius: 14px; padding: 4px; gap: 4px; }
+  .wl-tabs button { height: 42px; border: 0; border-radius: 11px; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: #3D4A60; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .wl-tabs button[aria-selected="true"] { background: #fff; color: #1B2A4A; box-shadow: 0 1px 2px rgba(27,42,74,.12); }
+  .wl-tabs i { font-style: normal; font-size: 12px; min-width: 20px; height: 20px; line-height: 20px; border-radius: 999px; background: #C2410C; color: #fff; padding: 0 6px; box-sizing: border-box; }
+  .wl-list { display: flex; flex-direction: column; gap: 10px; }
+  .wl-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .wl-kpi { background: #fff; border: 1px solid #E7E2DA; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+  .wl-kpi small { font-size: 12px; color: #5F6B7E; }
+  .wl-kpi b { font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-size: 20px; }
+  .wl-kpi.red b { color: #B3261E; }
+  .wl-kpi.green b { color: #17663F; }
+  .wl-h { margin: 6px 2px 0; font-size: 13px; font-weight: 600; color: #5F6B7E; }
+  .wl-req { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 13px 15px; display: flex; flex-direction: column; gap: 8px; }
+  .wl-req.pending { border-color: #F2B8A0; box-shadow: inset 3px 0 0 #C2410C; }
+  .wl-req-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .wl-kind { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px; }
+  .wl-kind.advance { background: #EAF1FF; color: #1D4ED8; }
+  .wl-kind.deposit { background: #E6F6EE; color: #17663F; }
+  .wl-kind.withdraw { background: #FFF4E0; color: #8A4B00; }
+  .wl-amt { font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-size: 20px; font-weight: 700; }
+  .wl-when { margin-left: auto; font-size: 12.5px; color: #5F6B7E; }
+  .wl-who { font-size: 14.5px; font-weight: 600; }
+  .wl-who a { color: #1B2A4A; }
+  .wl-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13.5px; margin: 0; }
+  .wl-kv dt { color: #5F6B7E; }
+  .wl-kv dd { margin: 0; overflow-wrap: anywhere; }
+  .wl-kv a { color: #1B2A4A; font-weight: 600; }
+  .wl-act { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .wl-in { flex: 1 1 160px; min-width: 0; height: 44px; box-sizing: border-box; border: 1px solid #E7E2DA; border-radius: 12px; padding: 0 12px; font: inherit; font-size: 15px; color: #1B2A4A; }
+  .wl-btn { height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .wl-btn.ok { background: #17663F; border-color: #17663F; color: #fff; }
+  .wl-btn.red { color: #B3261E; border-color: #F2B8A0; }
+  .wl-btn:disabled { opacity: .55; }
+  .wl-state { align-self: flex-start; font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 8px; overflow-wrap: anywhere; }
+  .wl-state.ok { background: #E6F6EE; color: #17663F; }
+  .wl-state.no { background: #F1F4F8; color: #5F6B7E; }
+  .wl-rider { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; overflow: hidden; }
+  .wl-rh { display: flex; gap: 10px; align-items: center; width: 100%; padding: 12px 14px; background: none; border: 0; font: inherit; color: #1B2A4A; text-align: left; cursor: pointer; }
+  .wl-ava { position: relative; width: 40px; height: 40px; flex: none; border-radius: 50%; background: #EFEBE5; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #5F6B7E; }
+  .wl-rt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .wl-rt b { font-size: 15px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .wl-rt small { font-size: 12px; color: #5F6B7E; }
+  .wl-badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 6px; background: #EEF1F5; color: #3D4A60; }
+  .wl-badge.own { background: #FFF4E0; color: #8A4B00; }
+  .wl-badge.hot { background: #C2410C; color: #fff; }
+  .wl-bal { text-align: right; display: flex; flex-direction: column; gap: 1px; flex: none; }
+  .wl-bal small { font-size: 11.5px; color: #5F6B7E; }
+  .wl-bal b { font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-size: 17px; }
+  .wl-bal.neg b { color: #B3261E; }
+  .wl-bal.pos b { color: #17663F; }
+  .wl-body { border-top: 1px solid #EFEBE5; padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 4px; }
+  .wl-body[hidden] { display: none; }
+  .wl-e { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; font-size: 13.5px; }
+  .wl-e + .wl-e { border-top: 1px dashed #E7E2DA; }
+  .wl-e span:first-child { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; overflow-wrap: anywhere; }
+  .wl-e small { font-size: 12px; color: #5F6B7E; }
+  .wl-e b { white-space: nowrap; }
+  .wl-e b.neg { color: #B3261E; }
+  .wl-e b.pos { color: #17663F; }
+  .wl-e a { color: #1B2A4A; font-weight: 600; }
+  .wl-adj { display: flex; flex-direction: column; gap: 8px; background: #F7F5F2; border-radius: 12px; padding: 10px; margin-top: 8px; }
+  .wl-adj p { margin: 0; font-size: 12.5px; color: #5F6B7E; }
+  .wl-link { font-size: 13px; font-weight: 600; color: #C2410C; text-decoration: none; margin-top: 6px; }
+  .wl-empty, .wl-deny { padding: 30px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; color: #5F6B7E; }
+  .wl-deny { font-weight: 600; color: #1B2A4A; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, canOpenAdminPath, bn, dayLabel, timeLabel, agoLabel } from '../../lib/consoleApp.js';
+
+  const $ = (id) => document.getElementById(id);
+  const toast = (t, type = 'success') => window.showToast?.(t, type);
+  const tk = (n) => (Number(n) < 0 ? '−' : '') + '৳' + bn(Math.abs(Math.round(Number(n) || 0)));
+  const KIND = { advance: 'অগ্রিম চেয়েছেন', deposit: 'টাকা জমা দিয়েছেন', withdraw: 'টাকা তুলতে চান' };
+  const METHOD = { bkash: 'বিকাশ', nagad: 'নগদ', cash: 'নগদ হাতে' };
+  const ENTRY = {
+    order_cash: 'কাস্টমারের হাতে নেওয়া নগদ', order_advance: 'রাইডারের বিকাশে আসা অগ্রিম', order_purchase: 'দোকানে দেওয়া',
+    order_earning: 'ডেলিভারি চার্জ (আয়)', company_advance: 'কোম্পানি অগ্রিম পাঠিয়েছে', deposit: 'রাইডার টাকা জমা দিয়েছেন',
+    withdraw: 'রাইডার টাকা তুলেছেন', adjust: 'সংশোধন',
+  };
+  const params = new URLSearchParams(location.search);
+  const st = { tab: params.get('tab') === 'riders' || params.get('rider') ? 'riders' : 'requests', open: params.get('rider') || null };
+  let ctx = null;
+  let canManage = false;
+  let reqs = [];
+  let wallets = [];
+  const names = {};
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  const when = (d) => dayLabel(d) + ', ' + timeLabel(d);
+  function balLabel(b) { return Number(b) < 0 ? 'কোম্পানিকে দেবে' : Number(b) > 0 ? 'কোম্পানি দেবে' : 'সমান'; }
+  function kpi(box, k, v, cls) { const d = el('div', 'wl-kpi' + (cls ? ' ' + cls : '')); d.append(el('small', null, k), el('b', null, v)); box.appendChild(d); }
+
+  function syncUrl() {
+    const u = new URL(location.href);
+    u.searchParams.set('tab', st.tab);
+    if (st.tab === 'riders' && st.open) u.searchParams.set('rider', st.open); else u.searchParams.delete('rider');
+    history.replaceState(null, '', u.pathname + u.search);
+  }
+
+  function renderTabs() {
+    const box = $('wlTabs');
+    box.textContent = '';
+    [['requests', 'অনুরোধ'], ['riders', 'রাইডারের হিসাব']].forEach(([k, name]) => {
+      const b = el('button');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(st.tab === k));
+      b.appendChild(document.createTextNode(name));
+      const n = k === 'requests' ? reqs.filter((r) => r.status === 'pending').length : 0;
+      if (n) b.appendChild(el('i', null, bn(n)));
+      b.addEventListener('click', () => { st.tab = k; syncUrl(); render(); });
+      box.appendChild(b);
+    });
+  }
+
+  // ---------- অনুরোধ ----------
+  async function decide(r, approve, trx, note, btn) {
+    btn.disabled = true;
+    const { error } = await supabase.rpc('admin_wallet_decide', { p_id: r.id, p_approve: approve, p_trx_id: trx || null, p_note: note || null });
+    btn.disabled = false;
+    if (error) { toast(error.message && /[ঀ-৿]/.test(error.message) ? error.message : 'হয়নি, আবার চেষ্টা করুন', 'error'); return; }
+    toast(approve ? 'হয়েছে, ওয়ালেটে লেখা হয়েছে' : 'বাতিল করা হয়েছে, রাইডারকে জানানো হয়েছে');
+    load();
+  }
+
+  function reqCard(r) {
+    const c = el('article', 'wl-req' + (r.status === 'pending' ? ' pending' : ''));
+    const top = el('div', 'wl-req-top');
+    top.append(el('span', 'wl-kind ' + r.kind, KIND[r.kind] || r.kind), el('span', 'wl-amt', tk(r.amount)), el('span', 'wl-when', agoLabel(r.created_at)));
+    c.appendChild(top);
+    const p = names[r.rider_id] || {};
+    const who = el('div', 'wl-who');
+    const a = el('a', null, p.name || 'রাইডার');
+    a.href = '/console/wallets?tab=riders&rider=' + encodeURIComponent(r.rider_id);
+    who.appendChild(a);
+    const w = wallets.find((x) => x.rider_id === r.rider_id);
+    if (w) who.appendChild(document.createTextNode(' · এখন ' + balLabel(w.balance) + ' ' + tk(Math.abs(w.balance))));
+    c.appendChild(who);
+    const dl = el('dl', 'wl-kv');
+    const kv = (k, v) => { if (!v) return; dl.appendChild(el('dt', null, k)); const dd = el('dd'); if (v instanceof Node) dd.appendChild(v); else dd.textContent = v; dl.appendChild(dd); };
+    if (r.order_no) { const o = el('a', null, r.order_no); o.href = '/console/order?no=' + encodeURIComponent(r.order_no); kv('অর্ডার', o); }
+    if (r.kind === 'deposit') kv('পাঠিয়েছেন', (METHOD[r.method] || r.method || '') + (r.trx_id ? ' · TrxID ' + r.trx_id : ''));
+    else kv('টাকা নেবেন', (METHOD[r.method] || r.method || '') + (r.number ? ' · ' + r.number : ''));
+    if (p.phone) { const t = el('a', null, p.phone); t.href = 'tel:' + String(p.phone).replace(/[^\d+]/g, ''); kv('ফোন', t); }
+    kv('নোট', r.note || '');
+    kv('সময়', when(r.created_at));
+    c.appendChild(dl);
+
+    if (r.status !== 'pending') {
+      const ok = r.status === 'approved';
+      c.appendChild(el('span', 'wl-state ' + (ok ? 'ok' : 'no'),
+        (ok ? (r.kind === 'deposit' ? 'পাওয়া গেছে' : 'পাঠানো হয়েছে') : 'বাতিল') + (r.admin_trx_id ? ' · TrxID ' + r.admin_trx_id : '') + (r.admin_note ? ' · ' + r.admin_note : '') + (r.decided_at ? ' · ' + when(r.decided_at) : '')));
+      return c;
+    }
+    if (!canManage) return c;
+
+    const act = el('div', 'wl-act');
+    let trx = null;
+    if (r.kind !== 'deposit' && r.method !== 'cash') {
+      trx = el('input', 'wl-in');
+      trx.maxLength = 40;
+      trx.placeholder = 'আপনি যে TrxID-তে পাঠালেন';
+      trx.setAttribute('aria-label', 'TrxID');
+      act.appendChild(trx);
+    }
+    const ok = el('button', 'wl-btn ok', r.kind === 'deposit' ? 'পেয়েছি' : 'পাঠিয়েছি');
+    ok.type = 'button';
+    const no = el('button', 'wl-btn red', 'বাতিল');
+    no.type = 'button';
+    act.append(ok, no);
+    c.appendChild(act);
+
+    ok.addEventListener('click', () => {
+      const t = trx ? trx.value.trim() : '';
+      if (trx && !t) { toast('যে TrxID-তে টাকা পাঠিয়েছেন সেটা লিখুন', 'warning'); trx.focus(); return; }
+      const msg = r.kind === 'deposit'
+        ? (p.name || 'রাইডার') + '-এর ' + tk(r.amount) + ' (' + (METHOD[r.method] || '') + (r.trx_id ? ', TrxID ' + r.trx_id : '') + ') অফিসের নম্বরে এসেছে, মিলিয়ে দেখেছেন?'
+        : (p.name || 'রাইডার') + '-কে ' + tk(r.amount) + ' পাঠিয়েছেন' + (r.number ? ' (' + r.number + ')' : '') + '? রাইডারের ওয়ালেট থেকে কাটা যাবে।';
+      if (!window.confirm(msg)) return;
+      decide(r, true, t, null, ok);
+    });
+    no.addEventListener('click', () => {
+      const why = (window.prompt('বাতিলের কারণ (রাইডার দেখবেন)') || '').trim();
+      if (why.length < 3) { if (why) toast('কারণ লিখুন (কমপক্ষে ৩ অক্ষর)', 'warning'); return; }
+      decide(r, false, null, why.slice(0, 300), no);
+    });
+    return c;
+  }
+
+  function renderRequests() {
+    const box = $('wlList');
+    const pend = reqs.filter((r) => r.status === 'pending');
+    const done = reqs.filter((r) => r.status !== 'pending').slice(0, 30);
+    if (!reqs.length) { box.appendChild(el('div', 'wl-empty', 'এখনো কোনো অনুরোধ আসেনি।')); return; }
+    box.appendChild(el('h2', 'wl-h', pend.length ? 'অপেক্ষায় · পুরনোটা আগে (' + bn(pend.length) + ')' : 'অপেক্ষায় কিছু নেই'));
+    pend.slice().reverse().forEach((r) => box.appendChild(reqCard(r)));
+    if (done.length) {
+      box.appendChild(el('h2', 'wl-h', 'সাম্প্রতিক'));
+      done.forEach((r) => box.appendChild(reqCard(r)));
+    }
+  }
+
+  // ---------- রাইডারের হিসাব ----------
+  async function ledger(w, body) {
+    body.textContent = '';
+    body.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 3) : '';
+    const { data, error } = await supabase.from('rider_wallet_entries')
+      .select('id, kind, amount, note, created_at, request_id, delivery_requests(order_no)')
+      .eq('rider_id', w.rider_id).order('created_at', { ascending: false }).limit(100);
+    body.textContent = '';
+    if (error) { body.appendChild(el('p', 'wl-h', 'লোড করা যায়নি।')); return; }
+    const rows = data || [];
+    if (!rows.length) body.appendChild(el('p', 'wl-h', 'এখনো কোনো লেনদেন নেই।'));
+    rows.forEach((e) => {
+      const r = el('div', 'wl-e');
+      const t = el('span');
+      const no = e.delivery_requests && e.delivery_requests.order_no;
+      const title = el('span', null, ENTRY[e.kind] || e.kind);
+      if (no) { title.appendChild(document.createTextNode(' · ')); const a = el('a', null, no); a.href = '/console/order?no=' + encodeURIComponent(no); title.appendChild(a); }
+      t.appendChild(title);
+      t.appendChild(el('small', null, when(e.created_at) + (e.kind === 'adjust' || /TrxID|·/.test(e.note || '') ? ' · ' + (e.note || '') : '')));
+      r.append(t, el('b', Number(e.amount) < 0 ? 'neg' : 'pos', (Number(e.amount) > 0 ? '+' : '') + tk(e.amount)));
+      body.appendChild(r);
+    });
+    if (ctx.isSuper) {
+      const f = el('div', 'wl-adj');
+      f.appendChild(el('p', null, 'সংশোধন (শুধু সুপার অ্যাডমিন): ভুল ঠিক করতে প্লাস বা মাইনাস লিখুন। আগের লাইন বদলায় না, নতুন লাইন যোগ হয়।'));
+      const row = el('div', 'wl-act');
+      const amt = el('input', 'wl-in');
+      amt.type = 'number'; amt.inputMode = 'decimal'; amt.placeholder = 'যেমন -২০০ বা ১৫০'; amt.setAttribute('aria-label', 'টাকা (প্লাস/মাইনাস)');
+      const note = el('input', 'wl-in');
+      note.maxLength = 200; note.placeholder = 'কারণ'; note.setAttribute('aria-label', 'কারণ');
+      const go = el('button', 'wl-btn', 'যোগ করুন');
+      go.type = 'button';
+      row.append(amt, note, go);
+      f.appendChild(row);
+      go.addEventListener('click', async () => {
+        const v = Number(amt.value);
+        if (!v) { toast('টাকা লিখুন', 'warning'); return; }
+        if (note.value.trim().length < 3) { toast('কারণ লিখুন', 'warning'); return; }
+        if (!window.confirm((w.name || 'রাইডার') + '-এর ওয়ালেটে ' + (v > 0 ? '+' : '') + tk(v) + ' সংশোধন যোগ করবেন?')) return;
+        go.disabled = true;
+        const { error: e2 } = await supabase.rpc('admin_wallet_adjust', { p_rider_id: w.rider_id, p_amount: v, p_note: note.value.trim() });
+        go.disabled = false;
+        if (e2) { toast('হয়নি', 'error'); return; }
+        toast('সংশোধন যোগ হয়েছে');
+        load();
+      });
+      body.appendChild(f);
+    }
+    const rl = el('a', 'wl-link', 'রাইডারের পেজ খুলুন →');
+    rl.href = '/console/rider?id=' + encodeURIComponent(w.rider_id);
+    body.appendChild(rl);
+  }
+
+  function renderRiders() {
+    const box = $('wlList');
+    const owe = wallets.filter((w) => Number(w.balance) < 0);
+    const due = wallets.filter((w) => Number(w.balance) > 0);
+    const k = el('div', 'wl-kpis');
+    kpi(k, 'রাইডারদের কাছে কোম্পানির টাকা', tk(owe.reduce((a, w) => a - Number(w.balance), 0)), 'red');
+    kpi(k, 'কোম্পানি রাইডারদের দেবে', tk(due.reduce((a, w) => a + Number(w.balance), 0)), 'green');
+    box.appendChild(k);
+    if (!wallets.length) { box.appendChild(el('div', 'wl-empty', 'কোনো রাইডার নেই।')); return; }
+    wallets.forEach((w) => {
+      const c = el('section', 'wl-rider');
+      const h = el('button', 'wl-rh');
+      h.type = 'button';
+      const bodyId = 'wlb-' + w.rider_id;
+      h.setAttribute('aria-controls', bodyId);
+      h.setAttribute('aria-expanded', String(st.open === w.rider_id));
+      h.appendChild(el('span', 'wl-ava', String(w.name || 'র').trim().charAt(0)));
+      const t = el('span', 'wl-rt');
+      const nm = el('b', null, w.name || 'রাইডার');
+      nm.appendChild(el('span', 'wl-badge' + (w.is_own ? ' own' : ''), w.is_own ? 'নিজস্ব' : 'ফ্রিল্যান্সার'));
+      if (Number(w.pending)) nm.appendChild(el('span', 'wl-badge hot', bn(w.pending) + 'টা অনুরোধ'));
+      t.appendChild(nm);
+      t.appendChild(el('small', null, [w.phone, w.last_at ? 'শেষ লেনদেন ' + agoLabel(w.last_at) : 'কোনো লেনদেন নেই'].filter(Boolean).join(' · ')));
+      h.appendChild(t);
+      const b = el('span', 'wl-bal ' + (Number(w.balance) < 0 ? 'neg' : Number(w.balance) > 0 ? 'pos' : ''));
+      b.append(el('small', null, balLabel(w.balance)), el('b', null, tk(Math.abs(w.balance))));
+      h.appendChild(b);
+      c.appendChild(h);
+      const body = el('div', 'wl-body');
+      body.id = bodyId;
+      body.hidden = st.open !== w.rider_id;
+      if (!body.hidden) ledger(w, body);
+      h.addEventListener('click', () => {
+        const open = body.hidden;
+        st.open = open ? w.rider_id : null;
+        body.hidden = !open;
+        h.setAttribute('aria-expanded', String(open));
+        syncUrl();
+        if (open) ledger(w, body);
+      });
+      c.appendChild(body);
+      box.appendChild(c);
+      if (st.open === w.rider_id) setTimeout(() => c.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+    });
+  }
+
+  function render() {
+    renderTabs();
+    const box = $('wlList');
+    box.textContent = '';
+    if (st.tab === 'requests') renderRequests(); else renderRiders();
+  }
+
+  async function load() {
+    if (!reqs.length && !wallets.length) $('wlList').innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 4) : '';
+    const [rq, ws] = await Promise.all([
+      supabase.from('rider_wallet_requests').select('*, delivery_requests(order_no)').order('created_at', { ascending: false }).limit(150),
+      supabase.rpc('admin_rider_wallets'),
+    ]);
+    if (rq.error || ws.error) { $('wlList').textContent = ''; $('wlList').appendChild(el('div', 'wl-empty', 'লোড করা যায়নি। একটু পরে আবার চেষ্টা করুন।')); return; }
+    wallets = Array.isArray(ws.data) ? ws.data : [];
+    wallets.forEach((w) => { names[w.rider_id] = { name: w.name, phone: w.phone }; });
+    reqs = (rq.data || []).map((r) => ({ ...r, order_no: r.delivery_requests && r.delivery_requests.order_no }));
+    const pend = reqs.filter((r) => r.status === 'pending').length;
+    const owe = wallets.filter((w) => Number(w.balance) < 0).reduce((a, w) => a - Number(w.balance), 0);
+    $('wlSub').textContent = (pend ? bn(pend) + 'টা অনুরোধ অপেক্ষায় · ' : '') + 'রাইডারদের কাছে কোম্পানির ' + tk(owe);
+    render();
+  }
+
+  onConsoleReady((data) => {
+    ctx = data;
+    if (!canOpenAdminPath('/admin/delivery-orders', data)) { $('wlDeny').hidden = false; return; }
+    canManage = !!(data.isSuper || !data.access.isStaff || data.access.can('delivery_orders.manage'));
+    $('wlMain').hidden = false;
+    load();
+    setInterval(() => { if (document.visibilityState === 'visible' && st.tab === 'requests') load(); }, 60000);
+  });
+</script>
