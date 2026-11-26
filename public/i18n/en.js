@@ -3515,4 +3515,7 @@ window.SF_I18N_EN = {
 "বিকাশ/নগদের মেসেজের TrxID, অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ ডিজিট। যেকোনো একটা দিলেই হবে।": "The TrxID from your bKash/Nagad message, or the last 4 digits of the number you sent from. Either one is enough.",
 "TrxID অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ ডিজিট দিন": "Enter the TrxID or the last 4 digits of the number you sent from",
 "TrxID ঠিকভাবে লিখুন, অথবা শুধু শেষ ৪ ডিজিট দিন": "Enter a valid TrxID, or just the last 4 digits",
+"অনলাইন শপ: শুধু প্রি-অর্ডার দোকান": "Online shop: pre-order shops only",
+"প্রি-অর্ডার দোকান": "Pre-order shops",
+"সব দোকান দেখুন": "See all shops",
 };

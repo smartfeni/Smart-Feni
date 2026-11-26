@@ -146,6 +146,8 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     .qd-sec h2 svg { width: 20px; height: 20px; fill: #FF6B35; }
     .qd-sec small { font-size: 13px; color: #4A5568; font-weight: 600; }
 
+    .qd-pre-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 12px; padding: 10px 12px 10px 14px; border-radius: 14px; background: #FFF4EC; border: 1px solid #FFD9C2; color: #9A4A1F; font-weight: 700; font-size: 14px; }
+    .qd-pre-x { flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; border: 0; background: #fff; color: #9A4A1F; font-size: 14px; cursor: pointer; }
     .qd-row { display: flex; gap: 12px; overflow-x: auto; margin: 0 -16px; padding: 0 16px 6px; scroll-snap-type: x proximity; scrollbar-width: none; }
     .qd-row::-webkit-scrollbar { display: none; }
     .qd-pop { flex: none; width: 250px; scroll-snap-align: start; }
@@ -244,6 +246,14 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     }
     let itemIdx = {};
     let active = null;
+    // ?mode=preorder — হোমের "অনলাইন শপ" থেকে: সব ক্যাটাগরির শুধু প্রি-অর্ডার দোকান (delivery_kind = preorder)।
+    // কোনো ক্যাটাগরি বাছলে বা ✕ চাপলে সাধারণ মোডে ফেরে।
+    let preOnly = new URLSearchParams(window.location.search).get('mode') === 'preorder';
+    function clearPreOnly() {
+      if (!preOnly) return;
+      preOnly = false;
+      try { const u = new URL(location.href); u.searchParams.delete('mode'); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch (_) {}
+    }
     let food = null;
     let q = '';
     let slideTimer = null;
@@ -304,7 +314,8 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
     function catOf(id) { return cats.find((c) => c.id === id); }
     // সারিতে ৪টা (যেকোনো কিছু + প্রথম ৩টা), বাকিগুলো "আরো দেখুন" শিটে; শিট থেকে বাছলে সেটা ৪র্থ ঘরে বসে
     function pickCat(id) {
-      if (active === id) return;
+      if (active === id && !preOnly) return;
+      clearPreOnly();
       active = id; food = null; favOnly = false; paintFavBtn();
       renderCats(); setPlaceholder(); renderBody();
     }
@@ -375,7 +386,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
         const b = mk('button', 'qd-cat');
         b.type = 'button';
         b.setAttribute('role', 'tab');
-        b.setAttribute('aria-selected', String(c.id === active));
+        b.setAttribute('aria-selected', String(!preOnly && c.id === active));
         const tile = mk('span', 'qd-cat-tile');
         const key = c.id === ANY ? 'any' : CAT_IMG[c.icon] || CAT_IMG[c.slug];
         if (key) tile.appendChild(img(key));
@@ -583,13 +594,22 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       const body = $('qdBody');
       body.textContent = '';
       if (cats.length) $('qdFav').hidden = active === ANY;
-      if (active === ANY && !q) { renderAny(body); return; }
+      if (active === ANY && !q && !preOnly) { renderAny(body); return; }
 
-      if (!q && !favOnly) body.appendChild(slides());
-      if (isFoodCat() && !favOnly && !q) body.appendChild(foodsRow());
+      if (preOnly) {
+        const bar = mk('div', 'qd-pre-bar');
+        bar.appendChild(mk('span', '', 'অনলাইন শপ: শুধু প্রি-অর্ডার দোকান'));
+        const x = mk('button', 'qd-pre-x', '✕'); x.type = 'button'; x.setAttribute('aria-label', 'সব দোকান দেখুন');
+        x.addEventListener('click', () => { clearPreOnly(); renderCats(); setPlaceholder(); renderBody(); });
+        bar.appendChild(x);
+        body.appendChild(bar);
+      }
+      if (!q && !favOnly && !preOnly) body.appendChild(slides());
+      if (isFoodCat() && !favOnly && !q && !preOnly) body.appendChild(foodsRow());
 
       // সার্চ ইউনিভার্সাল: q থাকলে ক্যাটাগরি ও খাবারের ধরন ধরা হয় না (দোকানের নাম + আইটেম সব ক্যাটাগরিতে)
-      const list = shops.filter((s) => (q || inCat(s)) && matchesQ(s) && (q || matchesFood(s)) && (!favOnly || favIds.has(s.id)));
+      // প্রি-অর্ডার মোডে সব ক্যাটাগরির শুধু প্রি-অর্ডার দোকান
+      const list = shops.filter((s) => (q || preOnly || inCat(s)) && (!preOnly || s.delivery_kind === 'preorder') && matchesQ(s) && (q || preOnly || matchesFood(s)) && (!favOnly || favIds.has(s.id)));
       // খোলা আগে, তারপর দূরত্ব অনুযায়ী
       list.sort((a, b) => {
         const oa = shopOpenState(a).open ? 0 : 1, ob = shopOpenState(b).open ? 0 : 1;
@@ -610,7 +630,7 @@ import MarketLocationSheet from '../components/market/MarketLocationSheet.astro'
       }
 
       const c = catOf(active);
-      const title = favOnly ? 'আপনার প্রিয়' : q ? 'খোঁজার ফল' : food ? FOODS.find((x) => x.k === food).t : getDrop() && getDrop().lat !== null ? 'আপনার কাছের দোকান' : 'সব দোকান';
+      const title = favOnly ? 'আপনার প্রিয়' : q ? 'খোঁজার ফল' : preOnly ? 'প্রি-অর্ডার দোকান' : food ? FOODS.find((x) => x.k === food).t : getDrop() && getDrop().lat !== null ? 'আপনার কাছের দোকান' : 'সব দোকান';
       body.appendChild(sec(title, (q ? 'সব ক্যাটাগরিতে · ' : '') + bnNum(list.length) + 'টি দোকান', !q && !food && getDrop() && getDrop().lat !== null ? PIN : null));
       if (!list.length) {
         let msg = 'এই ক্যাটাগরিতে এখনো কোনো দোকান নেই। শীঘ্রই আসছে!';
