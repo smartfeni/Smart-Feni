@@ -3510,4 +3510,9 @@ window.SF_I18N_EN = {
 "নিচের অফিস নম্বরে Send Money করুন, তারপর TrxID অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ সংখ্যা দিন। অনুমোদন হলে ওয়ালেটে যোগ হবে।": "Send Money to the office number below, then enter the TrxID or the last 4 digits of the number you sent from. It's added to your wallet once approved.",
 "আপনি পাবেন {}। অনুমোদন হলে টাকা পাঠানো হবে, তখন ওয়ালেট থেকে কাটা যাবে।": "You will receive {}. Once approved the money is sent and deducted from your wallet.",
 "অর্ডারের জিনিস কিনতে টাকা লাগলে চান। অনুমোদন হলে টাকা পাঠানো হবে আর ওয়ালেটে কোম্পানির পাওনা হিসেবে লেখা হবে; কাস্টমার থেকে টাকা নিয়ে জমা দেবেন।": "Ask if you need money to buy the order items. Once approved, it's sent and recorded in your wallet as owed to the company; deposit it after collecting from the customer.",
+"TrxID বা শেষ ৪ ডিজিট": "TrxID or last 4 digits",
+"যেমন: 9KX4ABCD12 বা 1234": "e.g. 9KX4ABCD12 or 1234",
+"বিকাশ/নগদের মেসেজের TrxID, অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ ডিজিট। যেকোনো একটা দিলেই হবে।": "The TrxID from your bKash/Nagad message, or the last 4 digits of the number you sent from. Either one is enough.",
+"TrxID অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ ডিজিট দিন": "Enter the TrxID or the last 4 digits of the number you sent from",
+"TrxID ঠিকভাবে লিখুন, অথবা শুধু শেষ ৪ ডিজিট দিন": "Enter a valid TrxID, or just the last 4 digits",
 };

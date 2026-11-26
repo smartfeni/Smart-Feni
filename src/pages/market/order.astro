@@ -59,11 +59,8 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
         <div><b id="qoPayNum">—</b><button type="button" class="qo-copy" id="qoPayCopy">কপি</button></div>
       </div>
       <label class="qo-pf"><span>কত টাকা পাঠিয়েছেন <i class="required-mark">*</i></span><input id="qoPayAmt" type="number" inputmode="numeric" min="1" max="99999" /></label>
-      <div class="qo-pf-row">
-        <label class="qo-pf"><span>TrxID</span><input id="qoPayTrx" maxlength="30" autocomplete="off" placeholder="যেমন: 9KX4ABCD12" /></label>
-        <label class="qo-pf small"><span>অথবা শেষ ৪ ডিজিট</span><input id="qoPayL4" inputmode="numeric" maxlength="4" placeholder="১২৩৪" /></label>
-      </div>
-      <p class="qo-hint">TrxID অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ ডিজিট, যেকোনো একটা দিন।</p>
+      <label class="qo-pf"><span>TrxID বা শেষ ৪ ডিজিট <i class="required-mark">*</i></span><input id="qoPayTrx" maxlength="30" autocomplete="off" autocapitalize="characters" placeholder="যেমন: 9KX4ABCD12 বা 1234" /></label>
+      <p class="qo-hint">বিকাশ/নগদের মেসেজের TrxID, অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ ডিজিট। যেকোনো একটা দিলেই হবে।</p>
       <label class="qo-pf"><span>স্ক্রিনশট (ঐচ্ছিক)</span><input id="qoPayFile" type="file" accept="image/*" /></label>
       <p class="qo-bad" id="qoPayErr" role="alert" hidden></p>
       <button type="button" class="qo-btn" id="qoPayGo">পেমেন্ট জমা দিন</button>
@@ -496,7 +493,7 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     function openPay(mode, amt) {
       payMode = mode;
       $('qoPayAmt').value = String(amt);
-      $('qoPayTrx').value = ''; $('qoPayL4').value = ''; $('qoPayFile').value = '';
+      $('qoPayTrx').value = ''; $('qoPayFile').value = '';
       $('qoPayErr').hidden = true;
       $('qoPayMode').textContent = mode === 'full' ? 'পুরো টাকা' : 'শুধু ডেলিভারি চার্জ';
       const nag = $('qoMNagad');
@@ -526,12 +523,13 @@ import DisputeReasonModal from '../../components/delivery/DisputeReasonModal.ast
     $('qoPayGo').addEventListener('click', async () => {
       const err = (m) => { const e = $('qoPayErr'); e.textContent = m; e.hidden = false; };
       const amt = Number($('qoPayAmt').value);
-      const trx = $('qoPayTrx').value.trim();
-      const l4 = $('qoPayL4').value.trim();
+      // এক ঘর: ঠিক ৪টা সংখ্যা হলে শেষ ৪ ডিজিট, নইলে TrxID (বাংলা অঙ্কও চলে)
+      const raw = $('qoPayTrx').value.replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d))).replace(/\s+/g, '');
+      const l4 = /^\d{4}$/.test(raw) ? raw : '';
+      const trx = l4 ? '' : raw.toUpperCase();
       if (!amt || amt <= 0) return err('কত টাকা পাঠিয়েছেন লিখুন');
-      if (!trx && !l4) return err('TrxID অথবা প্রেরক নম্বরের শেষ ৪ ডিজিট দিন');
-      if (l4 && !/^\d{4}$/.test(l4)) return err('শেষ ৪ ডিজিট ঠিকভাবে লিখুন');
-      if (trx && !/^[A-Za-z0-9]{6,30}$/.test(trx)) return err('TrxID ঠিকভাবে লিখুন');
+      if (!raw) return err('TrxID অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ ডিজিট দিন');
+      if (trx && !/^[A-Za-z0-9]{6,30}$/.test(trx)) return err('TrxID ঠিকভাবে লিখুন, অথবা শুধু শেষ ৪ ডিজিট দিন');
       if (busy) return;
       busy = true;
       const go = $('qoPayGo'); go.disabled = true; go.textContent = 'জমা হচ্ছে…';
