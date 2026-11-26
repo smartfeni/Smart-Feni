@@ -23,6 +23,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { reportServerError } from '../../lib/serverErrorReporter.js';
+import { logAdminAction } from '../../lib/adminAudit.js';
 
 export const prerender = false;
 
@@ -93,7 +94,7 @@ export async function POST({ request }) {
 
     const { data: targetProfile } = await supabaseAdmin
       .from('profiles')
-      .select('role')
+      .select('role, full_name, phone')
       .eq('id', targetUserId)
       .single();
 
@@ -142,6 +143,11 @@ export async function POST({ request }) {
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    await logAdminAction(supabaseAdmin, {
+      actorId: callerUser.id, action: 'delete', entity: 'profiles', entityId: targetUserId,
+      label: targetProfile?.full_name || targetProfile?.phone || null,
+    });
 
     return new Response(
       JSON.stringify({ success: true }),

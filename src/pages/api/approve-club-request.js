@@ -19,6 +19,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { callerCan } from '../../lib/serverPermission.js';
 import { reportServerError } from '../../lib/serverErrorReporter.js';
+import { logAdminAction } from '../../lib/adminAudit.js';
 import {
   slugify,
   validateSlugFormat,
@@ -218,6 +219,11 @@ export async function POST({ request }) {
         status: 200,
       });
     }
+
+    await logAdminAction(supabaseAdmin, {
+      actorId: callerData.user.id, action: 'approve', entity: 'club_requests',
+      entityId: requestId, label: req.club_name, details: { club_id: clubData.id, slug: finalSlug },
+    });
 
     return json({ success: true, clubId: clubData.id, slug: finalSlug }, 200);
   } catch (err) {

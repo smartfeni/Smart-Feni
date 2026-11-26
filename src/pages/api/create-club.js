@@ -18,6 +18,7 @@ import { createClient } from '@supabase/supabase-js';
 import { callerCan } from '../../lib/serverPermission.js';
 // এরর মনিটরিং (ধাপ ৯): ৫০০ পথ ও গিলে-ফেলা এরর অ্যাডমিন এরর লগে রিপোর্ট হয়
 import { reportServerError } from '../../lib/serverErrorReporter.js';
+import { logAdminAction } from '../../lib/adminAudit.js';
 
 export const prerender = false;
 
@@ -221,6 +222,11 @@ export async function POST({ request }) {
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    await logAdminAction(supabaseAdmin, {
+      actorId: callerData.user.id, action: 'create', entity: 'clubs', entityId: clubData.id, label: clubName,
+      details: { slug: cleanSlug, owner_id: userData.user.id },
+    });
 
     return new Response(
       JSON.stringify({

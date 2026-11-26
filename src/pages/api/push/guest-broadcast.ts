@@ -23,6 +23,7 @@ import { callerCan } from '../../../lib/serverPermission.js';
 import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { reportServerError } from '../../../lib/serverErrorReporter.js';
+import { logAdminAction } from '../../../lib/adminAudit.js';
 
 export const prerender = false;
 
@@ -144,6 +145,11 @@ export async function POST({ request }) {
       });
       return json({ error: 'প্রমো সেভ ব্যর্থ' }, 500);
     }
+
+    await logAdminAction(supabaseAdmin, {
+      actorId: userData.user.id, action: 'create', entity: 'guest_promos', entityId: promoRow.id,
+      label: message.slice(0, 120), details: { action_url: actionUrl },
+    });
 
     // ---------- ২) টার্গেট টোকেন (লগইন করা ডিভাইস ও আনইনস্টল হওয়া বাদ) ----------
     const [guestTokens, loggedInTokens] = await Promise.all([
