@@ -1,0 +1,286 @@
+---
+// ============================================================
+// /console/shop-apps — কুইক ডেলিভারির দোকানের আবেদন (নতুন অ্যাপ, ধাপ ৫.৩)
+// আবেদন আসে /become-a-shop-owner থেকে (market_shop_applications, draft বাদে)।
+// অনুমোদন: RPC admin_approve_shop_app(p_id, p_category_ids, p_commission=0) → দোকান + মেনু তৈরি, লাইভ, মালিক Pro শপ পান
+// ফেরত: RPC admin_reject_shop_app(p_id, p_reason) — কারণ আবেদনকারী দেখেন (৩+ অক্ষর)
+// অনুমতি: delivery_shops (দেখা), RPC-তে delivery_shops.manage। পুরনো পেজের হুবহু নিয়ম, নতুন DB বদল নেই।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="দোকানের আবেদন" active="todo">
+  <div class="cs-pad cm-page sa-page">
+    <div>
+      <h1 class="cs-h cm-title">দোকানের আবেদন</h1>
+      <p class="cs-muted sa-sub">কুইক ডেলিভারিতে যুক্ত হতে চাওয়া দোকান। অনুমোদন দিলে দোকান ও মেনু নিজে তৈরি হয়ে লাইভ হয়।</p>
+    </div>
+    <div class="sa-deny" id="saDeny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+    <div class="sa-main" id="saMain" hidden>
+      <div class="sa-tabs" id="saTabs" role="tablist" aria-label="আবেদনের অবস্থা"></div>
+      <div class="sa-list" id="saList"></div>
+    </div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .sa-sub { margin: 2px 0 0; }
+  .sa-main { display: flex; flex-direction: column; gap: 12px; }
+  .sa-tabs { display: grid; grid-template-columns: repeat(3, 1fr); background: #EFEBE5; border-radius: 14px; padding: 4px; gap: 4px; }
+  .sa-tabs button { height: 42px; border: 0; border-radius: 11px; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: #3D4A60; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .sa-tabs button[aria-selected="true"] { background: #fff; color: #1B2A4A; box-shadow: 0 1px 2px rgba(27,42,74,.12); }
+  .sa-tabs i { font-style: normal; font-size: 12px; min-width: 20px; height: 20px; line-height: 20px; border-radius: 999px; background: #DCD6CD; padding: 0 6px; box-sizing: border-box; }
+  .sa-tabs i.hot { background: #C2410C; color: #fff; }
+  .sa-list { display: flex; flex-direction: column; gap: 12px; }
+  .sa-card { background: #fff; border: 1px solid #E7E2DA; border-radius: 18px; overflow: hidden; }
+  .sa-cover { height: 96px; background: #EFEBE5 center/cover no-repeat; position: relative; }
+  .sa-logo { position: absolute; left: 14px; bottom: -22px; width: 56px; height: 56px; border-radius: 14px; border: 3px solid #fff; background: #DCD6CD center/cover no-repeat; }
+  .sa-kind { position: absolute; right: 10px; top: 10px; font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 6px; background: #fff; color: #1B2A4A; }
+  .sa-in { padding: 28px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .sa-in h2 { margin: 0; font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+  .sa-text { font-size: 13.5px; color: #3D4A60; overflow-wrap: anywhere; white-space: pre-wrap; margin: 0; }
+  .sa-kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 13.5px; margin: 0; }
+  .sa-kv dt { color: #5F6B7E; }
+  .sa-kv dd { margin: 0; overflow-wrap: anywhere; }
+  .sa-kv a { color: #1B2A4A; font-weight: 600; }
+  .sa-fold { display: flex; justify-content: space-between; width: 100%; background: #F7F5F2; border: 0; border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 13.5px; font-weight: 600; color: #1B2A4A; cursor: pointer; }
+  .sa-items { display: flex; flex-direction: column; gap: 6px; }
+  .sa-it { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+  .sa-it span:first-child { width: 40px; height: 40px; flex: none; border-radius: 8px; background: #EFEBE5 center/cover no-repeat; }
+  .sa-it span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .sa-label { font-size: 13px; font-weight: 600; margin: 4px 0 0; }
+  .sa-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sa-cats button { height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+  .sa-cats button[aria-pressed="true"] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .sa-cats small { font-size: 11px; font-weight: 600; background: #FFF4E0; color: #8A4B00; border-radius: 5px; padding: 0 5px; }
+  .sa-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sa-ok { flex: 1 1 180px; height: 48px; border: 0; border-radius: 12px; background: #17663F; color: #fff; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .sa-no { flex: 1 1 140px; height: 48px; border-radius: 12px; border: 1px solid #F2B8A0; background: #fff; color: #B3261E; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .sa-btn { flex: 1 1 140px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; }
+  .sa-ok:disabled, .sa-no:disabled { opacity: .55; }
+  .sa-reject { display: flex; flex-direction: column; gap: 8px; background: #FDF6F4; border-radius: 12px; padding: 10px; }
+  .sa-reject textarea { width: 100%; box-sizing: border-box; min-height: 80px; border: 1px solid #E7E2DA; border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 14.5px; }
+  .sa-badge { align-self: flex-start; font-size: 12.5px; font-weight: 600; padding: 4px 10px; border-radius: 8px; overflow-wrap: anywhere; }
+  .sa-empty { padding: 30px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; color: #5F6B7E; }
+  .sa-deny { padding: 30px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; font-weight: 600; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, canOpenAdminPath, bn, dayLabel, timeLabel } from '../../lib/consoleApp.js';
+  import { WEEK_DAYS } from '../../lib/consoleShopKit.js';
+
+  const $ = (id) => document.getElementById(id);
+  const toast = (t, type = 'success') => window.showToast?.(t, type);
+  const TABS = [['pending', 'নতুন'], ['approved', 'অনুমোদিত'], ['rejected', 'ফেরত']];
+  let rows = [];
+  let cats = [];
+  let shopState = {};
+  let tab = 'pending';
+  let canManage = false;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  const bg = (n, url) => { if (url) n.style.backgroundImage = 'url("' + encodeURI(url) + '")'; };
+  const hm = (t) => (t ? String(t).slice(0, 5) : '');
+
+  function renderTabs() {
+    const box = $('saTabs');
+    box.textContent = '';
+    TABS.forEach(([k, name]) => {
+      const b = el('button');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(k === tab));
+      b.appendChild(document.createTextNode(name));
+      const n = rows.filter((r) => r.status === k).length;
+      if (n) b.appendChild(el('i', k === 'pending' ? 'hot' : null, bn(n)));
+      b.addEventListener('click', () => { tab = k; renderTabs(); render(); });
+      box.appendChild(b);
+    });
+  }
+
+  function kv(dl, k, v) {
+    if (v == null || v === '') return;
+    dl.appendChild(el('dt', null, k));
+    const dd = el('dd');
+    if (v instanceof Node) dd.appendChild(v); else dd.textContent = v;
+    dl.appendChild(dd);
+  }
+
+  function card(a) {
+    const c = el('article', 'sa-card');
+    const cv = el('div', 'sa-cover');
+    bg(cv, a.cover_url);
+    const lg = el('div', 'sa-logo');
+    bg(lg, a.logo_url);
+    cv.appendChild(lg);
+    cv.appendChild(el('span', 'sa-kind', a.delivery_kind === 'preorder' ? 'প্রি-অর্ডার' : 'এখনই ডেলিভারি'));
+    c.appendChild(cv);
+    const inn = el('div', 'sa-in');
+    inn.appendChild(el('h2', null, a.name || 'নাম নেই'));
+    if (a.description) inn.appendChild(el('p', 'sa-text', a.description));
+    if (a.sells) inn.appendChild(el('p', 'sa-text', 'বিক্রি করে: ' + a.sells));
+
+    const dl = el('dl', 'sa-kv');
+    kv(dl, 'আবেদনকারী', (a.profiles && a.profiles.full_name) || '');
+    if (a.phone) { const t = el('a', null, a.phone); t.href = 'tel:' + String(a.phone).replace(/[^\d+]/g, ''); kv(dl, 'দোকানের ফোন', t); }
+    kv(dl, 'এলাকা', [a.union_name, a.upazila].filter(Boolean).join(', '));
+    kv(dl, 'ঠিকানা', a.address || '');
+    if (a.lat != null && a.lng != null) {
+      const m = el('a', null, 'ম্যাপে দেখুন ↗');
+      m.href = 'https://www.google.com/maps?q=' + Number(a.lat) + ',' + Number(a.lng);
+      m.target = '_blank'; m.rel = 'noopener';
+      kv(dl, 'পিন', m);
+    }
+    kv(dl, 'সময়', (hm(a.opens_at) || hm(a.closes_at) ? hm(a.opens_at) + ' – ' + hm(a.closes_at) : '') + (a.weekly_off != null ? ' · ছুটি ' + (WEEK_DAYS[a.weekly_off] || '') : ''));
+    kv(dl, 'টাকা নেবে', (a.payout_method === 'nagad' ? 'নগদ' : 'বিকাশ') + (a.payout_number ? ' · ' + a.payout_number : ''));
+    kv(dl, 'জমা দিয়েছেন', a.submitted_at ? dayLabel(a.submitted_at) + ', ' + timeLabel(a.submitted_at) : '');
+    inn.appendChild(dl);
+
+    const items = Array.isArray(a.items) ? a.items : [];
+    if (items.length) {
+      const fb = el('button', 'sa-fold');
+      fb.type = 'button';
+      const lst = el('div', 'sa-items');
+      lst.id = 'sai-' + a.id;
+      lst.hidden = true;
+      fb.setAttribute('aria-expanded', 'false');
+      fb.setAttribute('aria-controls', lst.id);
+      const lbl = el('span', null, 'দেখুন ▾');
+      fb.append(el('span', null, 'মেনু (' + bn(items.length) + 'টা পণ্য)'), lbl);
+      fb.addEventListener('click', () => {
+        const o = lst.hidden; lst.hidden = !o;
+        fb.setAttribute('aria-expanded', String(o));
+        lbl.textContent = o ? 'বন্ধ ▴' : 'দেখুন ▾';
+      });
+      items.forEach((it) => {
+        const r = el('div', 'sa-it');
+        const p = el('span'); bg(p, it.image_url); r.appendChild(p);
+        r.appendChild(el('span', null, it.name || ''));
+        r.appendChild(el('b', null, '৳' + bn(it.price || 0) + (it.unit ? ' / ' + it.unit : '')));
+        lst.appendChild(r);
+      });
+      inn.append(fb, lst);
+    }
+
+    if (a.status === 'pending') {
+      if (!canManage) { inn.appendChild(el('p', 'sa-text', 'অনুমোদন বা ফেরত দেওয়ার অনুমতি নেই।')); c.appendChild(inn); return c; }
+      inn.appendChild(el('p', 'sa-label', 'মার্কেটের ক্যাটাগরি বাছুন (১–৩টা)'));
+      const sel = new Set((a.suggested_category_ids || []).slice(0, 3));
+      const cw = el('div', 'sa-cats');
+      cats.forEach((cat) => {
+        const b = el('button');
+        b.type = 'button';
+        b.setAttribute('aria-pressed', String(sel.has(cat.id)));
+        b.appendChild(document.createTextNode(cat.name + (cat.is_active ? '' : ' (বন্ধ)')));
+        if ((a.suggested_category_ids || []).includes(cat.id)) b.appendChild(el('small', null, 'চেয়েছে'));
+        b.addEventListener('click', () => {
+          if (sel.has(cat.id)) sel.delete(cat.id);
+          else { if (sel.size >= 3) { toast('সর্বোচ্চ ৩টা', 'warning'); return; } sel.add(cat.id); }
+          b.setAttribute('aria-pressed', String(sel.has(cat.id)));
+        });
+        cw.appendChild(b);
+      });
+      inn.appendChild(cw);
+
+      const btns = el('div', 'sa-btns');
+      const ok = el('button', 'sa-ok', 'অনুমোদন দিন, লাইভ করুন');
+      ok.type = 'button';
+      const no = el('button', 'sa-no', 'ফেরত পাঠান');
+      no.type = 'button';
+      btns.append(ok, no);
+      inn.appendChild(btns);
+
+      const rj = el('div', 'sa-reject');
+      rj.hidden = true;
+      const ta = el('textarea');
+      ta.maxLength = 500;
+      ta.placeholder = 'কী ঠিক করতে হবে? আবেদনকারী এটা দেখবেন।';
+      ta.setAttribute('aria-label', 'ফেরতের কারণ');
+      const rjb = el('button', 'sa-no', 'কারণসহ ফেরত পাঠান');
+      rjb.type = 'button';
+      rj.append(el('p', 'sa-label', 'ফেরতের কারণ *'), ta, rjb);
+      inn.appendChild(rj);
+
+      ok.addEventListener('click', async () => {
+        if (!sel.size) { toast('অন্তত ১টা ক্যাটাগরি বাছুন', 'warning'); return; }
+        if (!window.confirm('"' + (a.name || '') + '" অনুমোদন দেবেন? দোকান ও মেনু তৈরি হয়ে সাথে সাথে মার্কেটে দেখাবে। কমিশন শুরুতে ০%, পরে দোকানের পেজ থেকে বসাতে পারবেন।')) return;
+        ok.disabled = true;
+        const { data, error } = await supabase.rpc('admin_approve_shop_app', { p_id: a.id, p_category_ids: Array.from(sel), p_commission: 0 });
+        ok.disabled = false;
+        if (error || !data || !data.ok) { toast('অনুমোদন হয়নি' + (data && data.reason ? ' (' + data.reason + ')' : ''), 'error'); return; }
+        toast('"' + (a.name || '') + '" লাইভ হয়েছে');
+        load();
+      });
+      no.addEventListener('click', () => { rj.hidden = !rj.hidden; if (!rj.hidden) ta.focus(); });
+      rjb.addEventListener('click', async () => {
+        const why = ta.value.trim();
+        if (why.length < 3) { toast('কারণ লিখুন (কমপক্ষে ৩ অক্ষর)', 'warning'); ta.focus(); return; }
+        rjb.disabled = true;
+        const { data, error } = await supabase.rpc('admin_reject_shop_app', { p_id: a.id, p_reason: why });
+        rjb.disabled = false;
+        if (error || !data || !data.ok) { toast('ফেরত পাঠানো যায়নি', 'error'); return; }
+        toast('ফেরত পাঠানো হয়েছে, আবেদনকারী কারণ দেখবেন');
+        load();
+      });
+    } else if (a.status === 'rejected') {
+      const b = el('span', 'sa-badge', 'ফেরতের কারণ: ' + (a.reject_reason || '—'));
+      b.style.cssText += 'background:#FDECEA;color:#8A1C14;';
+      inn.appendChild(b);
+    } else if (a.status === 'approved') {
+      const st = a.shop_id ? shopState[a.shop_id] : null;
+      const b = el('span', 'sa-badge', !st ? 'দোকানটা পরে মুছে ফেলা হয়েছে' : st.is_active ? 'লাইভ আছে' : 'লুকানো আছে');
+      b.style.cssText += !st ? 'background:#F1F4F8;color:#5F6B7E;' : st.is_active ? 'background:#E6F6EE;color:#17663F;' : 'background:#FFF4E0;color:#7A3E00;';
+      inn.appendChild(b);
+      if (st) {
+        const go = el('a', 'sa-btn', 'দোকানের পেজ খুলুন');
+        go.href = '/console/shop?id=' + encodeURIComponent(a.shop_id);
+        inn.appendChild(go);
+      }
+    }
+    c.appendChild(inn);
+    return c;
+  }
+
+  function render() {
+    const box = $('saList');
+    box.textContent = '';
+    const list = rows.filter((r) => r.status === tab);
+    if (!list.length) { box.appendChild(el('div', 'sa-empty', tab === 'pending' ? 'নতুন কোনো আবেদন নেই।' : 'এখানে কিছু নেই।')); return; }
+    list.forEach((a) => box.appendChild(card(a)));
+  }
+
+  async function load() {
+    if (!rows.length) $('saList').innerHTML = window.SFSkeleton ? window.SFSkeleton.html('card', 2) : '';
+    const [r, c] = await Promise.all([
+      supabase.from('market_shop_applications').select('*, profiles!market_shop_applications_applicant_id_fkey(full_name)').neq('status', 'draft').order('submitted_at', { ascending: false }).limit(200),
+      cats.length ? Promise.resolve({ data: cats }) : supabase.from('delivery_market_categories').select('id, name, is_active, sort_order').order('sort_order'),
+    ]);
+    if (r.error) {
+      const r2 = await supabase.from('market_shop_applications').select('*').neq('status', 'draft').order('submitted_at', { ascending: false }).limit(200);
+      rows = r2.data || [];
+    } else rows = r.data || [];
+    cats = c.data || [];
+    const ids = rows.filter((x) => x.status === 'approved' && x.shop_id).map((x) => x.shop_id);
+    shopState = {};
+    if (ids.length) {
+      const { data: sd } = await supabase.from('delivery_shops').select('id, is_active').in('id', ids);
+      (sd || []).forEach((s) => { shopState[s.id] = s; });
+    }
+    renderTabs();
+    render();
+  }
+
+  onConsoleReady((ctx) => {
+    if (!canOpenAdminPath('/admin/delivery-shop-applications', ctx)) { $('saDeny').hidden = false; return; }
+    canManage = !!(ctx.isSuper || !ctx.access.isStaff || ctx.access.can('delivery_shops.manage'));
+    $('saMain').hidden = false;
+    load();
+  });
+</script>

@@ -1,0 +1,186 @@
+---
+// ============================================================
+// /console/market-cats — মার্কেটের শপ ক্যাটাগরি (নতুন অ্যাপ, ধাপ ৫.৩)
+// টেবিল: delivery_market_categories (পড়া: সবাই; লেখা RLS: delivery_shops.manage)
+// পেজ শুধু সুপার অ্যাডমিন (পুরনো /admin/delivery-categories-এর মতো, adminGuard-এ সেগমেন্ট নেই)।
+// কাজ: যোগ, নাম বদল, আইকন বদল, টেনে ক্রম (sortable.js → sort_order), চালু/বন্ধ।
+// ডিলিট নেই: দোকানে ক্যাটাগরির আইডি জমা থাকে, তাই শুধু বন্ধ করা যায়।
+// প্রতিটা ক্যাটাগরিতে কয়টা দোকান তা delivery_shops.market_category_ids থেকে গোনা।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="শপ ক্যাটাগরি" active="menu">
+  <div class="cs-pad cm-page mc-page">
+    <div>
+      <h1 class="cs-h cm-title">শপ ক্যাটাগরি</h1>
+      <p class="cs-muted mc-sub">মার্কেটের উপরের ক্যাটাগরি (খাবার, গ্রোসারি…)। বন্ধ ক্যাটাগরি কাস্টমার দেখে না।</p>
+    </div>
+    <div class="mc-deny" id="mcDeny" hidden>এই পেজ শুধু সুপার অ্যাডমিন দেখতে পারেন।</div>
+    <div class="mc-main" id="mcMain" hidden>
+      <form class="mc-add" id="mcAdd" novalidate>
+        <input class="mc-in" id="mcName" maxlength="40" placeholder="নতুন ক্যাটাগরির নাম" aria-label="নতুন ক্যাটাগরির নাম" required />
+        <select class="mc-in mc-icon" id="mcIcon" aria-label="আইকন"></select>
+        <button type="submit" class="mc-btn" id="mcAddBtn">যোগ করুন</button>
+      </form>
+      <p class="mc-hint">নাম বদলাতে নামের ঘরে লিখে বাইরে ট্যাপ করুন। ক্রম বদলাতে সারি চেপে ধরে টানুন।</p>
+      <div class="mc-list" id="mcList"></div>
+    </div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .mc-sub { margin: 2px 0 0; }
+  .mc-main { display: flex; flex-direction: column; gap: 10px; }
+  .mc-add { display: flex; gap: 8px; flex-wrap: wrap; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 12px; }
+  .mc-in { height: 44px; box-sizing: border-box; border: 1px solid #E7E2DA; border-radius: 12px; padding: 0 12px; font: inherit; font-size: 15px; color: #1B2A4A; background: #fff; flex: 1 1 160px; min-width: 0; }
+  .mc-icon { flex: 0 0 130px; }
+  .mc-btn { height: 44px; padding: 0 18px; border-radius: 12px; border: 0; background: #1B2A4A; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  .mc-hint { margin: 0; font-size: 12.5px; color: #5F6B7E; }
+  .mc-list { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; overflow: hidden; }
+  .mc-row { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #fff; }
+  .mc-row + .mc-row { border-top: 1px solid #EFEBE5; }
+  .mc-row.off { background: #FAF9F7; }
+  .mc-grip { width: 22px; flex: none; color: #9AA3B2; font-size: 18px; text-align: center; cursor: grab; user-select: none; }
+  .mc-row .mc-in { height: 40px; font-size: 14.5px; }
+  .mc-row.off .mc-in:first-of-type { color: #9AA3B2; }
+  .mc-n { font-size: 12px; color: #5F6B7E; white-space: nowrap; min-width: 54px; text-align: right; }
+  .mc-toggle { position: relative; width: 48px; height: 28px; flex: none; border-radius: 999px; border: 0; background: #CBD2DC; cursor: pointer; }
+  .mc-toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s; }
+  .mc-toggle[aria-checked="true"] { background: #17663F; }
+  .mc-toggle[aria-checked="true"]::after { transform: translateX(20px); }
+  .mc-deny { padding: 30px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; font-weight: 600; }
+  @media (max-width: 520px) { .mc-row { flex-wrap: wrap; } .mc-row .mc-in:first-of-type { flex-basis: calc(100% - 40px); } }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, bn } from '../../lib/consoleApp.js';
+  import { makeSortable } from '../../lib/sortable.js';
+
+  const $ = (id) => document.getElementById(id);
+  const toast = (t, type = 'success') => window.showToast?.(t, type);
+  const ICONS = [['food', 'খাবার'], ['grocery', 'গ্রোসারি'], ['pharmacy', 'ফার্মেসি'], ['flower', 'ফুল'], ['beauty', 'বিউটি'], ['gadget', 'গ্যাজেট'], ['other', 'অন্যান্য']];
+  let cats = [];
+  let used = {};
+  let sorted = false;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function iconSelect(sel, v) {
+    sel.textContent = '';
+    ICONS.forEach(([k, l]) => { const o = el('option', null, l); o.value = k; sel.appendChild(o); });
+    sel.value = ICONS.some(([k]) => k === v) ? v : 'other';
+  }
+
+  async function patch(id, fields, msg) {
+    const { error } = await supabase.from('delivery_market_categories').update(fields).eq('id', id);
+    if (error) { toast('সেভ হয়নি', 'error'); return false; }
+    if (msg) toast(msg);
+    return true;
+  }
+
+  async function saveOrder(ids) {
+    const jobs = [];
+    ids.forEach((id, k) => {
+      const c = cats.find((x) => x.id === id);
+      const want = (k + 1) * 10;
+      if (c && c.sort_order !== want) { c.sort_order = want; jobs.push(supabase.from('delivery_market_categories').update({ sort_order: want }).eq('id', id)); }
+    });
+    const res = await Promise.all(jobs);
+    if (res.some((r) => r.error)) { toast('ক্রম সেভ হয়নি', 'error'); load(); return; }
+    toast('ক্রম সেভ হয়েছে');
+  }
+
+  function render() {
+    const box = $('mcList');
+    box.textContent = '';
+    if (!cats.length) { box.appendChild(el('p', 'mc-hint', 'এখনো কোনো ক্যাটাগরি নেই।')); return; }
+    cats.forEach((c) => {
+      const r = el('div', 'mc-row' + (c.is_active ? '' : ' off'));
+      r.dataset.id = c.id;
+      r.appendChild(el('span', 'mc-grip', '⋮⋮'));
+      const nm = el('input', 'mc-in');
+      nm.value = c.name || '';
+      nm.maxLength = 40;
+      nm.setAttribute('aria-label', 'ক্যাটাগরির নাম');
+      const commit = async () => {
+        const v = nm.value.trim();
+        if (v === c.name) return;
+        if (!v) { nm.value = c.name; toast('নাম খালি রাখা যাবে না', 'warning'); return; }
+        if (await patch(c.id, { name: v }, 'নাম বদলেছে')) c.name = v; else nm.value = c.name;
+      };
+      nm.addEventListener('blur', commit);
+      nm.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); nm.blur(); } });
+      r.appendChild(nm);
+      const ic = el('select', 'mc-in mc-icon');
+      ic.setAttribute('aria-label', (c.name || '') + ' আইকন');
+      iconSelect(ic, c.icon);
+      ic.addEventListener('change', async () => { if (await patch(c.id, { icon: ic.value }, 'আইকন বদলেছে')) c.icon = ic.value; else ic.value = c.icon; });
+      r.appendChild(ic);
+      r.appendChild(el('span', 'mc-n', bn(used[c.id] || 0) + 'টা দোকান'));
+      const sw = el('button', 'mc-toggle');
+      sw.type = 'button';
+      sw.setAttribute('role', 'switch');
+      sw.setAttribute('aria-label', (c.name || '') + ' চালু');
+      sw.setAttribute('aria-checked', String(!!c.is_active));
+      sw.addEventListener('click', async () => {
+        const want = !c.is_active;
+        if (!want && (used[c.id] || 0) > 0 && !window.confirm('"' + c.name + '" বন্ধ করলে কাস্টমার মার্কেটে এই ক্যাটাগরি দেখবে না (' + bn(used[c.id]) + 'টা দোকান আছে, দোকানগুলো অন্য ক্যাটাগরিতে থাকলে সেখানে দেখাবে)। বন্ধ করবেন?')) return;
+        sw.disabled = true;
+        const ok = await patch(c.id, { is_active: want }, want ? 'চালু হয়েছে' : 'বন্ধ হয়েছে');
+        sw.disabled = false;
+        if (!ok) return;
+        c.is_active = want;
+        sw.setAttribute('aria-checked', String(want));
+        r.classList.toggle('off', !want);
+      });
+      r.appendChild(sw);
+      box.appendChild(r);
+    });
+    if (!sorted) { sorted = true; makeSortable(box, { itemSelector: '.mc-row', handle: '.mc-grip', onChange: (ids) => saveOrder(ids) }); }
+  }
+
+  async function load() {
+    $('mcList').innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 5) : '';
+    const [cr, sr] = await Promise.all([
+      supabase.from('delivery_market_categories').select('id, slug, name, icon, sort_order, is_active').order('sort_order', { ascending: true }).order('name', { ascending: true }),
+      supabase.from('delivery_shops').select('market_category_ids'),
+    ]);
+    if (cr.error) { $('mcList').textContent = ''; $('mcList').appendChild(el('p', 'mc-hint', 'লোড করা যায়নি।')); return; }
+    cats = cr.data || [];
+    used = {};
+    (sr.data || []).forEach((s) => (s.market_category_ids || []).forEach((id) => { used[id] = (used[id] || 0) + 1; }));
+    render();
+  }
+
+  $('mcAdd').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (window.SFValidateForm && !window.SFValidateForm($('mcAdd'))) return;
+    const name = $('mcName').value.trim();
+    if (!name || name.length > 40) { toast('নাম ১ থেকে ৪০ অক্ষরের মধ্যে দিন', 'warning'); return; }
+    const btn = $('mcAddBtn');
+    btn.disabled = true;
+    const maxSort = cats.reduce((m, c) => Math.max(m, c.sort_order || 0), 0);
+    const { error } = await supabase.from('delivery_market_categories').insert({
+      slug: 'c-' + Math.random().toString(36).slice(2, 8), name, icon: $('mcIcon').value, sort_order: maxSort + 10, is_active: true,
+    });
+    btn.disabled = false;
+    if (error) { toast('যোগ হয়নি', 'error'); return; }
+    $('mcName').value = '';
+    toast('ক্যাটাগরি যোগ হয়েছে');
+    load();
+  });
+
+  onConsoleReady((ctx) => {
+    if (!ctx.isSuper) { $('mcDeny').hidden = false; return; }
+    $('mcMain').hidden = false;
+    iconSelect($('mcIcon'), 'other');
+    load();
+  });
+</script>
