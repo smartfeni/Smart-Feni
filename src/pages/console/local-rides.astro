@@ -1,0 +1,389 @@
+---
+// ============================================================
+// /console/local-rides — লোকাল রাইড (নতুন অ্যাপ, ধাপ ১৩)
+// পুরনো /admin/local-rides থেকে তৈরি; একই টেবিল/RPC/API, DB বদল নেই। অনুমতি পুরনো পেজের একই।
+// ============================================================
+export const prerender = false;
+
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="লোকাল রাইড" active="menu">
+  <div class="lm-page">
+    <div class="container">
+
+      <div id="cxDeny" class="cx-deny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+
+      <div id="adminGuardedContent" hidden>
+        <h1 class="lm-h1"><i class="fas fa-van-shuttle"></i> লোকাল রাইড মনিটর</h1>
+
+        <div class="lm-alerts" id="lmAlerts"></div>
+        <div class="lm-stats" id="lmStats"></div>
+
+        <div class="lm-tabs" role="tablist">
+          <button type="button" class="lm-tab active" data-tab="open">চলমান <span class="lm-count" id="lmOpenCount">0</span></button>
+          <button type="button" class="lm-tab" data-tab="confirmed">কনফার্ম</button>
+          <button type="button" class="lm-tab" data-tab="completed">সম্পন্ন</button>
+          <button type="button" class="lm-tab" data-tab="closed">বাতিল</button>
+          <button type="button" class="lm-tab" data-tab="reports">রিপোর্ট <span class="lm-count lm-count-red" id="lmReportCount" style="display:none;">0</span></button>
+        </div>
+
+        <div id="lmList" class="lm-list"></div>
+        <p class="lm-empty" id="lmEmpty" style="display:none;">এই ট্যাবে কোনো রিকোয়েস্ট নেই</p>
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .lm-page { min-height: 60vh; padding: 14px 0 40px; }
+    #adminGuardedContent[hidden], .cx-deny[hidden] { display: none !important; }
+    .cx-deny { padding: 40px 16px; text-align: center; color: #64748B; font-weight: 600; }
+    .lm-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .lm-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: lmspin .8s linear infinite; }
+    @keyframes lmspin { to { transform: rotate(360deg); } }
+    .lm-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: .88rem; margin-bottom: 18px; min-height: 44px; }
+    .lm-h1 { font-size: 1.4rem; font-weight: 800; color: #1B2A4A; display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+    .lm-h1 i { color: #FF6B35; }
+    .lm-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+    .lm-stat { background: #fff; border-radius: 14px; padding: 10px 6px; text-align: center; box-shadow: 0 2px 10px rgba(15,23,42,.05); }
+    .lm-stat b { display: block; font-size: 1.15rem; color: #1B2A4A; }
+    .lm-stat span { font-size: .7rem; color: #8FA0BC; font-weight: 700; }
+    .lm-tabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid #EEF3F9; overflow-x: auto; }
+    .lm-tab { background: none; border: none; padding: 10px 12px; min-height: 44px; font-size: .84rem; font-weight: 700; color: #8FA0BC; cursor: pointer; border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 6px; font-family: inherit; white-space: nowrap; }
+    .lm-tab.active { color: #FF6B35; border-bottom-color: #FF6B35; }
+    .lm-count { background: #FFF0EA; color: #FF6B35; font-size: .7rem; font-weight: 800; padding: 1px 8px; border-radius: 20px; }
+    .lm-list { display: flex; flex-direction: column; gap: 12px; }
+    .lm-card { background: #fff; border-radius: 18px; padding: 14px 16px; box-shadow: 0 4px 16px rgba(15,23,42,.06); }
+    .lm-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .lm-no { font-size: .76rem; font-weight: 700; color: #8FA0BC; }
+    .lm-time { font-size: .74rem; color: #8FA0BC; }
+    .lm-route { font-size: .92rem; font-weight: 700; color: #1B2A4A; line-height: 1.45; margin: 2px 0 6px; }
+    .lm-route small { display: block; font-size: .74rem; font-weight: 600; color: #5A6E85; }
+    .lm-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .lm-tag { font-size: .74rem; font-weight: 600; background: #F4F7FC; border-radius: 20px; padding: 3px 10px; color: #1B2A4A; }
+    .lm-tag.warn { background: #FFF4E0; color: #B8860B; }
+    .lm-tag.ok { background: #EAFBF0; color: #1B7A3C; }
+    .lm-fare { margin-left: auto; font-size: 1rem; font-weight: 800; color: #1B2A4A; }
+    .lm-who { margin-top: 8px; font-size: .8rem; color: #5A6E85; line-height: 1.6; }
+    .lm-who a { color: #FF6B35; font-weight: 700; text-decoration: none; }
+    .lm-empty { text-align: center; color: #9AA8BC; font-size: .9rem; padding: 60px 0; }
+    .lm-alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+    .lm-alert { display: flex; gap: 10px; align-items: flex-start; background: #FFF4E5; border: 1px solid #FFD8A8; color: #5E3000; border-radius: 14px; padding: 10px 12px; font-size: .84rem; font-weight: 600; line-height: 1.5; }
+    .lm-alert i { margin-top: 3px; color: #D9822B; }
+    .lm-alert a { color: #FF6B35; font-weight: 800; text-decoration: none; }
+    .lm-count-red { background: #D14343; color: #fff; }
+    .lm-chip-r { font-size: .74rem; font-weight: 800; border-radius: 20px; padding: 3px 10px; background: #FFF0EA; color: #D14343; }
+    .lm-chip-r.done { background: #EAFBF0; color: #1B7A3C; }
+    .lm-chip-r.off { background: #F1F5F9; color: #5A6E85; }
+    .lm-rnote { margin: 8px 0 0; font-size: .84rem; color: #1B2A4A; background: #F8FAFC; border-radius: 12px; padding: 8px 12px; line-height: 1.5; }
+    .lm-racts { display: flex; gap: 8px; margin-top: 10px; }
+    .lm-rbtn { flex: 1; min-height: 44px; border: 0; border-radius: 12px; font-weight: 800; font-size: .86rem; cursor: pointer; font-family: inherit; }
+    .lm-rbtn.ok { background: #1B7A3C; color: #fff; }
+    .lm-rbtn.line { background: #fff; border: 1.5px solid #D5DCE8; color: #1B2A4A; }
+    .lm-rbtn:disabled { opacity: .6; cursor: default; }
+    @media (max-width: 420px) { .lm-stats { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+
+  <script>
+    import { onConsoleReady, canOpenAdminPath } from '../../lib/consoleApp.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const $ = (id) => document.getElementById(id);
+    const BN = '০১২৩৪৫৬৭৮৯';
+    const bn = (n) => String(n).replace(/\d/g, (d) => BN[d]);
+    const POLL_MS = 15000;
+
+    let rows = [];
+    let tab = 'open';
+    let sig = '';
+    let timer = null;
+
+    function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+    function safePhone(p) { return String(p || '').replace(/[^0-9+]/g, ''); }
+    function timeText(iso) {
+      const d = new Date(iso);
+      if (isNaN(d)) return '';
+      const mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+      if (mins < 1) return 'এইমাত্র';
+      if (mins < 60) return bn(mins) + ' মিনিট আগে';
+      if (mins < 1440) return bn(Math.round(mins / 60)) + ' ঘণ্টা আগে';
+      return bn(Math.round(mins / 1440)) + ' দিন আগে';
+    }
+    function groupOf(r) {
+      if (r.status === 'open' && new Date(r.expires_at).getTime() > Date.now()) return 'open';
+      if (r.status === 'confirmed') return 'confirmed';
+      if (r.status === 'completed') return 'completed';
+      return 'closed';
+    }
+
+    async function load() {
+      const { data: reqs, error } = await supabase
+        .from('local_ride_requests')
+        .select('id, request_no, customer_id, pickup_area_id, pickup_text, drop_area_id, drop_text, vehicle_type_ids, passengers, fare, final_price, status, accepted_driver_id, expires_at, created_at')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) { $('lmEmpty').textContent = 'লোড করতে সমস্যা হয়েছে'; $('lmEmpty').style.display = 'block'; return; }
+      const list = reqs || [];
+      const reqIds = list.map((r) => r.id);
+      const custIds = [...new Set(list.map((r) => r.customer_id))];
+      const drvIds = [...new Set(list.map((r) => r.accepted_driver_id).filter(Boolean))];
+
+      const [vt, ar, of, cu, dr] = await Promise.all([
+        supabase.from('local_ride_vehicle_types').select('id, name_bn'),
+        supabase.from('local_areas').select('id, name_bn'),
+        reqIds.length ? supabase.from('local_ride_offers').select('request_id, status').in('request_id', reqIds) : Promise.resolve({ data: [] }),
+        custIds.length ? supabase.from('profiles').select('id, full_name, phone').in('id', custIds) : Promise.resolve({ data: [] }),
+        drvIds.length ? supabase.from('local_ride_drivers').select('id, user_id, vehicle_number').in('id', drvIds) : Promise.resolve({ data: [] }),
+      ]);
+      const drvUserIds = (dr.data || []).map((d) => d.user_id);
+      const dp = drvUserIds.length ? await supabase.from('profiles').select('id, full_name, phone').in('id', drvUserIds) : { data: [] };
+
+      const vtMap = new Map((vt.data || []).map((x) => [x.id, x.name_bn]));
+      const arMap = new Map((ar.data || []).map((x) => [x.id, x.name_bn]));
+      const cuMap = new Map((cu.data || []).map((x) => [x.id, x]));
+      const dpMap = new Map((dp.data || []).map((x) => [x.id, x]));
+      const drMap = new Map((dr.data || []).map((x) => [x.id, { ...x, profile: dpMap.get(x.user_id) || null }]));
+      const offerCount = new Map();
+      (of.data || []).forEach((o) => { if (o.status === 'active' || o.status === 'accepted') offerCount.set(o.request_id, (offerCount.get(o.request_id) || 0) + 1); });
+
+      rows = list.map((r) => ({
+        ...r,
+        group: groupOf(r),
+        pickupArea: arMap.get(r.pickup_area_id) || '',
+        dropArea: arMap.get(r.drop_area_id) || '',
+        types: (r.vehicle_type_ids || []).map((id) => vtMap.get(id)).filter(Boolean),
+        customer: cuMap.get(r.customer_id) || null,
+        driver: r.accepted_driver_id ? drMap.get(r.accepted_driver_id) || null : null,
+        offers: offerCount.get(r.id) || 0,
+      }));
+      const s = JSON.stringify(rows.map((r) => [r.id, r.status, r.group, r.offers, r.accepted_driver_id]));
+      if (s !== sig) { sig = s; render(); } else { paintStats(); }
+      await loadMeta();
+    }
+
+    function paintStats() {
+      const cnt = { open: 0, confirmed: 0, completed: 0, closed: 0 };
+      rows.forEach((r) => { cnt[r.group]++; });
+      $('lmOpenCount').textContent = bn(cnt.open);
+      const box = $('lmStats');
+      box.textContent = '';
+      [['চলমান', cnt.open], ['কনফার্ম', cnt.confirmed], ['সম্পন্ন', cnt.completed], ['বাতিল/মেয়াদ শেষ', cnt.closed]].forEach(([l, n]) => {
+        const s = el('div', 'lm-stat');
+        s.appendChild(el('b', null, bn(n)));
+        s.appendChild(el('span', null, l));
+        box.appendChild(s);
+      });
+    }
+
+    function render() {
+      paintStats();
+      if (tab === 'reports') { renderReports(); return; }
+      const box = $('lmList');
+      box.textContent = '';
+      const items = rows.filter((r) => r.group === tab);
+      $('lmEmpty').style.display = items.length ? 'none' : 'block';
+      $('lmEmpty').textContent = 'এই ট্যাবে কোনো রিকোয়েস্ট নেই';
+      items.forEach((r) => {
+        const card = el('div', 'lm-card');
+        const row = el('div', 'lm-row');
+        row.appendChild(el('span', 'lm-no', r.request_no || ''));
+        row.appendChild(el('span', 'lm-time', timeText(r.created_at)));
+        card.appendChild(row);
+
+        const route = el('div', 'lm-route');
+        route.appendChild(document.createTextNode((r.pickup_text || r.pickupArea) + ' → ' + (r.drop_text || r.dropArea || 'ম্যাপে দেওয়া গন্তব্য')));
+        route.appendChild(el('small', null, (r.pickupArea || '') + (r.dropArea ? ' → ' + r.dropArea : '')));
+        card.appendChild(route);
+
+        const meta = el('div', 'lm-meta');
+        r.types.forEach((t) => meta.appendChild(el('span', 'lm-tag', t)));
+        meta.appendChild(el('span', 'lm-tag', bn(r.passengers) + ' জন'));
+        if (r.group === 'open') meta.appendChild(el('span', 'lm-tag' + (r.offers ? ' ok' : ' warn'), r.offers ? bn(r.offers) + 'টা অফার' : 'কোনো অফার নেই'));
+        if (r.status === 'cancelled') meta.appendChild(el('span', 'lm-tag', 'যাত্রী বাতিল করেছে'));
+        if (r.status === 'expired') meta.appendChild(el('span', 'lm-tag warn', 'মেয়াদ শেষ'));
+        const price = r.final_price != null ? r.final_price : r.fare;
+        meta.appendChild(el('span', 'lm-fare', '৳' + bn(Math.round(Number(price)))));
+        card.appendChild(meta);
+
+        const who = el('div', 'lm-who');
+        const cph = safePhone(r.customer && r.customer.phone);
+        who.appendChild(document.createTextNode('যাত্রী: ' + ((r.customer && r.customer.full_name) || 'নাম নেই') + ' '));
+        if (cph) { const a = el('a', null, r.customer.phone); a.href = 'tel:' + cph; who.appendChild(a); }
+        if (r.driver) {
+          who.appendChild(document.createElement('br'));
+          const dph = safePhone(r.driver.profile && r.driver.profile.phone);
+          who.appendChild(document.createTextNode('ড্রাইভার: ' + ((r.driver.profile && r.driver.profile.full_name) || 'নাম নেই') + ' · ' + (r.driver.vehicle_number || '') + ' '));
+          if (dph) { const a = el('a', null, r.driver.profile.phone); a.href = 'tel:' + dph; who.appendChild(a); }
+        }
+        card.appendChild(who);
+        box.appendChild(card);
+      });
+    }
+
+    // ===== সতর্কতা বার + রিপোর্ট =====
+    let reports = [];
+    let repSig = '';
+    let overview = null;
+    const ROLE_L = { customer: 'যাত্রী', driver: 'ড্রাইভার' };
+    const ST_L = { open: 'খোলা', resolved: 'নিষ্পত্তি', dismissed: 'বাদ' };
+
+    function toast(msg, type) { if (typeof window.showToast === 'function') window.showToast(msg, type || 'error'); }
+
+    function paintAlerts() {
+      const box = $('lmAlerts');
+      box.textContent = '';
+      if (!overview) return;
+      const add = (text, linkText, href) => {
+        const a = el('div', 'lm-alert');
+        const i = document.createElement('i'); i.className = 'fas fa-triangle-exclamation';
+        a.appendChild(i);
+        const s = el('span', null, text + ' ');
+        if (linkText) { const l = el('a', null, linkText); l.href = href; s.appendChild(l); }
+        a.appendChild(s);
+        box.appendChild(a);
+      };
+      if (Number(overview.no_match_open) > 0) add(bn(overview.no_match_open) + 'টা রিকোয়েস্টে ৩ মিনিটের বেশি ধরে মিলে যাওয়া কোনো অনলাইন ড্রাইভার নেই।');
+      if (Number(overview.online_drivers) === 0) add('এখন কোনো লোকাল ড্রাইভার অনলাইনে নেই।');
+      if (Number(overview.pending_drivers) > 0) add(bn(overview.pending_drivers) + 'টা ড্রাইভারের আবেদন যাচাইয়ের অপেক্ষায়।', 'দেখুন', '/console/drivers?tab=pending');
+    }
+
+    async function loadMeta() {
+      const [ov, rp] = await Promise.all([
+        supabase.rpc('admin_local_ride_overview'),
+        supabase.rpc('admin_local_ride_reports', { p_status: 'all', p_limit: 100 }),
+      ]);
+      if (!ov.error && ov.data) { overview = ov.data; paintAlerts(); }
+      if (!rp.error && Array.isArray(rp.data)) {
+        const s = JSON.stringify(rp.data);
+        if (s !== repSig) { repSig = s; reports = rp.data; if (tab === 'reports') renderReports(); }
+      }
+      const open = reports.filter((r) => r.status === 'open').length;
+      const c = $('lmReportCount');
+      c.textContent = bn(open);
+      c.style.display = open ? '' : 'none';
+    }
+
+    // নিষ্পত্তি/বাদের নোট (বটম শিট) — নোট স্ট্রিং ('' হতে পারে) ফেরত দেয়, বাদ দিলে null
+    function askAdminNote(titleText, okLabel) {
+      return new Promise((resolve) => {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(27,42,74,.55);display:flex;align-items:flex-end;justify-content:center;';
+        const sheet = document.createElement('div');
+        sheet.style.cssText = 'background:#fff;width:100%;max-width:480px;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));';
+        const t = el('div', null, titleText);
+        t.style.cssText = 'font-size:16px;font-weight:700;color:#1B2A4A;margin-bottom:4px;';
+        const h = el('div', null, 'এই নোট রিপোর্টকারীকে নোটিফিকেশনে দেখানো হবে (ঐচ্ছিক)।');
+        h.style.cssText = 'font-size:13px;color:#64748b;margin-bottom:10px;';
+        const ta = document.createElement('textarea');
+        ta.maxLength = 500; ta.rows = 3; ta.placeholder = 'যেমন: ড্রাইভারকে সতর্ক করা হয়েছে';
+        ta.style.cssText = 'width:100%;box-sizing:border-box;border:1.5px solid #D5DCE8;border-radius:12px;padding:10px 12px;font-size:14.5px;font-family:inherit;';
+        const ok = el('button', null, okLabel);
+        ok.type = 'button';
+        ok.style.cssText = 'display:block;width:100%;padding:13px;margin-top:10px;border:none;border-radius:12px;background:#FF6B35;color:#fff;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;';
+        const no = el('button', null, 'ফিরে যান');
+        no.type = 'button';
+        no.style.cssText = 'display:block;width:100%;padding:12px;margin-top:4px;border:none;background:transparent;color:#6C7A93;font-size:14.5px;font-weight:700;font-family:inherit;cursor:pointer;';
+        const done = (v) => { wrap.remove(); resolve(v); };
+        ok.addEventListener('click', () => done(ta.value.trim()));
+        no.addEventListener('click', () => done(null));
+        wrap.addEventListener('click', (e) => { if (e.target === wrap) done(null); });
+        sheet.append(t, h, ta, ok, no);
+        wrap.appendChild(sheet);
+        document.body.appendChild(wrap);
+      });
+    }
+
+    async function resolveReport(btn, r, status) {
+      const note = await askAdminNote(status === 'resolved' ? 'রিপোর্ট নিষ্পত্তি করবেন?' : 'রিপোর্ট বাদ দেবেন?', status === 'resolved' ? 'নিষ্পত্তি করুন' : 'বাদ দিন');
+      if (note === null) return;
+      btn.disabled = true;
+      const { error } = await supabase.rpc('admin_local_ride_report_resolve', { p_report_id: r.id, p_status: status, p_admin_note: note || null });
+      if (error) {
+        btn.disabled = false;
+        const m = String(error.message || '');
+        toast(/FORBIDDEN|42501/.test(m) ? 'এই কাজের অনুমতি নেই' : /REPORT_NOT_OPEN/.test(m) ? 'রিপোর্টটা আগেই দেখা হয়ে গেছে' : 'কাজটা করা যায়নি, আবার চেষ্টা করুন');
+        await loadMeta();
+        return;
+      }
+      toast(status === 'resolved' ? 'রিপোর্ট নিষ্পত্তি হয়েছে' : 'রিপোর্ট বাদ দেওয়া হয়েছে', 'success');
+      repSig = '';
+      await loadMeta();
+    }
+
+    function personLine(label, name, phone) {
+      const d = el('div');
+      d.appendChild(document.createTextNode(label + ': ' + (name || 'নাম নেই') + ' '));
+      const ph = safePhone(phone);
+      if (ph) { const a = el('a', null, phone); a.href = 'tel:' + ph; d.appendChild(a); }
+      return d;
+    }
+
+    function renderReports() {
+      const box = $('lmList');
+      box.textContent = '';
+      const items = reports.slice().sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1));
+      $('lmEmpty').textContent = 'কোনো রিপোর্ট নেই';
+      $('lmEmpty').style.display = items.length ? 'none' : 'block';
+      items.forEach((r) => {
+        const card = el('div', 'lm-card');
+        const row = el('div', 'lm-row');
+        row.appendChild(el('span', 'lm-no', (r.request_no || '') + ' · ' + (ROLE_L[r.reporter_role] || '') + 'র রিপোর্ট'));
+        row.appendChild(el('span', 'lm-time', timeText(r.created_at)));
+        card.appendChild(row);
+
+        const meta = el('div', 'lm-meta');
+        meta.appendChild(el('span', 'lm-chip-r' + (r.status === 'resolved' ? ' done' : r.status === 'dismissed' ? ' off' : ''), (r.reason_label || '') + ' · ' + (ST_L[r.status] || '')));
+        const price = r.final_price != null ? r.final_price : r.fare;
+        if (price != null) meta.appendChild(el('span', 'lm-fare', '৳' + bn(Math.round(Number(price)))));
+        card.appendChild(meta);
+
+        const route = el('div', 'lm-route');
+        route.appendChild(document.createTextNode((r.pickup_text || '—') + ' → ' + (r.drop_text || 'ম্যাপে দেওয়া গন্তব্য')));
+        card.appendChild(route);
+
+        if (r.note) card.appendChild(el('p', 'lm-rnote', r.note));
+
+        const who = el('div', 'lm-who');
+        who.appendChild(personLine('রিপোর্টকারী', r.reporter_name, r.reporter_phone));
+        who.appendChild(personLine('অভিযুক্ত', r.reported_name, r.reported_phone));
+        card.appendChild(who);
+
+        if (r.status === 'open') {
+          const acts = el('div', 'lm-racts');
+          const ok = el('button', 'lm-rbtn ok', 'নিষ্পত্তি'); ok.type = 'button';
+          const no = el('button', 'lm-rbtn line', 'বাদ দিন'); no.type = 'button';
+          ok.addEventListener('click', () => resolveReport(ok, r, 'resolved'));
+          no.addEventListener('click', () => resolveReport(no, r, 'dismissed'));
+          acts.append(ok, no);
+          card.appendChild(acts);
+        } else if (r.admin_note) {
+          card.appendChild(el('p', 'lm-rnote', 'অ্যাডমিনের নোট: ' + r.admin_note));
+        }
+        box.appendChild(card);
+      });
+    }
+
+    // নোটিফিকেশন লিংক: /admin/local-rides?tab=reports
+    try {
+      if (new URLSearchParams(window.location.search).get('tab') === 'reports') {
+        tab = 'reports';
+        document.querySelectorAll('.lm-tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === 'reports'));
+      }
+    } catch (_) { /* উপেক্ষা */ }
+
+    document.querySelectorAll('.lm-tab').forEach((b) => b.addEventListener('click', () => {
+      document.querySelectorAll('.lm-tab').forEach((x) => x.classList.remove('active'));
+      b.classList.add('active');
+      tab = b.dataset.tab;
+      render();
+    }));
+
+    onConsoleReady((ctx) => {
+      if (!canOpenAdminPath('/admin/local-rides', ctx)) { document.getElementById('cxDeny').hidden = false; return; }
+      document.getElementById('adminGuardedContent').hidden = false;
+      load();
+      clearInterval(timer);
+      timer = setInterval(() => { if (!document.hidden) load(); }, POLL_MS);
+    });
+  </script>
+</ConsoleShell>

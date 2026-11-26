@@ -1,0 +1,706 @@
+---
+// ============================================================
+// /console/disputes — ডেলিভারি ডিসপিউট (নতুন অ্যাপ, ধাপ ১৩)
+// পুরনো /admin/delivery-disputes থেকে তৈরি; একই টেবিল/RPC/API, DB বদল নেই। অনুমতি পুরনো পেজের একই। অর্ডারের লিংক /console/order?no=।
+// ============================================================
+export const prerender = false;
+
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+import ChatModal from '../../components/delivery/ChatModal.astro';
+---
+
+<ConsoleShell title="ডেলিভারি ডিসপিউট" active="menu">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="cxDeny" class="cx-deny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+
+      <div id="adminGuardedContent" class="admin-content" hidden>
+
+        <div class="dd-header">
+          <h1><i class="fas fa-triangle-exclamation"></i> ডেলিভারি ডিসপিউট</h1>
+          <p>উভয় পক্ষের তথ্য ও প্রমাণ দেখে সিদ্ধান্ত নিন</p>
+        </div>
+
+        <div class="dd-search">
+          <i class="fas fa-magnifying-glass"></i>
+          <input type="search" id="disputeSearch" placeholder="অর্ডার নাম্বার, নাম বা ফোন দিয়ে খুঁজুন" autocomplete="off" />
+        </div>
+        <a href="/console/orders" class="dd-all-orders-link"><i class="fas fa-list"></i> সব অর্ডার ও হিস্ট্রি দেখুন</a>
+
+        <div id="disputeListLoading" class="dd-loading" style="display:none;">
+          <div class="admin-spinner"></div>
+        </div>
+
+        <div id="disputeList" class="dd-list"></div>
+
+        <div class="dd-empty" id="disputeEmpty" style="display:none;">
+          <i class="fas fa-circle-check"></i>
+          <p>এই মুহূর্তে কোনো পেন্ডিং ডিসপিউট নেই</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ছবি lightbox (পেমেন্ট প্রুফ বড় করে দেখার জন্য) ===== -->
+  <div class="dd-lightbox-overlay" id="ddLightboxOverlay">
+    <button class="dd-lightbox-close" id="ddLightboxClose" type="button"><i class="fas fa-xmark"></i></button>
+    <img id="ddLightboxImg" src="" alt="" />
+  </div>
+
+  <ChatModal />
+
+  <style is:global>
+    .admin-page {
+      min-height: 60vh;
+      padding: 14px 0 40px;
+    }
+    #adminGuardedContent[hidden], .cx-deny[hidden] { display: none !important; }
+    .cx-deny { padding: 40px 16px; text-align: center; color: #64748B; font-weight: 600; }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .dd-loading {
+      display: flex;
+      justify-content: center;
+      padding: 40px 0;
+    }
+
+    .dd-back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .dd-back-link:hover {
+      color: #FF6B35;
+    }
+
+    .dd-header {
+      margin-bottom: 22px;
+    }
+
+    .dd-header h1 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .dd-header h1 i {
+      color: #D14343;
+    }
+
+    .dd-header p {
+      font-size: 0.84rem;
+      color: #8FA0BC;
+    }
+
+    .dd-search {
+      position: relative;
+      margin-bottom: 10px;
+    }
+
+    .dd-search i {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #9AA8BC;
+      font-size: 0.85rem;
+    }
+
+    .dd-search input {
+      width: 100%;
+      padding: 12px 14px 12px 38px;
+      border: 1.5px solid #E5EAF0;
+      border-radius: 14px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      background: #fff;
+      color: #1B2A4A;
+      box-sizing: border-box;
+    }
+
+    .dd-search input:focus {
+      outline: none;
+      border-color: #FF6B35;
+    }
+
+    .dd-all-orders-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #FF6B35;
+      text-decoration: none;
+      margin-bottom: 16px;
+    }
+
+    .dd-order-no {
+      display: inline-block;
+      font-size: 0.74rem;
+      font-weight: 800;
+      color: #1B2A4A;
+      background: #EEF3F9;
+      padding: 3px 10px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      letter-spacing: 0.3px;
+    }
+
+    .dd-details-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #3B82F6;
+      text-decoration: none;
+      margin-bottom: 12px;
+    }
+
+    .dd-list {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .dd-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      border: 1px solid #FFF0EA;
+    }
+
+    .dd-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px dashed #E5EAF0;
+    }
+
+    .dd-price {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #FF6B35;
+    }
+
+    .dd-date {
+      font-size: 0.72rem;
+      color: #9AA8BC;
+      margin-top: 2px;
+    }
+
+    .dd-disputed-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.68rem;
+      font-weight: 800;
+      padding: 4px 12px;
+      border-radius: 20px;
+      background: #FFF4E0;
+      color: #B8860B;
+      flex-shrink: 0;
+    }
+
+    .dd-parties-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .dd-party-box {
+      background: #F8FAFC;
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+
+    .dd-party-label {
+      font-size: 0.64rem;
+      color: #9AA8BC;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 3px;
+    }
+
+    .dd-party-name {
+      font-size: 0.84rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .dd-party-phone {
+      font-size: 0.74rem;
+      color: #5A6E85;
+      margin-top: 1px;
+    }
+
+    .dd-section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #8FA0BC;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 6px;
+      margin-top: 12px;
+    }
+
+    .dd-desc {
+      font-size: 0.82rem;
+      color: #3A4A60;
+      line-height: 1.5;
+      margin-bottom: 4px;
+    }
+
+    .dd-area {
+      font-size: 0.76rem;
+      color: #9AA8BC;
+    }
+
+    .dd-area i {
+      color: #FF6B35;
+      margin-right: 4px;
+    }
+
+    .dd-reason-box {
+      background: #FFF0EA;
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-top: 6px;
+    }
+
+    .dd-reason-box p {
+      font-size: 0.84rem;
+      color: #7A3A1A;
+      line-height: 1.5;
+      font-weight: 600;
+    }
+
+    .dd-proofs-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .dd-proof-thumb {
+      width: 64px;
+      height: 64px;
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      border: 1px solid #EEF3F9;
+    }
+
+    .dd-proof-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .dd-no-proof {
+      font-size: 0.76rem;
+      color: #B0BCCB;
+      font-style: italic;
+    }
+
+    .dd-btn-view-chat {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1.5px solid #FF6B35;
+      background: #FFF0EA;
+      color: #FF6B35;
+      padding: 11px;
+      border-radius: 12px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      margin-top: 14px;
+    }
+
+    .dd-btn-view-chat:hover {
+      background: #FF6B35;
+      color: #fff;
+    }
+
+    .dd-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .dd-actions button {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: none;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+
+    .dd-btn-rider-favor {
+      background: #1B7A3C;
+      color: #fff;
+    }
+
+    .dd-btn-rider-favor:hover {
+      background: #156530;
+    }
+
+    .dd-btn-cancel-deal {
+      background: #FFF0EA;
+      color: #D14343;
+    }
+
+    .dd-btn-cancel-deal:hover {
+      background: #D14343;
+      color: #fff;
+    }
+
+    .dd-empty {
+      text-align: center;
+      background: #fff;
+      border-radius: 20px;
+      padding: 60px 24px;
+      border: 1px dashed #C8ECD5;
+    }
+
+    .dd-empty i {
+      font-size: 2rem;
+      color: #1B7A3C;
+      margin-bottom: 12px;
+    }
+
+    .dd-empty p {
+      font-weight: 700;
+      color: #1B2A4A;
+      font-size: 0.9rem;
+    }
+
+    .dd-lightbox-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.88);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .dd-lightbox-overlay.active {
+      display: flex;
+    }
+
+    .dd-lightbox-overlay img {
+      max-width: 100%;
+      max-height: 90vh;
+      border-radius: 12px;
+    }
+
+    .dd-lightbox-close {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      border: none;
+      color: #fff;
+      font-size: 1.1rem;
+      cursor: pointer;
+    }
+
+    @media (max-width: 480px) {
+      .dd-parties-row {
+        grid-template-columns: 1fr;
+      }
+      .dd-actions {
+        flex-direction: column;
+      }
+    }
+  </style>
+
+  <script>
+    import { onConsoleReady, canOpenAdminPath } from '../../lib/consoleApp.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { resolveDispute } from '../../lib/deliveryClient.js';
+    import { getSignedUrls } from '../../lib/storageSigned.js';
+
+    const PROOF_BUCKET = 'delivery-proofs';
+
+    const disputeList = document.getElementById('disputeList');
+    const disputeEmpty = document.getElementById('disputeEmpty');
+    const disputeListLoading = document.getElementById('disputeListLoading');
+
+    // ইউজারের লেখা টেক্সট innerHTML-এ বসানোর আগে এস্কেপ (অ্যাডমিন পেজে HTML ইনজেকশন ঠেকাতে)
+    function esc(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function formatDate(iso) {
+      return new Date(iso).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadDisputes() {
+      disputeListLoading.style.display = 'flex';
+      disputeList.innerHTML = '';
+      disputeEmpty.style.display = 'none';
+
+      const { data, error } = await supabase
+        .from('delivery_requests')
+        .select(`
+          id, order_no, description, upazila, area_detail, final_price, dispute_reason, disputed_at, created_at,
+          customer_profile_id, accepted_rider_id,
+          customer:profiles!delivery_requests_customer_profile_id_fkey(full_name, phone),
+          accepted_rider:delivery_riders!delivery_requests_accepted_rider_id_fkey(profile_id, profiles!delivery_riders_profile_id_fkey(full_name, phone))
+        `)
+        .eq('status', 'disputed')
+        .order('disputed_at', { ascending: false });
+
+      disputeListLoading.style.display = 'none';
+
+      if (error) {
+        console.error('ডিসপিউট লোড এরর:', error.message);
+        disputeList.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করতে সমস্যা হয়েছে: ${esc(error.message)}</p>`;
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        disputeEmpty.style.display = 'block';
+        return;
+      }
+
+      // প্রতিটা ডিসপিউটের payment proof ছবি আলাদাভাবে ফেচ
+      const requestIds = data.map((r) => r.id);
+      const { data: proofsData } = await supabase
+        .from('delivery_payment_proofs')
+        .select('request_id, image_urls')
+        .in('request_id', requestIds);
+
+      const proofsMap = new Map();
+      (proofsData || []).forEach((p) => {
+        const existing = proofsMap.get(p.request_id) || [];
+        proofsMap.set(p.request_id, [...existing, ...(p.image_urls || [])]);
+      });
+
+      // delivery-proofs bucket private — দেখানোর আগে সব ছবির signed URL বানাই
+      for (const [reqId, urls] of Array.from(proofsMap.entries())) {
+        proofsMap.set(reqId, await getSignedUrls(supabase, PROOF_BUCKET, urls));
+      }
+
+      data.forEach((req) => {
+        const card = document.createElement('div');
+        card.className = 'dd-card';
+
+        const customerName = req.customer?.full_name || 'কাস্টমার';
+        const customerPhone = req.customer?.phone || '—';
+        const riderName = req.accepted_rider?.profiles?.full_name || 'রাইডার';
+        const riderPhone = req.accepted_rider?.profiles?.phone || '—';
+        // চ্যাটের sender_id = profile id; ChatModal-এ লেবেল বসাতে এগুলো লাগে
+        const customerProfileId = req.customer_profile_id || null;
+        const riderProfileId = req.accepted_rider?.profile_id || null;
+        const proofs = proofsMap.get(req.id) || [];
+
+        const proofsHtml = proofs.length > 0
+          ? `<div class="dd-proofs-row">${proofs.map((url) => `<div class="dd-proof-thumb" data-img="${esc(url)}"><img loading="lazy" decoding="async" src="${esc(url)}" alt="পেমেন্ট প্রুফ" /></div>`).join('')}</div>`
+          : `<p class="dd-no-proof">কোনো পেমেন্ট প্রুফ আপলোড করা হয়নি</p>`;
+
+        // সার্চের জন্য কার্ডে লুকানো টেক্সট
+        card.dataset.search = [req.order_no, customerName, customerPhone, riderName, riderPhone]
+          .join(' ')
+          .toLowerCase();
+
+        card.innerHTML = `
+          <div class="dd-card-top">
+            <div>
+              <span class="dd-order-no">#${esc(req.order_no || '')}</span>
+              <p class="dd-price">৳${esc(req.final_price || 0)}</p>
+              <p class="dd-date">রিপোর্ট: ${req.disputed_at ? formatDate(req.disputed_at) : '—'}</p>
+            </div>
+            <span class="dd-disputed-badge"><i class="fas fa-flag"></i> ডিসপিউটেড</span>
+          </div>
+
+          <div class="dd-parties-row">
+            <div class="dd-party-box">
+              <p class="dd-party-label">কাস্টমার</p>
+              <p class="dd-party-name">${esc(customerName)}</p>
+              <p class="dd-party-phone"><i class="fas fa-phone"></i> ${esc(customerPhone)}</p>
+            </div>
+            <div class="dd-party-box">
+              <p class="dd-party-label">রাইডার</p>
+              <p class="dd-party-name">${esc(riderName)}</p>
+              <p class="dd-party-phone"><i class="fas fa-phone"></i> ${esc(riderPhone)}</p>
+            </div>
+          </div>
+
+          <a class="dd-details-link" href="/console/order?no=${encodeURIComponent(req.order_no || '')}"><i class="fas fa-circle-info"></i> অর্ডার ডিটেইলস ও টাইমলাইন</a>
+
+          <p class="dd-section-label">ডেলিভারি বিবরণ</p>
+          <p class="dd-desc">${esc(req.description || '')}</p>
+          <p class="dd-area"><i class="fas fa-location-dot"></i> ${esc(req.upazila || '')} — ${esc(req.area_detail || '')}</p>
+
+          <p class="dd-section-label">অভিযোগের কারণ</p>
+          <div class="dd-reason-box">
+            <p>${esc(req.dispute_reason || 'কোনো কারণ উল্লেখ করা হয়নি')}</p>
+          </div>
+
+          <p class="dd-section-label">পেমেন্ট প্রুফ</p>
+          ${proofsHtml}
+
+          <button class="dd-btn-view-chat" data-action="view-chat"><i class="fas fa-comment-dots"></i> চ্যাট হিস্ট্রি দেখুন</button>
+
+          <div class="dd-actions">
+            <button class="dd-btn-rider-favor" data-action="resolve-completed"><i class="fas fa-check"></i> রাইডারের পক্ষে (সম্পন্ন)</button>
+            <button class="dd-btn-cancel-deal" data-action="resolve-cancelled"><i class="fas fa-xmark"></i> ডিল বাতিল করুন</button>
+          </div>
+
+          <a class="dd-btn-view-chat" style="text-decoration:none;" href="/console/order?no=${encodeURIComponent(req.order_no || '')}"><i class="fas fa-repeat"></i> অন্য রাইডার দিন / মার্কেটে ফেরত / বাতিল (অর্ডার ডিটেইলে)</a>
+        `;
+
+        card.querySelector('[data-action="view-chat"]')?.addEventListener('click', () => {
+          window.openChatModal({
+            requestId: req.id,
+            otherPartyName: `${customerName} ↔ ${riderName}`,
+            readOnly: true,
+            customerId: customerProfileId,
+            customerName: req.customer?.full_name || '',
+            riderId: riderProfileId,
+            riderName: req.accepted_rider?.profiles?.full_name || '',
+          });
+        });
+
+        card.querySelectorAll('.dd-proof-thumb').forEach((thumb) => {
+          thumb.addEventListener('click', () => openLightbox(thumb.dataset.img));
+        });
+
+        card.querySelector('[data-action="resolve-completed"]')?.addEventListener('click', async (e) => {
+          if (!confirm('রাইডারের পক্ষে রিজলভ করবেন? এটা ডেলিভারি সম্পন্ন হিসেবে গণ্য হবে ও রাইডারের স্ট্যাটস আপডেট হবে।')) return;
+          e.target.disabled = true;
+          const { error } = await resolveDispute({ requestId: req.id, resolution: 'resolve_completed' });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            return;
+          }
+          loadDisputes();
+        });
+
+        card.querySelector('[data-action="resolve-cancelled"]')?.addEventListener('click', async (e) => {
+          if (!confirm('ডিলটি বাতিল করবেন? কারো স্ট্যাটে কিছু যোগ হবে না।')) return;
+          e.target.disabled = true;
+          const { error } = await resolveDispute({ requestId: req.id, resolution: 'resolve_cancelled' });
+          if (error) {
+            alert(error);
+            e.target.disabled = false;
+            return;
+          }
+          loadDisputes();
+        });
+
+        disputeList.appendChild(card);
+      });
+    }
+
+    // ===== সার্চ: অর্ডার নাম্বার / নাম / ফোন =====
+    function normalizeQuery(value) {
+      return String(value || '').trim().toLowerCase().replace(/^#/, '');
+    }
+
+    document.getElementById('disputeSearch')?.addEventListener('input', (e) => {
+      const q = normalizeQuery(e.target.value);
+      const digits = q.replace(/\D/g, '');
+      let visible = 0;
+      disputeList.querySelectorAll('.dd-card').forEach((card) => {
+        const hay = card.dataset.search || '';
+        const hayDigits = hay.replace(/\D/g, '');
+        const match = !q || hay.includes(q) || (digits.length >= 4 && hayDigits.includes(digits));
+        card.style.display = match ? '' : 'none';
+        if (match) visible += 1;
+      });
+      disputeEmpty.style.display = visible === 0 && disputeList.children.length > 0 ? 'block' : 'none';
+    });
+
+    // ===== lightbox =====
+    const lightboxOverlay = document.getElementById('ddLightboxOverlay');
+    const lightboxImg = document.getElementById('ddLightboxImg');
+
+    function openLightbox(url) {
+      lightboxImg.src = url;
+      lightboxOverlay.classList.add('active');
+    }
+
+    document.getElementById('ddLightboxClose')?.addEventListener('click', () => {
+      lightboxOverlay.classList.remove('active');
+    });
+
+    lightboxOverlay?.addEventListener('click', (e) => {
+      if (e.target === lightboxOverlay) lightboxOverlay.classList.remove('active');
+    });
+
+    onConsoleReady(async (ctx) => {
+      if (!canOpenAdminPath('/admin/delivery-disputes', ctx)) { document.getElementById('cxDeny').hidden = false; return; }
+      document.getElementById('adminGuardedContent').hidden = false;
+      await loadDisputes();
+      // অর্ডার পেজ থেকে ?q=SFD-১০০১ নিয়ে এলে সার্চ বক্সে বসিয়ে ফিল্টার চালাই
+      const q = new URLSearchParams(window.location.search).get('q');
+      const input = document.getElementById('disputeSearch');
+      if (q && input) {
+        input.value = q;
+        input.dispatchEvent(new Event('input'));
+      }
+    });
+  </script>
+</ConsoleShell>
