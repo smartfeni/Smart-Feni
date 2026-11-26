@@ -1,0 +1,367 @@
+---
+// ============================================================
+// /console/rider?id=<delivery_riders.id> — একজন ডেলিভারি হিরোর সব কিছু (নতুন অ্যাপ, ধাপ ৬.১)
+// কাজ (পুরনো /admin/delivery-riders ও হিসাবের সেটিং শিটের একই পথ, নতুন DB বদল নেই):
+//   অনুমোদন / বাতিল (কারণসহ) → API admin/verify-rider (deliveryClient.verifyRider)
+//   ডেলিভারি অনলাইন → RPC mod_set_rider_online(p_category='delivery') (riders.manage)
+//     (delivery_online কোডে সরাসরি লেখা হয় না; is_active ট্রিগারে ডেরাইভড)
+//   নিজস্ব রাইডার → RPC admin_set_rider_own (riders.manage বা delivery_orders.manage)
+//   ডিলিট → API admin/delete-rider (ইতিহাস থাকলে code has_history → জোরপূর্বক ডিলিটের আলাদা নিশ্চিতকরণ)
+// দেখা: ছবি (পাবলিক), আইডি কার্ড (প্রাইভেট rider-verification, signed URL),
+//   সাম্প্রতিক অর্ডার (delivery_requests.accepted_rider_id, delivery_orders.view)
+// রাইড হিরো বাদ (SF, ২৬ নভে): রাইড অনলাইন সুইচ নেই।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="ডেলিভারি হিরো" active="menu">
+  <div class="cs-pad cm-page rv-page">
+    <a class="rv-back" href="/console/riders" id="rvBack">← রাইডারের তালিকা</a>
+    <div id="rvBody"></div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .rv-back { font-size: 13.5px; font-weight: 600; color: #5F6B7E; text-decoration: none; margin-top: 4px; }
+  #rvBody { display: flex; flex-direction: column; gap: 12px; }
+  .rv-head { display: flex; gap: 14px; align-items: center; }
+  .rv-pic { width: 72px; height: 72px; flex: none; border-radius: 50%; background: #EFEBE5 center/cover no-repeat; display: flex; align-items: center; justify-content: center; font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-weight: 700; font-size: 26px; color: #5F6B7E; border: 0; padding: 0; cursor: pointer; }
+  .rv-ht { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .rv-ht h1 { margin: 0; font-size: 22px; overflow-wrap: anywhere; }
+  .rv-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .rv-tag { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: #EEF1F5; color: #3D4A60; }
+  .rv-tag.on { background: #E6F6EE; color: #17663F; }
+  .rv-tag.warn { background: #FDECEA; color: #B3261E; }
+  .rv-tag.own { background: #FFF4E0; color: #8A4B00; }
+  .rv-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .rv-stat { background: #fff; border: 1px solid #E7E2DA; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+  .rv-stat small { font-size: 12px; color: #5F6B7E; }
+  .rv-stat b { font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-size: 19px; }
+  .rv-card { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 4px 16px; display: flex; flex-direction: column; }
+  .rv-card > h2 { margin: 10px 0 6px; font-size: 13px; font-weight: 600; color: #5F6B7E; }
+  .rv-docs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-bottom: 14px; }
+  .rv-doc { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: #5F6B7E; }
+  .rv-doc button { height: 130px; border-radius: 12px; border: 1px solid #E7E2DA; background: #F7F5F2 center/cover no-repeat; cursor: pointer; padding: 0; color: #9AA3B2; font: inherit; font-size: 12.5px; }
+  .rv-doc button:disabled { cursor: default; }
+  .rv-sw { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+  .rv-sw + .rv-sw { border-top: 1px solid #EFEBE5; }
+  .rv-sw-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .rv-sw-t b { font-size: 15px; font-weight: 600; }
+  .rv-sw-t small { font-size: 12.5px; color: #5F6B7E; line-height: 1.45; }
+  .rv-toggle { position: relative; width: 48px; height: 28px; flex: none; border-radius: 999px; border: 0; background: #CBD2DC; cursor: pointer; }
+  .rv-toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s; }
+  .rv-toggle[aria-checked="true"] { background: #17663F; }
+  .rv-toggle[aria-checked="true"]::after { transform: translateX(20px); }
+  .rv-toggle:disabled { opacity: .5; cursor: default; }
+  .rv-kv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; font-size: 14px; margin: 0 0 12px; }
+  .rv-kv dt { color: #5F6B7E; }
+  .rv-kv dd { margin: 0; overflow-wrap: anywhere; }
+  .rv-kv a { color: #1B2A4A; font-weight: 600; }
+  .rv-reason { background: #FDF6F4; border-radius: 10px; padding: 8px 10px; font-size: 13.5px; margin-bottom: 12px; overflow-wrap: anywhere; }
+  .rv-ord { display: flex; align-items: center; gap: 10px; padding: 11px 0; color: #1B2A4A; text-decoration: none; font-size: 14px; }
+  .rv-ord + .rv-ord { border-top: 1px solid #EFEBE5; }
+  .rv-ord span:first-child { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .rv-ord small { font-size: 12.5px; color: #5F6B7E; }
+  .rv-muted { font-size: 13px; color: #5F6B7E; margin: 0 0 12px; }
+  .rv-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 0 14px; }
+  .rv-btn { flex: 1 1 150px; height: 46px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer; }
+  .rv-btn.ok { background: #17663F; border-color: #17663F; color: #fff; }
+  .rv-btn.red { color: #B3261E; border-color: #F2B8A0; }
+  .rv-btn.redfill { background: #B3261E; border-color: #B3261E; color: #fff; }
+  .rv-btn:disabled { opacity: .55; }
+  .rv-panel { display: flex; flex-direction: column; gap: 8px; background: #FDF6F4; border-radius: 12px; padding: 12px; margin-bottom: 14px; }
+  .rv-panel[hidden] { display: none; }
+  .rv-panel p { margin: 0; font-size: 13.5px; line-height: 1.5; }
+  .rv-panel textarea { width: 100%; box-sizing: border-box; min-height: 72px; border: 1px solid #E7E2DA; border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 14.5px; }
+  .rv-empty { padding: 30px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; display: flex; flex-direction: column; gap: 4px; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { verifyRider, deleteRider } from '../../lib/deliveryClient.js';
+  import { onConsoleReady, canOpenAdminPath, bn, dayLabel, agoLabel } from '../../lib/consoleApp.js';
+  import { ORDER_STATUS, orderStatusOf, money } from '../../lib/consoleOrders.js';
+  import { VEHICLE_BN, signedRiderDoc, publicPhoto, openPhoto } from '../../lib/consoleRiders.js';
+
+  const $ = (id) => document.getElementById(id);
+  const body = $('rvBody');
+  const id = (new URLSearchParams(location.search).get('id') || '').trim();
+  const toast = (t, type = 'success') => window.showToast?.(t, type);
+  let ctx = null;
+  let canManage = false;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function card(title) {
+    const c = el('section', 'rv-card');
+    if (title) c.appendChild(el('h2', null, title));
+    body.appendChild(c);
+    return c;
+  }
+  function kv(dl, k, v) {
+    if (v == null || v === '') return;
+    dl.appendChild(el('dt', null, k));
+    const dd = el('dd');
+    if (v instanceof Node) dd.appendChild(v); else dd.textContent = v;
+    dl.appendChild(dd);
+  }
+  function showEmpty(t, sub) {
+    body.textContent = '';
+    const e = el('div', 'rv-empty');
+    e.appendChild(el('b', null, t));
+    if (sub) e.appendChild(el('span', 'cs-muted', sub));
+    body.appendChild(e);
+  }
+
+  function toggle(parent, title, desc, on, disabled, onChange) {
+    const row = el('div', 'rv-sw');
+    const t = el('div', 'rv-sw-t');
+    t.append(el('b', null, title), el('small', null, desc));
+    const b = el('button', 'rv-toggle');
+    b.type = 'button';
+    b.setAttribute('role', 'switch');
+    b.setAttribute('aria-label', title);
+    b.setAttribute('aria-checked', String(!!on));
+    b.disabled = !!disabled;
+    b.addEventListener('click', async () => {
+      const next = b.getAttribute('aria-checked') !== 'true';
+      b.disabled = true;
+      const ok = await onChange(next);
+      b.disabled = false;
+      if (ok) b.setAttribute('aria-checked', String(next));
+    });
+    row.append(t, b);
+    parent.appendChild(row);
+  }
+
+  function doc(parent, label, url) {
+    const d = el('div', 'rv-doc');
+    d.appendChild(el('span', null, label));
+    const b = el('button');
+    b.type = 'button';
+    if (url) {
+      b.style.backgroundImage = 'url("' + encodeURI(url) + '")';
+      b.setAttribute('aria-label', label + ' বড় করে দেখুন');
+      b.addEventListener('click', () => openPhoto(url, label));
+    } else {
+      b.textContent = 'দেওয়া নেই';
+      b.disabled = true;
+    }
+    d.appendChild(b);
+    parent.appendChild(d);
+  }
+
+  async function load() {
+    if (!id) { showEmpty('কোনো রাইডার বাছা হয়নি'); return; }
+    body.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('profile', 1) + window.SFSkeleton.html('row', 4) : '';
+    const { data: r, error } = await supabase.from('delivery_riders')
+      .select('*, profiles!delivery_riders_profile_id_fkey(full_name, phone, avatar_url, created_at)')
+      .eq('id', id).maybeSingle();
+    if (error || !r) { showEmpty(error ? 'লোড করা যায়নি' : 'রাইডার পাওয়া যায়নি'); return; }
+    const canOrders = canOpenAdminPath('/admin/delivery-orders', ctx);
+    const [idUrl, ordRes, reviewer] = await Promise.all([
+      signedRiderDoc(r.id_card_photo_url),
+      canOrders
+        ? supabase.from('delivery_requests').select('id, order_no, status, eff_status:status, publish_status, price, created_at, drop_union, upazila').eq('accepted_rider_id', r.id).order('created_at', { ascending: false }).limit(8)
+        : Promise.resolve({ data: null }),
+      r.reviewed_by ? supabase.from('profiles').select('full_name').eq('id', r.reviewed_by).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
+    const p = r.profiles || {};
+    const photo = publicPhoto(r.photo_url);
+    body.textContent = '';
+    document.title = (p.full_name || 'রাইডার') + ' | Smart Feni Admin';
+
+    // ---- মাথা ----
+    const head = el('div', 'rv-head');
+    const pic = el('button', 'rv-pic');
+    pic.type = 'button';
+    pic.setAttribute('aria-label', 'ছবি বড় করে দেখুন');
+    if (photo) { pic.style.backgroundImage = 'url("' + encodeURI(photo) + '")'; pic.addEventListener('click', () => openPhoto(photo, 'রাইডারের ছবি')); }
+    else { pic.textContent = String(p.full_name || '?').trim().charAt(0); pic.disabled = true; }
+    head.appendChild(pic);
+    const ht = el('div', 'rv-ht');
+    ht.appendChild(el('h1', 'cs-h', p.full_name || 'নাম নেই'));
+    const tags = el('div', 'rv-tags');
+    const ST = { pending: ['যাচাইয়ের অপেক্ষায়', 'warn'], approved: ['চালু', 'on'], rejected: ['বাতিল', ''] };
+    const s = ST[r.verification_status] || [r.verification_status, ''];
+    tags.appendChild(el('span', 'rv-tag ' + s[1], s[0]));
+    if (r.verification_status === 'approved') tags.appendChild(el('span', 'rv-tag ' + (r.delivery_online ? 'on' : ''), r.delivery_online ? 'এখন অনলাইন' : 'অফলাইন'));
+    if (r.is_own) tags.appendChild(el('span', 'rv-tag own', 'নিজস্ব রাইডার'));
+    ht.appendChild(tags);
+    ht.appendChild(el('span', 'cs-muted', [VEHICLE_BN[r.vehicle_type] || r.vehicle_type, r.upazila].filter(Boolean).join(' · ')));
+    head.appendChild(ht);
+    body.appendChild(head);
+
+    if (r.verification_status === 'approved') {
+      const stats = el('div', 'rv-stats');
+      const st = (k, v) => { const d = el('div', 'rv-stat'); d.append(el('small', null, k), el('b', null, v)); stats.appendChild(d); };
+      st('সম্পন্ন', bn(r.total_completed || 0));
+      st('রেটিং', Number(r.avg_rating) > 0 ? '★ ' + bn(Number(r.avg_rating).toFixed(1)) : '—');
+      st('মোট আয়', money(r.total_earned || 0));
+      body.appendChild(stats);
+    }
+
+    // ---- সুইচ (শুধু চালু রাইডার) ----
+    if (r.verification_status === 'approved') {
+      const sw = card('সুইচ');
+      if (r.offers_delivery) {
+        toggle(sw, 'ডেলিভারি অনলাইন', 'চালু থাকলে নতুন ডেলিভারি অর্ডারের নোটিফিকেশন পান।', r.delivery_online, !canManage, async (v) => {
+          const { error: e } = await supabase.rpc('mod_set_rider_online', { p_rider_id: r.id, p_category: 'delivery', p_online: v });
+          if (e) { toast('বদলানো যায়নি', 'error'); return false; }
+          toast(v ? 'অনলাইন করা হয়েছে' : 'অফলাইন করা হয়েছে');
+          return true;
+        });
+      } else {
+        sw.appendChild(el('p', 'rv-muted', 'এই রাইডার ডেলিভারির কাজ নেন না।'));
+      }
+      toggle(sw, 'নিজস্ব রাইডার', 'স্মার্ট ফেনীর নিজস্ব রাইডার। "রাইডারকে দিন" তালিকায় উপরে আসেন ও আলাদা ব্যাজ পান।', r.is_own, !canManage, async (v) => {
+        const { error: e } = await supabase.rpc('admin_set_rider_own', { p_rider_id: r.id, p_own: v });
+        if (e) { toast('বদলানো যায়নি', 'error'); return false; }
+        toast(v ? 'নিজস্ব রাইডার করা হয়েছে' : 'নিজস্ব থেকে সরানো হয়েছে');
+        return true;
+      });
+      if (!canManage) sw.appendChild(el('p', 'rv-muted', 'বদলানোর অনুমতি নেই, শুধু দেখা যাবে।'));
+    }
+
+    // ---- তথ্য ----
+    const info = card('তথ্য');
+    const dl = el('dl', 'rv-kv');
+    if (p.phone) { const a = el('a', null, p.phone); a.href = 'tel:' + String(p.phone).replace(/[^\d+]/g, ''); kv(dl, 'ফোন', a); }
+    kv(dl, 'বাহন', VEHICLE_BN[r.vehicle_type] || r.vehicle_type || '');
+    kv(dl, 'উপজেলা', r.upazila || '');
+    kv(dl, 'আবেদন', r.created_at ? dayLabel(r.created_at) + ' (' + agoLabel(r.created_at) + ')' : '');
+    if (r.reviewed_at) kv(dl, 'যাচাই', dayLabel(r.reviewed_at) + (reviewer.data && reviewer.data.full_name ? ' · ' + reviewer.data.full_name : ''));
+    info.appendChild(dl);
+    if (r.verification_status === 'rejected' && r.rejection_reason) info.appendChild(el('div', 'rv-reason', 'বাতিলের কারণ: ' + r.rejection_reason));
+
+    // ---- কাগজপত্র ----
+    const docs = card('কাগজপত্র');
+    const dg = el('div', 'rv-docs');
+    doc(dg, 'রাইডারের ছবি', photo);
+    doc(dg, 'আইডি কার্ড', idUrl);
+    docs.appendChild(dg);
+
+    // ---- সাম্প্রতিক অর্ডার ----
+    if (ordRes.data) {
+      const oc = card('সাম্প্রতিক অর্ডার');
+      if (!ordRes.data.length) oc.appendChild(el('p', 'rv-muted', 'এখনো কোনো অর্ডার নেননি।'));
+      ordRes.data.forEach((o) => {
+        const a = el('a', 'rv-ord');
+        a.href = '/console/order?no=' + encodeURIComponent(o.order_no);
+        const t = el('span');
+        t.append(el('b', null, o.order_no), el('small', null, [o.drop_union, o.upazila].filter(Boolean).join(', ') + ' · ' + agoLabel(o.created_at)));
+        a.appendChild(t);
+        const stt = orderStatusOf(o);
+        const m = ORDER_STATUS[stt] || { name: stt, fg: '#3D4A60', bg: '#EEF1F5' };
+        const badge = el('span', 'rv-tag', m.name);
+        badge.style.color = m.fg; badge.style.background = m.bg;
+        a.append(badge, el('b', null, money(o.price)));
+        oc.appendChild(a);
+      });
+    }
+
+    // ---- কাজ ----
+    if (canManage) actions(r, p);
+  }
+
+  function actions(r, p) {
+    const c = card('কাজ');
+    const row = el('div', 'rv-actions');
+    c.appendChild(row);
+    const name = p.full_name || 'এই রাইডার';
+
+    if (r.verification_status !== 'approved') {
+      const ok = el('button', 'rv-btn ok', r.verification_status === 'rejected' ? 'আবার চালু করুন' : 'অনুমোদন দিন');
+      ok.type = 'button';
+      ok.addEventListener('click', async () => {
+        if (!window.confirm(name + '-কে অনুমোদন দেবেন? তিনি ডেলিভারি অর্ডার নিতে পারবেন।')) return;
+        ok.disabled = true;
+        const { error } = await verifyRider({ riderId: r.id, decision: 'approve' });
+        if (error) { ok.disabled = false; toast(String(error), 'error'); return; }
+        toast('অনুমোদন দেওয়া হয়েছে');
+        load();
+      });
+      row.appendChild(ok);
+    }
+
+    // বাতিল / ইনঅ্যাকটিভ (অপেক্ষায় ও চালু রাইডারে)
+    let rejPanel = null;
+    if (r.verification_status !== 'rejected') {
+      const no = el('button', 'rv-btn red', r.verification_status === 'approved' ? 'বন্ধ করুন (বাতিল)' : 'বাতিল করুন');
+      no.type = 'button';
+      row.appendChild(no);
+      rejPanel = el('div', 'rv-panel');
+      rejPanel.hidden = true;
+      rejPanel.appendChild(el('p', null, r.verification_status === 'approved' ? 'বন্ধ করলে রাইডার আর অর্ডার পাবেন না, অফলাইন হয়ে যাবেন। পরে আবার চালু করা যায়।' : 'রাইডার কারণটা দেখবেন।'));
+      const ta = el('textarea');
+      ta.maxLength = 300;
+      ta.placeholder = 'কারণ লিখুন (যেমন: আইডি কার্ডের ছবি পরিষ্কার নয়)';
+      ta.setAttribute('aria-label', 'বাতিলের কারণ');
+      const go = el('button', 'rv-btn redfill', 'নিশ্চিত, বাতিল করুন');
+      go.type = 'button';
+      rejPanel.append(ta, go);
+      c.appendChild(rejPanel);
+      no.addEventListener('click', () => { rejPanel.hidden = !rejPanel.hidden; if (!rejPanel.hidden) ta.focus(); });
+      go.addEventListener('click', async () => {
+        const why = ta.value.trim();
+        if (why.length < 3) { toast('কারণ লিখুন (কমপক্ষে ৩ অক্ষর)', 'warning'); ta.focus(); return; }
+        go.disabled = true;
+        const { error } = await verifyRider({ riderId: r.id, decision: 'reject', rejectionReason: why });
+        if (error) { go.disabled = false; toast(String(error), 'error'); return; }
+        toast('বাতিল করা হয়েছে');
+        load();
+      });
+    }
+
+    // ডিলিট (চালু ও বাতিল রাইডারে, পুরনো পেজের মতো)
+    if (r.verification_status !== 'pending') {
+      const del = el('button', 'rv-btn red', 'ডিলিট');
+      del.type = 'button';
+      row.appendChild(del);
+      const force = el('div', 'rv-panel');
+      force.hidden = true;
+      force.appendChild(el('p', null, 'এই রাইডারের ডেলিভারি বা অফারের ইতিহাস আছে। জোরপূর্বক ডিলিট করলে সংশ্লিষ্ট রেফারেন্স চিরতরে মুছে যাবে, আর ফেরানো যাবে না। শুধু বন্ধ রাখতে চাইলে "বাতিল" ব্যবহার করুন।'));
+      const fgo = el('button', 'rv-btn redfill', 'জোরপূর্বক ডিলিট করুন');
+      fgo.type = 'button';
+      force.appendChild(fgo);
+      c.appendChild(force);
+      del.addEventListener('click', async () => {
+        if (!window.confirm(name + '-এর রাইডার প্রোফাইল ডিলিট করবেন? ইউজার অ্যাকাউন্ট থাকবে, শুধু রাইডার প্রোফাইল মুছবে।')) return;
+        del.disabled = true;
+        const { error, code } = await deleteRider({ riderId: r.id });
+        del.disabled = false;
+        if (error) {
+          if (code === 'has_history') { force.hidden = false; force.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+          toast(String(error), 'error');
+          return;
+        }
+        toast('ডিলিট করা হয়েছে');
+        location.href = '/console/riders';
+      });
+      fgo.addEventListener('click', async () => {
+        if (!window.confirm('শেষবার নিশ্চিত করুন: ' + name + '-এর রাইডার প্রোফাইল ও রেফারেন্স চিরতরে মুছে যাবে।')) return;
+        fgo.disabled = true;
+        const { error } = await deleteRider({ riderId: r.id, force: true });
+        if (error) { fgo.disabled = false; toast(String(error), 'error'); return; }
+        toast('জোরপূর্বক ডিলিট করা হয়েছে');
+        location.href = '/console/riders';
+      });
+    }
+  }
+
+  if (document.referrer && new URL(document.referrer, location.href).pathname === '/console/riders') {
+    $('rvBack').addEventListener('click', (e) => { e.preventDefault(); history.back(); });
+  }
+
+  onConsoleReady((data) => {
+    ctx = data;
+    if (!canOpenAdminPath('/admin/delivery-riders', data)) { showEmpty('এই পেজ দেখার অনুমতি নেই'); return; }
+    canManage = !!(data.isSuper || !data.access.isStaff || data.access.can('riders.manage'));
+    load();
+  });
+</script>
