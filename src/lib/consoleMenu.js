@@ -80,7 +80,7 @@ export const MENU = [
       { name: 'ডেলিভারি হিরো', desc: 'সব রাইডার, যাচাই, অনলাইন, নিজস্ব রাইডার, কাজ ও রেটিং', href: '/console/riders', perm: '/admin/delivery-riders', keys: 'রাইডার নিজস্ব অনলাইন' },
       { name: 'লোকাল ড্রাইভার', desc: 'সিএনজি/অটো ড্রাইভার: তালিকা, অনলাইন, এলাকা, কাগজ ও যাচাই', href: '/console/drivers', perm: '/admin/local-drivers', keys: 'সিএনজি অটো' },
       { name: 'ম্যানুয়াল রাইডার ও লেনদেন', desc: 'নিজস্ব রাইডার যোগ ও তাদের টাকার হিসাব', href: '/admin/manual-orders', keys: 'লেনদেন' },
-      { name: 'রাইডারের ক্যাশ', desc: 'কোন রাইডারের কাছে কত টাকা জমা', href: '/admin/delivery-market-accounts', keys: 'ক্যাশ হিসাব' },
+      { name: 'রাইডারের ক্যাশ', desc: 'কোন রাইডারের কাছে কত টাকা, কোম্পানিকে কত দেবে', href: '/console/money', perm: '/admin/delivery-orders', keys: 'ক্যাশ হিসাব বুঝে নিলাম' },
     ],
   },
   {
@@ -88,7 +88,7 @@ export const MENU = [
     icon: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="16" cy="14.5" r="1.5"/>',
     items: [
       { name: 'কোম্পানির হিসাব', desc: 'জমা, আয়, খরচ, দৈনিক হিসাব ও Excel', href: '/admin/hisab', adminOnly: true, keys: 'আয় খরচ ব্যালেন্স' },
-      { name: 'মার্কেটপ্লেসের হিসাব', desc: 'দোকানের পাওনা ও লাভ-লস', href: '/admin/delivery-market-accounts', keys: 'পাওনা লাভ লস' },
+      { name: 'মার্কেটপ্লেসের হিসাব', desc: 'রাইডারের কাছে টাকা, দোকানের পাওনা ও লাভ-লস', href: '/console/money', perm: '/admin/delivery-orders', keys: 'পাওনা লাভ লস ক্ষতি' },
       { name: 'রেফার ও রিওয়ার্ড', desc: 'রেফারের তালিকা, পয়েন্ট ও লগ', href: '/admin/referrals', adminOnly: true, keys: 'রেফার পয়েন্ট' },
     ],
   },
