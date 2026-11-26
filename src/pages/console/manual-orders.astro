@@ -1,0 +1,1744 @@
+---
+// ============================================================
+// /console/manual-orders — ম্যানুয়াল অর্ডার (নতুন অ্যাপ, ধাপ ১৩)
+// পুরনো /admin/manual-orders থেকে তৈরি; একই টেবিল/RPC/API, DB বদল নেই। অনুমতি পুরনো পেজের একই।
+// ============================================================
+export const prerender = false;
+
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+import Skeleton from '../../components/ui/Skeleton.astro';
+---
+
+<ConsoleShell title="ম্যানুয়াল অর্ডার" active="menu">
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="mo-page">
+
+    <div id="cxDeny" class="cx-deny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+
+    <div id="adminGuardedContent" hidden>
+
+      <!-- ===== নেভি হেডার ===== -->
+      <div class="mo-head">
+        <div class="mo-head-in">
+          <a href="/" class="mo-round" aria-label="হোমে ফিরুন"><i class="fas fa-arrow-left"></i></a>
+          <h1 class="mo-title">ম্যানুয়াল অর্ডার</h1>
+          <button type="button" class="mo-cta mo-cta-sm" id="newOrderBtn">+ নতুন অর্ডার</button>
+        </div>
+        <div class="mo-tabs" id="mainTabs">
+          <button type="button" class="mo-tab active" data-tab="orders">অর্ডার</button>
+          <button type="button" class="mo-tab" data-tab="accounts" id="accountsTabBtn" style="display:none;">হিসাব</button>
+        </div>
+      </div>
+
+      <!-- ===== ট্যাব ১: অর্ডার ===== -->
+      <div class="mo-body" id="ordersPane">
+        <div class="mo-summary" id="summaryLine"></div>
+        <label class="mo-field mo-search">
+          <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+          <input id="searchIn" type="search" placeholder="নাম, ফোন, অর্ডার নম্বর বা ঠিকানা" autocomplete="off" aria-label="অর্ডার খুঁজুন" />
+        </label>
+        <div class="mo-chips" id="viewChips"></div>
+        <div id="counterBox"></div>
+        <div id="calBox" style="display:none;"><button type="button" class="mo-ghost" id="moCalToggle" style="width:100%;">📅 ক্যালেন্ডার (দিন বাছুন)</button><div id="moCal" style="display:none;"></div><div id="moCalSum"></div></div>
+        <div id="orderList"><Skeleton preset="order" count={3} /></div>
+      </div>
+
+      <!-- ===== ট্যাব ২: হিসাব (admin বা manual_accounts.view) ===== -->
+      <div class="mo-body" id="accountsPane" style="display:none;">
+        <button type="button" class="mo-ghost" id="accCalToggle" style="width:100%;">📅 আজ · ক্যালেন্ডার থেকে বদলান</button>
+        <div id="accCal" style="display:none;"></div>
+        <div id="accSummary"></div>
+        <div class="mo-h">রাইডারের হিসাব</div>
+        <div id="riderBalances"></div>
+        <button type="button" class="mo-add" id="addRiderBtn">+ নতুন রাইডার যোগ করুন</button>
+        <div class="mo-h">কে কয়টা অর্ডার নিয়েছে</div>
+        <div id="enteredBy"></div>
+        <button type="button" class="mo-ghost" id="csvBtn" style="width:100%;">এই সময়ের অর্ডার CSV ডাউনলোড</button>
+      </div>
+
+      <!-- ===== অর্ডার ফর্ম (নিচের শিট) ===== -->
+      <div class="mo-overlay" id="orderOverlay">
+        <div class="mo-sheet" role="dialog" aria-label="অর্ডারের তথ্য" id="orderForm">
+          <div class="mo-grip"></div>
+          <div class="mo-sheet-h">
+            <h2 id="orderFormTitle">নতুন অর্ডার</h2>
+            <button type="button" class="mo-x" id="orderClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+          </div>
+
+          <div class="mo-ai" id="aiBox">
+            <label class="mo-lbl" for="aiText" style="margin-top:8px;">ফেসবুক মেসেজ পেস্ট করুন (অটো-ফিল)</label>
+            <textarea class="mo-in" id="aiText" rows="4" maxlength="4000" placeholder="কাস্টমারের মেসেজ এখানে পেস্ট করুন, নাম/ফোন/ঠিকানা/সময় নিজে বসে যাবে"></textarea>
+            <button type="button" class="mo-cta mo-ai-btn" id="aiBtn">✨ অটো-ফিল করুন</button>
+            <p class="mo-ai-status" id="aiStatus" style="display:none;"></p>
+          </div>
+          <div class="mo-sec">কাস্টমার</div>
+          <label class="mo-lbl" for="f_name">কাস্টমারের নাম<span class="required-mark">*</span></label>
+          <input class="mo-in" id="f_name" maxlength="120" required />
+          <div class="field-error-msg" data-error-for="f_name"><i class="fas fa-circle-exclamation"></i><span>নাম লিখুন</span></div>
+
+          <label class="mo-lbl" for="f_phone">ফোন নম্বর<span class="required-mark">*</span></label>
+          <input class="mo-in" id="f_phone" type="tel" inputmode="tel" maxlength="30" required />
+          <div class="field-error-msg" data-error-for="f_phone"><i class="fas fa-circle-exclamation"></i><span>ফোন নম্বর লিখুন</span></div>
+          <p class="mo-warn" id="dupWarn" style="display:none;"></p>
+
+          <label class="mo-lbl" for="f_addr">ড্রপ ঠিকানা<span class="required-mark">*</span></label>
+          <textarea class="mo-in" id="f_addr" rows="2" maxlength="500" required></textarea>
+          <div class="field-error-msg" data-error-for="f_addr"><i class="fas fa-circle-exclamation"></i><span>ঠিকানা লিখুন</span></div>
+
+          <label class="mo-lbl" for="f_dmap">ড্রপ ম্যাপ লিংক (ঐচ্ছিক)</label>
+          <input class="mo-in" id="f_dmap" maxlength="500" placeholder="https://maps.google.com/..." />
+
+          <div class="mo-sec">পিকআপ ও অর্ডার</div>
+          <label class="mo-lbl" for="f_pname">পিকআপ কোথা থেকে (দোকান/জায়গা)</label>
+          <input class="mo-in" id="f_pname" maxlength="200" placeholder="যেমন: KFC" />
+
+          <label class="mo-lbl" for="f_pmap">পিকআপ ম্যাপ লিংক (ঐচ্ছিক)</label>
+          <input class="mo-in" id="f_pmap" maxlength="500" />
+
+          <label class="mo-lbl" for="f_details">অর্ডারের বিবরণ<span class="required-mark">*</span></label>
+          <textarea class="mo-in" id="f_details" rows="3" maxlength="2000" required></textarea>
+          <div class="field-error-msg" data-error-for="f_details"><i class="fas fa-circle-exclamation"></i><span>বিবরণ লিখুন</span></div>
+
+          <div class="mo-sec">ডেলিভারি কখন চায় (বাংলাদেশ সময়)</div>
+          <div class="mo-two">
+            <div>
+              <label class="mo-lbl" for="f_date">তারিখ<span class="required-mark">*</span></label>
+              <input class="mo-in" id="f_date" type="date" required />
+              <div class="field-error-msg" data-error-for="f_date"><i class="fas fa-circle-exclamation"></i><span>তারিখ দিন</span></div>
+            </div>
+            <div>
+              <label class="mo-lbl" for="f_time">সময়<span class="required-mark" id="timeStar">*</span></label>
+              <input class="mo-in" id="f_time" type="time" required />
+              <div class="field-error-msg" data-error-for="f_time"><i class="fas fa-circle-exclamation"></i><span>সময় দিন</span></div>
+            </div>
+          </div>
+          <label class="mo-check"><input type="checkbox" id="f_asap" /> যত দ্রুত সম্ভব (সময় ঠিক করা নেই)</label>
+          <label class="mo-check"><input type="checkbox" id="f_strict" /> ঠিক এই সময়েই লাগবে (মাস্ট)</label>
+
+          <div class="mo-sec">টাকার হিসাব</div>
+          <div class="mo-two">
+            <div>
+              <label class="mo-lbl" for="f_price">প্রোডাক্ট প্রাইস (৳)</label>
+              <input class="mo-in" id="f_price" type="number" inputmode="decimal" min="0" step="any" placeholder="0" />
+            </div>
+            <div>
+              <label class="mo-lbl" for="f_fee">ডেলিভারি ফি (৳)<span class="required-mark">*</span></label>
+              <input class="mo-in" id="f_fee" type="number" inputmode="decimal" min="0" step="any" placeholder="0" required />
+              <div class="field-error-msg" data-error-for="f_fee"><i class="fas fa-circle-exclamation"></i><span>ডেলিভারি ফি দিন (নাই হলে ০)</span></div>
+            </div>
+          </div>
+          <div class="mo-two">
+            <div>
+              <label class="mo-lbl" for="f_adv">অ্যাডভান্স পেয়েছি (৳)</label>
+              <input class="mo-in" id="f_adv" type="number" inputmode="decimal" min="0" step="any" placeholder="0" />
+            </div>
+            <div>
+              <label class="mo-lbl" for="f_advm">কিসে পেয়েছি</label>
+              <select class="mo-in" id="f_advm">
+                <option value="">—</option>
+                <option value="bkash">bKash</option>
+                <option value="nagad">নগদ</option>
+                <option value="rocket">রকেট</option>
+                <option value="bank">ব্যাংক</option>
+                <option value="cash_office">অফিসে ক্যাশ</option>
+                <option value="other">অন্য</option>
+              </select>
+            </div>
+          </div>
+          <label class="mo-lbl" for="f_trx">TrxID (ঐচ্ছিক)</label>
+          <input class="mo-in" id="f_trx" maxlength="60" />
+
+          <div class="mo-calc" id="calcBox"></div>
+          <p class="mo-err" id="advErr" style="display:none;"></p>
+
+          <div class="mo-sec">রাইডার ও দোকানের টাকা</div>
+          <label class="mo-lbl">রাইডার</label>
+          <p class="mo-muted" id="riderInfoBox" style="margin:0 0 6px;">রাইডার ঠিক হয়নি। সেভ করার পর কার্ডের "রাইডার ঠিক করুন" বাটন চাপুন।</p>
+          <select class="mo-in" id="f_rider" style="display:none;"></select>
+
+          <label class="mo-lbl" for="f_pay">রাইডারকে পে (৳)</label>
+          <input class="mo-in" id="f_pay" type="number" inputmode="decimal" min="0" step="any" placeholder="0" />
+
+          <label class="mo-lbl" for="f_shop">দোকানের টাকা কে দেবে</label>
+          <select class="mo-in" id="f_shop">
+            <option value="rider">রাইডার নিজের টাকায় কিনবে (পরে ফেরত দেব)</option>
+            <option value="admin">আমরা আগেই দোকানে দিয়েছি</option>
+            <option value="none">প্রযোজ্য নয় (শুধু কুরিয়ার)</option>
+          </select>
+
+          <label class="mo-lbl" for="f_cost">দোকানকে আসলে কত দিতে হবে (৳, প্রাইসের থেকে আলাদা হলে)</label>
+          <input class="mo-in" id="f_cost" type="number" inputmode="decimal" min="0" step="any" placeholder="খালি রাখলে প্রোডাক্ট প্রাইসই ধরা হবে" />
+
+          <label class="mo-lbl" for="f_note">অভ্যন্তরীণ নোট (ঐচ্ছিক)</label>
+          <textarea class="mo-in" id="f_note" rows="2" maxlength="1000"></textarea>
+
+          <div id="statusGroup" style="display:none;">
+            <label class="mo-lbl" for="f_status">স্ট্যাটাস</label>
+            <select class="mo-in" id="f_status">
+              <option value="new">নতুন</option>
+              <option value="rider_assigned">রাইডার ঠিক</option>
+              <option value="picked_up">পিকআপ হয়েছে</option>
+              <option value="delivered">ডেলিভারড</option>
+              <option value="cancelled">বাতিল</option>
+            </select>
+            <div id="cancelGroup" style="display:none;">
+              <label class="mo-lbl" for="f_cancel">বাতিলের কারণ</label>
+              <input class="mo-in" id="f_cancel" maxlength="300" />
+            </div>
+          </div>
+
+          <p class="mo-err" id="formErr" style="display:none;"></p>
+          <div class="mo-actions">
+            <button class="mo-cta" id="saveOrderBtn" type="button">অর্ডার সেভ করুন</button>
+            <button class="mo-ghost mo-red" id="delOrderBtn" type="button" style="display:none;">ডিলিট</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== ডেলিভারড শিট ===== -->
+      <div class="mo-overlay" id="dvOverlay">
+        <div class="mo-sheet" role="dialog" aria-label="ডেলিভারড" id="dvSheet">
+          <div class="mo-grip"></div>
+          <div class="mo-sheet-h">
+            <h2>ডেলিভারড করুন</h2>
+            <button type="button" class="mo-x" id="dvClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+          </div>
+          <p class="mo-muted" id="dvInfo"></p>
+          <label class="mo-lbl" for="dv_cash">রাইডার আসলে কত ক্যাশ কালেক্ট করেছে (৳)</label>
+          <input class="mo-in" id="dv_cash" type="number" inputmode="decimal" min="0" step="any" />
+          <p class="mo-err" id="dvErr" style="display:none;"></p>
+          <div class="mo-actions">
+            <button class="mo-cta" id="dvSave" type="button">ডেলিভারড নিশ্চিত করুন</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== রাইডারে পাবলিশ / চার্জ বাড়ানোর শিট ===== -->
+      <div class="mo-overlay" id="pbOverlay">
+        <div class="mo-sheet" role="dialog" aria-label="রাইডারে পাবলিশ" id="pbSheet">
+          <div class="mo-grip"></div>
+          <div class="mo-sheet-h">
+            <h2 id="pbTitle">রাইডারে পাবলিশ</h2>
+            <button type="button" class="mo-x" id="pbClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+          </div>
+          <p class="mo-muted" id="pbInfo"></p>
+          <label class="mo-lbl" for="pb_pay">রাইডারের ডেলিভারি চার্জ (৳)<span class="required-mark">*</span></label>
+          <input class="mo-in" id="pb_pay" type="number" inputmode="decimal" min="0" step="any" required />
+          <p class="mo-err" id="pbErr" style="display:none;"></p>
+          <div class="mo-actions">
+            <button class="mo-cta" id="pbSave" type="button">পাবলিশ করুন</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== রাইডার ঠিক করুন শিট (রেজিস্টার্ড রাইডারের লিস্ট) ===== -->
+      <div class="mo-overlay" id="asOverlay">
+        <div class="mo-sheet" role="dialog" aria-label="রাইডার ঠিক করুন" id="asSheet">
+          <div class="mo-grip"></div>
+          <div class="mo-sheet-h">
+            <h2>রাইডার ঠিক করুন</h2>
+            <button type="button" class="mo-x" id="asClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+          </div>
+          <p class="mo-muted" id="asInfo"></p>
+          <input class="mo-in" id="asSearch" type="search" placeholder="নাম বা ফোন দিয়ে খুঁজুন" autocomplete="off" aria-label="রাইডার খুঁজুন" />
+          <div class="mo-as-list" id="asList"></div>
+          <label class="mo-lbl" for="as_pay">রাইডারের ডেলিভারি চার্জ (৳)<span class="required-mark">*</span></label>
+          <input class="mo-in" id="as_pay" type="number" inputmode="decimal" min="0" step="any" />
+          <p class="mo-err" id="asErr" style="display:none;"></p>
+          <div class="mo-actions">
+            <button class="mo-cta" id="asSave" type="button">রাইডার ঠিক করুন</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== রাইডার যোগ শিট ===== -->
+      <div class="mo-overlay mo-top" id="rdOverlay">
+        <div class="mo-sheet" role="dialog" aria-label="নতুন রাইডার" id="rdSheet">
+          <div class="mo-grip"></div>
+          <div class="mo-sheet-h">
+            <h2>নতুন রাইডার</h2>
+            <button type="button" class="mo-x" id="rdClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+          </div>
+          <label class="mo-lbl" for="rd_name">রাইডারের নাম<span class="required-mark">*</span></label>
+          <input class="mo-in" id="rd_name" maxlength="80" required />
+          <div class="field-error-msg" data-error-for="rd_name"><i class="fas fa-circle-exclamation"></i><span>নাম লিখুন</span></div>
+          <label class="mo-lbl" for="rd_phone">ফোন</label>
+          <input class="mo-in" id="rd_phone" type="tel" inputmode="tel" maxlength="30" />
+          <p class="mo-err" id="rdErr" style="display:none;"></p>
+          <div class="mo-actions">
+            <button class="mo-cta" id="rdSave" type="button">রাইডার সেভ করুন</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== জমা/পে শিট ===== -->
+      <div class="mo-overlay" id="enOverlay">
+        <div class="mo-sheet" role="dialog" aria-label="লেনদেন" id="enSheet">
+          <div class="mo-grip"></div>
+          <div class="mo-sheet-h">
+            <h2 id="enTitle">লেনদেন</h2>
+            <button type="button" class="mo-x" id="enClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+          </div>
+          <p class="mo-muted" id="enInfo"></p>
+          <label class="mo-lbl" for="en_amount">টাকার পরিমাণ (৳)<span class="required-mark">*</span></label>
+          <input class="mo-in" id="en_amount" type="number" inputmode="decimal" min="0" step="any" required />
+          <div class="field-error-msg" data-error-for="en_amount"><i class="fas fa-circle-exclamation"></i><span>টাকার পরিমাণ দিন</span></div>
+          <label class="mo-lbl" for="en_note">নোট (ঐচ্ছিক)</label>
+          <input class="mo-in" id="en_note" maxlength="300" />
+          <p class="mo-err" id="enErr" style="display:none;"></p>
+          <div class="mo-actions">
+            <button class="mo-cta" id="enSave" type="button">সেভ করুন</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== লেনদেনের ইতিহাস শিট ===== -->
+      <div class="mo-overlay" id="hiOverlay">
+        <div class="mo-sheet" role="dialog" aria-label="লেনদেনের ইতিহাস" id="hiSheet">
+          <div class="mo-grip"></div>
+          <div class="mo-sheet-h">
+            <h2 id="hiTitle">লেনদেনের ইতিহাস</h2>
+            <button type="button" class="mo-x" id="hiClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+          </div>
+          <div id="hiList"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <style is:global>
+    .mo-as-list { max-height: 38vh; overflow-y: auto; margin: 8px 0 4px; }
+    .mo-as-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 8px; min-height: 56px; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; cursor: pointer; font-family: inherit; }
+    .mo-as-row.sel { border-color: #FF6B35; background: #FFF6F1; }
+    .mo-as-name { font-weight: 700; font-size: 15px; color: #1B2A4A; }
+    .mo-as-sub { font-size: 12.5px; color: #5B6B86; }
+    .mo-ctr-box { background: #FFF6F1; border: 1.5px solid #FFD9C7; border-radius: 18px; padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .mo-ctr-h { font-weight: 700; color: #C2410C; }
+    .mo-ctr { background: #fff; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .mo-ctr-t { font-weight: 700; font-size: 14.5px; color: #1B2A4A; }
+    .mo-ctr-p { font-size: 17px; font-weight: 700; color: #14693A; }
+    #adminGuardedContent[hidden], .cx-deny[hidden] { display: none !important; }
+    .cx-deny { padding: 40px 16px; text-align: center; color: #64748B; font-weight: 600; }
+    .mo-page { font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; min-height: 60vh; padding-bottom: 90px; overflow-x: hidden; background: #F8FAFC; }
+    .mo-page * { box-sizing: border-box; }
+    .mo-page button, .mo-page input, .mo-page select, .mo-page textarea { font-family: inherit; }
+    .mo-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5B6B86; font-weight: 600; }
+    .mo-spinner { width: 36px; height: 36px; border: 3px solid #E3E8F0; border-top-color: #FF6B35; border-radius: 50%; animation: moSpin 0.8s linear infinite; }
+    @keyframes moSpin { to { transform: rotate(360deg); } }
+
+    .mo-head { position: relative; left: 50%; width: 100vw; margin-left: -50vw; background: #1B2A4A; color: #fff; }
+    .mo-head-in { max-width: 560px; margin: 0 auto; padding: 12px 16px 6px; display: flex; align-items: center; gap: 8px; min-height: 68px; }
+    .mo-title { flex: 1; min-width: 0; margin: 0; font-size: 19px; font-weight: 700; color: #fff; }
+    .mo-round { width: 44px; height: 44px; border-radius: 22px; background: rgba(255, 255, 255, 0.14); color: #fff; display: flex; align-items: center; justify-content: center; text-decoration: none; font-size: 17px; flex: none; }
+    .mo-tabs { max-width: 560px; margin: 0 auto; padding: 0 16px; display: flex; gap: 6px; }
+    .mo-tab { flex: 1; height: 44px; border: 0; border-radius: 12px 12px 0 0; background: rgba(255, 255, 255, 0.1); color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; }
+    .mo-tab.active { background: #F8FAFC; color: #1B2A4A; }
+    .mo-body { max-width: 560px; margin: 0 auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+    .mo-muted { font-size: 14px; color: #5B6B86; padding: 8px 2px; margin: 0; }
+    .mo-h { font-size: 15px; font-weight: 700; margin: 6px 2px 0; color: #1B2A4A; }
+
+    .mo-cta { height: 46px; border: 0; border-radius: 14px; background: #FF6B35; color: #1B2A4A; font-weight: 700; font-size: 15px; padding: 0 16px; cursor: pointer; }
+    .mo-cta-sm { height: 44px; flex: none; }
+    .mo-cta:disabled, .mo-ghost:disabled { opacity: 0.55; cursor: not-allowed; }
+    .mo-ghost { height: 44px; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; color: #1B2A4A; font-weight: 600; font-size: 14.5px; padding: 0 14px; cursor: pointer; }
+    .mo-red { color: #B3261E; }
+    .mo-add { height: 46px; border: 1.5px dashed #FF6B35; border-radius: 14px; background: #FFF6F1; font-weight: 700; font-size: 15px; color: #1B2A4A; cursor: pointer; }
+    .mo-field { border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; padding: 0 14px; min-height: 48px; display: flex; align-items: center; gap: 8px; color: #5B6B86; }
+    .mo-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 15px; color: #1B2A4A; min-height: 44px; }
+    .mo-in { width: 100%; border: 1.5px solid #D5DCE8; border-radius: 14px; background: #fff; padding: 10px 14px; font-size: 15px; min-height: 48px; color: #1B2A4A; }
+    .mo-in:focus { outline: 0; border-color: #FF6B35; }
+    textarea.mo-in { resize: vertical; }
+    .mo-lbl { display: block; margin: 12px 0 4px; font-size: 12.5px; font-weight: 600; color: #5B6B86; }
+    .mo-sec { margin: 20px 0 0; padding-top: 10px; border-top: 1px solid #EEF2F8; font-size: 14px; font-weight: 700; color: #FF6B35; }
+    .mo-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .mo-check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14.5px; font-weight: 600; }
+    .mo-check input { width: 20px; height: 20px; accent-color: #FF6B35; }
+
+    .mo-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+    .mo-pill { flex: none; height: 40px; border: 1.5px solid #D5DCE8; border-radius: 20px; background: #fff; padding: 0 14px; font-size: 14px; font-weight: 700; color: #1B2A4A; cursor: pointer; white-space: nowrap; }
+    .mo-pill.active { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+    .mo-pill b { color: #FF6B35; margin-left: 4px; }
+    .mo-pill.active b { color: #FFB899; }
+    .mo-summary { font-size: 13.5px; color: #5B6B86; padding: 0 2px; }
+
+    .mo-card { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27, 42, 74, 0.08); padding: 14px; display: flex; flex-direction: column; gap: 10px; border-left: 6px solid #D5DCE8; }
+    .mo-card.soon { border-left-color: #F59E0B; }
+    .mo-card.late { border-left-color: #D92D20; }
+    .mo-card.done { opacity: 0.8; border-left-color: #14A44D; }
+    .mo-card.cancelled { opacity: 0.6; border-left-color: #B7C2D8; }
+    .mo-top { }
+    .mo-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .mo-time { font-size: 19px; font-weight: 700; }
+    .mo-ono { margin-left: auto; font-size: 12.5px; font-weight: 700; color: #5B6B86; }
+    .mo-cname { font-size: 17px; font-weight: 700; }
+    .mo-line { font-size: 14px; color: #3A4A66; line-height: 1.45; word-break: break-word; }
+    .mo-line a { color: #0B63CE; font-weight: 600; text-decoration: none; }
+    .mo-lab { color: #5B6B86; font-weight: 600; }
+    .mo-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 10px; font-size: 12.5px; font-weight: 700; background: #EEF2F8; color: #1B2A4A; }
+    .mo-chip.green { background: #E8F7EE; color: #14693A; }
+    .mo-chip.yel { background: #FFF1C9; color: #6B4A00; }
+    .mo-chip.red { background: #FDECEA; color: #B3261E; }
+    .mo-chip.blue { background: #DCE8FB; color: #0B3D91; }
+    .mo-money { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .mo-m { background: #F8FAFC; border-radius: 12px; padding: 8px 6px; text-align: center; }
+    .mo-m small { display: block; font-size: 11.5px; font-weight: 600; color: #5B6B86; }
+    .mo-m b { font-size: 16px; }
+    .mo-m.cash { background: #FFF1E8; }
+    .mo-m.cash b { color: #C2410C; }
+    .mo-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    .mo-btns .mo-cta { flex: 1; min-width: 140px; }
+    .mo-btns .mo-ghost { height: 44px; }
+
+    .mo-ai { margin-top: 10px; background: #FFF6F1; border: 1.5px dashed #FF6B35; border-radius: 16px; padding: 4px 12px 12px; }
+    .mo-ai-btn { width: 100%; margin-top: 8px; }
+    .mo-ai-status { margin: 8px 2px 0; font-size: 13.5px; font-weight: 600; color: #14693A; }
+    .mo-ai-status.bad { color: #B3261E; }
+    .mo-calc { margin-top: 12px; background: #F1F5F9; border-radius: 14px; padding: 10px 14px; display: grid; gap: 4px; font-size: 14px; }
+    .mo-calc div { display: flex; justify-content: space-between; gap: 8px; }
+    .mo-calc .big { font-weight: 700; color: #C2410C; font-size: 15.5px; }
+    .mo-warn { margin: 8px 0 0; font-size: 13.5px; font-weight: 600; color: #8A5A00; background: #FFF1C9; border-radius: 12px; padding: 8px 12px; }
+    .mo-err { margin: 12px 0 0; font-size: 14px; font-weight: 600; color: #B3261E; }
+
+    .mo-overlay { position: fixed; inset: 0; z-index: 1050; background: rgba(27, 42, 74, 0.5); display: none; align-items: flex-end; justify-content: center; }
+    .mo-overlay.mo-top { z-index: 1060; }
+    .mo-overlay.active { display: flex; }
+    .mo-sheet { position: relative; width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 28px 28px 0 0; padding: 10px 20px calc(24px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -6px 24px rgba(27, 42, 74, 0.12); }
+    .mo-grip { width: 44px; height: 5px; border-radius: 3px; background: #D5DCE8; margin: 2px auto 8px; }
+    .mo-sheet-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .mo-sheet-h h2 { margin: 0; font-size: 21px; font-weight: 700; color: #1B2A4A; }
+    .mo-x { width: 44px; height: 44px; border-radius: 22px; border: 0; background: #F1F5F9; color: #1B2A4A; cursor: pointer; font-size: 16px; }
+    .mo-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .mo-actions .mo-cta { flex: 1; height: 48px; font-size: 16px; }
+    .mo-actions .mo-ghost { height: 48px; }
+
+    .mo-sum { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mo-sum .mo-m { background: #fff; box-shadow: 0 2px 10px rgba(27, 42, 74, 0.07); padding: 12px 8px; }
+    .mo-sum .mo-m.wide { grid-column: 1 / -1; background: #E8F7EE; }
+    .mo-sum .mo-m.wide b { color: #14693A; font-size: 20px; }
+    .mo-rcard { background: #fff; border-radius: 20px; box-shadow: 0 2px 12px rgba(27, 42, 74, 0.08); padding: 14px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .mo-kv { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+    .mo-kv span:first-child { color: #5B6B86; }
+    .mo-net { border-radius: 12px; padding: 10px 12px; font-weight: 700; font-size: 15px; }
+    .mo-net.pos { background: #FFF1E8; color: #C2410C; }
+    .mo-net.neg { background: #DCE8FB; color: #0B3D91; }
+    .mo-net.zero { background: #E8F7EE; color: #14693A; }
+    .mo-hi { display: flex; justify-content: space-between; gap: 8px; padding: 10px 0; border-top: 1px solid #EEF2F8; font-size: 14px; }
+
+    @media (max-width: 380px) {
+      .mo-two { grid-template-columns: 1fr; }
+      .mo-money { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+
+  <script>
+    import { onConsoleReady, canOpenAdminPath } from '../../lib/consoleApp.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { createRangeCalendar, dhakaRangeIso, monthRangeIso, monthLabel, labelKey, dayKeyOf } from '../../lib/adminCalendar.js';
+
+    const $ = (id) => document.getElementById(id);
+    const BN = '০১২৩৪৫৬৭৮৯';
+    const bn = (v) => String(v).replace(/\d/g, (d) => BN[d]);
+    const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+    const money = (n) => '৳' + bn(Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }));
+    const toast = (m, t) => { if (window.showToast) window.showToast(m, t); };
+
+    const ACTIVE_OFF = ['delivered', 'completed', 'cancelled'];
+    const STATUS = {
+      new: { t: 'নতুন', c: 'yel' },
+      rider_assigned: { t: 'রাইডার ঠিক', c: '' },
+      picked_up: { t: 'পিকআপ হয়েছে', c: 'blue' },
+      delivered: { t: 'ডেলিভারড', c: 'green' },
+      completed: { t: 'সম্পন্ন', c: 'green' },
+      cancelled: { t: 'বাতিল', c: 'red' },
+    };
+    const ADV_METHOD = { bkash: 'bKash', nagad: 'নগদ', rocket: 'রকেট', bank: 'ব্যাংক', cash_office: 'অফিসে ক্যাশ', other: 'অন্য' };
+
+    let role = null;
+    let userId = null;
+    let active = [];
+    let done = [];
+    let riders = [];
+    let extraRiders = {};
+    let names = {};
+    let view = 'today';
+    let q = '';
+    let editing = null;
+    let dvOrder = null;
+    let enRider = null;
+    let enKind = 'deposit';
+    let rdCallback = null;
+    let period = 'today';
+    let accRows = [];
+    let busy = false;
+
+    function el(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    function openSheet(id) { $(id).classList.add('active'); }
+    function closeSheet(id) { $(id).classList.remove('active'); }
+    function anyOpen() { return !!document.querySelector('.mo-overlay.active'); }
+    function showErr(id, text) {
+      const e = $(id);
+      if (!text) { e.style.display = 'none'; return; }
+      e.textContent = text;
+      e.style.display = 'block';
+      toast(text, 'error');
+    }
+
+    // ---------- তারিখ/সময় ----------
+    function period12(h) {
+      if (h < 4) return 'রাত';
+      if (h < 6) return 'ভোর';
+      if (h < 12) return 'সকাল';
+      if (h < 15) return 'দুপুর';
+      if (h < 18) return 'বিকেল';
+      if (h < 20) return 'সন্ধ্যা';
+      return 'রাত';
+    }
+    // সব সময় বাংলাদেশ টাইম (Asia/Dhaka, UTC+6, DST নেই) — ভিউয়ার ডুবাই/পর্তুগাল/সৌদি যেখানেই থাকুক
+    const BD_OFFSET_MS = 6 * 3600000;
+    function bdp(d) {
+      const x = new Date(d.getTime() + BD_OFFSET_MS);
+      return { y: x.getUTCFullYear(), m: x.getUTCMonth() + 1, d: x.getUTCDate(), h: x.getUTCHours(), mi: x.getUTCMinutes() };
+    }
+    function timeBn(d) {
+      const p = bdp(d);
+      return period12(p.h) + ' ' + bn(p.h % 12 || 12) + ':' + bn(String(p.mi).padStart(2, '0'));
+    }
+    function dateBn(d) { const p = bdp(d); return bn(p.d) + '/' + bn(p.m) + '/' + bn(p.y); }
+    function bdDayNum(d) { return Math.floor((d.getTime() + BD_OFFSET_MS) / 86400000); }
+    function startOfDay(d) { return new Date(bdDayNum(d) * 86400000 - BD_OFFSET_MS); }
+    function dayDiff(d) { return bdDayNum(d) - bdDayNum(new Date()); }
+    function dayLabel(d) {
+      const k = dayDiff(d);
+      if (k === 0) return 'আজ';
+      if (k === 1) return 'আগামীকাল';
+      if (k === -1) return 'গতকাল';
+      return dateBn(d);
+    }
+    function fmtEn(d) {
+      const p = bdp(d);
+      return String(p.d).padStart(2, '0') + '/' + String(p.m).padStart(2, '0') + '/' + p.y + ', ' + (p.h % 12 || 12) + ':' + String(p.mi).padStart(2, '0') + ' ' + (p.h < 12 ? 'AM' : 'PM') + ' (BD time)';
+    }
+    function fmtDur(min) {
+      const m = Math.round(Math.abs(min));
+      if (m < 60) return bn(m) + ' মিনিট';
+      return bn(Math.floor(m / 60)) + ' ঘণ্টা' + (m % 60 ? ' ' + bn(m % 60) + ' মিনিট' : '');
+    }
+    function dateInput(d) { const p = bdp(d); return p.y + '-' + String(p.m).padStart(2, '0') + '-' + String(p.d).padStart(2, '0'); }
+    function timeInput(d) { const p = bdp(d); return String(p.h).padStart(2, '0') + ':' + String(p.mi).padStart(2, '0'); }
+
+    // ---------- ফোন/লিংক ----------
+    function waNumber(p) {
+      let d = String(p || '').replace(/\D/g, '');
+      if (d.startsWith('880')) return d;
+      if (d.startsWith('0')) return '88' + d;
+      return d ? '880' + d : '';
+    }
+    function safeLink(u) { return typeof u === 'string' && /^https?:\/\//i.test(u.trim()) ? u.trim() : null; }
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('কপি হয়েছে', 'success');
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); toast('কপি হয়েছে', 'success'); } catch (e2) { toast('কপি করা যায়নি', 'error'); }
+        ta.remove();
+      }
+    }
+
+    // ---------- কপি-মেসেজ (Excel টেমপ্লেটের মতো) ----------
+    function riderOf(o) { return riders.find((r) => r.id === o.manual_rider_id) || extraRiders[o.manual_rider_id] || null; }
+    function riderMsg(o) {
+      const lines = [
+        '*New Delivery Order #' + o.order_no + '*',
+        'Customer: ' + o.customer_name,
+        'Phone: ' + o.customer_phone,
+        'Delivery Time: ' + (o.is_asap ? 'ASAP, ' : '') + fmtEn(new Date(o.scheduled_at)) + (o.is_strict_time ? ' (MUST)' : ''),
+        'Drop-off: ' + o.drop_address,
+      ];
+      if (o.drop_map_link) lines.push('Map: ' + o.drop_map_link);
+      if (o.pickup_name) lines.push('Pickup: ' + o.pickup_name);
+      if (o.pickup_map_link) lines.push('Pickup Map: ' + o.pickup_map_link);
+      lines.push('Order: ' + o.details);
+      lines.push('Product Price: BDT ' + o.product_price);
+      lines.push('Collect Cash: BDT ' + o.cod_amount + (Number(o.cod_amount) === 0 ? ' (advance paid)' : ''));
+      lines.push('Your Pay: BDT ' + o.rider_pay);
+      return lines.join('\n');
+    }
+    function customerMsg(o) {
+      const lines = [
+        '*Order Confirmation #' + o.order_no + '*',
+        'Name: ' + o.customer_name,
+        'Phone: ' + o.customer_phone,
+        'Delivery Date & Time: ' + fmtEn(new Date(o.scheduled_at)),
+      ];
+      if (o.pickup_name) lines.push('Pickup From: ' + o.pickup_name);
+      lines.push('Deliver To: ' + o.drop_address);
+      lines.push('Order: ' + o.details);
+      lines.push('Product Price: BDT ' + o.product_price);
+      lines.push('Delivery Charge: BDT ' + o.delivery_fee);
+      lines.push('Total: BDT ' + o.total_amount);
+      if (Number(o.advance_amount) > 0) lines.push('Advance Received: BDT ' + o.advance_amount);
+      lines.push('Cash on Delivery: BDT ' + o.cod_amount);
+      return lines.join('\n');
+    }
+
+    // ---------- ডেটা লোড ----------
+    async function loadOrders() {
+      const [a, d, r] = await Promise.all([
+        supabase.from('manual_orders').select('*').not('status', 'in', '(delivered,completed,cancelled)').order('scheduled_at', { ascending: true }).limit(500),
+        supabase.from('manual_orders').select('*').in('status', ['delivered', 'completed', 'cancelled']).order('scheduled_at', { ascending: false }).limit(100),
+        supabase.from('manual_riders').select('*').eq('is_active', true).order('name'),
+      ]);
+      if (a.error || d.error || r.error) {
+        $('orderList').replaceChildren(el('p', 'mo-muted', 'লোড করা যায়নি, আবার চেষ্টা করুন।'));
+        return;
+      }
+      active = a.data || [];
+      calDirty = true;
+      done = d.data || [];
+      riders = r.data || [];
+      // অ্যাপ রাইডার একসেপ্ট করলে অটো-লিংক হওয়া রাইডার লিস্টে না থাকলেও নাম আনা
+      const missing = [...new Set([...active, ...done].map((o) => o.manual_rider_id).filter(Boolean))].filter((id) => !riders.some((r) => r.id === id) && !extraRiders[id]);
+      if (missing.length) {
+        try {
+          const x = await supabase.from('manual_riders').select('*').in('id', missing);
+          (x.data || []).forEach((r) => { extraRiders[r.id] = r; });
+        } catch (e) { /* নাম না পেলেও চলবে */ }
+      }
+      const ids = [...new Set([...active, ...done].map((o) => o.entered_by).filter(Boolean))].filter((id) => !names[id]);
+      if (ids.length) {
+        try {
+          const p = await supabase.from('profiles').select('id, full_name').in('id', ids);
+          (p.data || []).forEach((x) => { names[x.id] = x.full_name || ''; });
+        } catch (e) { /* নাম না পেলেও চলবে */ }
+      }
+      renderOrders();
+      loadCounters();
+    }
+
+    function matches(o) {
+      if (!q) return true;
+      const s = q.toLowerCase();
+      return [o.customer_name, o.customer_phone, o.order_no, o.drop_address, o.details, o.pickup_name]
+        .some((x) => String(x || '').toLowerCase().includes(s));
+    }
+
+    function bucketOf(o) { const k = dayDiff(new Date(o.scheduled_at)); return k <= 0 ? 'today' : k === 1 ? 'tomorrow' : 'later'; }
+
+    function renderOrders() {
+      const act = active.filter(matches);
+      const counts = {
+        today: active.filter((o) => bucketOf(o) === 'today').length,
+        tomorrow: active.filter((o) => bucketOf(o) === 'tomorrow').length,
+        later: active.filter((o) => bucketOf(o) === 'later').length,
+        norider: active.filter((o) => !o.manual_rider_id).length,
+        done: done.filter((o) => o.status === 'delivered' || o.status === 'completed').length,
+      };
+      const defs = [['today', 'আজ'], ['tomorrow', 'আগামীকাল'], ['later', 'পরে'], ['norider', 'রাইডার নেই'], ['done', 'সম্পন্ন']];
+      const chips = $('viewChips');
+      chips.replaceChildren();
+      defs.forEach(([k, t]) => {
+        const b = el('button', 'mo-pill' + (view === k ? ' active' : ''));
+        b.type = 'button';
+        b.appendChild(document.createTextNode(t));
+        if (counts[k] != null) b.appendChild(el('b', '', bn(counts[k])));
+        b.addEventListener('click', () => { view = k; renderOrders(); });
+        chips.appendChild(b);
+      });
+
+      const unassignedToday = active.filter((o) => bucketOf(o) === 'today' && !o.manual_rider_id).length;
+      const cashPending = active.reduce((s, o) => s + Number(o.cod_amount || 0), 0);
+      $('summaryLine').textContent = 'চলমান ' + bn(active.length) + 'টা · ক্যাশ আসবে ' + money(cashPending) + (unassignedToday ? ' · আজ রাইডার নেই ' + bn(unassignedToday) + 'টায়' : '');
+
+      let list;
+      if (view === 'done') { renderCalView(); return; }
+      hideCalView();
+      if (view === 'done') list = done.filter(matches);
+      else if (view === 'norider') list = act.filter((o) => !o.manual_rider_id);
+      else list = act.filter((o) => bucketOf(o) === view);
+
+      const box = $('orderList');
+      box.replaceChildren();
+      if (!list.length) {
+        box.appendChild(el('p', 'mo-muted', q ? 'কিছু পাওয়া যায়নি।' : 'কোনো অর্ডার নেই।'));
+        return;
+      }
+      const wrap = el('div', '');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.gap = '12px';
+      list.forEach((o) => wrap.appendChild(renderCard(o)));
+      box.appendChild(wrap);
+    }
+
+    function renderCard(o) {
+      const isActive = !ACTIVE_OFF.includes(o.status);
+      const sched = new Date(o.scheduled_at);
+      const diffMin = (sched.getTime() - Date.now()) / 60000;
+      const card = el('div', 'mo-card');
+      let urgencyChip = null;
+      if (isActive) {
+        if (!o.is_asap && diffMin < 0) { card.classList.add('late'); urgencyChip = el('span', 'mo-chip red', 'দেরি ' + fmtDur(diffMin)); }
+        else if (!o.is_asap && diffMin <= 60) { card.classList.add('soon'); urgencyChip = el('span', 'mo-chip yel', fmtDur(diffMin) + ' বাকি'); }
+      } else if (o.status === 'cancelled') card.classList.add('cancelled');
+      else card.classList.add('done');
+
+      const top = el('div', 'mo-row');
+      top.appendChild(el('span', 'mo-time', o.is_asap ? 'এখনই · ' + dayLabel(sched) : dayLabel(sched) + ' · ' + timeBn(sched) + ' (BD)'));
+      top.appendChild(el('span', 'mo-ono', o.order_no));
+      card.appendChild(top);
+
+      const chips = el('div', 'mo-row');
+      const st = STATUS[o.status] || { t: o.status, c: '' };
+      chips.appendChild(el('span', 'mo-chip ' + st.c, st.t));
+      if (urgencyChip) chips.appendChild(urgencyChip);
+      if (o.is_strict_time) chips.appendChild(el('span', 'mo-chip red', 'ঠিক সময়েই'));
+      if (o.is_asap) chips.appendChild(el('span', 'mo-chip yel', 'ASAP'));
+      if (isActive && !o.manual_rider_id) chips.appendChild(el('span', 'mo-chip red', 'রাইডার ঠিক হয়নি'));
+      if (isActive && o.published_at && !o.delivery_rider_id) chips.appendChild(el('span', 'mo-chip yel', 'রাইডারদের কাছে পাবলিশড · ' + money(o.rider_pay)));
+      if (isActive && o.delivery_rider_id) { const rn = riderOf(o); chips.appendChild(el('span', 'mo-chip blue', '🛵 ' + (rn && rn.name ? rn.name : 'অ্যাপ রাইডার') + ' একসেপ্ট করেছেন')); }
+      if (isActive && o.delivery_rider_id) chips.appendChild(el('span', o.ready_at ? 'mo-chip green' : 'mo-chip', o.ready_at ? 'রেডি ✓' : 'রেডি দেওয়া হয়নি'));
+      card.appendChild(chips);
+
+      card.appendChild(el('div', 'mo-cname', o.customer_name));
+
+      const ph = el('div', 'mo-line');
+      const tel = el('a', '', o.customer_phone);
+      tel.href = 'tel:' + String(o.customer_phone).replace(/[^\d+]/g, '');
+      ph.appendChild(tel);
+      card.appendChild(ph);
+
+      const addr = el('div', 'mo-line');
+      addr.appendChild(el('span', 'mo-lab', 'ড্রপ: '));
+      addr.appendChild(document.createTextNode(o.drop_address + ' '));
+      const dm = safeLink(o.drop_map_link);
+      if (dm) { const a = el('a', '', 'ম্যাপ'); a.href = dm; a.target = '_blank'; a.rel = 'noopener'; addr.appendChild(a); }
+      card.appendChild(addr);
+
+      if (o.pickup_name) {
+        const pk = el('div', 'mo-line');
+        pk.appendChild(el('span', 'mo-lab', 'পিকআপ: '));
+        pk.appendChild(document.createTextNode(o.pickup_name + ' '));
+        const pm = safeLink(o.pickup_map_link);
+        if (pm) { const a = el('a', '', 'ম্যাপ'); a.href = pm; a.target = '_blank'; a.rel = 'noopener'; pk.appendChild(a); }
+        card.appendChild(pk);
+      }
+      const dt = el('div', 'mo-line');
+      dt.appendChild(el('span', 'mo-lab', 'অর্ডার: '));
+      dt.appendChild(document.createTextNode(o.details));
+      card.appendChild(dt);
+
+      const mon = el('div', 'mo-money');
+      [['মোট', o.total_amount, ''], ['অ্যাডভান্স', o.advance_amount, ''], ['ক্যাশ নেবে', o.status === 'delivered' || o.status === 'completed' ? (o.cash_collected == null ? o.cod_amount : o.cash_collected) : o.cod_amount, 'cash']].forEach(([l, v, c]) => {
+        const m = el('div', 'mo-m ' + c);
+        m.appendChild(el('small', '', l));
+        m.appendChild(el('b', '', money(v)));
+        mon.appendChild(m);
+      });
+      card.appendChild(mon);
+
+      const rd = riderOf(o);
+      const rl = el('div', 'mo-line');
+      rl.appendChild(el('span', 'mo-lab', 'রাইডার: '));
+      rl.appendChild(document.createTextNode(rd ? rd.name + (rd.phone ? ' (' + rd.phone + ')' : '') + ' · পে ' + money(o.rider_pay) : '—'));
+      card.appendChild(rl);
+
+      if (o.status === 'cancelled' && o.cancel_reason) {
+        const cr = el('div', 'mo-line');
+        cr.appendChild(el('span', 'mo-lab', 'বাতিলের কারণ: '));
+        cr.appendChild(document.createTextNode(o.cancel_reason));
+        card.appendChild(cr);
+      }
+      if (o.note) {
+        const nt = el('div', 'mo-line');
+        nt.appendChild(el('span', 'mo-lab', 'নোট: '));
+        nt.appendChild(document.createTextNode(o.note));
+        card.appendChild(nt);
+      }
+      if (o.entered_by && names[o.entered_by]) {
+        card.appendChild(el('div', 'mo-line', 'নিয়েছেন: ' + names[o.entered_by]));
+      }
+
+      const btns = el('div', 'mo-btns');
+      if (o.status === 'new') {
+        const b = el('button', 'mo-cta', 'রাইডার ঠিক করুন'); b.type = 'button';
+        b.addEventListener('click', () => openAssign(o));
+        btns.appendChild(b);
+      } else if (o.status === 'rider_assigned') {
+        const b = el('button', 'mo-cta', 'পিকআপ হয়েছে'); b.type = 'button';
+        b.addEventListener('click', () => setStatus(o, 'picked_up'));
+        btns.appendChild(b);
+      } else if (o.status === 'picked_up') {
+        const b = el('button', 'mo-cta', 'ডেলিভারড ✓'); b.type = 'button';
+        b.addEventListener('click', () => openDeliver(o));
+        btns.appendChild(b);
+      }
+      if (isActive && o.status === 'new' && !o.manual_rider_id && !o.published_at) {
+        const pb = el('button', 'mo-cta', 'রাইডারে পাবলিশ করুন'); pb.type = 'button';
+        pb.addEventListener('click', () => openPublish(o, 'publish'));
+        btns.appendChild(pb);
+      }
+      if (isActive && o.status === 'new' && o.published_at && !o.delivery_rider_id) {
+        const rb = el('button', 'mo-ghost', 'চার্জ বাড়ান'); rb.type = 'button';
+        rb.addEventListener('click', () => openPublish(o, 'raise'));
+        btns.appendChild(rb);
+      }
+      if (isActive && o.delivery_rider_id && !o.ready_at) {
+        const rd = el('button', 'mo-cta', 'রেডি ✓'); rd.type = 'button';
+        rd.addEventListener('click', () => markReady(o));
+        btns.appendChild(rd);
+      }
+      if (o.status === 'rider_assigned') {
+        const chg = el('button', 'mo-ghost', 'রাইডার বদলান'); chg.type = 'button';
+        chg.addEventListener('click', () => openAssign(o));
+        btns.appendChild(chg);
+        const rm = el('button', 'mo-ghost mo-red', 'রাইডার সরান'); rm.type = 'button';
+        rm.addEventListener('click', () => removeRider(o));
+        btns.appendChild(rm);
+      }
+      const edit = el('button', 'mo-ghost', 'এডিট'); edit.type = 'button';
+      edit.addEventListener('click', () => openOrderForm(o));
+      btns.appendChild(edit);
+      card.appendChild(btns);
+
+      const btns2 = el('div', 'mo-btns');
+      const cr = el('button', 'mo-ghost', 'রাইডার মেসেজ'); cr.type = 'button';
+      cr.addEventListener('click', () => copyText(riderMsg(o)));
+      const cc = el('button', 'mo-ghost', 'কাস্টমার মেসেজ'); cc.type = 'button';
+      cc.addEventListener('click', () => copyText(customerMsg(o)));
+      btns2.appendChild(cr);
+      btns2.appendChild(cc);
+      const wc = waNumber(o.customer_phone);
+      if (wc) {
+        const w = el('a', 'mo-ghost', 'WhatsApp');
+        w.style.display = 'inline-flex'; w.style.alignItems = 'center'; w.style.textDecoration = 'none';
+        w.href = 'https://wa.me/' + wc + '?text=' + encodeURIComponent(customerMsg(o));
+        w.target = '_blank'; w.rel = 'noopener';
+        btns2.appendChild(w);
+      }
+      card.appendChild(btns2);
+      return card;
+    }
+
+    // ---------- ক্যালেন্ডার ভিউ: তারিখ ধরে ইতিহাস + সামারি (তারিখ = ডেলিভারির তারিখ, বাংলাদেশ টাইম) ----------
+    let moCal = null;
+    let calOrders = [];
+    let calDirty = true;
+    let calToken = 0;
+
+    let calToggleWired = false;
+
+    function paintCalToggle() {
+      const btn = $('moCalToggle');
+      if (!btn) return;
+      const open = $('moCal').style.display !== 'none';
+      const sel = moCal ? moCal.getRange() : { from: '', to: '' };
+      const lab = sel.from ? (sel.from === sel.to ? labelKey(sel.from) : labelKey(sel.from) + ' – ' + labelKey(sel.to)) : '';
+      btn.textContent = open ? '▲ ক্যালেন্ডার ভাঁজ করুন' : '📅 ক্যালেন্ডার' + (lab ? ' · ' + lab : ' (দিন বাছুন)');
+    }
+
+    function wireCalToggle() {
+      if (calToggleWired) return;
+      calToggleWired = true;
+      $('moCalToggle').addEventListener('click', () => {
+        const c = $('moCal');
+        c.style.display = c.style.display === 'none' ? '' : 'none';
+        paintCalToggle();
+      });
+      paintCalToggle();
+    }
+
+    function hideCalView() {
+      const b = $('calBox');
+      if (b) b.style.display = 'none';
+    }
+
+    async function renderCalView() {
+      $('calBox').style.display = '';
+      wireCalToggle();
+      if (!moCal) {
+        moCal = createRangeCalendar($('moCal'), {
+          allowFuture: true,
+          onMonthChange: () => { calDirty = true; renderCalView(); },
+          onRangeChange: () => { calDirty = true; renderCalView(); },
+        });
+      }
+      const mon = moCal.getMonth();
+      const sel = moCal.getRange();
+      if (calDirty) {
+        calDirty = false;
+        const token = ++calToken;
+        const mr = monthRangeIso(mon.y, mon.m);
+        let lo = mr.fromIso;
+        let hi = mr.toIso;
+        if (sel.from) {
+          const sr = dhakaRangeIso(sel.from, sel.to);
+          if (sr.fromIso < lo) lo = sr.fromIso;
+          if (sr.toIso > hi) hi = sr.toIso;
+        }
+        const res = await supabase.from('manual_orders').select('*').in('status', ['delivered', 'completed']).gte('scheduled_at', lo).lt('scheduled_at', hi).order('scheduled_at', { ascending: false }).limit(2000);
+        if (token !== calToken) return;
+        if (res.error) {
+          $('orderList').replaceChildren(el('p', 'mo-muted', 'লোড করা যায়নি, আবার চেষ্টা করুন।'));
+          return;
+        }
+        calOrders = res.data || [];
+        const missing = [...new Set(calOrders.map((o) => o.manual_rider_id).filter(Boolean))].filter((id) => !riders.some((r) => r.id === id) && !extraRiders[id]);
+        if (missing.length) {
+          try {
+            const x = await supabase.from('manual_riders').select('*').in('id', missing);
+            (x.data || []).forEach((r) => { extraRiders[r.id] = r; });
+          } catch (e) { /* নাম না পেলেও চলবে */ }
+        }
+        const ids = [...new Set(calOrders.map((o) => o.entered_by).filter(Boolean))].filter((id) => !names[id]);
+        if (ids.length) {
+          try {
+            const p = await supabase.from('profiles').select('id, full_name').in('id', ids);
+            (p.data || []).forEach((x) => { names[x.id] = x.full_name || ''; });
+          } catch (e) { /* নাম না পেলেও চলবে */ }
+        }
+        if (token !== calToken) return;
+      }
+      paintCal(mon, sel);
+    }
+
+    function paintCal(mon, sel) {
+      const counts = {};
+      calOrders.forEach((o) => {
+        const k = dayKeyOf(new Date(o.scheduled_at));
+        counts[k] = (counts[k] || 0) + 1;
+      });
+      moCal.setCounts(counts);
+      const prefix = mon.y + '-' + String(mon.m).padStart(2, '0') + '-';
+      const rows = (sel.from ? calOrders : done.filter((o) => o.status === 'delivered' || o.status === 'completed')).filter((o) => {
+        const k = dayKeyOf(new Date(o.scheduled_at));
+        return (!sel.from || (k >= sel.from && k <= sel.to)) && matches(o);
+      });
+      const label = sel.from
+        ? (sel.from === sel.to ? labelKey(sel.from) : labelKey(sel.from) + ' – ' + labelKey(sel.to))
+        : 'সর্বশেষ সম্পন্ন';
+      renderCalSummary(rows, label);
+      paintCalToggle();
+
+      const box = $('orderList');
+      box.replaceChildren();
+      if (!rows.length) {
+        box.appendChild(el('p', 'mo-muted', q ? 'কিছু পাওয়া যায়নি।' : 'এই সময়ে কোনো অর্ডার নেই।'));
+        return;
+      }
+      const wrap = el('div', '');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.gap = '12px';
+      rows.forEach((o) => wrap.appendChild(renderCard(o)));
+      box.appendChild(wrap);
+    }
+
+    function renderCalSummary(rows, label) {
+      const box = $('moCalSum');
+      box.replaceChildren();
+      box.appendChild(el('div', 'mo-h', label + ' · সামারি'));
+      const n = (f) => rows.filter(f).length;
+      const dn = rows.filter((o) => o.status === 'delivered' || o.status === 'completed');
+      const cells = [
+        ['সম্পন্ন অর্ডার', bn(rows.length)],
+        
+        
+        
+        
+      ];
+      // টাকার হিসাব শুধু admin বা manual_accounts.view পারমিশনওয়ালা দেখবে (হিসাব ট্যাবের নিয়মের মতো)
+      if (canAccounts()) {
+        cells.push(['ডেলিভারড অর্ডারের মোট', money(sumM(dn, 'total_amount'))]);
+        cells.push(['এর মধ্যে ডেলিভারি ফি', money(sumM(dn, 'delivery_fee'))]);
+        cells.push(['এর মধ্যে প্রোডাক্ট', money(sumM(dn, 'product_price'))]);
+      }
+      const sum = el('div', 'mo-sum');
+      cells.forEach(([l, v]) => {
+        const m = el('div', 'mo-m');
+        m.appendChild(el('small', '', l));
+        m.appendChild(el('b', '', v));
+        sum.appendChild(m);
+      });
+      box.appendChild(sum);
+    }
+
+    // ---------- রাইডারে পাবলিশ / চার্জ বাড়ানো / রেডি ----------
+    let pbOrder = null;
+    let pbMode = 'publish';
+    const PB_REASONS = {
+      pay_required: 'ডেলিভারি চার্জ লিখুন (০-এর বেশি)।',
+      not_open: 'অর্ডারটা আর খোলা নেই (কেউ একসেপ্ট করেছে বা স্ট্যাটাস বদলেছে)।',
+      already_published: 'অর্ডারটা আগেই পাবলিশ করা হয়েছে।',
+      must_increase: 'নতুন চার্জ আগের চেয়ে বেশি হতে হবে।',
+      not_found: 'অর্ডার পাওয়া যায়নি।',
+    };
+    function openPublish(o, mode) {
+      pbOrder = o;
+      pbMode = mode;
+      $('pbTitle').textContent = mode === 'raise' ? 'ডেলিভারি চার্জ বাড়ান' : 'রাইডারে পাবলিশ';
+      $('pbSave').textContent = mode === 'raise' ? 'চার্জ বাড়ান' : 'পাবলিশ করুন';
+      $('pbInfo').textContent = mode === 'raise'
+        ? o.order_no + ' · এখন চার্জ ' + money(o.rider_pay) + '। নতুন চার্জ আগের চেয়ে বেশি দিন, সব রাইডার নোটিফিকেশন পাবে।'
+        : o.order_no + ' · পাবলিশ করলে সব approved রাইডার (অনলাইন-অফলাইন) নোটিফিকেশন পাবে, যে আগে একসেপ্ট করবে সে পাবে।';
+      $('pb_pay').value = mode === 'publish' && Number(o.rider_pay) > 0 ? o.rider_pay : '';
+      showErr('pbErr', '');
+      openSheet('pbOverlay');
+    }
+    async function savePublish() {
+      if (busy || !pbOrder) return;
+      const v = num($('pb_pay').value);
+      if (v <= 0) return showErr('pbErr', 'ডেলিভারি চার্জ লিখুন (০-এর বেশি)।');
+      if (pbMode === 'raise' && v <= Number(pbOrder.rider_pay)) return showErr('pbErr', 'নতুন চার্জ আগের চেয়ে বেশি হতে হবে।');
+      busy = true;
+      $('pbSave').disabled = true;
+      const res = pbMode === 'raise'
+        ? await supabase.rpc('admin_raise_rider_pay', { p_order_id: pbOrder.id, p_new_pay: v })
+        : await supabase.rpc('admin_publish_manual_order', { p_order_id: pbOrder.id, p_rider_pay: v });
+      busy = false;
+      $('pbSave').disabled = false;
+      if (res.error) return showErr('pbErr', 'হয়নি, আবার চেষ্টা করুন।');
+      const out = res.data;
+      if (!out || !out.ok) {
+        showErr('pbErr', PB_REASONS[out && out.reason] || 'হয়নি, আবার চেষ্টা করুন।');
+        if (out && (out.reason === 'not_open' || out.reason === 'already_published')) { closeSheet('pbOverlay'); await loadOrders(); }
+        return;
+      }
+      closeSheet('pbOverlay');
+      toast((pbMode === 'raise' ? 'চার্জ বেড়েছে' : 'পাবলিশ হয়েছে') + ' · ' + bn(out.notified || 0) + ' জন রাইডারকে নোটিফিকেশন গেছে', 'success');
+      await loadOrders();
+    }
+    async function markReady(o) {
+      if (busy) return;
+      busy = true;
+      const res = await supabase.rpc('admin_mark_manual_order_ready', { p_order_id: o.id });
+      busy = false;
+      if (res.error || !res.data || !res.data.ok) { toast('রেডি দেওয়া যায়নি, আবার চেষ্টা করুন', 'error'); return; }
+      toast('রেডি দেওয়া হয়েছে, রাইডারকে জানানো হয়েছে', 'success');
+      await loadOrders();
+    }
+
+    // ---------- স্ট্যাটাস ----------
+    async function setStatus(o, status) {
+      if (busy) return;
+      busy = true;
+      const { error } = await supabase.from('manual_orders').update({ status }).eq('id', o.id);
+      busy = false;
+      if (error) { toast('বদলানো যায়নি', 'error'); return; }
+      await loadOrders();
+    }
+
+    function openDeliver(o) {
+      dvOrder = o;
+      $('dvInfo').textContent = o.order_no + ' · ' + o.customer_name + ' · ক্যাশ নেওয়ার কথা ' + money(o.cod_amount);
+      $('dv_cash').value = o.cod_amount;
+      showErr('dvErr', '');
+      openSheet('dvOverlay');
+    }
+    async function saveDeliver() {
+      if (busy || !dvOrder) return;
+      const v = $('dv_cash').value;
+      if (v === '' || num(v) < 0) return showErr('dvErr', 'ক্যাশের পরিমাণ লিখুন (নাই হলে ০)।');
+      busy = true;
+      $('dvSave').disabled = true;
+      const { error } = await supabase.from('manual_orders').update({ status: 'delivered', cash_collected: num(v) }).eq('id', dvOrder.id);
+      busy = false;
+      $('dvSave').disabled = false;
+      if (error) return showErr('dvErr', 'সেভ হয়নি, আবার চেষ্টা করুন।');
+      closeSheet('dvOverlay');
+      toast('ডেলিভারড করা হয়েছে', 'success');
+      await loadOrders();
+    }
+
+    // ---------- রাইডার ঠিক করুন (শুধু রেজিস্টার্ড রাইডারের লিস্ট থেকে) ----------
+    let asOrder = null;
+    let asRiders = [];
+    let asSel = null;
+    const AS_REASONS = {
+      rider_not_found: 'রাইডার পাওয়া যায়নি বা অ্যাপ্রুভড নন।',
+      not_found: 'অর্ডার পাওয়া যায়নি।',
+      bad_status: 'অর্ডারটা আর বদলানো যায় না (পিকআপ/ডেলিভারড/বাতিল)।',
+      pay_required: 'রাইডারের ডেলিভারি চার্জ লিখুন (০-এর বেশি)।',
+    };
+    async function openAssign(o) {
+      asOrder = o;
+      asSel = null;
+      const when = new Date(o.scheduled_at);
+      $('asInfo').textContent = o.order_no + ' · ' + o.customer_name + ' · ' + (o.is_asap ? 'এখনই' : dayLabel(when) + ' ' + timeBn(when));
+      $('as_pay').value = Number(o.rider_pay) > 0 ? o.rider_pay : '';
+      $('asSearch').value = '';
+      showErr('asErr', '');
+      $('asList').replaceChildren(el('p', 'mo-muted', 'রাইডারের লিস্ট লোড হচ্ছে...'));
+      openSheet('asOverlay');
+      const res = await supabase.rpc('admin_assignable_riders', { p_category: 'delivery' });
+      if (res.error || !Array.isArray(res.data)) {
+        $('asList').replaceChildren(el('p', 'mo-muted', 'লিস্ট লোড করা যায়নি, আবার চেষ্টা করুন।'));
+        return;
+      }
+      asRiders = res.data;
+      renderAssignList();
+    }
+    function renderAssignList() {
+      const box = $('asList');
+      const s = $('asSearch').value.trim().toLowerCase();
+      const list = asRiders.filter((r) => !s || String(r.name || '').toLowerCase().includes(s) || String(r.phone || '').includes(s));
+      box.replaceChildren();
+      if (!list.length) { box.appendChild(el('p', 'mo-muted', 'কোনো রাইডার পাওয়া যায়নি।')); return; }
+      list.forEach((r) => {
+        const row = el('button', 'mo-as-row' + (asSel === r.rider_id ? ' sel' : ''));
+        row.type = 'button';
+        row.appendChild(el('div', 'mo-as-name', (r.online ? '🟢 ' : '⚪ ') + (r.name || 'নাম নেই')));
+        row.appendChild(el('div', 'mo-as-sub', (r.phone || 'ফোন নেই') + (r.vehicle_type ? ' · ' + r.vehicle_type : '') + (r.upazila ? ' · ' + r.upazila : '')));
+        row.addEventListener('click', () => { asSel = r.rider_id; renderAssignList(); });
+        box.appendChild(row);
+      });
+    }
+    async function saveAssign() {
+      if (busy || !asOrder) return;
+      if (!asSel) return showErr('asErr', 'তালিকা থেকে একজন রাইডার বাছুন।');
+      const pay = num($('as_pay').value);
+      if (pay <= 0) return showErr('asErr', AS_REASONS.pay_required);
+      busy = true;
+      $('asSave').disabled = true;
+      const res = await supabase.rpc('admin_assign_manual_order', { p_order_id: asOrder.id, p_delivery_rider_id: asSel, p_rider_pay: pay });
+      busy = false;
+      $('asSave').disabled = false;
+      if (res.error) return showErr('asErr', 'হয়নি, আবার চেষ্টা করুন।');
+      const out = res.data;
+      if (!out || !out.ok) return showErr('asErr', AS_REASONS[out && out.reason] || 'হয়নি, আবার চেষ্টা করুন।');
+      closeSheet('asOverlay');
+      toast('রাইডার ঠিক হয়েছে, রাইডারকে নোটিফিকেশন গেছে', 'success');
+      await loadOrders();
+    }
+
+    // ---------- রাইডার সরান (অর্ডার রাইডার-বিহীন থাকে, পরে আবার পাবলিশ/অ্যাসাইন) ----------
+    async function removeRider(o) {
+      if (busy) return;
+      const r = riderOf(o);
+      const who = r && r.name ? r.name : 'রাইডার';
+      if (!confirm(o.order_no + ' অর্ডার থেকে ' + who + '-কে সরাবেন? অর্ডারটা রাইডার-বিহীন (পাবলিশ ছাড়া) থাকবে, পরে আবার পাবলিশ বা রাইডার ঠিক করতে পারবেন।')) return;
+      busy = true;
+      const res = await supabase.rpc('admin_unassign_manual_order', { p_order_id: o.id, p_note: null });
+      busy = false;
+      if (res.error) { toast('হয়নি, আবার চেষ্টা করুন', 'error'); return; }
+      const out = res.data;
+      if (!out || !out.ok) {
+        toast(out && out.reason === 'bad_status' ? 'পিকআপ হয়ে গেলে রাইডার সরানো যায় না' : 'হয়নি, আবার চেষ্টা করুন', 'error');
+        await loadOrders();
+        return;
+      }
+      toast('রাইডার সরানো হয়েছে। অর্ডারটা এখন রাইডার-বিহীন।', 'success');
+      await loadOrders();
+    }
+
+    // ---------- রাইডারের দাম বাড়ানোর অনুরোধ (অ্যাডমিন রিভিউ) ----------
+    async function loadCounters() {
+      const box = $('counterBox');
+      if (!box) return;
+      const res = await supabase.rpc('admin_pending_manual_counters');
+      box.replaceChildren();
+      if (res.error || !Array.isArray(res.data) || !res.data.length) return;
+      const wrap = el('div', 'mo-ctr-box');
+      wrap.appendChild(el('div', 'mo-ctr-h', '💬 রাইডারের দাম বাড়ানোর অনুরোধ (' + bn(res.data.length) + ')'));
+      res.data.forEach((c) => {
+        const card = el('div', 'mo-ctr');
+        card.appendChild(el('div', 'mo-ctr-t', c.order_no + ' · ' + (c.rider_name || 'রাইডার') + (c.rider_phone ? ' (' + c.rider_phone + ')' : '')));
+        card.appendChild(el('div', 'mo-ctr-p', money(c.original_pay) + ' → ' + money(c.proposed_pay)));
+        card.appendChild(el('div', 'mo-line', (c.pickup_name ? c.pickup_name + ' → ' : '') + (c.drop_address || '')));
+        const btns = el('div', 'mo-btns');
+        const ok = el('button', 'mo-cta', 'অনুমোদন দিন (এই রাইডারকে দিন)'); ok.type = 'button';
+        ok.addEventListener('click', () => reviewCounter(c, true));
+        const no = el('button', 'mo-ghost mo-red', 'বাতিল'); no.type = 'button';
+        no.addEventListener('click', () => reviewCounter(c, false));
+        btns.appendChild(ok);
+        btns.appendChild(no);
+        card.appendChild(btns);
+        wrap.appendChild(card);
+      });
+      box.appendChild(wrap);
+    }
+    async function reviewCounter(c, approve) {
+      if (busy) return;
+      const msg = approve
+        ? c.order_no + ' অর্ডার ' + (c.rider_name || 'এই রাইডার') + '-কে ' + money(c.proposed_pay) + '-এ দেবেন? অন্য রাইডারদের অনুরোধ বন্ধ হয়ে যাবে।'
+        : (c.rider_name || 'রাইডার') + '-এর ' + money(c.proposed_pay) + ' চাওয়াটা বাতিল করবেন?';
+      if (!confirm(msg)) return;
+      busy = true;
+      const res = await supabase.rpc('admin_review_manual_counter', { p_counter_id: c.id, p_approve: approve, p_note: null });
+      busy = false;
+      if (res.error) { toast('হয়নি, আবার চেষ্টা করুন', 'error'); return; }
+      const out = res.data;
+      if (!out || !out.ok) {
+        toast(out && out.reason === 'taken' ? 'অর্ডারটা আর খোলা নেই (অন্য রাইডার পেয়েছেন)' : out && out.reason === 'already_reviewed' ? 'এটা আগেই রিভিউ হয়ে গেছে' : 'হয়নি, আবার চেষ্টা করুন', 'error');
+      } else {
+        toast(approve ? 'অনুমোদন হয়েছে, রাইডারকে জানানো হয়েছে' : 'বাতিল করা হয়েছে, রাইডারকে জানানো হয়েছে', 'success');
+      }
+      await loadOrders();
+    }
+
+    // ---------- অর্ডার ফর্ম ----------
+    function fillRiderSelect(selected) {
+      const s = $('f_rider');
+      s.replaceChildren();
+      const none = el('option', '', 'রাইডার ঠিক হয়নি'); none.value = '';
+      s.appendChild(none);
+      riders.forEach((r) => { const op = el('option', '', r.name + (r.phone ? ' · ' + r.phone : '')); op.value = r.id; s.appendChild(op); });
+      const nw = el('option', '', '+ নতুন রাইডার যোগ করুন'); nw.value = '__new';
+      s.appendChild(nw);
+      s.value = selected || '';
+    }
+
+    function updateCalc() {
+      const price = num($('f_price').value);
+      const fee = num($('f_fee').value);
+      const adv = num($('f_adv').value);
+      const pay = num($('f_pay').value);
+      const total = price + fee;
+      const cash = Math.max(total - adv, 0);
+      const box = $('calcBox');
+      box.replaceChildren();
+      const rows = [['মোট (প্রোডাক্ট + ফি)', money(total), ''], ['অ্যাডভান্স', money(adv), ''], ['রাইডার ক্যাশ নেবে', money(cash), 'big'], ['আমাদের ডেলিভারি লাভ (ফি − রাইডার পে)', money(fee - pay), '']];
+      rows.forEach(([l, v, c]) => {
+        const d = el('div', c);
+        d.appendChild(el('span', '', l));
+        d.appendChild(el('b', '', v));
+        box.appendChild(d);
+      });
+      showErrInline('advErr', adv > total ? 'অ্যাডভান্স মোটের চেয়ে বেশি হতে পারে না।' : '');
+    }
+    function showErrInline(id, text) {
+      const e = $(id);
+      e.textContent = text || '';
+      e.style.display = text ? 'block' : 'none';
+    }
+
+    function syncAsap() {
+      const asap = $('f_asap').checked;
+      $('f_time').required = !asap;
+      $('timeStar').style.display = asap ? 'none' : '';
+    }
+
+    function openOrderForm(o, focusId) {
+      editing = o || null;
+      $('orderFormTitle').textContent = o ? 'অর্ডার এডিট · ' + o.order_no : 'নতুন অর্ডার';
+      $('saveOrderBtn').textContent = o ? 'পরিবর্তন সেভ করুন' : 'অর্ডার সেভ করুন';
+      $('statusGroup').style.display = o ? '' : 'none';
+      $('delOrderBtn').style.display = o && role === 'admin' ? '' : 'none';
+      $('dupWarn').style.display = 'none';
+      $('aiBox').style.display = o ? 'none' : '';
+      $('aiText').value = '';
+      setAiStatus('', false);
+      showErr('formErr', '');
+      const d = o ? new Date(o.scheduled_at) : new Date();
+      $('f_name').value = o ? o.customer_name : '';
+      $('f_phone').value = o ? o.customer_phone : '';
+      $('f_addr').value = o ? o.drop_address : '';
+      $('f_dmap').value = o ? o.drop_map_link || '' : '';
+      $('f_pname').value = o ? o.pickup_name || '' : '';
+      $('f_pmap').value = o ? o.pickup_map_link || '' : '';
+      $('f_details').value = o ? o.details : '';
+      $('f_date').value = dateInput(d);
+      $('f_time').value = o ? timeInput(d) : '';
+      $('f_asap').checked = o ? !!o.is_asap : false;
+      $('f_strict').checked = o ? !!o.is_strict_time : false;
+      $('f_price').value = o ? o.product_price : '';
+      $('f_fee').value = o ? o.delivery_fee : '';
+      $('f_adv').value = o && Number(o.advance_amount) ? o.advance_amount : '';
+      $('f_advm').value = o ? o.advance_method || '' : '';
+      $('f_trx').value = o ? o.advance_trx_id || '' : '';
+      $('f_pay').value = o && Number(o.rider_pay) ? o.rider_pay : '';
+      $('f_shop').value = o ? o.shop_paid_by : 'rider';
+      $('f_cost').value = o && o.product_cost != null ? o.product_cost : '';
+      $('f_note').value = o ? o.note || '' : '';
+      $('f_status').value = o ? (o.status === 'completed' ? 'delivered' : o.status) : 'new';
+      $('f_cancel').value = o ? o.cancel_reason || '' : '';
+      $('cancelGroup').style.display = $('f_status').value === 'cancelled' ? '' : 'none';
+      fillRiderSelect(o ? o.manual_rider_id : '');
+      const curRider = o ? riderOf(o) : null;
+      $('riderInfoBox').textContent = curRider
+        ? 'রাইডার: ' + curRider.name + (curRider.phone ? ' (' + curRider.phone + ')' : '') + '। বদলাতে কার্ডের "রাইডার বদলান" বাটন চাপুন।'
+        : 'রাইডার ঠিক হয়নি। সেভ করার পর কার্ডের "রাইডার ঠিক করুন" বাটন চাপুন।';
+      syncAsap();
+      updateCalc();
+      openSheet('orderOverlay');
+      if (focusId) setTimeout(() => { const f = $(focusId); if (f) f.focus(); }, 150);
+    }
+
+    // ---------- অটো-ফিল (ফেসবুক মেসেজ → ফর্ম) ----------
+    function setAiStatus(text, bad) {
+      const s = $('aiStatus');
+      s.textContent = text || '';
+      s.classList.toggle('bad', !!bad);
+      s.style.display = text ? 'block' : 'none';
+    }
+
+    function applyAi(f) {
+      let n = 0;
+      const set = (id, v) => { if (v !== null && v !== undefined && v !== '') { $(id).value = v; n++; } };
+      set('f_name', f.customer_name);
+      set('f_phone', f.customer_phone);
+      set('f_addr', f.drop_address);
+      set('f_dmap', f.drop_map_link);
+      set('f_pname', f.pickup_name);
+      set('f_details', f.details);
+      set('f_date', f.delivery_date);
+      set('f_time', f.delivery_time);
+      if (f.is_asap) { $('f_asap').checked = true; n++; }
+      syncAsap();
+      set('f_price', f.product_price);
+      set('f_fee', f.delivery_fee);
+      set('f_adv', f.advance_amount);
+      if (f.advance_amount > 0 && f.advance_method) $('f_advm').value = f.advance_method;
+      set('f_trx', f.advance_trx_id);
+      set('f_note', f.note);
+      updateCalc();
+      checkDup();
+      if (n) setAiStatus('অটো-ফিল হয়েছে (' + bn(n) + 'টা ঘর)। সেভের আগে সব মিলিয়ে নিন, বিশেষ করে ফোন, সময় ও টাকা।', false);
+      else setAiStatus('মেসেজ থেকে কিছু বের করা যায়নি, হাতে লিখুন।', true);
+    }
+
+    async function aiFill() {
+      if (busy) return;
+      const text = $('aiText').value.trim();
+      if (text.length < 10) return setAiStatus('আগে কাস্টমারের মেসেজটা পেস্ট করুন।', true);
+      busy = true;
+      $('aiBtn').disabled = true;
+      setAiStatus('মেসেজ পড়া হচ্ছে...', false);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/admin/parse-manual-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session ? session.access_token : '') },
+          body: JSON.stringify({ text }),
+        });
+        const out = await res.json().catch(() => null);
+        if (!res.ok || !out || !out.fields) {
+          setAiStatus((out && out.error) || 'অটো-ফিল হয়নি, হাতে লিখুন।', true);
+        } else {
+          applyAi(out.fields);
+        }
+      } catch (e) {
+        setAiStatus('নেটওয়ার্ক সমস্যা, আবার চেষ্টা করুন।', true);
+      } finally {
+        busy = false;
+        $('aiBtn').disabled = false;
+      }
+    }
+
+    async function checkDup() {
+      if (editing) return;
+      const phone = $('f_phone').value.trim();
+      const w = $('dupWarn');
+      if (phone.length < 6) { w.style.display = 'none'; return; }
+      const { data } = await supabase.from('manual_orders').select('order_no, scheduled_at, status').eq('customer_phone', phone).not('status', 'in', '(delivered,completed,cancelled)').limit(5);
+      if (data && data.length) {
+        w.textContent = 'সতর্কতা: এই নম্বরে আগে থেকেই ' + bn(data.length) + 'টা চলমান অর্ডার আছে (' + data.map((x) => x.order_no).join(', ') + ')। ডুপ্লিকেট কিনা দেখে নিন।';
+        w.style.display = 'block';
+      } else w.style.display = 'none';
+    }
+
+    async function saveOrder() {
+      if (busy) return;
+      showErr('formErr', '');
+      if (!window.SFValidateForm($('orderForm'))) return showErr('formErr', 'লাল চিহ্নিত ঘরগুলো পূরণ করুন।');
+      const price = num($('f_price').value);
+      const fee = num($('f_fee').value);
+      const adv = num($('f_adv').value);
+      if (adv > price + fee) return showErr('formErr', 'অ্যাডভান্স মোটের চেয়ে বেশি হতে পারে না।');
+      const asap = $('f_asap').checked;
+      let when;
+      if (asap && !$('f_time').value) when = new Date();
+      else when = new Date($('f_date').value + 'T' + $('f_time').value + ':00+06:00');
+      if (isNaN(when.getTime())) return showErr('formErr', 'তারিখ ও সময় ঠিকভাবে দিন।');
+
+      const riderId = editing ? (editing.manual_rider_id || null) : null; // রাইডার বদলায় শুধু "রাইডার ঠিক করুন" থেকে
+      let status = editing ? $('f_status').value : (riderId ? 'rider_assigned' : 'new');
+      if (editing) {
+        if (status === 'new' && riderId) status = 'rider_assigned';
+        else if (status === 'rider_assigned' && !riderId) status = 'new';
+      }
+      const costV = $('f_cost').value;
+      const payload = {
+        customer_name: $('f_name').value.trim(),
+        customer_phone: $('f_phone').value.trim(),
+        drop_address: $('f_addr').value.trim(),
+        drop_map_link: $('f_dmap').value.trim() || null,
+        pickup_name: $('f_pname').value.trim() || null,
+        pickup_map_link: $('f_pmap').value.trim() || null,
+        details: $('f_details').value.trim(),
+        scheduled_at: when.toISOString(),
+        is_asap: asap,
+        is_strict_time: $('f_strict').checked,
+        product_price: price,
+        delivery_fee: fee,
+        product_cost: costV === '' ? null : num(costV),
+        advance_amount: adv,
+        advance_method: adv > 0 ? ($('f_advm').value || 'other') : null,
+        advance_trx_id: adv > 0 ? ($('f_trx').value.trim() || null) : null,
+        shop_paid_by: $('f_shop').value,
+        rider_pay: num($('f_pay').value),
+        note: $('f_note').value.trim() || null,
+        status,
+        cancel_reason: status === 'cancelled' ? ($('f_cancel').value.trim() || null) : null,
+      };
+      busy = true;
+      $('saveOrderBtn').disabled = true;
+      let error;
+      if (editing) ({ error } = await supabase.from('manual_orders').update(payload).eq('id', editing.id));
+      else ({ error } = await supabase.from('manual_orders').insert(payload));
+      busy = false;
+      $('saveOrderBtn').disabled = false;
+      if (error) return showErr('formErr', 'সেভ হয়নি: ' + (error.message || 'আবার চেষ্টা করুন'));
+      closeSheet('orderOverlay');
+      toast(editing ? 'অর্ডার আপডেট হয়েছে' : 'নতুন অর্ডার যোগ হয়েছে', 'success');
+      await loadOrders();
+    }
+
+    async function deleteOrder() {
+      if (busy || !editing || role !== 'admin') return;
+      if (!confirm(editing.order_no + ' অর্ডারটা চিরতরে ডিলিট করবেন? (হিসাব থেকেও চলে যাবে)')) return;
+      busy = true;
+      const { error } = await supabase.from('manual_orders').delete().eq('id', editing.id);
+      busy = false;
+      if (error) return showErr('formErr', 'ডিলিট হয়নি।');
+      closeSheet('orderOverlay');
+      toast('ডিলিট হয়েছে', 'success');
+      await loadOrders();
+    }
+
+    // ---------- রাইডার যোগ ----------
+    function openRiderSheet(cb) {
+      rdCallback = cb || null;
+      $('rd_name').value = '';
+      $('rd_phone').value = '';
+      showErr('rdErr', '');
+      openSheet('rdOverlay');
+    }
+    async function saveRider() {
+      if (busy) return;
+      if (!window.SFValidateForm($('rdSheet'))) return showErr('rdErr', 'রাইডারের নাম লিখুন।');
+      busy = true;
+      $('rdSave').disabled = true;
+      const { data, error } = await supabase.from('manual_riders').insert({ name: $('rd_name').value.trim(), phone: $('rd_phone').value.trim() || null }).select().single();
+      busy = false;
+      $('rdSave').disabled = false;
+      if (error || !data) return showErr('rdErr', 'সেভ হয়নি, আবার চেষ্টা করুন।');
+      riders.push(data);
+      riders.sort((a, b) => a.name.localeCompare(b.name));
+      closeSheet('rdOverlay');
+      toast('রাইডার যোগ হয়েছে', 'success');
+      if (rdCallback) rdCallback(data);
+      else if (canAccounts()) loadAccounts();
+    }
+
+    // ---------- হিসাব ----------
+    function periodStart() {
+      const now = new Date();
+      if (period === 'today') return startOfDay(now);
+      if (period === 'week') return new Date(startOfDay(now).getTime() - 6 * 86400000);
+      if (period === 'month') { const p = bdp(now); return new Date(Date.UTC(p.y, p.m - 1, 1) - BD_OFFSET_MS); }
+      return null;
+    }
+
+    let accCal = null;
+    let accSel = { from: '', to: '' };
+
+    // ডিফল্ট = আজ (বাংলাদেশ টাইম); ক্যালেন্ডারে দিন/রেঞ্জ বাছলে সেটা
+    function periodRange() {
+      if (accSel.from) return dhakaRangeIso(accSel.from, accSel.to);
+      const s = startOfDay(new Date());
+      return { fromIso: s.toISOString(), toIso: new Date(s.getTime() + 86400000).toISOString() };
+    }
+
+    function paintAccToggle() {
+      const open = $('accCal').style.display !== 'none';
+      const lab = accSel.from
+        ? (accSel.from === accSel.to ? labelKey(accSel.from) : labelKey(accSel.from) + ' – ' + labelKey(accSel.to))
+        : 'আজ';
+      $('accCalToggle').textContent = open ? '▲ ক্যালেন্ডার ভাঁজ করুন' : '📅 ' + lab + ' · ক্যালেন্ডার থেকে বদলান';
+    }
+
+    function initAccCal() {
+      if (accCal) return;
+      accCal = createRangeCalendar($('accCal'), {
+        onRangeChange: (from, to) => {
+          accSel = { from: from || '', to: to || '' };
+          paintAccToggle();
+          loadAccounts();
+        },
+      });
+      $('accCalToggle').addEventListener('click', () => {
+        const c = $('accCal');
+        c.style.display = c.style.display === 'none' ? '' : 'none';
+        paintAccToggle();
+      });
+      paintAccToggle();
+    }
+
+    function renderPeriodChips() {
+      initAccCal();
+      return;
+      const box = $('periodChips');
+      box.replaceChildren();
+      [['today', 'আজ'], ['week', 'শেষ ৭ দিন'], ['month', 'এই মাস'], ['all', 'সব']].forEach(([k, t]) => {
+        const b = el('button', 'mo-pill' + (period === k ? ' active' : ''), t);
+        b.type = 'button';
+        b.addEventListener('click', () => { period = k; renderPeriodChips(); loadAccounts(); });
+        box.appendChild(b);
+      });
+    }
+
+    function sumM(rows, key) { return rows.reduce((s, r) => s + Number(r[key] || 0), 0); }
+
+    // হিসাব দেখার অনুমতি: সুপার অ্যাডমিন অথবা রোলওয়ালা স্টাফ যার manual_accounts.view আছে
+    function canAccounts() {
+      const a = window.__sfAdminAccess;
+      return role === 'admin' || !!(a && a.isStaff && a.can('manual_accounts.view'));
+    }
+
+    async function loadAccounts() {
+      if (!canAccounts()) return;
+      $('accSummary').replaceChildren(el('p', 'mo-muted', 'লোড হচ্ছে...'));
+      const rg = periodRange();
+      let qy = supabase.from('manual_orders').select('*').in('status', ['delivered', 'completed']).order('delivered_at', { ascending: false }).limit(2000);
+      qy = qy.gte('delivered_at', rg.fromIso).lt('delivered_at', rg.toIso);
+      const [o, b] = await Promise.all([qy, supabase.from('manual_rider_balances').select('*').eq('is_active', true).order('name')]);
+      if (o.error || b.error) {
+        $('accSummary').replaceChildren(el('p', 'mo-muted', 'হিসাব লোড করা যায়নি।'));
+        return;
+      }
+      accRows = o.data || [];
+      const rows = accRows;
+      const sales = sumM(rows, 'product_price');
+      const fee = sumM(rows, 'delivery_fee');
+      const pay = sumM(rows, 'rider_pay');
+      const adv = sumM(rows, 'advance_amount');
+      const cash = sumM(rows, 'cash_collected');
+
+      const sum = el('div', 'mo-sum');
+      [['ডেলিভারড অর্ডার', bn(rows.length) + 'টা'], ['প্রোডাক্ট বিক্রি', money(sales)], ['ডেলিভারি ফি', money(fee)], ['রাইডারকে পে', money(pay)], ['অ্যাডভান্স পেয়েছি', money(adv)], ['রাইডার ক্যাশ কালেক্ট', money(cash)]].forEach(([l, v]) => {
+        const m = el('div', 'mo-m');
+        m.appendChild(el('small', '', l));
+        m.appendChild(el('b', '', v));
+        sum.appendChild(m);
+      });
+      const net = el('div', 'mo-m wide');
+      net.appendChild(el('small', '', 'নিট ডেলিভারি লাভ (ফি − রাইডার পে)'));
+      net.appendChild(el('b', '', money(fee - pay)));
+      sum.appendChild(net);
+      $('accSummary').replaceChildren(sum);
+
+      // রাইডার ব্যালেন্স
+      const rb = $('riderBalances');
+      rb.replaceChildren();
+      const bal = b.data || [];
+      if (!bal.length) rb.appendChild(el('p', 'mo-muted', 'এখনো কোনো রাইডার যোগ করা হয়নি।'));
+      bal.forEach((r) => {
+        const c = el('div', 'mo-rcard');
+        const h = el('div', 'mo-row');
+        h.appendChild(el('b', 'mo-cname', r.name));
+        if (r.phone) h.appendChild(el('span', 'mo-ono', r.phone));
+        c.appendChild(h);
+        [['ক্যাশ কালেক্ট করেছে', r.cash_collected], ['আমাদের জমা দিয়েছে', r.deposited], ['এখন হাতে ক্যাশ আছে', r.holds_cash], ['রাইডারের পাওনা (পে + দোকানের টাকা)', r.we_owe], ['এর মধ্যে আমরা দিয়েছি', r.paid_out]].forEach(([l, v]) => {
+          const k = el('div', 'mo-kv');
+          k.appendChild(el('span', '', l));
+          k.appendChild(el('b', '', money(v)));
+          c.appendChild(k);
+        });
+        const n = Number(r.net_rider_owes_us || 0);
+        const nt = el('div', 'mo-net ' + (n > 0 ? 'pos' : n < 0 ? 'neg' : 'zero'),
+          n > 0 ? 'রাইডারের কাছে আমরা পাব ' + money(n) : n < 0 ? 'আমরা রাইডারকে দেব ' + money(-n) : 'হিসাব মিলে গেছে');
+        c.appendChild(nt);
+        const bt = el('div', 'mo-btns');
+        const b1 = el('button', 'mo-cta', 'জমা নিলাম'); b1.type = 'button';
+        b1.addEventListener('click', () => openEntry(r, 'deposit'));
+        const b2 = el('button', 'mo-ghost', 'পে দিলাম'); b2.type = 'button';
+        b2.addEventListener('click', () => openEntry(r, 'payout'));
+        const b3 = el('button', 'mo-ghost', 'ইতিহাস'); b3.type = 'button';
+        b3.addEventListener('click', () => openHistory(r));
+        bt.appendChild(b1); bt.appendChild(b2); bt.appendChild(b3);
+        c.appendChild(bt);
+        rb.appendChild(c);
+      });
+
+      // কে কয়টা অর্ডার নিয়েছে (সব অর্ডার থেকে, এই সময়ের)
+      let eq = supabase.from('manual_orders').select('entered_by').limit(5000);
+      eq = eq.gte('created_at', rg.fromIso).lt('created_at', rg.toIso);
+      const e = await eq;
+      const eb = $('enteredBy');
+      eb.replaceChildren();
+      const counts = {};
+      (e.data || []).forEach((x) => { const k = x.entered_by || '—'; counts[k] = (counts[k] || 0) + 1; });
+      const ids = Object.keys(counts).filter((k) => k !== '—' && !names[k]);
+      if (ids.length) {
+        try {
+          const p = await supabase.from('profiles').select('id, full_name').in('id', ids);
+          (p.data || []).forEach((x) => { names[x.id] = x.full_name || ''; });
+        } catch (e2) { /* নাম না পেলেও চলবে */ }
+      }
+      const entries = Object.entries(counts).sort((a, b2) => b2[1] - a[1]);
+      if (!entries.length) eb.appendChild(el('p', 'mo-muted', 'এই সময়ে কোনো অর্ডার নেই।'));
+      entries.forEach(([k, n]) => {
+        const row = el('div', 'mo-kv');
+        row.style.padding = '8px 2px';
+        row.appendChild(el('span', '', k === '—' ? 'অজানা' : (names[k] || 'অ্যাডমিন/মডারেটর')));
+        row.appendChild(el('b', '', bn(n) + 'টা'));
+        eb.appendChild(row);
+      });
+    }
+
+    function openEntry(r, kind) {
+      enRider = r;
+      enKind = kind;
+      $('enTitle').textContent = kind === 'deposit' ? 'জমা নিলাম' : 'পে দিলাম';
+      $('enInfo').textContent = kind === 'deposit'
+        ? r.name + ' আমাদের হাতে যে ক্যাশ জমা দিয়েছে তার পরিমাণ লিখুন।'
+        : r.name + '-কে আমরা যে টাকা দিয়েছি (পে বা দোকানের টাকা ফেরত) তার পরিমাণ লিখুন।';
+      $('en_amount').value = '';
+      $('en_note').value = '';
+      showErr('enErr', '');
+      openSheet('enOverlay');
+    }
+    async function saveEntry() {
+      if (busy || !enRider) return;
+      if (!window.SFValidateForm($('enSheet'))) return showErr('enErr', 'টাকার পরিমাণ লিখুন।');
+      const amt = num($('en_amount').value);
+      if (amt <= 0) return showErr('enErr', 'টাকার পরিমাণ ০-এর বেশি হতে হবে।');
+      busy = true;
+      $('enSave').disabled = true;
+      const { error } = await supabase.from('rider_cash_entries').insert({ manual_rider_id: enRider.manual_rider_id, kind: enKind, amount: amt, note: $('en_note').value.trim() || null });
+      busy = false;
+      $('enSave').disabled = false;
+      if (error) return showErr('enErr', 'সেভ হয়নি, আবার চেষ্টা করুন।');
+      closeSheet('enOverlay');
+      toast('লেনদেন সেভ হয়েছে', 'success');
+      await loadAccounts();
+    }
+
+    async function openHistory(r) {
+      $('hiTitle').textContent = r.name + ' · লেনদেন';
+      const box = $('hiList');
+      box.replaceChildren(el('p', 'mo-muted', 'লোড হচ্ছে...'));
+      openSheet('hiOverlay');
+      const { data, error } = await supabase.from('rider_cash_entries').select('*').eq('manual_rider_id', r.manual_rider_id).order('created_at', { ascending: false }).limit(30);
+      box.replaceChildren();
+      if (error) { box.appendChild(el('p', 'mo-muted', 'লোড করা যায়নি।')); return; }
+      if (!data.length) { box.appendChild(el('p', 'mo-muted', 'এখনো কোনো লেনদেন নেই।')); return; }
+      data.forEach((x) => {
+        const d = new Date(x.created_at);
+        const row = el('div', 'mo-hi');
+        const left = el('div', '');
+        left.appendChild(el('b', '', x.kind === 'deposit' ? 'জমা নিয়েছি' : 'পে দিয়েছি'));
+        left.appendChild(el('div', 'mo-line', dateBn(d) + ' ' + timeBn(d) + (x.note ? ' · ' + x.note : '')));
+        row.appendChild(left);
+        row.appendChild(el('b', '', money(x.amount)));
+        box.appendChild(row);
+      });
+    }
+
+    function downloadCsv() {
+      if (!accRows.length) return toast('এই সময়ে কোনো ডেলিভারড অর্ডার নেই', 'error');
+      const riderName = (id) => { const r = riders.find((x) => x.id === id); return r ? r.name : ''; };
+      const head = ['Order No', 'Delivered At', 'Customer', 'Phone', 'Order', 'Product', 'Delivery Fee', 'Total', 'Advance', 'Cash Collected', 'Rider', 'Rider Pay', 'Entered By'];
+      const cell = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const lines = [head.map(cell).join(',')];
+      accRows.forEach((o) => {
+        lines.push([o.order_no, o.delivered_at ? fmtEn(new Date(o.delivered_at)) : '', o.customer_name, o.customer_phone, o.details, o.product_price, o.delivery_fee, o.total_amount, o.advance_amount, o.cash_collected, riderName(o.manual_rider_id), o.rider_pay, names[o.entered_by] || ''].map(cell).join(','));
+      });
+      const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'manual-orders-' + dateInput(new Date()) + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    // ---------- ট্যাব ----------
+    function switchTab(t) {
+      document.querySelectorAll('#mainTabs .mo-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
+      $('ordersPane').style.display = t === 'orders' ? '' : 'none';
+      $('accountsPane').style.display = t === 'accounts' ? '' : 'none';
+      if (t === 'accounts') { renderPeriodChips(); loadAccounts(); }
+    }
+
+    // ---------- ইনিট ----------
+    function wire() {
+      $('newOrderBtn').addEventListener('click', () => openOrderForm(null));
+      $('orderClose').addEventListener('click', () => closeSheet('orderOverlay'));
+      $('saveOrderBtn').addEventListener('click', saveOrder);
+      $('delOrderBtn').addEventListener('click', deleteOrder);
+      $('dvClose').addEventListener('click', () => closeSheet('dvOverlay'));
+      $('dvSave').addEventListener('click', saveDeliver);
+      $('rdClose').addEventListener('click', () => closeSheet('rdOverlay'));
+      $('rdSave').addEventListener('click', saveRider);
+      $('enClose').addEventListener('click', () => closeSheet('enOverlay'));
+      $('enSave').addEventListener('click', saveEntry);
+      $('hiClose').addEventListener('click', () => closeSheet('hiOverlay'));
+      $('pbClose').addEventListener('click', () => closeSheet('pbOverlay'));
+      $('pbSave').addEventListener('click', savePublish);
+      $('asClose').addEventListener('click', () => closeSheet('asOverlay'));
+      $('asSave').addEventListener('click', saveAssign);
+      $('asSearch').addEventListener('input', renderAssignList);
+      $('addRiderBtn').addEventListener('click', () => openRiderSheet(null));
+      $('csvBtn').addEventListener('click', downloadCsv);
+      ['f_price', 'f_fee', 'f_adv', 'f_pay'].forEach((id) => $(id).addEventListener('input', updateCalc));
+      $('f_asap').addEventListener('change', syncAsap);
+      $('f_phone').addEventListener('blur', checkDup);
+      $('aiBtn').addEventListener('click', aiFill);
+      $('f_status').addEventListener('change', () => { $('cancelGroup').style.display = $('f_status').value === 'cancelled' ? '' : 'none'; });
+      $('f_rider').addEventListener('change', () => {
+        if ($('f_rider').value === '__new') {
+          $('f_rider').value = '';
+          openRiderSheet((r) => { fillRiderSelect(r.id); });
+        }
+      });
+      let t = null;
+      $('searchIn').addEventListener('input', (e) => {
+        clearTimeout(t);
+        t = setTimeout(() => { q = e.target.value.trim(); renderOrders(); }, 200);
+      });
+      document.querySelectorAll('#mainTabs .mo-tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+      document.querySelectorAll('.mo-overlay').forEach((ov) => ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('active'); }));
+      // প্রতি ৬০ সেকেন্ডে রিফ্রেশ (কোনো শিট খোলা না থাকলে)
+      setInterval(() => { if (!document.hidden && !anyOpen() && $('ordersPane').style.display !== 'none') loadOrders(); }, 15000);
+    }
+
+    let moStarted = false;
+    onConsoleReady(async (ctx) => {
+      if (moStarted) return;
+      moStarted = true;
+      if (!canOpenAdminPath('/admin/manual-orders', ctx)) { document.getElementById('cxDeny').hidden = false; return; }
+      document.getElementById('adminGuardedContent').hidden = false;
+      role = ctx.profile?.role || null;
+      userId = ctx.profile ? ctx.profile.id : null;
+      const acc = ctx.access;
+      if (role === 'admin' || (acc && acc.isStaff && acc.can('manual_accounts.view'))) $('accountsTabBtn').style.display = '';
+      wire();
+      await loadOrders();
+      // রাইডার একসেপ্ট/পিক-আপ/ডেলিভার্ড করলে ফর্ম নিজে আপডেট হয় (Realtime; না চললে ৬০ সেকেন্ডের রিফ্রেশ আছে)
+      try {
+        let rt = null;
+        supabase.channel('mo-admin-orders')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'manual_orders' }, () => {
+            clearTimeout(rt);
+            rt = setTimeout(() => { if (!anyOpen() && $('ordersPane').style.display !== 'none') loadOrders(); }, 800);
+          })
+          .subscribe();
+      } catch (err) { /* Realtime ছাড়াই চলবে */ }
+    });
+  </script>
+</ConsoleShell>
