@@ -59,9 +59,20 @@ function fillProfile(profile, designation) {
   });
 }
 
+// লগআউট: [data-cs-logout] বাটনে (মেনুর নিচে ও "অ্যাক্সেস নেই" পেজে); নিশ্চিত করে /console/login-এ
+export async function consoleLogout() {
+  if (!window.confirm('লগআউট করবেন?')) return;
+  try { await supabase.auth.signOut(); } catch (_) { /* উপেক্ষা */ }
+  window.location.replace('/console/login');
+}
+
 export async function initConsole() {
   if (window.__consoleInit) return;
   window.__consoleInit = true;
+  document.addEventListener('click', (e) => {
+    const b = e.target instanceof Element ? e.target.closest('[data-cs-logout]') : null;
+    if (b) { e.preventDefault(); consoleLogout(); }
+  });
   show('csGateLoading');
 
   const { data: { session } } = await supabase.auth.getSession();
