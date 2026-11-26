@@ -32,14 +32,19 @@
 
 import { supabase } from './supabase.js';
 import { isNativeApp } from './native-bridge.js';
-import { isProApp } from './proApp.js';
+import { isProApp, isAdminApp } from './proApp.js';
 
 const NATIVE_PUSH_GRANTED_KEY = 'smartfeni_push_granted';
 
-// কোন অ্যাপ থেকে টোকেন যাচ্ছে: 'pro' (Smart Feni Pro) বা 'main'।
-// সার্ভার (send.ts) এটা দেখে Pro নোটিফিকেশন Pro টোকেনে পাঠায়। ভুল হলেও 'main' (আগের আচরণ)।
+// কোন অ্যাপ থেকে টোকেন যাচ্ছে: 'pro' (Smart Feni Pro), 'admin' (Smart Feni Admin) বা 'main'।
+// সার্ভার (send.ts) এটা দেখে Pro নোটিফিকেশন Pro টোকেনে, অ্যাডমিন নোটিফিকেশন Admin টোকেনে পাঠায়।
+// ভুল হলেও 'main' (আগের আচরণ)।
 async function getAppId() {
-  try { return (await isProApp()) ? 'pro' : 'main'; } catch (_) { return 'main'; }
+  try {
+    if (await isProApp()) return 'pro';
+    if (await isAdminApp()) return 'admin';
+    return 'main';
+  } catch (_) { return 'main'; }
 }
 
 // VAPID public key (base64url string) কে Uint8Array এ কনভার্ট করা,

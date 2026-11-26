@@ -63,6 +63,28 @@ export function isProApp() {
   return proPromise;
 }
 
+// ---------- Smart Feni Admin (com.smartfeni.admin) ----------
+// অ্যাডমিন অ্যাপ চেনা (পুশ টোকেনের app_id = 'admin' বসাতে)। ব্রাউজার/মেইন/Pro-তে false।
+export const ADMIN_APP_ID = 'com.smartfeni.admin';
+let adminPromise = null;
+export function isAdminApp() {
+  if (adminPromise) return adminPromise;
+  adminPromise = (async () => {
+    try {
+      if (!Capacitor.isNativePlatform()) return false;
+      const { App } = await import('@capacitor/app');
+      const info = await Promise.race([
+        App.getInfo(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ]);
+      return !!info && info.id === ADMIN_APP_ID;
+    } catch (_) {
+      return false;
+    }
+  })();
+  return adminPromise;
+}
+
 export async function applyProNav() {
   try {
     if (!(await isProApp())) return false;

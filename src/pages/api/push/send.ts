@@ -60,6 +60,13 @@ const PRO_URL_RE = /^\/(pro|delivery-hero|ride-hero|offline-orders|my-shop|my-cl
 function isProNotification(actionUrl) {
   return typeof actionUrl === 'string' && PRO_URL_RE.test(actionUrl);
 }
+// ---------- Smart Feni Admin (com.smartfeni.admin) ----------
+// অ্যাডমিন নোটিফিকেশন (/admin/*, /console/*) -> শুধু Admin অ্যাপের টোকেনে (থাকলে);
+// Admin অ্যাপ না থাকলে আগের মতো মেইন/Pro নিয়মে। Admin টোকেন কখনো অন্য নোটিফিকেশন পায় না।
+const ADMIN_URL_RE = /^\/(admin|console)(?:[/?#]|$)/;
+function isAdminNotification(actionUrl) {
+  return typeof actionUrl === 'string' && ADMIN_URL_RE.test(actionUrl);
+}
 // জরুরি -> sf_pro_orders_v2 (রিংটোন order_alert.mp3); বাকি সব -> ফোনের ডিফল্ট শব্দ।
 // ⚠️ জরুরি শুধু: নতুন অর্ডার/রিকোয়েস্ট (শপ, রাইডার, অফলাইন, ক্লিনিক সিরিয়াল), কাস্টমার দাম একসেপ্ট, priority=urgent।
 // ক্যাটাগরি দিয়ে চেনা যায় না (rider_offer/delivery_hero-তে বাতিল, দাম বাড়ানো, অভিযোগ, ধাপের আপডেটও আসে),
@@ -217,11 +224,14 @@ export async function POST({ request }) {
     // Android রাউটিং: Pro নোটিফিকেশন -> Pro অ্যাপের টোকেন; বাকি -> মেইন অ্যাপের টোকেন।
     // কাঙ্ক্ষিত অ্যাপের টোকেন না থাকলে অন্যটিতে যায় (Pro ইনস্টল না থাকলে সব আগের মতো মেইনে)।
     const proAndroidSubs = subscriptions.filter((s) => s.platform === 'android' && s.app_id === 'pro');
-    const mainAndroidSubs = subscriptions.filter((s) => s.platform === 'android' && s.app_id !== 'pro');
+    const adminAndroidSubs = subscriptions.filter((s) => s.platform === 'android' && s.app_id === 'admin');
+    const mainAndroidSubs = subscriptions.filter((s) => s.platform === 'android' && s.app_id !== 'pro' && s.app_id !== 'admin');
     const proNotif = isProNotification(action_url);
     const preferredAndroid = proNotif ? proAndroidSubs : mainAndroidSubs;
     const fallbackAndroid = proNotif ? mainAndroidSubs : proAndroidSubs;
-    const androidSubs = preferredAndroid.length > 0 ? preferredAndroid : fallbackAndroid;
+    const androidSubs = (isAdminNotification(action_url) && adminAndroidSubs.length > 0)
+      ? adminAndroidSubs
+      : (preferredAndroid.length > 0 ? preferredAndroid : fallbackAndroid);
 
     let sentCount = 0;
     const staleWebIds = [];        // web: ডিলিট হবে

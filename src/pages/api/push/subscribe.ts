@@ -34,8 +34,8 @@ export async function POST({ request }) {
   try {
     const body = await request.json();
     const { accessToken, platform = 'web', device_label } = body;
-    // কোন অ্যাপের টোকেন (main | pro); না থাকলে/ভুল হলে main (পুরোনো অ্যাপ ভার্সনের জন্য)
-    const appId = body.app_id === 'pro' ? 'pro' : 'main';
+    // কোন অ্যাপের টোকেন (main | pro | admin); না থাকলে/ভুল হলে main (পুরোনো অ্যাপ ভার্সনের জন্য)
+    const appId = body.app_id === 'pro' ? 'pro' : body.app_id === 'admin' ? 'admin' : 'main';
 
     if (!accessToken) {
       return new Response(
