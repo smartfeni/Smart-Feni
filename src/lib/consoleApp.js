@@ -198,3 +198,18 @@ export function diffRows(changes) {
     return { field, value: valueText(v) };
   });
 }
+
+// site_settings-এর key → বাংলা নাম (লগে দেখানোর জন্য)
+const SETTING_BN = {
+  accept_delivery_orders: 'ডেলিভারি অর্ডার নেওয়া', accept_local_ride: 'লোকাল রাইড নেওয়া',
+  accept_ride_orders: 'রাইড অর্ডার নেওয়া', marketplace_enabled: 'কুইক ডেলিভারি মার্কেট',
+  delivery_auto_publish_minutes: 'অটো-পাবলিশ টাইমার', delivery_rider_scope: 'রাইডারের অর্ডার এলাকা',
+  shop_notify_on_rider_confirm: 'পিকআপের আগে কনফার্ম', market_commission_pct: 'সাধারণ কমিশন',
+  market_payment_bkash: 'অফিসের বিকাশ নম্বর', market_payment_nagad: 'অফিসের নগদ নম্বর',
+  market_advance_receiver: 'অগ্রিম কে নেবে', homepage_section_order: 'হোমপেজের সেকশনের ক্রম',
+};
+
+export function entityLabel(r) {
+  if (r && r.entity === 'site_settings') return SETTING_BN[r.entity_label] || r.entity_label;
+  return r ? r.entity_label : '';
+}

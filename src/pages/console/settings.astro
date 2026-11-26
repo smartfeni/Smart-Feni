@@ -1,0 +1,292 @@
+---
+// ============================================================
+// /console/settings — সব সুইচ ও নিয়ম এক জায়গায় (প্রতিটার নিচে কী করে লেখা)
+//
+// কোন সেটিং কীভাবে সেভ হয় (পুরনো পেজের হুবহু নিয়ম, নতুন DB বদল নেই):
+//   accept_delivery_orders / accept_local_ride / accept_ride_orders
+//        → RPC admin_set_service_accepting (delivery_orders.manage)
+//   market_commission_pct / market_payment_bkash / market_payment_nagad / market_advance_receiver
+//        → RPC admin_set_market_setting (delivery_orders.manage, নিজস্ব যাচাই)
+//   delivery_auto_publish_minutes / delivery_rider_scope / shop_notify_on_rider_confirm / marketplace_enabled
+//        → site_settings upsert (RLS: শুধু সুপার অ্যাডমিন/images.manage) — তাই এগুলো এখানে শুধু সুপার অ্যাডমিন বদলায়
+// প্রতিটা বদল অ্যাক্টিভিটি লগে ওঠে (site_settings-এ zz_admin_audit ট্রিগার)।
+// বন্ধ করা/ঝুঁকির বদলে আগে নিশ্চিত করতে হয়।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="সেটিং" active="menu">
+  <div class="cs-pad cm-page st-page">
+    <div>
+      <h1 class="cs-h cm-title">সেটিং</h1>
+      <p class="cs-muted" style="margin:2px 0 0">সার্ভিস চালু/বন্ধ, অর্ডারের নিয়ম ও টাকার নিয়ম — সব এক জায়গায়</p>
+    </div>
+
+    <section class="cm-sec" id="stSvcSec" hidden>
+      <h2 class="cm-group">কোন সার্ভিস চালু</h2>
+      <div class="cm-body">
+        <div class="st-row">
+          <div class="st-t"><b>ডেলিভারি অর্ডার নেওয়া</b><small>বন্ধ করলে কাস্টমার নতুন ডেলিভারি অর্ডার দিতে পারবে না, "সেবা বন্ধ" দেখবে। চলমান অর্ডারে প্রভাব নেই।</small></div>
+          <label class="st-sw"><span class="cs-sr">ডেলিভারি অর্ডার নেওয়া</span><input type="checkbox" role="switch" data-svc="delivery" disabled /><span></span></label>
+        </div>
+        <div class="st-row">
+          <div class="st-t"><b>লোকাল রাইড নেওয়া</b><small>সিএনজি/অটো রাইডের নতুন অনুরোধ নেওয়া চালু বা বন্ধ।</small></div>
+          <label class="st-sw"><span class="cs-sr">লোকাল রাইড নেওয়া</span><input type="checkbox" role="switch" data-svc="local_ride" disabled /><span></span></label>
+        </div>
+        <div class="st-row">
+          <div class="st-t"><b>রাইড অর্ডার নেওয়া</b><small>রাইড হিরোর রাইড অর্ডার। এখন ইচ্ছা করেই বন্ধ রাখা আছে।</small></div>
+          <label class="st-sw"><span class="cs-sr">রাইড অর্ডার নেওয়া</span><input type="checkbox" role="switch" data-svc="ride" disabled /><span></span></label>
+        </div>
+        <div class="st-row" data-st-super hidden>
+          <div class="st-t"><b>কুইক ডেলিভারি মার্কেট</b><small>বন্ধ করলে কাস্টমার দোকান থেকে অর্ডার দিতে পারবে না ("শীঘ্রই আসছে" দেখবে); স্টাফ টেস্টের জন্য ঢুকতে পারবে।</small></div>
+          <label class="st-sw"><span class="cs-sr">কুইক ডেলিভারি মার্কেট</span><input type="checkbox" role="switch" data-key="marketplace_enabled" data-on="true" data-off="false" disabled /><span></span></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="cm-sec" id="stRuleSec" hidden>
+      <h2 class="cm-group">অর্ডারের নিয়ম</h2>
+      <div class="cm-body">
+        <div class="st-row st-col" data-st-super hidden>
+          <div class="st-t"><b>অটো-পাবলিশ টাইমার</b><small>নতুন অর্ডার এত মিনিট অ্যাডমিনের কাছে থাকে (দেখা, ডিল বা রাইডার ঠিক করার জন্য), তারপর নিজে থেকে সব রাইডারের কাছে যায়। ০ = সাথে সাথে।</small></div>
+          <div class="st-inline">
+            <label class="st-in"><span class="cs-sr">মিনিট</span><input type="number" id="stAuto" min="0" max="240" step="1" inputmode="numeric" /><span>মিনিট</span></label>
+            <button type="button" class="st-btn" id="stAutoSave">সেভ করুন</button>
+          </div>
+        </div>
+        <div class="st-row st-col" data-st-super hidden>
+          <div class="st-t"><b>রাইডার কোন অর্ডার পাবে</b><small>"সব উপজেলা" = অনলাইন সব রাইডার নতুন অর্ডার দেখে। "নিজের উপজেলা" = শুধু অর্ডারের উপজেলার রাইডার।</small></div>
+          <div class="st-seg" role="radiogroup" aria-label="রাইডার কোন অর্ডার পাবে">
+            <button type="button" role="radio" data-scope="all" aria-checked="false">সব উপজেলা</button>
+            <button type="button" role="radio" data-scope="upazila" aria-checked="false">নিজের উপজেলা</button>
+          </div>
+        </div>
+        <div class="st-row" data-st-super hidden>
+          <div class="st-t"><b>পিকআপের আগে "অর্ডার কনফার্ম" বাধ্যতামূলক</b><small>চালু থাকলে রাইডারকে পিকআপের আগে "অর্ডার কনফার্ম করুন" চাপতে হয়, তখন দোকান নোটিফিকেশন পায়।</small></div>
+          <label class="st-sw"><span class="cs-sr">পিকআপের আগে কনফার্ম</span><input type="checkbox" role="switch" data-key="shop_notify_on_rider_confirm" data-on="on" data-off="off" disabled /><span></span></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="cm-sec" id="stMoneySec" hidden>
+      <h2 class="cm-group">টাকার নিয়ম (কুইক ডেলিভারি)</h2>
+      <div class="cm-body">
+        <div class="st-row st-col">
+          <div class="st-t"><b>সাধারণ কমিশন</b><small>দোকানের বিক্রির উপর কত % কমিশন। কোনো দোকানের আলাদা কমিশন থাকলে সেটাই চলবে।</small></div>
+          <label class="st-in"><span class="cs-sr">কমিশন শতাংশ</span><input type="text" id="stPct" inputmode="decimal" maxlength="6" /><span>%</span></label>
+        </div>
+        <div class="st-row st-col">
+          <div class="st-t"><b>অগ্রিম টাকা কে নেবে</b><small>কাস্টমারের বিকাশ/নগদ অগ্রিম সরাসরি রাইডারের নম্বরে যাবে, নাকি অফিসের নম্বরে।</small></div>
+          <div class="st-seg" role="radiogroup" aria-label="অগ্রিম কে নেবে">
+            <button type="button" role="radio" data-recv="rider" aria-checked="false">রাইডার</button>
+            <button type="button" role="radio" data-recv="admin" aria-checked="false">অফিস</button>
+          </div>
+        </div>
+        <div class="st-row st-col">
+          <div class="st-t"><b>অফিসের পেমেন্ট নম্বর</b><small>অগ্রিম অফিসে নিলে কাস্টমার এই নম্বরে পাঠাবে। খালি রাখলে সেই মাধ্যম দেখাবে না।</small></div>
+          <div class="st-two">
+            <label class="st-in st-wide"><span>বিকাশ</span><input type="tel" id="stBkash" inputmode="numeric" maxlength="14" placeholder="01XXXXXXXXX" /></label>
+            <label class="st-in st-wide"><span>নগদ</span><input type="tel" id="stNagad" inputmode="numeric" maxlength="14" placeholder="01XXXXXXXXX" /></label>
+          </div>
+        </div>
+        <div class="st-row st-end">
+          <button type="button" class="st-btn st-primary" id="stMoneySave">টাকার নিয়ম সেভ করুন</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="cm-sec" id="stLinkSec">
+      <h2 class="cm-group">অন্য জায়গায় যেসব সেটিং</h2>
+      <div class="cm-body" id="stLinks"></div>
+    </section>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .st-page { padding-bottom: 24px; }
+  .st-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; }
+  .st-row + .st-row { border-top: 1px solid #EFEBE5; }
+  .st-col { flex-direction: column; align-items: stretch; gap: 10px; }
+  .st-end { justify-content: flex-end; }
+  .st-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .st-t b { font-weight: 600; font-size: 15px; }
+  .st-t small { font-size: 12.5px; color: #5F6B7E; line-height: 1.5; }
+  .st-sw { position: relative; flex-shrink: 0; width: 52px; height: 32px; cursor: pointer; }
+  .st-sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+  .st-sw input + span { position: absolute; inset: 0; border-radius: 16px; background: #CBD3DE; transition: background .2s; }
+  .st-sw input + span::after { content: ''; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(27,42,74,.25); transition: transform .2s; }
+  .st-sw input:checked + span { background: #1F9254; }
+  .st-sw input:checked + span::after { transform: translateX(20px); }
+  .st-sw input:disabled + span { opacity: .5; }
+  .st-sw input:focus-visible + span { outline: 2px solid #1B2A4A; outline-offset: 2px; }
+  .st-inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .st-in { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; border: 1px solid #E7E2DA; border-radius: 10px; background: #fff; font-size: 14px; color: #5F6B7E; }
+  .st-in input { border: 0; outline: 0; width: 72px; font: inherit; font-size: 15px; font-weight: 600; color: #1B2A4A; background: transparent; }
+  .st-col > .st-in { align-self: flex-start; }
+  .st-wide { flex: 1; min-width: 0; }
+  .st-wide input { width: 100%; min-width: 0; }
+  .st-two { display: flex; gap: 10px; flex-wrap: wrap; }
+  .st-two .st-in { flex: 1 1 200px; }
+  .st-seg { display: inline-flex; background: #F1F3F6; border-radius: 12px; padding: 4px; gap: 4px; align-self: flex-start; }
+  .st-seg button { min-height: 38px; padding: 0 16px; border: 0; border-radius: 9px; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: #3D4A60; cursor: pointer; }
+  .st-seg button[aria-checked="true"] { background: #fff; color: #1B2A4A; box-shadow: 0 1px 3px rgba(27,42,74,.15); }
+  .st-btn { min-height: 44px; padding: 0 18px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; font: inherit; font-weight: 600; color: #1B2A4A; cursor: pointer; }
+  .st-primary { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { MENU, visibleItem, itemEl } from '../../lib/consoleMenu.js';
+  import { onConsoleReady, canOpenAdminPath, bn } from '../../lib/consoleApp.js';
+
+  const $ = (id) => document.getElementById(id);
+  const toast = (m, t = 'success') => window.showToast?.(m, t);
+  const S = {};
+
+  async function loadSettings() {
+    const { data } = await supabase.from('site_settings').select('key, value');
+    (data || []).forEach((r) => { S[r.key] = r.value; });
+  }
+
+  async function upsertSetting(key, value) {
+    const { error } = await supabase
+      .from('site_settings')
+      .upsert({ key, value: String(value), updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    return error;
+  }
+
+  // ---------- সার্ভিস সুইচ ----------
+  const SVC_KEY = { delivery: 'accept_delivery_orders', local_ride: 'accept_local_ride', ride: 'accept_ride_orders' };
+  const SVC_NAME = { delivery: 'ডেলিভারি অর্ডার নেওয়া', local_ride: 'লোকাল রাইড নেওয়া', ride: 'রাইড অর্ডার নেওয়া' };
+
+  function wireServiceSwitches() {
+    document.querySelectorAll('input[data-svc]').forEach((inp) => {
+      const svc = inp.dataset.svc;
+      inp.checked = (S[SVC_KEY[svc]] ?? 'true') !== 'false';
+      inp.disabled = false;
+      inp.addEventListener('change', async () => {
+        const on = inp.checked;
+        if (!on && !confirm(SVC_NAME[svc] + ' বন্ধ করবেন? কাস্টমার নতুন অনুরোধ দিতে পারবে না।')) { inp.checked = true; return; }
+        inp.disabled = true;
+        const { error } = await supabase.rpc('admin_set_service_accepting', { p_service: svc, p_on: on });
+        inp.disabled = false;
+        if (error) {
+          inp.checked = !on;
+          toast(error.code === '42501' ? 'এই সুইচ বদলানোর অনুমতি নেই' : 'বদলানো যায়নি, আবার চেষ্টা করুন', 'error');
+          return;
+        }
+        toast(SVC_NAME[svc] + (on ? ' চালু হয়েছে' : ' বন্ধ হয়েছে'));
+      });
+    });
+  }
+
+  // ---------- সাধারণ সুইচ (site_settings, সুপার অ্যাডমিন) ----------
+  function wireKeySwitches() {
+    document.querySelectorAll('input[data-key]').forEach((inp) => {
+      const { key, on: onVal, off: offVal } = inp.dataset;
+      const label = inp.closest('.st-row').querySelector('b').textContent;
+      inp.checked = String(S[key]).toLowerCase() === onVal;
+      inp.disabled = false;
+      inp.addEventListener('change', async () => {
+        const on = inp.checked;
+        if (!confirm(label + (on ? ' চালু' : ' বন্ধ') + ' করবেন?')) { inp.checked = !on; return; }
+        inp.disabled = true;
+        const err = await upsertSetting(key, on ? onVal : offVal);
+        inp.disabled = false;
+        if (err) { inp.checked = !on; toast('সেভ হয়নি: ' + err.message, 'error'); return; }
+        S[key] = on ? onVal : offVal;
+        toast(label + (on ? ' চালু হয়েছে' : ' বন্ধ হয়েছে'));
+      });
+    });
+  }
+
+  // ---------- অটো-পাবলিশ ও রাইডার এলাকা ----------
+  function wireRules() {
+    $('stAuto').value = parseInt(S.delivery_auto_publish_minutes || '0', 10) || 0;
+    $('stAutoSave').addEventListener('click', async () => {
+      const v = parseInt($('stAuto').value, 10);
+      if (!(v >= 0 && v <= 240)) { toast('০ থেকে ২৪০ মিনিটের মধ্যে দিন', 'error'); return; }
+      const run = async () => {
+        const err = await upsertSetting('delivery_auto_publish_minutes', v);
+        if (err) { toast('সেভ হয়নি: ' + err.message, 'error'); return; }
+        toast(v === 0 ? 'নতুন অর্ডার সাথে সাথে রাইডারদের কাছে যাবে' : 'অটো-পাবলিশ ' + bn(v) + ' মিনিট সেট হয়েছে');
+      };
+      window.SFLoading ? await window.SFLoading.wrap($('stAutoSave'), run) : await run();
+    });
+
+    const scope = S.delivery_rider_scope === 'upazila' ? 'upazila' : 'all';
+    document.querySelectorAll('[data-scope]').forEach((b) => {
+      b.setAttribute('aria-checked', String(b.dataset.scope === scope));
+      b.addEventListener('click', async () => {
+        const want = b.dataset.scope;
+        if (b.getAttribute('aria-checked') === 'true') return;
+        if (!confirm('রাইডাররা এখন থেকে ' + (want === 'all' ? 'সব উপজেলার' : 'শুধু নিজের উপজেলার') + ' অর্ডার পাবে। নিশ্চিত?')) return;
+        const err = await upsertSetting('delivery_rider_scope', want);
+        if (err) { toast('সেভ হয়নি: ' + err.message, 'error'); return; }
+        document.querySelectorAll('[data-scope]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+        toast('রাইডারের অর্ডার এলাকা বদলানো হয়েছে');
+      });
+    });
+  }
+
+  // ---------- টাকার নিয়ম (admin_set_market_setting) ----------
+  function wireMoney() {
+    $('stPct').value = S.market_commission_pct || '0';
+    $('stBkash').value = S.market_payment_bkash || '';
+    $('stNagad').value = S.market_payment_nagad || '';
+    let recv = S.market_advance_receiver === 'rider' ? 'rider' : 'admin';
+    const paint = () => document.querySelectorAll('[data-recv]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.recv === recv)));
+    paint();
+    document.querySelectorAll('[data-recv]').forEach((b) => b.addEventListener('click', () => { recv = b.dataset.recv; paint(); }));
+
+    $('stMoneySave').addEventListener('click', async () => {
+      if (recv !== (S.market_advance_receiver === 'rider' ? 'rider' : 'admin')
+        && !confirm('অগ্রিম টাকা এখন থেকে ' + (recv === 'rider' ? 'রাইডারের' : 'অফিসের') + ' নম্বরে যাবে। নিশ্চিত?')) return;
+      const run = async () => {
+        const pairs = [['market_commission_pct', $('stPct').value.trim() || '0'], ['market_advance_receiver', recv],
+          ['market_payment_bkash', $('stBkash').value.trim()], ['market_payment_nagad', $('stNagad').value.trim()]];
+        for (const [k, v] of pairs) {
+          if (String(S[k] ?? '') === String(v)) continue;
+          const { data, error } = await supabase.rpc('admin_set_market_setting', { p_key: k, p_value: v });
+          if (error) { toast(error.message, 'error'); return; }
+          S[k] = (data && data.value) ?? v;
+        }
+        toast('টাকার নিয়ম সেভ হয়েছে');
+      };
+      window.SFLoading ? await window.SFLoading.wrap($('stMoneySave'), run) : await run();
+    });
+  }
+
+  function renderLinks(data) {
+    const sec = MENU.find((m) => m.id === 'settings');
+    const box = $('stLinks');
+    const extra = [
+      { name: 'দোকানপ্রতি কমিশন', desc: 'কোন দোকান থেকে আলাদা কত % কমিশন', href: '/admin/delivery-shop-settings' },
+    ];
+    sec.items.filter((it) => it.href !== '/console/settings')
+      .concat(extra)
+      .filter((it) => visibleItem(it, data, canOpenAdminPath))
+      .forEach((it) => box.appendChild(itemEl(it)));
+    if (!box.children.length) $('stLinkSec').hidden = true;
+  }
+
+  onConsoleReady(async (data) => {
+    const canOrders = canOpenAdminPath('/admin/delivery-orders', data);
+    document.querySelectorAll('[data-st-super]').forEach((el) => { el.hidden = !data.isSuper; });
+    await loadSettings();
+    if (canOrders) {
+      $('stSvcSec').hidden = false;
+      $('stMoneySec').hidden = false;
+      wireServiceSwitches();
+      wireMoney();
+    }
+    if (data.isSuper) {
+      $('stRuleSec').hidden = false;
+      $('stSvcSec').hidden = false;
+      wireKeySwitches();
+      wireRules();
+    }
+    renderLinks(data);
+  });
+</script>
