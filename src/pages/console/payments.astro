@@ -1,0 +1,255 @@
+---
+// ============================================================
+// /console/payments — কাস্টমারের অগ্রিম পেমেন্ট যাচাই (নতুন অ্যাপ, ধাপ ৭.২)
+// পুরনো /admin/delivery-market-payments-এর একই ডাটা ও RPC (নতুন DB বদল নেই):
+//   delivery_payments (পড়া: delivery_orders.view) · যাচাই RPC admin_verify_advance(p_payment_id, p_ok, p_amount, p_note)
+//   স্ক্রিনশট: প্রাইভেট payment-docs → signed URL
+// বাড়তি: টাকা কোন নম্বরে গেছে (receiver rider/admin + receiver_number), কে যাচাই করেছে (রাইডার/অফিস),
+//   দাবি আর হওয়ার কথার অমিল লাল, কাস্টমারের ৩০ দিনে নিজে বাতিল করা অর্ডার।
+// রাইডারের নম্বরে আসা পেমেন্ট সাধারণত রাইডার নিজে যাচাই করেন; দরকারে অফিসও করতে পারে।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="অগ্রিম পেমেন্ট" active="todo">
+  <div class="cs-pad cm-page py-page">
+    <div>
+      <h1 class="cs-h cm-title">অগ্রিম পেমেন্ট</h1>
+      <p class="cs-muted py-sub">কুইক ডেলিভারিতে কাস্টমারের পাঠানো বিকাশ/নগদ অগ্রিম মিলিয়ে দেখা</p>
+    </div>
+    <div class="py-deny" id="pyDeny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+    <div class="py-main" id="pyMain" hidden>
+      <div class="py-tabs" id="pyTabs" role="tablist" aria-label="অবস্থা"></div>
+      <div class="py-list" id="pyList"></div>
+    </div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .py-sub { margin: 2px 0 0; }
+  .py-main { display: flex; flex-direction: column; gap: 10px; }
+  .py-tabs { display: grid; grid-template-columns: repeat(3, 1fr); background: #EFEBE5; border-radius: 14px; padding: 4px; gap: 4px; }
+  .py-tabs button { height: 42px; border: 0; border-radius: 11px; background: transparent; font: inherit; font-size: 13.5px; font-weight: 600; color: #3D4A60; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .py-tabs button[aria-selected="true"] { background: #fff; color: #1B2A4A; box-shadow: 0 1px 2px rgba(27,42,74,.12); }
+  .py-tabs i { font-style: normal; font-size: 12px; min-width: 20px; height: 20px; line-height: 20px; border-radius: 999px; background: #C2410C; color: #fff; padding: 0 6px; box-sizing: border-box; }
+  .py-list { display: flex; flex-direction: column; gap: 10px; }
+  .py-card { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 13px 15px; display: flex; flex-direction: column; gap: 10px; }
+  .py-card.pending { border-color: #F2B8A0; box-shadow: inset 3px 0 0 #C2410C; }
+  .py-top { display: flex; align-items: center; gap: 10px; }
+  .py-top img { width: 36px; height: 36px; object-fit: contain; flex: none; }
+  .py-top-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .py-top-t b { font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-size: 20px; }
+  .py-top-t span { font-size: 12.5px; color: #5F6B7E; }
+  .py-st { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 6px; white-space: nowrap; }
+  .py-st.pending { background: #FFF4E0; color: #8A4B00; }
+  .py-st.verified { background: #E6F6EE; color: #17663F; }
+  .py-st.mismatch { background: #FDECEA; color: #B3261E; }
+  .py-to { background: #F7F5F2; border-radius: 12px; padding: 9px 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 2px; }
+  .py-to b { font-size: 15px; letter-spacing: .3px; }
+  .py-to.rider { background: #FFF1F7; }
+  .py-kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; font-size: 13.5px; margin: 0; }
+  .py-kv dt { color: #5F6B7E; }
+  .py-kv dd { margin: 0; overflow-wrap: anywhere; }
+  .py-kv dd.hl { font-weight: 700; font-size: 15px; letter-spacing: .3px; }
+  .py-kv dd.warn { color: #B3261E; font-weight: 600; }
+  .py-kv a { color: #1B2A4A; font-weight: 600; }
+  .py-shot { align-self: flex-start; height: 38px; padding: 0 14px; border-radius: 10px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+  .py-act { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #EFEBE5; padding-top: 10px; }
+  .py-act label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
+  .py-in { height: 44px; box-sizing: border-box; border: 1px solid #E7E2DA; border-radius: 12px; padding: 0 12px; font: inherit; font-size: 15px; color: #1B2A4A; }
+  .py-row { display: flex; gap: 8px; }
+  .py-btn { flex: 1; height: 46px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer; }
+  .py-btn.ok { background: #17663F; border-color: #17663F; color: #fff; }
+  .py-btn.no { color: #B3261E; border-color: #F2B8A0; }
+  .py-btn:disabled { opacity: .55; }
+  .py-hint { margin: 0; font-size: 12.5px; color: #5F6B7E; }
+  .py-done { margin: 0; font-size: 13.5px; font-weight: 600; }
+  .py-empty, .py-deny { padding: 30px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; color: #5F6B7E; }
+  .py-deny { font-weight: 600; color: #1B2A4A; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { getSignedUrl } from '../../lib/storageSigned.js';
+  import { onConsoleReady, canOpenAdminPath, bn, dayLabel, timeLabel } from '../../lib/consoleApp.js';
+  import { openPhoto } from '../../lib/consoleRiders.js';
+
+  const $ = (id) => document.getElementById(id);
+  const toast = (t, type = 'success') => window.showToast?.(t, type);
+  const tk = (n) => '৳' + bn(Math.round(Number(n) || 0));
+  const TABS = [['pending', 'যাচাই বাকি'], ['verified', 'মিলেছে'], ['mismatch', 'মেলেনি']];
+  const ST = { pending: 'যাচাই বাকি', verified: 'মিলেছে', mismatch: 'মেলেনি' };
+  let tab = 'pending';
+  let rows = [];
+  let cancels = {};
+  let verifiers = {};
+  let canManage = false;
+  let busy = false;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  const when = (d) => dayLabel(d) + ', ' + timeLabel(d);
+
+  function renderTabs() {
+    const box = $('pyTabs');
+    box.textContent = '';
+    TABS.forEach(([k, name]) => {
+      const b = el('button');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(tab === k));
+      b.appendChild(document.createTextNode(name));
+      const n = k === 'pending' ? rows.filter((r) => r.status === 'pending').length : 0;
+      if (n) b.appendChild(el('i', null, bn(n)));
+      b.addEventListener('click', () => { tab = k; render(); });
+      box.appendChild(b);
+    });
+  }
+
+  function card(p) {
+    const r = p.delivery_requests || {};
+    const fare = Number(r.final_price || r.current_price || r.initial_price || 0);
+    const expected = p.mode === 'full' ? Number(r.items_total || 0) + fare : fare;
+    const mism = Math.round(expected) !== Math.round(Number(p.amount_claimed));
+    const method = p.method === 'nagad' ? 'নগদ' : 'বিকাশ';
+    const c = el('article', 'py-card' + (p.status === 'pending' ? ' pending' : ''));
+
+    const top = el('div', 'py-top');
+    const logo = el('img');
+    logo.src = '/market/pay/' + (p.method === 'nagad' ? 'nagad' : 'bkash') + '.webp';
+    logo.alt = method;
+    const tt = el('div', 'py-top-t');
+    tt.append(el('b', null, tk(p.amount_claimed)), el('span', null, method + ' · ' + (p.mode === 'full' ? 'পুরো টাকা' : 'শুধু ডেলিভারি চার্জ') + ' · ' + when(p.created_at)));
+    top.append(logo, tt, el('span', 'py-st ' + p.status, ST[p.status] || p.status));
+    c.appendChild(top);
+
+    // কোন নম্বরে গেছে
+    const to = el('div', 'py-to' + (p.receiver === 'rider' ? ' rider' : ''));
+    to.appendChild(el('span', null, p.receiver === 'rider' ? 'টাকা গেছে রাইডারের ' + method + 'ে' + (p.rider_name ? ' (' + p.rider_name + ')' : '') : 'টাকা গেছে অফিসের ' + method + 'ে'));
+    to.appendChild(el('b', null, p.receiver_number ? bn(p.receiver_number) : 'নম্বর সেভ নেই (পুরনো পেমেন্ট)'));
+    c.appendChild(to);
+
+    const dl = el('dl', 'py-kv');
+    const kv = (k, v, cls) => { if (v == null || v === '') return; dl.appendChild(el('dt', null, k)); const dd = el('dd', cls || null); if (v instanceof Node) dd.appendChild(v); else dd.textContent = v; dl.appendChild(dd); };
+    if (p.trx_id) kv('TrxID', p.trx_id, 'hl');
+    if (p.sender_last4) kv('পাঠানো নম্বরের শেষ ৪', bn(p.sender_last4), 'hl');
+    if (r.order_no) { const a = el('a', null, r.order_no); a.href = '/console/order?no=' + encodeURIComponent(r.order_no); kv('অর্ডার', a); }
+    kv('যত হওয়ার কথা', tk(expected) + (mism ? ' · দাবির সাথে মেলে না' : ''), mism ? 'warn' : null);
+    const cu = p.customer || {};
+    kv('কাস্টমার', cu.full_name || '');
+    if (cu.phone) { const t = el('a', null, cu.phone); t.href = 'tel:' + String(cu.phone).replace(/[^\d+]/g, ''); kv('ফোন', t); }
+    const cc = cancels[p.customer_id] || 0;
+    if (cc) kv('৩০ দিনে নিজে বাতিল', bn(cc) + 'টা অর্ডার', cc >= 2 ? 'warn' : null);
+    c.appendChild(dl);
+
+    if (p.screenshot_path) {
+      const b = el('button', 'py-shot', 'স্ক্রিনশট দেখুন');
+      b.type = 'button';
+      b.addEventListener('click', async () => {
+        const url = await getSignedUrl(supabase, 'payment-docs', p.screenshot_path);
+        if (!url || url.indexOf('http') !== 0) { toast('স্ক্রিনশট খোলা যায়নি', 'error'); return; }
+        openPhoto(url, 'পেমেন্টের স্ক্রিনশট');
+      });
+      c.appendChild(b);
+    }
+
+    if (p.status !== 'pending') {
+      const who = p.verified_by_role === 'rider' ? 'রাইডার' : (verifiers[p.verified_by] || 'অফিস');
+      c.appendChild(el('p', 'py-done', (p.status === 'verified' ? 'মিলেছে ' + tk(p.verified_amount) : 'মেলেনি') + ' · যাচাই করেছেন ' + who + (p.verified_at ? ' · ' + when(p.verified_at) : '') + (p.admin_note ? ' · ' + p.admin_note : '')));
+      return c;
+    }
+    if (!canManage) return c;
+
+    const act = el('div', 'py-act');
+    if (p.receiver === 'rider') act.appendChild(el('p', 'py-hint', 'টাকা রাইডারের নম্বরে গেছে, সাধারণত রাইডার নিজে মিলিয়ে নেন। দরকার হলে আপনিও করতে পারেন।'));
+    const l1 = el('label', null, 'যত টাকা পাওয়া গেছে (বিকাশ/নগদ অ্যাপে দেখে)');
+    const amt = el('input', 'py-in');
+    amt.type = 'number'; amt.inputMode = 'numeric'; amt.min = '1';
+    amt.value = String(Math.round(Number(p.amount_claimed)));
+    l1.appendChild(amt);
+    const l2 = el('label', null, 'নোট (মেলেনি হলে কারণ)');
+    const note = el('input', 'py-in');
+    note.maxLength = 200;
+    l2.appendChild(note);
+    const row = el('div', 'py-row');
+    const ok = el('button', 'py-btn ok', 'মিলেছে');
+    ok.type = 'button';
+    const no = el('button', 'py-btn no', 'মেলেনি');
+    no.type = 'button';
+    row.append(ok, no);
+    act.append(l1, l2, row);
+    c.appendChild(act);
+
+    const run = async (isOk) => {
+      if (busy) return;
+      const v = Number(amt.value);
+      if (isOk && (!v || v <= 0)) { toast('যত টাকা পাওয়া গেছে লিখুন', 'warning'); amt.focus(); return; }
+      const msg = isOk
+        ? tk(v) + ' ' + (p.receiver === 'rider' ? 'রাইডারের' : 'অফিসের') + ' নম্বরে পাওয়া গেছে? কনফার্ম করলে অর্ডার দোকানে যাবে আর কাস্টমার ও রাইডার জানবেন।'
+        : 'পেমেন্ট মেলেনি জানাবেন? কাস্টমার আবার জমা দিতে বলা হবে।';
+      if (!window.confirm(msg)) return;
+      busy = true; ok.disabled = true; no.disabled = true;
+      const { error } = await supabase.rpc('admin_verify_advance', { p_payment_id: p.id, p_ok: isOk, p_amount: isOk ? v : null, p_note: note.value.trim() || null });
+      busy = false; ok.disabled = false; no.disabled = false;
+      if (error) { toast(/[ঀ-৿]/.test(error.message || '') ? error.message : 'হয়নি, আবার চেষ্টা করুন', 'error'); return; }
+      toast(isOk ? 'অগ্রিম কনফার্ম হয়েছে, কাস্টমার ও রাইডারকে জানানো হয়েছে' : 'মেলেনি জানানো হয়েছে');
+      load();
+    };
+    ok.addEventListener('click', () => run(true));
+    no.addEventListener('click', () => run(false));
+    return c;
+  }
+
+  function render() {
+    renderTabs();
+    const box = $('pyList');
+    box.textContent = '';
+    const list = rows.filter((r) => r.status === tab);
+    if (tab === 'pending') list.reverse();
+    if (!list.length) { box.appendChild(el('div', 'py-empty', tab === 'pending' ? 'যাচাই বাকি কোনো পেমেন্ট নেই।' : 'এখানে কিছু নেই।')); return; }
+    list.forEach((p) => box.appendChild(card(p)));
+  }
+
+  async function load() {
+    if (!rows.length) $('pyList').innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 4) : '';
+    const cols = 'id, request_id, customer_id, mode, method, amount_claimed, trx_id, sender_last4, screenshot_path, status, verified_amount, verified_by, verified_at, verified_by_role, admin_note, receiver, receiver_number, created_at, delivery_requests(order_no, items_total, final_price, current_price, initial_price, status, accepted_rider_id)';
+    let res = await supabase.from('delivery_payments').select(cols + ', customer:profiles!delivery_payments_customer_id_fkey(full_name, phone)').order('created_at', { ascending: false }).limit(200);
+    if (res.error) res = await supabase.from('delivery_payments').select(cols).order('created_at', { ascending: false }).limit(200);
+    if (res.error) { $('pyList').textContent = ''; $('pyList').appendChild(el('div', 'py-empty', 'লোড করা যায়নি। একটু পরে আবার চেষ্টা করুন।')); return; }
+    rows = res.data || [];
+
+    const custIds = [...new Set(rows.map((r) => r.customer_id).filter(Boolean))].slice(0, 150);
+    const riderIds = [...new Set(rows.filter((r) => r.receiver === 'rider').map((r) => r.delivery_requests && r.delivery_requests.accepted_rider_id).filter(Boolean))];
+    const vIds = [...new Set(rows.map((r) => r.verified_by_role !== 'rider' && r.verified_by).filter(Boolean))];
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const [cr, rr, vr] = await Promise.all([
+      custIds.length ? supabase.from('delivery_requests').select('customer_profile_id, cancelled_by').eq('is_market', true).eq('status', 'cancelled').gte('cancelled_at', since).in('customer_profile_id', custIds) : Promise.resolve({ data: [] }),
+      riderIds.length ? supabase.from('delivery_riders').select('id, profiles!delivery_riders_profile_id_fkey(full_name)').in('id', riderIds) : Promise.resolve({ data: [] }),
+      vIds.length ? supabase.from('profiles').select('id, full_name').in('id', vIds) : Promise.resolve({ data: [] }),
+    ]);
+    cancels = {};
+    (cr.data || []).forEach((x) => { if (x.cancelled_by && x.cancelled_by === x.customer_profile_id) cancels[x.customer_profile_id] = (cancels[x.customer_profile_id] || 0) + 1; });
+    const rn = {};
+    (rr.data || []).forEach((x) => { rn[x.id] = x.profiles && x.profiles.full_name; });
+    verifiers = {};
+    (vr.data || []).forEach((x) => { verifiers[x.id] = x.full_name; });
+    rows.forEach((r) => { r.rider_name = r.delivery_requests && rn[r.delivery_requests.accepted_rider_id]; });
+    render();
+  }
+
+  onConsoleReady((ctx) => {
+    if (!canOpenAdminPath('/admin/delivery-orders', ctx)) { $('pyDeny').hidden = false; return; }
+    canManage = !!(ctx.isSuper || !ctx.access.isStaff || ctx.access.can('delivery_orders.manage'));
+    $('pyMain').hidden = false;
+    load();
+    setInterval(() => {
+      const a = document.activeElement;
+      if (document.visibilityState === 'visible' && !busy && !(a && a.tagName === 'INPUT')) load();
+    }, 30000);
+  });
+</script>
