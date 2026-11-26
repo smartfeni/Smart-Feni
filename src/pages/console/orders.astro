@@ -1,0 +1,319 @@
+---
+// ============================================================
+// /console/orders — ডেলিভারি ও রাইড অর্ডারের তালিকা (নতুন অ্যাপ, ধাপ ৪ ভাগ ১)
+// ডাটা (পুরনো পেজের একই RPC, নতুন DB বদল নেই):
+//   admin_delivery_inbox_counts  → ট্যাবের সংখ্যা
+//   admin_search_orders          → তালিকা ও খোঁজা (নম্বর / ফোন / নাম)
+// ট্যাব: নতুন (পাবলিশের অপেক্ষা/হোল্ড) · চলমান · শেষ (সম্পন্ন/বাতিল/মেয়াদ শেষ)
+// কার্ডে চাপলে /console/order?no=... (বিস্তারিত)।
+// পাবলিশ/অ্যাসাইন/বাতিলের মতো কাজ এখনো পুরনো প্যানেলে (ভাগ ২-এ এখানে আসবে)।
+// URL: ?tab=new|live|history&q=...
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="অর্ডার" active="orders">
+  <div class="cs-pad cm-page or-page">
+    <div class="or-head">
+      <div>
+        <h1 class="cs-h cm-title">অর্ডার</h1>
+        <p class="cs-muted or-sub" id="orSub">ডেলিভারি ও রাইড</p>
+      </div>
+      <a class="or-old" href="/admin/delivery-orders" title="পুরনো প্যানেলে খুলবে">পুরনো পেজ ↗</a>
+    </div>
+
+    <div class="cm-body" id="orDeny" hidden>
+      <div class="or-empty"><b>এই পেজ দেখার অনুমতি নেই</b><span class="cs-muted">ডেলিভারি অর্ডার দেখার অনুমতি লাগবে।</span></div>
+    </div>
+
+    <div class="or-main" id="orMain" hidden>
+      <div class="or-tabs" id="orTabs" role="tablist" aria-label="অর্ডারের অবস্থা"></div>
+      <div class="or-bar">
+        <input type="search" id="orQ" placeholder="অর্ডার নম্বর, ফোন বা নাম" aria-label="অর্ডার খুঁজুন" />
+        <div class="or-cats" id="orCats" role="group" aria-label="ধরন"></div>
+      </div>
+      <p class="or-hint" id="orHint" hidden></p>
+      <div class="or-list" id="orList"></div>
+      <button type="button" class="or-more" id="orMore" hidden>আরও দেখুন</button>
+    </div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .or-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .or-sub { margin: 2px 0 0; }
+  .or-old { margin-top: 12px; font-size: 13px; font-weight: 600; color: #5F6B7E; text-decoration: none; white-space: nowrap; }
+  .or-main { display: flex; flex-direction: column; gap: 12px; }
+  .or-tabs { display: grid; grid-template-columns: repeat(3, 1fr); background: #EFEBE5; border-radius: 14px; padding: 4px; gap: 4px; }
+  .or-tabs button { height: 44px; border: 0; border-radius: 11px; background: transparent; font: inherit; font-size: 14.5px; font-weight: 600; color: #3D4A60; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .or-tabs button[aria-selected="true"] { background: #fff; color: #1B2A4A; box-shadow: 0 1px 2px rgba(27,42,74,.12); }
+  .or-tabs i { font-style: normal; font-size: 12px; min-width: 20px; height: 20px; line-height: 20px; border-radius: 999px; background: #DCD6CD; color: #1B2A4A; padding: 0 6px; box-sizing: border-box; }
+  .or-tabs i.hot { background: #C2410C; color: #fff; }
+  .or-bar { display: flex; flex-direction: column; gap: 8px; }
+  .or-bar input { width: 100%; box-sizing: border-box; height: 44px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; padding: 0 14px; font: inherit; font-size: 15px; color: #1B2A4A; }
+  .or-bar input:focus { outline: 2px solid #1B2A4A; outline-offset: -1px; }
+  .or-cats { display: flex; gap: 8px; }
+  .or-cats button { height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .or-cats button[aria-pressed="true"] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .or-hint { margin: 0; font-size: 13px; color: #5F6B7E; }
+  .or-list { display: flex; flex-direction: column; gap: 10px; }
+  .or-card { display: flex; flex-direction: column; gap: 6px; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 13px 15px; color: #1B2A4A; text-decoration: none; }
+  .or-card:active { background: #FBFAF8; }
+  .or-card.warn { box-shadow: inset 3px 0 0 #C2410C; border-color: #F2B8A0; }
+  .or-card.fresh { animation: orFresh 2.4s ease-out; }
+  @keyframes orFresh { from { background: #FFF4EC; } to { background: #fff; } }
+  .or-top { display: flex; align-items: center; gap: 8px; }
+  .or-no { font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-weight: 700; font-size: 16px; }
+  .or-cat { font-size: 11.5px; font-weight: 600; color: #5F6B7E; }
+  .or-st { margin-left: auto; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px; white-space: nowrap; }
+  .or-route { font-size: 14.5px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.45; }
+  .or-items { font-size: 13px; color: #3D4A60; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .or-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: #5F6B7E; }
+  .or-meta b { color: #1B2A4A; font-weight: 700; }
+  .or-flag { font-size: 12.5px; font-weight: 600; color: #B23A0B; }
+  .or-empty { padding: 26px 16px; text-align: center; display: flex; flex-direction: column; gap: 4px; }
+  .or-empty b { font-size: 15px; }
+  .or-more { align-self: center; height: 42px; padding: 0 22px; border-radius: 999px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-weight: 600; cursor: pointer; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, canOpenAdminPath, bn, agoLabel } from '../../lib/consoleApp.js';
+  import { splitMapLink } from '../../lib/mapLinks.js';
+  import { ORDER_STATUS, orderStatusOf, money } from '../../lib/consoleOrders.js';
+
+  const $ = (id) => document.getElementById(id);
+  const PAGE = 20;
+  const TABS = [
+    { k: 'new', name: 'নতুন' },
+    { k: 'live', name: 'চলমান' },
+    { k: 'history', name: 'শেষ' },
+  ];
+  const CATS = [['', 'সব'], ['delivery', 'ডেলিভারি'], ['ride', 'রাইড']];
+
+  const params = new URLSearchParams(location.search);
+  const state = {
+    tab: TABS.some((t) => t.k === params.get('tab')) ? params.get('tab') : 'new',
+    cat: '',
+    q: (params.get('q') || '').slice(0, 60),
+    offset: 0,
+    total: 0,
+  };
+  let seq = 0;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function syncUrl() {
+    const u = new URL(location.href);
+    u.searchParams.set('tab', state.tab);
+    if (state.q) u.searchParams.set('q', state.q); else u.searchParams.delete('q');
+    history.replaceState(null, '', u.pathname + u.search);
+  }
+
+  function renderTabs(counts) {
+    const box = $('orTabs');
+    box.textContent = '';
+    TABS.forEach((t) => {
+      const b = el('button');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(t.k === state.tab && !state.q));
+      b.appendChild(document.createTextNode(t.name));
+      const n = counts ? counts[t.k] : null;
+      if (n) b.appendChild(el('i', t.k === 'new' ? 'hot' : null, bn(n)));
+      b.addEventListener('click', () => {
+        state.tab = t.k;
+        if (state.q) { state.q = ''; $('orQ').value = ''; }
+        renderTabs(lastCounts);
+        loadList(true);
+      });
+      box.appendChild(b);
+    });
+  }
+
+  function renderCats() {
+    const box = $('orCats');
+    box.textContent = '';
+    CATS.forEach(([k, name]) => {
+      const b = el('button', null, name);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(k === state.cat));
+      b.addEventListener('click', () => {
+        if (state.cat === k) return;
+        state.cat = k;
+        renderCats();
+        loadList(true);
+      });
+      box.appendChild(b);
+    });
+  }
+
+  let lastCounts = null;
+  async function loadCounts() {
+    const { data, error } = await supabase.rpc('admin_delivery_inbox_counts');
+    if (error || !data) return;
+    lastCounts = {
+      new: (data.pending || 0) + (data.hold || 0),
+      live: (data.published_open || 0) + (data.in_progress || 0) + (data.disputed || 0),
+      history: 0,
+    };
+    renderTabs(lastCounts);
+    $('orSub').textContent = lastCounts.new
+      ? bn(lastCounts.new) + 'টা নতুন অর্ডার পাবলিশের অপেক্ষায়'
+      : 'ডেলিভারি ও রাইড';
+  }
+
+  function shopNames(o) {
+    const out = [];
+    (Array.isArray(o.order_items) ? o.order_items : []).forEach((i) => {
+      if (i.shop_name && !out.includes(i.shop_name)) out.push(i.shop_name);
+    });
+    return out;
+  }
+
+  function card(o, fresh) {
+    const st = orderStatusOf(o);
+    const meta = ORDER_STATUS[st] || { name: st, fg: '#3D4A60', bg: '#EEF1F5' };
+    const a = el('a', 'or-card' + (st === 'disputed' || o.release_requested_at ? ' warn' : '') + (fresh ? ' fresh' : ''));
+    a.href = '/console/order?no=' + encodeURIComponent(o.order_no);
+    a.dataset.no = o.order_no;
+
+    const top = el('div', 'or-top');
+    top.appendChild(el('span', 'or-no', o.order_no));
+    top.appendChild(el('span', 'or-cat', o.category === 'ride' ? 'রাইড' : 'ডেলিভারি'));
+    const s = el('span', 'or-st', meta.name);
+    s.style.color = meta.fg; s.style.background = meta.bg;
+    top.appendChild(s);
+    a.appendChild(top);
+
+    const shops = shopNames(o);
+    const pa = splitMapLink(o.pickup_address || '').text;
+    const da = splitMapLink(o.drop_address || '').text;
+    const from = shops.length ? shops.join(', ') : pa;
+    const to = [o.drop_union, o.upazila].filter(Boolean).join(', ') || da;
+    a.appendChild(el('div', 'or-route', from && to ? from + ' → ' + to : (to || from || splitMapLink(o.description || '').text || '—')));
+
+    const items = Array.isArray(o.order_items) ? o.order_items : [];
+    if (items.length) {
+      a.appendChild(el('div', 'or-items', items.map((i) => (i.name || '') + (Number(i.qty) > 1 ? ' × ' + bn(i.qty) : '')).join(', ')));
+    }
+
+    const m = el('div', 'or-meta');
+    const price = el('span');
+    price.appendChild(el('b', null, money(o.price)));
+    if (o.items_total != null) price.appendChild(document.createTextNode(' · পণ্য ' + money(o.items_total)));
+    m.appendChild(price);
+    m.appendChild(el('span', null, (o.customer && o.customer.name) || 'কাস্টমার'));
+    if (o.rider) m.appendChild(el('span', null, 'রাইডার: ' + (o.rider.name || '—')));
+    if (st === 'open') m.appendChild(el('span', null, bn(o.offers_count || 0) + 'টা অফার'));
+    m.appendChild(el('span', null, agoLabel(o.created_at)));
+    a.appendChild(m);
+
+    if (o.is_asap === false && o.scheduled_at) {
+      a.appendChild(el('div', 'or-flag', 'শিডিউল: ' + new Date(o.scheduled_at).toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })));
+    }
+    if (st === 'confirmed' && o.release_requested_at) a.appendChild(el('div', 'or-flag', 'রাইডার অর্ডারটা ছাড়তে চান'));
+    if (st === 'pending' && o.auto_publish_at) {
+      const left = Math.round((new Date(o.auto_publish_at).getTime() - Date.now()) / 60000);
+      a.appendChild(el('div', 'or-flag', left > 0 ? bn(left) + ' মিনিট পর নিজে পাবলিশ হবে' : 'এখনই নিজে পাবলিশ হবে'));
+    }
+    return a;
+  }
+
+  function empty(title, sub) {
+    const box = el('div', 'cm-body');
+    const e = el('div', 'or-empty');
+    e.appendChild(el('b', null, title));
+    if (sub) e.appendChild(el('span', 'cs-muted', sub));
+    box.appendChild(e);
+    return box;
+  }
+
+  async function loadList(reset, silent = false) {
+    const my = ++seq;
+    const list = $('orList');
+    if (reset) state.offset = 0;
+    if (reset && !silent) {
+      list.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('order', 4) : '';
+      $('orMore').hidden = true;
+    }
+    syncUrl();
+
+    const { data, error } = await supabase.rpc('admin_search_orders', {
+      p_query: state.q || null,
+      p_group: state.q ? 'all' : (state.tab === 'new' ? 'live' : state.tab),
+      p_category: state.cat || null,
+      p_filter: !state.q && state.tab === 'new' ? 'unpublished' : null,
+      p_limit: PAGE,
+      p_offset: reset ? 0 : state.offset,
+    });
+    if (my !== seq) return;
+
+    if (error || !data) {
+      if (!silent) { list.textContent = ''; list.appendChild(empty('লোড করা যায়নি', 'একটু পরে আবার চেষ্টা করুন।')); }
+      return;
+    }
+
+    let items = data.items || [];
+    // চলমান ট্যাবে পাবলিশের অপেক্ষার অর্ডার দেখাই না (ওগুলো "নতুন" ট্যাবে)
+    if (!state.q && state.tab === 'live') items = items.filter((o) => orderStatusOf(o) !== 'pending' && orderStatusOf(o) !== 'hold');
+    state.total = data.total || 0;
+
+    const before = new Set([...list.querySelectorAll('.or-card')].map((c) => c.dataset.no));
+    if (reset) list.textContent = '';
+    items.forEach((o) => list.appendChild(card(o, silent && !before.has(o.order_no))));
+
+    const shown = list.querySelectorAll('.or-card').length;
+    state.offset = (reset ? 0 : state.offset) + (data.items || []).length;
+    if (!shown) {
+      list.appendChild(state.q
+        ? empty('কিছু পাওয়া যায়নি', 'অন্য নম্বর, ফোন বা নাম দিয়ে খুঁজুন।')
+        : state.tab === 'new' ? empty('কোনো নতুন অর্ডার অপেক্ষায় নেই', 'নতুন অর্ডার এলে এখানে দেখাবে।')
+        : state.tab === 'live' ? empty('এখন কোনো চলমান অর্ডার নেই') : empty('কোনো অর্ডার নেই'));
+    }
+    $('orMore').hidden = state.offset >= state.total;
+
+    const hint = $('orHint');
+    if (state.q) { hint.hidden = false; hint.textContent = '"' + state.q + '" খুঁজে ' + bn(state.total) + 'টা অর্ডার পাওয়া গেছে (সব সময়ের)'; }
+    else hint.hidden = true;
+  }
+
+  onConsoleReady((data) => {
+    if (!canOpenAdminPath('/admin/delivery-orders', data)) {
+      $('orDeny').hidden = false;
+      return;
+    }
+    $('orMain').hidden = false;
+    $('orQ').value = state.q;
+    renderTabs(null);
+    renderCats();
+    loadCounts();
+    loadList(true);
+
+    let t = 0;
+    $('orQ').addEventListener('input', (e) => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const v = String(e.target.value || '').trim().slice(0, 60);
+        if (v === state.q) return;
+        state.q = v;
+        renderTabs(lastCounts);
+        loadList(true);
+      }, 400);
+    });
+    $('orMore').addEventListener('click', () => loadList(false));
+
+    // নতুন ও চলমান ট্যাব ৩০ সেকেন্ডে চুপচাপ রিফ্রেশ (শুধু প্রথম পেজ দেখা থাকলে)
+    setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      loadCounts();
+      if (!state.q && state.tab !== 'history' && state.offset <= PAGE) loadList(true, true);
+    }, 30000);
+  });
+</script>

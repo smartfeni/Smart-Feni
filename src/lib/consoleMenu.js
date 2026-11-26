@@ -56,7 +56,7 @@ export const MENU = [
     id: 'orders', name: 'অর্ডার', desc: 'সব ধরনের অর্ডার এক জায়গায়',
     icon: '<path d="M3 7h13v10H3z"/><path d="M16 10h3l2 3v4h-5"/><circle cx="7" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/>',
     items: [
-      { name: 'ডেলিভারি অর্ডার', desc: 'নতুন, ব্যাচ, চলমান ও সম্পন্ন অর্ডার; রাইডার ঠিক করা', href: '/admin/delivery-orders', keys: 'কুইক ডেলিভারি' },
+      { name: 'ডেলিভারি অর্ডার', desc: 'নতুন, চলমান ও শেষ হওয়া অর্ডার, খোঁজা ও বিস্তারিত', href: '/console/orders', perm: '/admin/delivery-orders', keys: 'কুইক ডেলিভারি' },
       { name: 'প্রি-অর্ডার', desc: 'দোকানে যাওয়া আগাম অর্ডার ট্র্যাক করা', href: '/console/preorders', perm: '/admin/delivery-orders', keys: 'আগাম অর্ডার দোকান' },
       { name: 'ম্যানুয়াল অর্ডার', desc: 'ফোন বা চ্যাটে আসা অর্ডার তোলা ও পাঠানো', href: '/admin/manual-orders', keys: 'ফোন অর্ডার' },
       { name: 'লোকাল রাইড', desc: 'সিএনজি/অটো রাইড: চলমান, কনফার্ম, সম্পন্ন, বাতিল', href: '/admin/local-rides', keys: 'রাইড' },

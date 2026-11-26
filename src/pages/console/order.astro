@@ -1,0 +1,371 @@
+---
+// ============================================================
+// /console/order?no=SFD-1042 — একটা ডেলিভারি/রাইড অর্ডারের বিস্তারিত (নতুন অ্যাপ, ধাপ ৪ ভাগ ১)
+// ডাটা: admin_get_order(p_key) — পুরনো পেজের একই RPC (সার্ভারে অনুমতি চেক)।
+// পেমেন্ট প্রুফ: delivery_payment_proofs + private bucket delivery-proofs → signed URL।
+// চ্যাট: ChatModal শুধু পড়ার মোডে (কাস্টমার/রাইডার লেবেল সহ)।
+// পাবলিশ/অ্যাসাইন/বাতিল/এলার্ট এখনো পুরনো প্যানেলে ("কাজ করুন ↗"), ভাগ ২-এ এখানে আসবে।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+import ChatModal from '../../components/delivery/ChatModal.astro';
+---
+
+<ConsoleShell title="অর্ডারের বিস্তারিত" active="orders">
+  <div class="cs-pad cm-page od-page">
+    <a class="od-back" href="/console/orders" id="odBack">← অর্ডারের তালিকা</a>
+    <div id="odBody"></div>
+  </div>
+
+  <div class="od-lightbox" id="odLightbox" hidden>
+    <button type="button" class="od-lb-close" id="odLbClose" aria-label="বন্ধ করুন">✕</button>
+    <img id="odLbImg" alt="পেমেন্ট প্রুফ" />
+  </div>
+  <ChatModal />
+</ConsoleShell>
+
+<style is:global>
+  .od-back { font-size: 13.5px; font-weight: 600; color: #5F6B7E; text-decoration: none; margin-top: 4px; }
+  #odBody { display: flex; flex-direction: column; gap: 12px; }
+  .od-head { display: flex; flex-direction: column; gap: 4px; }
+  .od-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0; font-size: 24px; }
+  .od-st { font-family: 'Hind Siliguri', sans-serif; font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 6px; letter-spacing: 0; }
+  .od-alert { background: #FDECEA; color: #8A1C14; border-radius: 12px; padding: 10px 12px; font-size: 13.5px; font-weight: 600; }
+  .od-card { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .od-card h2 { margin: 0; font-size: 13px; font-weight: 600; color: #5F6B7E; }
+  .od-fold > button { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: 0; padding: 0; font: inherit; font-size: 13px; font-weight: 600; color: #5F6B7E; cursor: pointer; text-align: left; }
+  .od-fold > button span:last-child { color: #1B2A4A; }
+  .od-addr-row b { display: block; font-size: 12.5px; color: #5F6B7E; font-weight: 600; margin-bottom: 2px; }
+  .od-addr { font-size: 14.5px; overflow-wrap: anywhere; }
+  .od-small { font-size: 12.5px; color: #5F6B7E; overflow-wrap: anywhere; }
+  .od-line { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+  .od-line span:first-child { min-width: 0; overflow-wrap: anywhere; }
+  .od-line b { white-space: nowrap; }
+  .od-line.tot { border-top: 1px solid #EFEBE5; padding-top: 6px; font-weight: 700; }
+  .od-tag { font-size: 11.5px; font-weight: 600; color: #B45309; background: #FFF4E0; border-radius: 6px; padding: 1px 6px; margin-left: 4px; }
+  .od-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .od-party { background: #F7F5F2; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .od-party small { font-size: 12px; color: #5F6B7E; }
+  .od-party b { font-size: 14.5px; overflow-wrap: anywhere; }
+  .od-party a { font-size: 13.5px; font-weight: 600; color: #1B2A4A; }
+  .od-reason { background: #F7F5F2; border-radius: 10px; padding: 8px 10px; font-size: 13.5px; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .od-proofs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .od-proofs button { width: 76px; height: 76px; border-radius: 10px; overflow: hidden; border: 1px solid #E7E2DA; padding: 0; cursor: pointer; background: #F7F5F2; }
+  .od-proofs img { width: 100%; height: 100%; object-fit: cover; }
+  .od-tl { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; }
+  .od-tl li { position: relative; padding: 0 0 12px 18px; font-size: 13.5px; }
+  .od-tl li::before { content: ''; position: absolute; left: 3px; top: 6px; width: 7px; height: 7px; border-radius: 50%; background: #1B2A4A; }
+  .od-tl li::after { content: ''; position: absolute; left: 6px; top: 15px; bottom: 0; width: 1px; background: #E7E2DA; }
+  .od-tl li:last-child::after { display: none; }
+  .od-tl small { display: block; color: #5F6B7E; font-size: 12px; overflow-wrap: anywhere; }
+  .od-actions { position: sticky; bottom: calc(68px + env(safe-area-inset-bottom)); display: flex; gap: 8px; flex-wrap: wrap; background: #F7F5F2; padding: 10px 0; }
+  @media (min-width: 900px) { .od-actions { bottom: 0; } }
+  .od-btn { flex: 1 1 140px; display: inline-flex; align-items: center; justify-content: center; height: 46px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; padding: 0 12px; }
+  .od-btn.primary { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .od-empty { padding: 30px 16px; text-align: center; display: flex; flex-direction: column; gap: 4px; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; }
+  .od-lightbox { position: fixed; inset: 0; z-index: 9000; background: rgba(10,16,30,.92); display: flex; align-items: center; justify-content: center; }
+  .od-lightbox[hidden] { display: none; }
+  .od-lightbox img { max-width: 94vw; max-height: 86vh; border-radius: 8px; }
+  .od-lb-close { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,.14); color: #fff; font-size: 18px; cursor: pointer; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { getSignedUrls } from '../../lib/storageSigned.js';
+  import { renderAddressWithNav } from '../../lib/mapLinks.js';
+  import { onConsoleReady, canOpenAdminPath, bn, dayLabel, timeLabel, agoLabel } from '../../lib/consoleApp.js';
+  import { ORDER_STATUS, orderStatusOf, money, eventText, DISPUTE_RESULT } from '../../lib/consoleOrders.js';
+
+  const $ = (id) => document.getElementById(id);
+  const body = $('odBody');
+  const key = (new URLSearchParams(location.search).get('no') || '').trim().slice(0, 40);
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  const when = (d) => (d ? dayLabel(d) + ', ' + timeLabel(d) : '—');
+  const coords = (la, ln) => (la != null && ln != null ? { lat: la, lng: ln } : undefined);
+
+  function section(title) {
+    const c = el('section', 'od-card');
+    c.appendChild(el('h2', null, title));
+    body.appendChild(c);
+    return c;
+  }
+
+  // ভাঁজ করা সেকশন (অফার/টাইমলাইন লম্বা হতে পারে)
+  function foldSection(title, count, open = false) {
+    const c = el('section', 'od-card od-fold');
+    const id = 'odf-' + Math.random().toString(36).slice(2, 8);
+    const btn = el('button');
+    btn.type = 'button';
+    btn.setAttribute('aria-expanded', String(open));
+    btn.setAttribute('aria-controls', id);
+    btn.appendChild(el('span', null, title + ' (' + bn(count) + ')'));
+    const lbl = el('span', null, open ? 'বন্ধ ▴' : 'দেখুন ▾');
+    btn.appendChild(lbl);
+    const inner = el('div');
+    inner.id = id;
+    inner.hidden = !open;
+    inner.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+    btn.addEventListener('click', () => {
+      const o = inner.hidden;
+      inner.hidden = !o;
+      btn.setAttribute('aria-expanded', String(o));
+      lbl.textContent = o ? 'বন্ধ ▴' : 'দেখুন ▾';
+    });
+    c.appendChild(btn);
+    c.appendChild(inner);
+    body.appendChild(c);
+    return inner;
+  }
+
+  function line(parent, label, value, cls) {
+    const d = el('div', 'od-line' + (cls ? ' ' + cls : ''));
+    const l = el('span');
+    if (label instanceof Node) l.appendChild(label); else l.textContent = label;
+    d.appendChild(l);
+    d.appendChild(el('b', null, value));
+    parent.appendChild(d);
+  }
+
+  function party(parent, role, p, extra) {
+    const box = el('div', 'od-party');
+    box.appendChild(el('small', null, role));
+    if (!p) {
+      const b = el('b', null, 'এখনো কেউ নেই');
+      b.style.color = '#9AA3B2';
+      box.appendChild(b);
+    } else {
+      box.appendChild(el('b', null, p.name || '—'));
+      if (p.phone) {
+        const a = el('a', null, p.phone);
+        a.href = 'tel:' + String(p.phone).replace(/[^\d+]/g, '');
+        box.appendChild(a);
+      }
+      if (extra) box.appendChild(el('small', null, extra));
+    }
+    parent.appendChild(box);
+  }
+
+  function openLightbox(url) {
+    $('odLbImg').src = url;
+    $('odLightbox').hidden = false;
+  }
+
+  async function proofUrls(requestId) {
+    try {
+      const { data } = await supabase.from('delivery_payment_proofs').select('image_urls').eq('request_id', requestId);
+      const raw = (data || []).flatMap((p) => p.image_urls || []);
+      return raw.length ? await getSignedUrls(supabase, 'delivery-proofs', raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function showEmpty(title, sub) {
+    body.textContent = '';
+    const e = el('div', 'od-empty');
+    e.appendChild(el('b', null, title));
+    if (sub) e.appendChild(el('span', 'cs-muted', sub));
+    body.appendChild(e);
+  }
+
+  async function load() {
+    if (!key) { showEmpty('কোনো অর্ডার নম্বর নেই', 'তালিকা থেকে একটা অর্ডার বেছে নিন।'); return; }
+    body.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('profile', 1) + window.SFSkeleton.html('row', 4) : '';
+
+    const { data, error } = await supabase.rpc('admin_get_order', { p_key: key });
+    if (error || !data || !data.order) {
+      showEmpty(error ? 'লোড করা যায়নি' : 'এই নম্বরে কোনো অর্ডার পাওয়া যায়নি', error ? 'একটু পরে আবার চেষ্টা করুন।' : null);
+      return;
+    }
+    const o = data.order;
+    const c = data.customer || {};
+    const r = data.rider || null;
+    const st = orderStatusOf(o);
+    const meta = ORDER_STATUS[st] || { name: st, fg: '#3D4A60', bg: '#EEF1F5' };
+    const proofs = await proofUrls(o.id);
+    body.textContent = '';
+    document.title = o.order_no + ' | Smart Feni Admin';
+
+    // ---- মাথা ----
+    const head = el('div', 'od-head');
+    const h = el('h1', 'cs-h od-title', o.order_no);
+    const badge = el('span', 'od-st', meta.name);
+    badge.style.color = meta.fg; badge.style.background = meta.bg;
+    h.appendChild(badge);
+    head.appendChild(h);
+    head.appendChild(el('span', 'cs-muted', (o.category === 'ride' ? 'রাইড' : 'ডেলিভারি') + ' · ' + when(o.created_at) + ' · ' + agoLabel(o.created_at)));
+    if (o.is_asap === false && o.scheduled_at) {
+      const s = el('span', 'od-small', 'শিডিউল: ' + when(o.scheduled_at));
+      s.style.cssText = 'color:#7A3E00;font-weight:600;';
+      head.appendChild(s);
+    }
+    if (st === 'pending' && o.auto_publish_at) {
+      const left = Math.round((new Date(o.auto_publish_at).getTime() - Date.now()) / 60000);
+      head.appendChild(el('span', 'od-small', left > 0 ? bn(left) + ' মিনিট পর নিজে পাবলিশ হবে' : 'এখনই নিজে পাবলিশ হবে'));
+    }
+    body.appendChild(head);
+
+    if (st === 'disputed') body.appendChild(el('div', 'od-alert', 'এই অর্ডারে ডিসপিউট খোলা আছে'));
+    if (st === 'confirmed' && o.release_requested_at) body.appendChild(el('div', 'od-alert', 'রাইডার অর্ডারটা ছাড়তে চান, অনুমোদনের অপেক্ষায়'));
+
+    // ---- রুট ----
+    const route = section('রুট');
+    const pRow = el('div', 'od-addr-row');
+    pRow.appendChild(el('b', null, 'পিকআপ'));
+    const pAddr = el('div', 'od-addr');
+    pRow.appendChild(pAddr);
+    if (o.pickup_instructions) pRow.appendChild(el('div', 'od-small', o.pickup_instructions));
+    route.appendChild(pRow);
+    const dRow = el('div', 'od-addr-row');
+    dRow.appendChild(el('b', null, o.category === 'ride' ? 'গন্তব্য' : 'ডেলিভারি'));
+    const dAddr = el('div', 'od-addr');
+    dRow.appendChild(dAddr);
+    if (o.drop_instructions) dRow.appendChild(el('div', 'od-small', o.drop_instructions));
+    route.appendChild(dRow);
+    const area = [o.upazila, o.pickup_union ? 'পিকআপ: ' + o.pickup_union : '', o.drop_union ? 'ড্রপ: ' + o.drop_union : '',
+      o.vehicle_type ? 'বাহন: ' + o.vehicle_type : '', o.seat_count ? 'সিট: ' + bn(o.seat_count) : ''].filter(Boolean).join(' · ');
+    if (area) route.appendChild(el('div', 'od-small', area));
+    renderAddressWithNav(pAddr, o.pickup_address || o.area_detail || '—', { coords: coords(o.pickup_lat, o.pickup_lng) });
+    renderAddressWithNav(dAddr, o.drop_address || '—', { coords: coords(o.drop_lat, o.drop_lng) });
+
+    if (o.description) {
+      const d = section('কাস্টমারের লেখা');
+      d.appendChild(el('div', 'od-reason', o.description));
+    }
+
+    // ---- পণ্য ও দাম ----
+    const items = Array.isArray(o.order_items) ? o.order_items : [];
+    const money1 = section(items.length ? 'পণ্য ও দাম' : 'দাম');
+    items.forEach((i) => {
+      const l = el('span', null, (i.name || 'পণ্য') + ' × ' + bn(i.qty || 1));
+      if (i.shop_name) l.appendChild(el('span', 'od-small', ' · ' + i.shop_name));
+      line(money1, l, money((Number(i.price) || 0) * (Number(i.qty) || 1)));
+    });
+    const itemsTotal = o.items_total != null ? Number(o.items_total) : null;
+    const feeLbl = el('span', null, o.category === 'ride' ? 'ভাড়া' : 'ডেলিভারি চার্জ');
+    if (o.fare_proposed_by_customer) feeLbl.appendChild(el('span', 'od-tag', 'কাস্টমারের প্রস্তাব'));
+    if (itemsTotal !== null) line(money1, 'পণ্যের দাম', money(itemsTotal));
+    line(money1, feeLbl, money(o.price));
+    if (itemsTotal !== null) line(money1, 'মোট', money(itemsTotal + Number(o.price || 0)), 'tot');
+    if (o.customer_asking_price) money1.appendChild(el('div', 'od-small', 'কাস্টমার চেয়েছেন ' + money(o.customer_asking_price)));
+    if (o.admin_fixed_price) money1.appendChild(el('div', 'od-small', 'অ্যাডমিন ঠিক করেছেন ' + money(o.admin_fixed_price)));
+
+    // ---- দুই পক্ষ ----
+    const pp = section('কাস্টমার ও রাইডার');
+    const grid = el('div', 'od-parties');
+    party(grid, 'কাস্টমার', c.name || c.phone ? c : { name: '—' });
+    const rExtra = r ? [r.total_completed ? bn(r.total_completed) + 'টা সম্পন্ন' : '', r.avg_rating ? '★ ' + bn(Number(r.avg_rating).toFixed(1)) : ''].filter(Boolean).join(' · ') : '';
+    party(grid, o.category === 'ride' ? 'রাইডার' : 'ডেলিভারি হিরো', r, rExtra);
+    pp.appendChild(grid);
+
+    // ---- ডিসপিউট / ছাড়ার অনুরোধ / বাতিল ----
+    if (o.dispute_reason || st === 'disputed' || o.disputed_at) {
+      const d = section('ডিসপিউট');
+      d.appendChild(el('div', 'od-reason', o.dispute_reason || 'কারণ লেখা নেই'));
+      if (o.dispute_resolution) d.appendChild(el('div', 'od-small', 'সিদ্ধান্ত: ' + (DISPUTE_RESULT[o.dispute_resolution] || o.dispute_resolution)));
+    }
+    if (st === 'confirmed' && o.release_requested_at) {
+      const d = section('রাইডার ছাড়তে চান');
+      d.appendChild(el('div', 'od-reason', o.release_reason || 'কারণ লেখা নেই'));
+      d.appendChild(el('div', 'od-small', 'অনুরোধ: ' + when(o.release_requested_at) + '। অনুমোদন না হওয়া পর্যন্ত অর্ডারটা এই রাইডারেরই।'));
+    }
+    if (st === 'cancelled' && o.cancel_reason) {
+      const d = section('বাতিলের কারণ');
+      d.appendChild(el('div', 'od-reason', o.cancel_reason));
+      if (o.cancelled_at) d.appendChild(el('div', 'od-small', when(o.cancelled_at)));
+    }
+
+    // ---- পেমেন্ট প্রুফ ----
+    if (proofs.length) {
+      const d = section('পেমেন্ট প্রুফ (' + bn(proofs.length) + ')');
+      const wrap = el('div', 'od-proofs');
+      proofs.forEach((u) => {
+        const b = el('button');
+        b.type = 'button';
+        b.setAttribute('aria-label', 'প্রুফ বড় করে দেখুন');
+        const img = el('img');
+        img.src = u; img.alt = 'পেমেন্ট প্রুফ'; img.loading = 'lazy';
+        b.appendChild(img);
+        b.addEventListener('click', () => openLightbox(u));
+        wrap.appendChild(b);
+      });
+      d.appendChild(wrap);
+    }
+
+    // ---- অফার ----
+    const offers = data.offers || [];
+    if (offers.length || st === 'open') {
+      const inner = foldSection('অফার', offers.length, st === 'open');
+      if (!offers.length) inner.appendChild(el('div', 'od-small', 'এখনো কোনো অফার আসেনি'));
+      offers.forEach((f) => {
+        const l = el('span', null, f.name || 'হিরো');
+        if (f.phone) l.appendChild(el('span', 'od-small', ' · ' + f.phone));
+        if (f.status !== 'active') l.appendChild(el('span', 'od-small', ' · ' + (f.status === 'withdrawn' ? 'তুলে নিয়েছেন' : f.status)));
+        line(inner, l, money(f.price));
+      });
+    }
+
+    // ---- টাইমলাইন ----
+    const events = data.events || [];
+    const tlInner = foldSection('টাইমলাইন', events.length, false);
+    const ul = el('ul', 'od-tl');
+    if (!events.length) ul.appendChild(el('li', null, 'কোনো ঘটনা নেই'));
+    events.forEach((ev) => {
+      const li = el('li', null, eventText(ev));
+      const sub = [when(ev.created_at), ev.actor_name, ev.note && ev.event_type !== 'rider_alert' ? ev.note : ''].filter(Boolean).join(' · ');
+      li.appendChild(el('small', null, sub));
+      ul.appendChild(li);
+    });
+    tlInner.appendChild(ul);
+
+    // ---- নিচের বোতাম ----
+    const bar = el('div', 'od-actions');
+    const work = el('a', 'od-btn primary', 'কাজ করুন (পুরনো পেজ) ↗');
+    work.href = '/admin/delivery-orders?open=' + encodeURIComponent(o.order_no);
+    bar.appendChild(work);
+    if ((data.chat_count || 0) > 0) {
+      const ch = el('button', 'od-btn', 'চ্যাট দেখুন (' + bn(data.chat_count) + ')');
+      ch.type = 'button';
+      ch.addEventListener('click', () => {
+        window.openChatModal?.({
+          requestId: o.id,
+          otherPartyName: (c.name || 'কাস্টমার') + ' ↔ ' + ((r && r.name) || 'রাইডার'),
+          readOnly: true,
+          customerId: c.id || null,
+          customerName: c.name || '',
+          riderId: (r && r.id) || null,
+          riderName: (r && r.name) || '',
+        });
+      });
+      bar.appendChild(ch);
+    }
+    if (st === 'disputed') {
+      const d = el('a', 'od-btn', 'ডিসপিউট পেজ ↗');
+      d.href = '/admin/delivery-disputes?q=' + encodeURIComponent(o.order_no);
+      bar.appendChild(d);
+    }
+    body.appendChild(bar);
+  }
+
+  $('odLbClose').addEventListener('click', () => { $('odLightbox').hidden = true; $('odLbImg').src = ''; });
+  $('odLightbox').addEventListener('click', (e) => { if (e.target === $('odLightbox')) $('odLbClose').click(); });
+
+  // তালিকা থেকে এলে "←" চাপলে আগের ট্যাব/খোঁজায় ফেরে
+  if (document.referrer && new URL(document.referrer, location.href).pathname === '/console/orders') {
+    $('odBack').addEventListener('click', (e) => { e.preventDefault(); history.back(); });
+  }
+
+  onConsoleReady((ctx) => {
+    if (!canOpenAdminPath('/admin/delivery-orders', ctx)) {
+      showEmpty('এই পেজ দেখার অনুমতি নেই', 'ডেলিভারি অর্ডার দেখার অনুমতি লাগবে।');
+      return;
+    }
+    load();
+  });
+</script>
