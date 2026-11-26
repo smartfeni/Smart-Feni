@@ -89,7 +89,7 @@ export const MENU = [
     id: 'money', name: 'টাকা-পয়সা', desc: 'কোম্পানি ও মার্কেটপ্লেসের হিসাব',
     icon: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="16" cy="14.5" r="1.5"/>',
     items: [
-      { name: 'কোম্পানির হিসাব', desc: 'জমা, আয়, খরচ, দৈনিক হিসাব ও Excel', href: '/admin/hisab', adminOnly: true, keys: 'আয় খরচ ব্যালেন্স' },
+      { name: 'কোম্পানির হিসাব', desc: 'জমা, আয়, খরচ, দৈনিক হিসাব ও Excel; ওয়ালেট ও অগ্রিমের এন্ট্রি নিজে ওঠে', href: '/console/hisab', perm: '/admin/hisab', keys: 'আয় খরচ ব্যালেন্স হিসাব' },
       { name: 'রাইডার ওয়ালেট', desc: 'রাইডারের ব্যালেন্স ও অগ্রিম/জমা/তোলার অনুরোধ', href: '/console/wallets', perm: '/admin/delivery-orders', keys: 'ওয়ালেট ক্যাশ' },
       { name: 'অগ্রিম পেমেন্ট যাচাই', desc: 'কাস্টমারের বিকাশ/নগদ অগ্রিম: কোন নম্বরে, কে যাচাই করেছে', href: '/console/payments', perm: '/admin/delivery-orders', keys: 'TrxID বিকাশ নগদ' },
       { name: 'মার্কেটপ্লেসের হিসাব', desc: 'লাভ-লস ও চুক্তিবদ্ধ দোকানের পাওনা', href: '/console/money', perm: '/admin/delivery-orders', keys: 'পাওনা লাভ লস ক্ষতি' },

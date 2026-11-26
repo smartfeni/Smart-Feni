@@ -1,0 +1,890 @@
+---
+// ============================================================
+// /console/hisab — কোম্পানির হিসাব (নতুন অ্যাপ, ধাপ ৭.৩)
+// পুরনো /admin/hisab (অ্যাকাউন্ট C) থেকে তৈরি; একই টেবিল/RPC/অনুমতি, নতুন DB বদল নেই:
+//   hisab_entries (পড়া) + RPC hisab_add_entry, hisab_edit_entry, hisab_cancel_entry, hisab_summary, hisab_daily, hisab_monthly
+//   দেখা: সুপার অ্যাডমিন বা hisab.view · এন্ট্রি/এডিট/বাতিল: সুপার অ্যাডমিন বা hisab.manage
+// ব্যালেন্স = জমা + আয় − খরচ (বাতিল ধরা হয় না)। সব তারিখ বাংলাদেশ সময়ে।
+// "অটো" এন্ট্রি (source_type থাকে): ওয়ালেট/অগ্রিম যাচাই থেকে নিজে ওঠে, টাকা/খাত এডিট হয় না।
+// Excel: src/lib/hisabExport.js (পুরনো পেজের একই)।
+// ============================================================
+export const prerender = false;
+
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+import Skeleton from '../../components/ui/Skeleton.astro';
+---
+
+<ConsoleShell title="কোম্পানির হিসাব" active="menu">
+  <div class="hs-page">
+    <div class="hs-wrap">
+
+      <div id="hsDeny" class="hs-muted" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+
+      <div id="hsMain" hidden>
+
+        <h1 class="cs-h cm-title">কোম্পানির হিসাব</h1>
+        <p class="hs-sub">ম্যানেজারের কাছে থাকা কোম্পানির টাকার খাতা। "অটো" লেখা এন্ট্রি ওয়ালেট ও অগ্রিম যাচাই থেকে নিজে ওঠে।</p>
+
+        <!-- ===== উপরের সংখ্যা ===== -->
+        <section class="hs-bal" aria-live="polite">
+          <div class="hs-bal-lbl">বর্তমান ব্যালেন্স</div>
+          <div class="hs-bal-num" id="sBalance">—</div>
+        </section>
+        <section class="hs-stats">
+          <div class="hs-stat"><div class="hs-stat-lbl">গতকালের ব্যালেন্স</div><div class="hs-stat-num" id="sYest">—</div></div>
+          <div class="hs-stat"><div class="hs-stat-lbl">আজকের জমা</div><div class="hs-stat-num" id="sJoma">—</div></div>
+          <div class="hs-stat"><div class="hs-stat-lbl">আজকের আয়</div><div class="hs-stat-num hs-c-income" id="sIncome">—</div></div>
+          <div class="hs-stat"><div class="hs-stat-lbl">আজকের খরচ</div><div class="hs-stat-num hs-c-expense" id="sExpense">—</div></div>
+        </section>
+
+        <button class="hs-btn hs-primary hs-add" id="addBtn" type="button"><i class="fas fa-plus"></i> নতুন এন্ট্রি</button>
+
+        <!-- ===== ট্যাব ===== -->
+        <div class="hs-tabs" role="tablist">
+          <button class="hs-tab on" role="tab" aria-selected="true" data-tab="daily" type="button">দৈনিক হিসাব</button>
+          <button class="hs-tab" role="tab" aria-selected="false" data-tab="entries" type="button">সব এন্ট্রি</button>
+          <button class="hs-tab" role="tab" aria-selected="false" data-tab="months" type="button">মাস ও বছর</button>
+        </div>
+
+        <!-- মাস বাছাই + Excel (দৈনিক ও সব এন্ট্রি ট্যাবে) -->
+        <div class="hs-filter" id="monthBar">
+          <label class="hs-flbl" for="fMonth">মাস</label>
+          <input class="hs-in hs-in-sm" type="month" id="fMonth" />
+          <button class="hs-btn hs-ghost hs-xl" id="xlBtn" type="button"><i class="fas fa-file-excel"></i> Excel</button>
+        </div>
+
+        <!-- ===== ট্যাব ১: দৈনিক ===== -->
+        <div id="panel-daily" class="hs-panel">
+          <label class="hs-check"><input type="checkbox" id="showAllDays" /> এন্ট্রি নেই এমন দিনও দেখান</label>
+          <div id="dailyWrap"><Skeleton preset="table" count={4} /></div>
+        </div>
+
+        <!-- ===== ট্যাব ২: সব এন্ট্রি ===== -->
+        <div id="panel-entries" class="hs-panel" hidden>
+          <div class="hs-filter">
+            <label class="hs-flbl" for="fType">ধরন</label>
+            <select class="hs-in hs-in-sm" id="fType">
+              <option value="">সব</option>
+              <option value="joma">জমা</option>
+              <option value="income">আয়</option>
+              <option value="expense">খরচ</option>
+            </select>
+            <label class="hs-check hs-check-inl"><input type="checkbox" id="showCancelled" /> বাতিলগুলোও</label>
+          </div>
+          <div id="entriesSum" class="hs-esum"></div>
+          <div id="entriesWrap"><Skeleton preset="table" count={5} /></div>
+        </div>
+
+        <!-- ===== ট্যাব ৩: মাস ও বছর ===== -->
+        <div id="panel-months" class="hs-panel" hidden>
+          <div class="hs-filter">
+            <label class="hs-flbl" for="fYear">বছর</label>
+            <select class="hs-in hs-in-sm" id="fYear"></select>
+          </div>
+          <div id="monthsWrap"><Skeleton preset="table" count={3} /></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== এন্ট্রি ফর্ম (নতুন / এডিট) ===== -->
+  <div class="hs-ov" id="sheetOv" hidden>
+    <div class="hs-sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" id="sheetBox">
+      <div class="hs-sh-head">
+        <div class="hs-sh-title" id="sheetTitle">নতুন এন্ট্রি</div>
+        <button class="hs-x" id="sheetClose" type="button" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      </div>
+
+      <div class="hs-sh-body">
+        <div class="hs-seg" id="typeSeg" role="radiogroup" aria-label="ধরন">
+          <button type="button" class="hs-seg-b" role="radio" data-type="joma" aria-checked="false">জমা</button>
+          <button type="button" class="hs-seg-b" role="radio" data-type="income" aria-checked="false">আয়</button>
+          <button type="button" class="hs-seg-b" role="radio" data-type="expense" aria-checked="false">খরচ</button>
+        </div>
+
+        <label class="hs-lbl" for="fAmount">পরিমাণ (টাকা)<span class="required-mark">*</span></label>
+        <div class="hs-amt">
+          <span class="hs-amt-cur">৳</span>
+          <input class="hs-amt-in" id="fAmount" type="text" inputmode="decimal" autocomplete="off" placeholder="০" required />
+        </div>
+        <div class="field-error-msg" data-error-for="fAmount"><i class="fas fa-circle-exclamation"></i><span>পরিমাণ লিখুন</span></div>
+
+        <label class="hs-lbl" for="fCategory">খাত<span class="required-mark">*</span></label>
+        <input class="hs-in" id="fCategory" maxlength="60" autocomplete="off" required />
+        <div class="field-error-msg" data-error-for="fCategory"><i class="fas fa-circle-exclamation"></i><span>খাতের নাম লিখুন</span></div>
+        <div class="hs-chips" id="chips"></div>
+
+        <label class="hs-lbl" for="fNote">নোট (ঐচ্ছিক)</label>
+        <input class="hs-in" id="fNote" maxlength="300" autocomplete="off" placeholder="যেমন: কাকে দেওয়া হলো, কী বাবদ" />
+
+        <div class="hs-time">
+          <div class="hs-time-row">
+            <div class="hs-time-lbl" id="timeLbl">সময়: এখন (বাংলাদেশ সময়)</div>
+            <button class="hs-link" id="timeToggle" type="button">সময় বদলান</button>
+          </div>
+          <div class="hs-time-pick" id="timePick" hidden>
+            <input class="hs-in" type="date" id="tDate" aria-label="তারিখ" />
+            <input class="hs-in" type="time" id="tTime" aria-label="সময়" />
+          </div>
+        </div>
+
+        <p class="hs-err" id="sheetErr" hidden></p>
+      </div>
+
+      <div class="hs-sh-foot">
+        <button class="hs-btn hs-ghost" id="sheetCancel" type="button">বন্ধ করুন</button>
+        <button class="hs-btn hs-primary" id="sheetSave" type="button">সেভ করুন</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== বাতিল নিশ্চিত ===== -->
+  <div class="hs-ov hs-ov-c" id="cancelOv" hidden>
+    <div class="hs-dlg" role="alertdialog" aria-modal="true" aria-labelledby="cancelTitle">
+      <div class="hs-dlg-title" id="cancelTitle">এন্ট্রি বাতিল করবেন?</div>
+      <div class="hs-dlg-sum" id="cancelSum"></div>
+      <p class="hs-dlg-note">বাতিল এন্ট্রি হিসাবে ধরা হবে না, তবে তালিকায় রেকর্ড থেকে যাবে।</p>
+      <input class="hs-in" id="cancelReason" maxlength="300" placeholder="কারণ (ঐচ্ছিক)" autocomplete="off" />
+      <div class="hs-dlg-act">
+        <button class="hs-btn hs-ghost" id="cancelNo" type="button">না, থাক</button>
+        <button class="hs-btn hs-danger" id="cancelYes" type="button">বাতিল করুন</button>
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .hs-page { min-height: 60vh; padding: 14px 0 40px; }
+    .hs-wrap { max-width: 760px; margin: 0 auto; padding: 0 16px; }
+    #hsMain[hidden], #hsDeny[hidden] { display: none; }
+    .hs-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .hs-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: hsSpin 0.8s linear infinite; }
+    @keyframes hsSpin { to { transform: rotate(360deg); } }
+
+    .hs-back { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 700; color: #64748B; text-decoration: none; margin-bottom: 10px; }
+    .hs-title { margin: 0; font-size: 1.5rem; font-weight: 800; color: #1B2A4A; }
+    .hs-sub { margin: 2px 0 14px; font-size: 0.84rem; color: #64748B; }
+    .hs-muted { font-size: 0.86rem; color: #64748B; padding: 10px 2px; }
+    .hs-num { font-variant-numeric: tabular-nums; }
+
+    /* সংখ্যা */
+    .hs-bal { background: #1B2A4A; color: #fff; border-radius: 18px; padding: 16px 18px 18px; }
+    .hs-bal-lbl { font-size: 0.8rem; font-weight: 600; color: rgba(255,255,255,0.72); }
+    .hs-bal-num { margin-top: 4px; font-size: 2.1rem; font-weight: 800; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+    .hs-bal-num.neg { color: #FFB4A8; }
+    .hs-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .hs-stat { background: #fff; border: 1px solid #E5EAF0; border-radius: 14px; padding: 11px 13px; }
+    .hs-stat-lbl { font-size: 0.74rem; font-weight: 600; color: #64748B; }
+    .hs-stat-num { margin-top: 2px; font-size: 1.12rem; font-weight: 800; color: #1B2A4A; font-variant-numeric: tabular-nums; }
+    .hs-c-income { color: #15803D !important; }
+    .hs-c-expense { color: #B42318 !important; }
+    .hs-c-joma { color: #1D4F9C !important; }
+
+    .hs-btn { border: 0; border-radius: 12px; padding: 12px 18px; font: inherit; font-size: 0.9rem; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; }
+    .hs-btn:active { transform: translateY(1px); }
+    .hs-btn:disabled { opacity: 0.6; cursor: default; }
+    .hs-primary { background: #FF6B35; color: #fff; }
+    .hs-ghost { background: #EEF2F7; color: #1B2A4A; }
+    .hs-danger { background: #B42318; color: #fff; }
+    .hs-add { width: 100%; margin-top: 12px; }
+
+    /* ট্যাব */
+    .hs-tabs { display: flex; gap: 4px; margin-top: 18px; border-bottom: 1px solid #E5EAF0; }
+    .hs-tab { flex: 1; border: 0; background: none; padding: 11px 4px; font: inherit; font-size: 0.86rem; font-weight: 700; color: #64748B; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; min-height: 44px; }
+    .hs-tab.on { color: #1B2A4A; border-bottom-color: #FF6B35; }
+    .hs-panel { margin-top: 12px; }
+    .hs-panel[hidden], .hs-ov[hidden], .hs-sheet [hidden], .hs-dlg [hidden] { display: none !important; }
+
+    .hs-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .hs-flbl { font-size: 0.78rem; font-weight: 700; color: #64748B; }
+    .hs-in { width: 100%; border: 1.5px solid #E5EAF0; border-radius: 12px; padding: 11px 12px; font: inherit; font-size: 16px; color: #1B2A4A; background: #fff; min-height: 44px; }
+    .hs-in:focus { outline: 0; border-color: #FF6B35; }
+    .hs-in-sm { width: auto; flex: 0 1 170px; }
+    .hs-xl { margin-left: auto; padding: 9px 14px; }
+    .hs-check { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; font-size: 0.84rem; font-weight: 600; color: #1B2A4A; }
+    .hs-check-inl { margin: 0 0 0 auto; }
+
+    /* দৈনিক টেবিল */
+    .hs-tblbox { overflow-x: auto; background: #fff; border: 1px solid #E5EAF0; border-radius: 16px; -webkit-overflow-scrolling: touch; }
+    .hs-tbl { width: 100%; min-width: 540px; border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
+    .hs-tbl th { text-align: right; font-size: 0.72rem; font-weight: 700; color: #64748B; padding: 10px 10px; border-bottom: 1px solid #E5EAF0; white-space: nowrap; background: #F8FAFC; }
+    .hs-tbl td { text-align: right; font-size: 0.88rem; font-weight: 600; color: #1B2A4A; padding: 10px 10px; border-bottom: 1px solid #F0F3F7; white-space: nowrap; }
+    .hs-tbl th:first-child, .hs-tbl td:first-child { text-align: left; position: sticky; left: 0; background: #fff; z-index: 1; box-shadow: 1px 0 0 #F0F3F7; }
+    .hs-tbl th:first-child { background: #F8FAFC; }
+    .hs-tbl td:first-child { font-weight: 700; }
+    .hs-wd { display: block; font-size: 0.7rem; font-weight: 600; color: #94A3B8; }
+    .hs-tbl .z { color: #B6C0CE; font-weight: 500; }
+    .hs-tbl tr.today td { background: #FFF8F3; }
+    .hs-tbl tr.today td:first-child { background: #FFF8F3; }
+    .hs-tbl tfoot td { font-weight: 800; border-bottom: 0; background: #F8FAFC; }
+    .hs-tbl tfoot td:first-child { background: #F8FAFC; }
+    .hs-tbl .close { font-weight: 800; }
+    .hs-tbl .neg { color: #B42318; }
+
+    /* এন্ট্রি তালিকা */
+    .hs-esum { font-size: 0.8rem; font-weight: 600; color: #64748B; margin: 8px 2px 8px; line-height: 1.6; }
+    .hs-esum b { font-variant-numeric: tabular-nums; }
+    .hs-row { background: #fff; border: 1px solid #E5EAF0; border-radius: 14px; padding: 11px 12px 11px 14px; margin-bottom: 8px; display: flex; gap: 10px; align-items: flex-start; transition: background 0.6s; }
+    .hs-row.fresh { background: #FFF4EC; }
+    .hs-row.cx { background: #FAFBFC; }
+    .hs-row.cx .hs-r-cat, .hs-row.cx .hs-r-amt { text-decoration: line-through; color: #94A3B8; }
+    .hs-r-main { flex: 1; min-width: 0; }
+    .hs-r-cat { font-size: 0.92rem; font-weight: 700; color: #1B2A4A; line-height: 1.3; word-break: break-word; }
+    .hs-r-note { font-size: 0.8rem; color: #475569; margin-top: 2px; word-break: break-word; }
+    .hs-r-meta { font-size: 0.74rem; color: #94A3B8; margin-top: 3px; }
+    .hs-r-side { text-align: right; flex: none; }
+    .hs-r-amt { font-size: 1rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .hs-r-type { font-size: 0.7rem; font-weight: 700; color: #64748B; }
+    .hs-r-tools { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+    .hs-ic { width: 38px; height: 38px; border-radius: 10px; border: 1px solid #E5EAF0; background: #F8FAFC; color: #1B2A4A; cursor: pointer; font-size: 0.82rem; }
+    .hs-ic.del { color: #B42318; }
+    .hs-tag { display: inline-block; font-size: 0.68rem; font-weight: 700; border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; background: #EEF2F7; color: #475569; }
+    .hs-tag.x { background: #FDE8E5; color: #B42318; }
+
+    /* মাস ও বছর */
+    .hs-card { background: #fff; border: 1px solid #E5EAF0; border-radius: 16px; padding: 14px 14px 6px; margin-bottom: 10px; }
+    .hs-card-h { font-size: 0.92rem; font-weight: 800; color: #1B2A4A; margin-bottom: 6px; }
+    .hs-grp { font-size: 0.72rem; font-weight: 800; color: #64748B; margin: 10px 0 2px; display: flex; justify-content: space-between; }
+    .hs-line { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid #F0F3F7; font-size: 0.88rem; }
+    .hs-line:last-child { border-bottom: 0; }
+    .hs-line span:first-child { color: #1B2A4A; font-weight: 600; min-width: 0; word-break: break-word; }
+    .hs-line span:last-child { font-weight: 800; font-variant-numeric: tabular-nums; flex: none; }
+    .hs-mon { background: #fff; border: 1px solid #E5EAF0; border-radius: 14px; margin-bottom: 8px; overflow: hidden; }
+    .hs-mon-h { width: 100%; border: 0; background: none; padding: 13px 14px; display: flex; align-items: center; gap: 10px; font: inherit; cursor: pointer; text-align: left; min-height: 52px; }
+    .hs-mon-n { font-weight: 800; color: #1B2A4A; font-size: 0.92rem; }
+    .hs-mon-s { margin-left: auto; font-size: 0.76rem; font-weight: 700; color: #64748B; text-align: right; font-variant-numeric: tabular-nums; }
+    .hs-mon-h i { color: #94A3B8; font-size: 0.78rem; transition: transform 0.2s; }
+    .hs-mon-h[aria-expanded="true"] i { transform: rotate(180deg); }
+    .hs-mon-b { padding: 0 14px 8px; }
+
+    /* শিট / ডায়ালগ */
+    .hs-ov { position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, 0.5); display: flex; align-items: flex-end; justify-content: center; }
+    .hs-ov-c { align-items: center; padding: 16px; }
+    .hs-sheet { background: #fff; width: 100%; max-width: 520px; max-height: 92vh; border-radius: 22px 22px 0 0; display: flex; flex-direction: column; animation: hsUp 0.22s ease-out; }
+    @keyframes hsUp { from { transform: translateY(40px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+    .hs-sh-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 10px; }
+    .hs-sh-title { font-size: 1.05rem; font-weight: 800; color: #1B2A4A; }
+    .hs-x { width: 40px; height: 40px; border: 0; border-radius: 12px; background: #F1F5F9; color: #1B2A4A; cursor: pointer; }
+    .hs-sh-body { padding: 0 18px 8px; overflow-y: auto; }
+    .hs-sh-foot { display: flex; gap: 8px; padding: 12px 18px calc(14px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid #EEF2F7; }
+    .hs-sh-foot .hs-primary { flex: 1; }
+    .hs-lbl { display: block; margin: 14px 0 5px; font-size: 0.78rem; font-weight: 700; color: #64748B; }
+    .hs-seg { display: flex; gap: 6px; background: #F1F5F9; border-radius: 14px; padding: 4px; }
+    .hs-seg-b { flex: 1; border: 0; background: none; border-radius: 11px; padding: 11px 6px; font: inherit; font-size: 0.9rem; font-weight: 700; color: #64748B; cursor: pointer; min-height: 44px; }
+    .hs-seg-b[aria-checked="true"] { background: #fff; color: #1B2A4A; box-shadow: 0 1px 4px rgba(27,42,74,0.14); }
+    .hs-seg.lock .hs-seg-b { pointer-events: none; }
+    .hs-seg.lock .hs-seg-b[aria-checked="false"] { display: none; }
+    .hs-amt { display: flex; align-items: center; gap: 6px; border: 1.5px solid #E5EAF0; border-radius: 14px; padding: 4px 14px; background: #fff; }
+    .hs-amt:focus-within { border-color: #FF6B35; }
+    .hs-amt-cur { font-size: 1.5rem; font-weight: 800; color: #94A3B8; }
+    .hs-amt-in { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 1.7rem; font-weight: 800; color: #1B2A4A; padding: 8px 0; font-variant-numeric: tabular-nums; }
+    .hs-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .hs-chip { border: 1.5px solid #E5EAF0; background: #fff; border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 0.8rem; font-weight: 700; color: #475569; cursor: pointer; min-height: 36px; }
+    .hs-chip.on { border-color: #FF6B35; background: #FFF4EC; color: #C2410C; }
+    .hs-time { margin-top: 16px; background: #F8FAFC; border-radius: 14px; padding: 10px 12px; }
+    .hs-time-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .hs-time-lbl { font-size: 0.84rem; font-weight: 600; color: #1B2A4A; }
+    .hs-link { border: 0; background: none; font: inherit; font-size: 0.82rem; font-weight: 700; color: #FF6B35; cursor: pointer; padding: 8px 4px; min-height: 40px; }
+    .hs-time-pick { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .hs-err { margin: 12px 0 0; font-size: 0.84rem; font-weight: 600; color: #B42318; }
+    .hs-dlg { background: #fff; border-radius: 18px; padding: 18px; width: 100%; max-width: 400px; }
+    .hs-dlg-title { font-size: 1.02rem; font-weight: 800; color: #1B2A4A; }
+    .hs-dlg-sum { margin: 10px 0 4px; font-size: 0.9rem; font-weight: 700; color: #1B2A4A; background: #F8FAFC; border-radius: 12px; padding: 10px 12px; }
+    .hs-dlg-note { margin: 8px 0 10px; font-size: 0.8rem; color: #64748B; line-height: 1.5; }
+    .hs-dlg-act { display: flex; gap: 8px; margin-top: 14px; }
+    .hs-dlg-act .hs-btn { flex: 1; }
+    body.hs-lock { overflow: hidden; }
+
+    @media (min-width: 640px) {
+      .hs-ov { align-items: center; }
+      .hs-sheet { border-radius: 22px; }
+    }
+  </style>
+
+  <script>
+    import { onConsoleReady } from '../../lib/consoleApp.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { downloadHisabExcel } from '../../lib/hisabExport.js';
+
+    const $ = (id) => document.getElementById(id);
+    const BD = 'Asia/Dhaka';
+
+    const TYPE = {
+      joma: { label: 'জমা', sign: 1, cls: 'hs-c-joma' },
+      income: { label: 'আয়', sign: 1, cls: 'hs-c-income' },
+      expense: { label: 'খরচ', sign: -1, cls: 'hs-c-expense' },
+    };
+    const HINT = {
+      joma: 'যেমন: কোম্পানিকে জমা',
+      income: 'যেমন: ডেলিভারি ইনকাম',
+      expense: 'যেমন: সেন্ড মানি খরচ, অফিস ভাড়া',
+    };
+    const MON = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+    const MON_S = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে'];
+    const WD = ['রবি', 'সোম', 'মঙ্গল', 'বুধ', 'বৃহ', 'শুক্র', 'শনি'];
+    const BN = '০১২৩৪৫৬৭৮৯';
+
+    // ---------- হেলপার ----------
+    const bn = (v) => String(v).replace(/[0-9]/g, (d) => BN[Number(d)]);
+    const nf = new Intl.NumberFormat('bn-BD', { maximumFractionDigits: 2 });
+    function money(n, signed) {
+      const v = Math.round((Number(n) || 0) * 100) / 100;
+      const s = '৳' + nf.format(Math.abs(v));
+      if (v < 0) return '−' + s;
+      return signed && v > 0 ? '+' + s : s;
+    }
+    function el(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    function bdParts(dt) {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: BD, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+      }).formatToParts(dt);
+      const o = {};
+      parts.forEach((p) => { o[p.type] = p.value; });
+      return { y: o.year, m: o.month, d: o.day, H: Number(o.hour), M: o.minute };
+    }
+    function todayStr() { const p = bdParts(new Date()); return `${p.y}-${p.m}-${p.d}`; }
+    function periodWord(H) {
+      if (H < 5) return 'রাত';
+      if (H < 12) return 'সকাল';
+      if (H < 16) return 'দুপুর';
+      if (H < 18) return 'বিকেল';
+      if (H < 20) return 'সন্ধ্যা';
+      return 'রাত';
+    }
+    function timeOnly(iso) {
+      const p = bdParts(new Date(iso));
+      return `${bn(p.H % 12 || 12)}:${bn(p.M)} ${periodWord(p.H)}`;
+    }
+    function dateTimeLabel(iso) {
+      const p = bdParts(new Date(iso));
+      const cy = bdParts(new Date()).y;
+      return `${bn(Number(p.d))} ${MON_S[Number(p.m) - 1]}${p.y !== cy ? ' ' + bn(p.y) : ''}, ${timeOnly(iso)}`;
+    }
+    function dayLabel(ds) {
+      const [y, m, d] = ds.split('-').map(Number);
+      const cy = Number(bdParts(new Date()).y);
+      return `${bn(d)} ${MON_S[m - 1]}${y !== cy ? ' ' + bn(y) : ''}`;
+    }
+    function weekday(ds) {
+      const [y, m, d] = ds.split('-').map(Number);
+      return WD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+    }
+    function parseAmount(s) {
+      const t = String(s || '').replace(/[০-৯]/g, (d) => String(BN.indexOf(d))).replace(/[,\s৳]/g, '');
+      if (!/^\d+(\.\d{1,2})?$/.test(t)) return NaN;
+      return Number(t);
+    }
+    function monthRange(ym) {
+      const [y, m] = ym.split('-').map(Number);
+      const last = new Date(y, m, 0).getDate();
+      return { from: `${ym}-01`, to: `${ym}-${String(last).padStart(2, '0')}`, label: `${MON[m - 1]} ${bn(y)}` };
+    }
+
+    // ---------- অবস্থা ----------
+    let cats = [];
+    let canManage = false; // hisab.manage (বা সুপার অ্যাডমিন)
+    let tab = 'daily';
+    let freshId = null;
+    let sheet = { mode: 'add', id: null, type: 'income', locked: false, timeOpen: false, auto: '', entry: null };
+
+    function toast(msg, kind) { window.showToast?.(msg, kind || 'success', 2200); }
+
+    // ---------- উপরের সংখ্যা ----------
+    async function loadSummary() {
+      const { data, error } = await supabase.rpc('hisab_summary');
+      if (error || !data || !data[0]) {
+        toast('ব্যালেন্স লোড হয়নি: ' + (error?.message || ''), 'error');
+        return;
+      }
+      const r = data[0];
+      const b = $('sBalance');
+      b.textContent = money(r.balance);
+      b.classList.toggle('neg', Number(r.balance) < 0);
+      $('sYest').textContent = money(r.yesterday_balance);
+      $('sJoma').textContent = money(r.today_joma);
+      $('sIncome').textContent = money(r.today_income);
+      $('sExpense').textContent = money(r.today_expense);
+    }
+
+    async function loadCats() {
+      const { data } = await supabase.from('hisab_categories').select('type,name,is_common,sort_order').order('sort_order').order('name');
+      cats = data || [];
+    }
+    function catsOf(type) {
+      return cats
+        .filter((c) => c.type === type)
+        .sort((a, b) => (b.is_common - a.is_common) || (a.sort_order - b.sort_order) || a.name.localeCompare(b.name, 'bn'));
+    }
+    const isCommon = (type, name) => cats.some((c) => c.type === type && c.name === name && c.is_common);
+
+    // ---------- দৈনিক ----------
+    async function loadDaily() {
+      const wrap = $('dailyWrap');
+      const ym = $('fMonth').value;
+      if (!ym) { wrap.replaceChildren(el('p', 'hs-muted', 'মাস বাছুন')); return; }
+      const { from, to } = monthRange(ym);
+      const { data, error } = await supabase.rpc('hisab_daily', { p_from: from, p_to: to });
+      if (error) { wrap.replaceChildren(el('p', 'hs-err', 'লোড হয়নি: ' + error.message)); return; }
+      const all = (data || []).map((r) => ({
+        day: r.day, opening: Number(r.opening), joma: Number(r.joma), income: Number(r.income), expense: Number(r.expense), closing: Number(r.closing),
+      }));
+      const showAll = $('showAllDays').checked;
+      const today = todayStr();
+      const active = (d) => d.joma + d.income + d.expense > 0;
+      const rows = all.filter((d) => showAll || active(d) || d.day === today).reverse();
+
+      if (!all.some(active)) {
+        wrap.replaceChildren(el('p', 'hs-muted', 'এই মাসে কোনো এন্ট্রি নেই।'));
+        return;
+      }
+
+      const box = el('div', 'hs-tblbox');
+      const tbl = el('table', 'hs-tbl');
+      const thead = el('thead');
+      const hr = el('tr');
+      ['তারিখ', 'আগের ব্যালেন্স', 'জমা', 'আয়', 'খরচ', 'দিন শেষে'].forEach((h) => hr.appendChild(el('th', null, h)));
+      thead.appendChild(hr);
+      tbl.appendChild(thead);
+
+      const tb = el('tbody');
+      const cell = (tr, v, cls) => {
+        const td = el('td', cls || '', v ? money(v) : '–');
+        if (!v) td.classList.add('z');
+        tr.appendChild(td);
+        return td;
+      };
+      rows.forEach((d) => {
+        const tr = el('tr', d.day === today ? 'today' : '');
+        const td0 = el('td');
+        td0.appendChild(document.createTextNode(dayLabel(d.day)));
+        td0.appendChild(el('span', 'hs-wd', weekday(d.day)));
+        tr.appendChild(td0);
+        const o = el('td', '', money(d.opening)); if (d.opening < 0) o.classList.add('neg'); tr.appendChild(o);
+        cell(tr, d.joma, d.joma ? 'hs-c-joma' : '');
+        cell(tr, d.income, d.income ? 'hs-c-income' : '');
+        cell(tr, d.expense, d.expense ? 'hs-c-expense' : '');
+        const c = el('td', 'close', money(d.closing)); if (d.closing < 0) c.classList.add('neg'); tr.appendChild(c);
+        tb.appendChild(tr);
+      });
+      tbl.appendChild(tb);
+
+      const sum = (k) => all.reduce((n, d) => n + d[k], 0);
+      const tf = el('tfoot');
+      const fr = el('tr');
+      fr.appendChild(el('td', '', 'মাসের মোট'));
+      fr.appendChild(el('td', '', money(all[0].opening)));
+      fr.appendChild(el('td', 'hs-c-joma', money(sum('joma'))));
+      fr.appendChild(el('td', 'hs-c-income', money(sum('income'))));
+      fr.appendChild(el('td', 'hs-c-expense', money(sum('expense'))));
+      fr.appendChild(el('td', '', money(all[all.length - 1].closing)));
+      tf.appendChild(fr);
+      tbl.appendChild(tf);
+
+      box.appendChild(tbl);
+      wrap.replaceChildren(box);
+    }
+
+    // ---------- সব এন্ট্রি ----------
+    async function fetchEntries(ym, type, withCancelled) {
+      const { from, to } = monthRange(ym);
+      let q = supabase.from('hisab_entries')
+        .select('id,entry_at,entry_date,type,category,amount,note,status,cancel_reason,source_type,created_by_name,cancelled_by_name')
+        .gte('entry_date', from).lte('entry_date', to)
+        .order('entry_at', { ascending: false }).limit(500);
+      if (type) q = q.eq('type', type);
+      if (!withCancelled) q = q.eq('status', 'active');
+      return q;
+    }
+
+    async function loadEntries() {
+      const wrap = $('entriesWrap');
+      const ym = $('fMonth').value;
+      if (!ym) { wrap.replaceChildren(el('p', 'hs-muted', 'মাস বাছুন')); return; }
+      const { data, error } = await fetchEntries(ym, $('fType').value, $('showCancelled').checked);
+      if (error) { wrap.replaceChildren(el('p', 'hs-err', 'লোড হয়নি: ' + error.message)); return; }
+      const rows = data || [];
+
+      const sum = { joma: 0, income: 0, expense: 0 };
+      rows.forEach((r) => { if (r.status === 'active') sum[r.type] += Number(r.amount); });
+      const es = $('entriesSum');
+      es.replaceChildren();
+      if (rows.length) {
+        es.appendChild(document.createTextNode(`${bn(rows.length)}টি এন্ট্রি · জমা `));
+        es.appendChild(el('b', 'hs-c-joma', money(sum.joma)));
+        es.appendChild(document.createTextNode(' · আয় '));
+        es.appendChild(el('b', 'hs-c-income', money(sum.income)));
+        es.appendChild(document.createTextNode(' · খরচ '));
+        es.appendChild(el('b', 'hs-c-expense', money(sum.expense)));
+      }
+
+      if (!rows.length) { wrap.replaceChildren(el('p', 'hs-muted', 'কোনো এন্ট্রি নেই।')); return; }
+
+      const frag = document.createDocumentFragment();
+      rows.forEach((r) => {
+        const t = TYPE[r.type];
+        const cx = r.status === 'cancelled';
+        const row = el('div', 'hs-row' + (cx ? ' cx' : '') + (r.id === freshId ? ' fresh' : ''));
+
+        const main = el('div', 'hs-r-main');
+        const cat = el('div', 'hs-r-cat', r.category);
+        if (r.source_type) cat.appendChild(el('span', 'hs-tag', 'অটো'));
+        if (cx) cat.appendChild(el('span', 'hs-tag x', 'বাতিল'));
+        main.appendChild(cat);
+        if (r.note) main.appendChild(el('div', 'hs-r-note', r.note));
+        if (cx && r.cancel_reason) main.appendChild(el('div', 'hs-r-note', 'কারণ: ' + r.cancel_reason));
+        if (cx && r.cancelled_by_name) main.appendChild(el('div', 'hs-r-note', 'বাতিল করেছেন: ' + r.cancelled_by_name));
+        main.appendChild(el('div', 'hs-r-meta', `#${bn(r.id)} · ${dateTimeLabel(r.entry_at)}${r.created_by_name ? ' · ' + r.created_by_name : ''}`));
+        row.appendChild(main);
+
+        const side = el('div', 'hs-r-side');
+        side.appendChild(el('div', 'hs-r-amt ' + t.cls, money(t.sign * Number(r.amount), true)));
+        side.appendChild(el('div', 'hs-r-type', t.label));
+        if (!cx && canManage) {
+          const tools = el('div', 'hs-r-tools');
+          const eb = el('button', 'hs-ic'); eb.type = 'button'; eb.setAttribute('aria-label', 'এডিট'); eb.innerHTML = '<i class="fas fa-pen"></i>';
+          eb.addEventListener('click', () => openSheet('edit', r));
+          const db = el('button', 'hs-ic del'); db.type = 'button'; db.setAttribute('aria-label', 'বাতিল করুন'); db.innerHTML = '<i class="fas fa-ban"></i>';
+          db.addEventListener('click', () => openCancel(r));
+          tools.appendChild(eb); tools.appendChild(db);
+          side.appendChild(tools);
+        }
+        row.appendChild(side);
+        frag.appendChild(row);
+      });
+      wrap.replaceChildren(frag);
+      if (freshId) setTimeout(() => { wrap.querySelectorAll('.fresh').forEach((n) => n.classList.remove('fresh')); freshId = null; }, 1800);
+    }
+
+    // ---------- মাস ও বছর ----------
+    function buildYearOptions() {
+      const sel = $('fYear');
+      const cy = Number(bdParts(new Date()).y);
+      sel.replaceChildren();
+      for (let y = cy; y >= 2026; y--) sel.appendChild(new Option(bn(y), String(y)));
+      sel.value = String(cy);
+    }
+
+    function groupedLines(parent, items) {
+      // items: [{type, category, total}] → আয়, খরচ, জমা ক্রমে; কমন খাত আগে
+      ['income', 'expense', 'joma'].forEach((type) => {
+        const list = items.filter((i) => i.type === type);
+        if (!list.length) return;
+        list.sort((a, b) => (isCommon(type, b.category) - isCommon(type, a.category)) || (b.total - a.total));
+        const total = list.reduce((n, i) => n + i.total, 0);
+        const g = el('div', 'hs-grp');
+        g.appendChild(el('span', null, TYPE[type].label));
+        g.appendChild(el('span', TYPE[type].cls, money(total)));
+        parent.appendChild(g);
+        list.forEach((i) => {
+          const ln = el('div', 'hs-line');
+          ln.appendChild(el('span', null, i.category));
+          ln.appendChild(el('span', TYPE[type].cls, money(i.total)));
+          parent.appendChild(ln);
+        });
+      });
+    }
+
+    async function loadMonths() {
+      const wrap = $('monthsWrap');
+      const year = Number($('fYear').value);
+      const { data, error } = await supabase.rpc('hisab_monthly', { p_year: year });
+      if (error) { wrap.replaceChildren(el('p', 'hs-err', 'লোড হয়নি: ' + error.message)); return; }
+      const rows = (data || []).map((r) => ({ month: Number(r.month), type: r.type, category: r.category, total: Number(r.total) }));
+      if (!rows.length) { wrap.replaceChildren(el('p', 'hs-muted', `${bn(year)} সালে কোনো এন্ট্রি নেই।`)); return; }
+
+      const frag = document.createDocumentFragment();
+
+      // সারা বছর
+      const yearMap = new Map();
+      rows.forEach((r) => {
+        const k = r.type + '|' + r.category;
+        yearMap.set(k, { type: r.type, category: r.category, total: (yearMap.get(k)?.total || 0) + r.total });
+      });
+      const yc = el('div', 'hs-card');
+      yc.appendChild(el('div', 'hs-card-h', `সারা বছর (${bn(year)})`));
+      groupedLines(yc, [...yearMap.values()]);
+      frag.appendChild(yc);
+
+      // মাস ধরে (নতুন আগে)
+      const curM = Number(bdParts(new Date()).m);
+      const curY = Number(bdParts(new Date()).y);
+      const months = [...new Set(rows.map((r) => r.month))].sort((a, b) => b - a);
+      months.forEach((m) => {
+        const items = rows.filter((r) => r.month === m);
+        const inc = items.filter((i) => i.type === 'income').reduce((n, i) => n + i.total, 0);
+        const exp = items.filter((i) => i.type === 'expense').reduce((n, i) => n + i.total, 0);
+        const open = year === curY && m === curM;
+
+        const box = el('div', 'hs-mon');
+        const head = el('button', 'hs-mon-h');
+        head.type = 'button';
+        head.setAttribute('aria-expanded', open ? 'true' : 'false');
+        head.appendChild(el('span', 'hs-mon-n', MON[m - 1]));
+        head.appendChild(el('span', 'hs-mon-s', `আয় ${money(inc)} · খরচ ${money(exp)}`));
+        const ch = document.createElement('i'); ch.className = 'fas fa-chevron-down'; head.appendChild(ch);
+        const body = el('div', 'hs-mon-b');
+        body.hidden = !open;
+        groupedLines(body, items);
+        head.addEventListener('click', () => {
+          const ex = head.getAttribute('aria-expanded') === 'true';
+          head.setAttribute('aria-expanded', ex ? 'false' : 'true');
+          body.hidden = ex;
+        });
+        box.appendChild(head);
+        box.appendChild(body);
+        frag.appendChild(box);
+      });
+      wrap.replaceChildren(frag);
+    }
+
+    // ---------- ট্যাব ----------
+    function setTab(t) {
+      tab = t;
+      document.querySelectorAll('.hs-tab').forEach((b) => {
+        const on = b.dataset.tab === t;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      ['daily', 'entries', 'months'].forEach((k) => { $('panel-' + k).hidden = k !== t; });
+      $('monthBar').style.display = t === 'months' ? 'none' : '';
+      refreshTab();
+    }
+    function refreshTab() {
+      if (tab === 'daily') loadDaily();
+      else if (tab === 'entries') loadEntries();
+      else loadMonths();
+    }
+    async function refreshAll() { await Promise.all([loadSummary(), loadCats()]); refreshTab(); }
+
+    // ---------- এন্ট্রি ফর্ম ----------
+    function setType(type) {
+      const prev = sheet.type;
+      sheet.type = type;
+      $('typeSeg').querySelectorAll('.hs-seg-b').forEach((b) => b.setAttribute('aria-checked', b.dataset.type === type ? 'true' : 'false'));
+      $('fCategory').placeholder = HINT[type];
+      if (sheet.mode === 'add') {
+        const cur = $('fCategory').value.trim();
+        const first = catsOf(type).find((c) => c.is_common);
+        if (!cur || cur === sheet.auto || (prev !== type && isCommon(prev, cur))) {
+          sheet.auto = first ? first.name : '';
+          $('fCategory').value = sheet.auto;
+        }
+      }
+      renderChips();
+    }
+    function renderChips() {
+      const box = $('chips');
+      box.replaceChildren();
+      const cur = $('fCategory').value.trim();
+      catsOf(sheet.type).slice(0, 8).forEach((c) => {
+        const b = el('button', 'hs-chip' + (c.name === cur ? ' on' : ''), c.name);
+        b.type = 'button';
+        b.addEventListener('click', () => { $('fCategory').value = c.name; sheet.auto = ''; renderChips(); });
+        box.appendChild(b);
+      });
+    }
+    function sheetErr(msg) {
+      const e = $('sheetErr');
+      e.hidden = !msg;
+      e.textContent = msg || '';
+      if (msg) toast(msg, 'error');
+    }
+    function setTimeOpen(open) {
+      sheet.timeOpen = open;
+      $('timePick').hidden = !open;
+      $('timeToggle').textContent = open ? 'এখনকার সময়' : 'সময় বদলান';
+      $('timeLbl').textContent = open ? 'সময় বাছুন (বাংলাদেশ সময়)' : (sheet.mode === 'edit' && sheet.entry ? 'সময়: ' + dateTimeLabel(sheet.entry.entry_at) : 'সময়: এখন (বাংলাদেশ সময়)');
+    }
+    function fillTime(iso) {
+      const p = bdParts(iso ? new Date(iso) : new Date());
+      $('tDate').value = `${p.y}-${p.m}-${p.d}`;
+      $('tTime').value = `${String(p.H).padStart(2, '0')}:${p.M}`;
+    }
+
+    async function openSheet(mode, entry) {
+      if (!cats.length) await loadCats();
+      sheet = { mode, id: entry ? entry.id : null, type: entry ? entry.type : 'income', locked: mode === 'edit', timeOpen: false, auto: '', entry: entry || null };
+      const auto = !!(entry && entry.source_type);
+
+      $('sheetTitle').textContent = mode === 'edit' ? 'এন্ট্রি এডিট' : 'নতুন এন্ট্রি';
+      $('typeSeg').classList.toggle('lock', mode === 'edit');
+      $('fAmount').value = entry ? String(Number(entry.amount)) : '';
+      $('fCategory').value = entry ? entry.category : '';
+      $('fNote').value = entry && entry.note ? entry.note : '';
+      $('fAmount').disabled = auto;
+      $('fCategory').disabled = auto;
+      $('timeToggle').hidden = auto;
+      $('sheetSave').textContent = 'সেভ করুন';
+      $('sheetSave').disabled = false;
+      sheetErr('');
+      document.querySelectorAll('#sheetBox .field-error-msg').forEach((n) => n.classList.remove('show'));
+
+      fillTime(entry ? entry.entry_at : null);
+      setType(sheet.type);
+      if (mode === 'edit') { $('fCategory').value = entry.category; renderChips(); }
+      setTimeOpen(false);
+
+      $('sheetOv').hidden = false;
+      document.body.classList.add('hs-lock');
+      setTimeout(() => { (auto ? $('fNote') : $('fAmount')).focus(); }, 60);
+    }
+    function closeSheet() {
+      $('sheetOv').hidden = true;
+      document.body.classList.remove('hs-lock');
+    }
+
+    async function saveSheet() {
+      sheetErr('');
+      if (!window.SFValidateForm($('sheetBox'))) return sheetErr('লাল চিহ্নিত ঘরগুলো পূরণ করুন।');
+      const amount = parseAmount($('fAmount').value);
+      const category = $('fCategory').value.trim();
+      const note = $('fNote').value.trim();
+      if (!Number.isFinite(amount) || amount <= 0) return sheetErr('পরিমাণ ঠিকমতো লিখুন (শুধু সংখ্যা, দশমিকের পর সর্বোচ্চ ২ ঘর)।');
+      if (!category) return sheetErr('খাতের নাম লিখুন।');
+
+      let entryAt = null;
+      if (sheet.timeOpen) {
+        const d = $('tDate').value;
+        const t = $('tTime').value;
+        if (!d || !t) return sheetErr('তারিখ ও সময় দুটোই বাছুন।');
+        entryAt = `${d}T${t}:00+06:00`;
+      }
+
+      const btn = $('sheetSave');
+      btn.disabled = true;
+      btn.textContent = 'সেভ হচ্ছে...';
+
+      let res;
+      if (sheet.mode === 'edit') {
+        res = await supabase.rpc('hisab_edit_entry', { p_id: sheet.id, p_category: category, p_amount: amount, p_note: note || null, p_entry_at: entryAt });
+      } else {
+        res = await supabase.rpc('hisab_add_entry', { p_type: sheet.type, p_category: category, p_amount: amount, p_note: note || null, p_entry_at: entryAt });
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'সেভ করুন';
+      if (res.error) return sheetErr('সেভ হয়নি: ' + res.error.message);
+
+      freshId = sheet.mode === 'edit' ? sheet.id : res.data;
+      closeSheet();
+      toast(sheet.mode === 'edit' ? 'এডিট হয়েছে ✓' : 'এন্ট্রি সেভ হয়েছে ✓');
+      await refreshAll();
+    }
+
+    // ---------- বাতিল ----------
+    let cancelTarget = null;
+    function openCancel(r) {
+      cancelTarget = r;
+      $('cancelSum').textContent = `${TYPE[r.type].label} · ${r.category} · ${money(r.amount)}`;
+      $('cancelReason').value = '';
+      $('cancelYes').disabled = false;
+      $('cancelYes').textContent = 'বাতিল করুন';
+      $('cancelOv').hidden = false;
+      document.body.classList.add('hs-lock');
+    }
+    function closeCancel() {
+      $('cancelOv').hidden = true;
+      document.body.classList.remove('hs-lock');
+      cancelTarget = null;
+    }
+    async function doCancel() {
+      if (!cancelTarget) return;
+      const btn = $('cancelYes');
+      btn.disabled = true;
+      btn.textContent = 'বাতিল হচ্ছে...';
+      const { error } = await supabase.rpc('hisab_cancel_entry', { p_id: cancelTarget.id, p_reason: $('cancelReason').value.trim() || null });
+      if (error) {
+        btn.disabled = false;
+        btn.textContent = 'বাতিল করুন';
+        toast('বাতিল হয়নি: ' + error.message, 'error');
+        return;
+      }
+      closeCancel();
+      toast('এন্ট্রি বাতিল হয়েছে');
+      await refreshAll();
+    }
+
+    // ---------- Excel ----------
+    async function exportExcel() {
+      const ym = $('fMonth').value;
+      if (!ym) return toast('আগে মাস বাছুন', 'error');
+      const btn = $('xlBtn');
+      btn.disabled = true;
+      try {
+        const { from, to, label } = monthRange(ym);
+        const [d, e] = await Promise.all([
+          supabase.rpc('hisab_daily', { p_from: from, p_to: to }),
+          fetchEntries(ym, '', true),
+        ]);
+        if (d.error) throw d.error;
+        if (e.error) throw e.error;
+        const active = (r) => Number(r.joma) + Number(r.income) + Number(r.expense) > 0;
+        const daily = (d.data || []).filter(active).map((r) => ({
+          day: r.day, opening: Number(r.opening), joma: Number(r.joma), income: Number(r.income), expense: Number(r.expense), closing: Number(r.closing),
+        }));
+        const entries = (e.data || []).slice().reverse().map((r) => ({
+          id: r.id, entry_date: r.entry_date, time_label: timeOnly(r.entry_at), type: r.type, category: r.category,
+          amount: Number(r.amount), note: r.note, status: r.status, created_by_name: r.created_by_name, cancelled_by_name: r.cancelled_by_name,
+        }));
+        if (!daily.length && !entries.length) { toast('এই মাসে কোনো এন্ট্রি নেই', 'error'); return; }
+        const where = await downloadHisabExcel({ title: label, daily, entries }, `hisab-${ym}.xlsx`);
+        toast(where === 'native' ? 'ফোনের Documents/SmartFeni ফোল্ডারে সেভ হয়েছে ✓' : 'Excel ডাউনলোড হচ্ছে ✓');
+      } catch (err) {
+        toast('Excel বানানো যায়নি: ' + (err?.message || ''), 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ---------- ইভেন্ট ----------
+    document.querySelectorAll('.hs-tab').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+    $('addBtn').addEventListener('click', () => openSheet('add', null));
+    $('sheetClose').addEventListener('click', closeSheet);
+    $('sheetCancel').addEventListener('click', closeSheet);
+    $('sheetSave').addEventListener('click', saveSheet);
+    $('typeSeg').addEventListener('click', (ev) => {
+      const b = ev.target.closest('.hs-seg-b');
+      if (b && !sheet.locked) setType(b.dataset.type);
+    });
+    $('fCategory').addEventListener('input', () => { sheet.auto = ''; renderChips(); });
+    $('fAmount').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); saveSheet(); } });
+    $('timeToggle').addEventListener('click', () => {
+      if (!sheet.timeOpen) { if (!sheet.entry) fillTime(null); setTimeOpen(true); } else setTimeOpen(false);
+    });
+    $('sheetOv').addEventListener('click', (ev) => { if (ev.target === $('sheetOv')) closeSheet(); });
+    $('cancelNo').addEventListener('click', closeCancel);
+    $('cancelYes').addEventListener('click', doCancel);
+    $('cancelOv').addEventListener('click', (ev) => { if (ev.target === $('cancelOv')) closeCancel(); });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return;
+      if (!$('cancelOv').hidden) closeCancel();
+      else if (!$('sheetOv').hidden) closeSheet();
+    });
+    $('fMonth').addEventListener('change', refreshTab);
+    $('fType').addEventListener('change', loadEntries);
+    $('showCancelled').addEventListener('change', loadEntries);
+    $('showAllDays').addEventListener('change', loadDaily);
+    $('fYear').addEventListener('change', loadMonths);
+    $('xlBtn').addEventListener('click', exportExcel);
+
+    onConsoleReady((ctx) => {
+      // সুপার অ্যাডমিন, অথবা রোলে "হিসাব — দেখা" থাকা স্টাফ (পুরনো পেজের একই নিয়ম)
+      const acc = ctx.access;
+      const isSuper = !!ctx.isSuper;
+      const canView = isSuper || !!(acc && acc.isStaff && acc.can('hisab.view'));
+      if (!canView) { $('hsDeny').hidden = false; return; }
+      $('hsMain').hidden = false;
+      canManage = isSuper || !!(acc && acc.isStaff && acc.can('hisab.manage'));
+      $('addBtn').style.display = canManage ? '' : 'none';
+      const t = todayStr();
+      $('fMonth').value = t.slice(0, 7);
+      buildYearOptions();
+      refreshAll();
+    });
+  </script>
+</ConsoleShell>
