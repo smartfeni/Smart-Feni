@@ -7,7 +7,7 @@
 //
 // নিয়ম: অ্যাডমিন (role=admin) ও মডারেটর ঢুকতে পারে; স্টাফের অনুমতি access.can(...)
 // (adminGuard.js-এর loadAccess, পুরনো প্যানেলের হুবহু নিয়ম)। লগইন না থাকলে
-// /pro/login?next=... (লগইন পেজ শেয়ার্ড)। পুরনো /admin প্যানেল অপরিবর্তিত।
+// /console/login?next=... (অ্যাডমিন ব্র্যান্ডের লগইন, লজিক proLogin.js)। পুরনো /admin প্যানেল অপরিবর্তিত।
 // ============================================================
 import { supabase } from './supabase.js';
 import { loadAccess, adminAreaOfPath } from './adminGuard.js';
@@ -66,7 +66,7 @@ export async function initConsole() {
 
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
-    window.location.replace('/pro/login?next=' + encodeURIComponent(location.pathname + location.search));
+    window.location.replace('/console/login?next=' + encodeURIComponent(location.pathname + location.search));
     return;
   }
 
