@@ -163,7 +163,8 @@ const ASSIGN_FAIL = {
   same_rider: 'এই রাইডারই এখন অর্ডারটি করছেন, অন্য রাইডার বাছুন।',
 };
 
-function assign(o, transfer, reload) {
+// multi = [{id, order_no}] হলে এক রাইডারকে অনেক অর্ডার (প্রতিটার নিজের চার্জে)
+function assign(o, transfer, reload, multi = null) {
   let riders = [];
   let pick = null;
   let listBox = null;
@@ -197,10 +198,13 @@ function assign(o, transfer, reload) {
   };
 
   openSheet({
-    title: transfer ? 'রাইডার বদলান' : 'রাইডারকে দিন',
-    line: orderLine(o),
+    title: transfer ? 'রাইডার বদলান' : multi ? bn(multi.length) + 'টা অর্ডার এক রাইডারকে' : 'রাইডারকে দিন',
+    line: multi ? multi.map((x) => x.order_no).join(', ') : orderLine(o),
     okText: transfer ? 'রাইডার বদলান' : 'রাইডারকে দিন',
     build: (b) => {
+      if (multi) {
+        b.appendChild(el('p', 'oa-hint', 'প্রতিটা অর্ডার তার নিজের ডেলিভারি চার্জেই রাইডারকে দেওয়া হবে।'));
+      } else {
       const price = el('input', 'oa-input');
       price.type = 'number';
       price.inputMode = 'numeric';
@@ -209,6 +213,7 @@ function assign(o, transfer, reload) {
       price.name = 'price';
       price.value = o.price ? String(Math.round(o.price)) : '';
       field(b, o.category === 'ride' ? 'ভাড়া (৳)' : 'ডেলিভারি চার্জ (৳)', price, true);
+      }
 
       search = el('input', 'oa-input');
       search.type = 'search';
@@ -236,6 +241,22 @@ function assign(o, transfer, reload) {
     submit: async (b) => {
       const rider = riders.find((r) => r.rider_id === pick);
       if (!rider) return { error: 'একজন রাইডার বাছুন।' };
+      if (multi) {
+        const pr = await supabase.rpc('admin_search_orders', { p_group: 'live', p_filter: 'unpublished', p_limit: 100 });
+        const map = {};
+        ((pr.data && pr.data.items) || []).forEach((it) => { map[it.id] = it.price; });
+        let done = 0;
+        const fails = [];
+        for (const x of multi) {
+          const pz = map[x.id];
+          if (!pz) { fails.push(x.order_no); continue; }
+          const res = await supabase.rpc('admin_assign_delivery_order', { p_request_id: x.id, p_rider_id: rider.rider_id, p_price: pz });
+          if (res.error || !res.data || !res.data.ok) fails.push(x.order_no); else done += 1;
+        }
+        if (done) { toast(bn(done) + 'টা অর্ডার ' + (rider.name || 'রাইডার') + '-কে দেওয়া হয়েছে' + (fails.length ? ' · ' + bn(fails.length) + 'টা হয়নি' : ''), fails.length ? 'error' : 'success'); reload(); }
+        if (!done) return { error: 'একটাও দেওয়া যায়নি (' + fails.join(', ') + ')। অর্ডারগুলো আর অপেক্ষায় নেই বা চার্জ ঠিক নেই।' };
+        return undefined;
+      }
       const price = parseFloat(b.querySelector('input[name="price"]').value);
       if (isNaN(price) || price <= 0 || price > 1000000) return { error: 'চার্জ সঠিক দিন।' };
       const { data, error } = transfer
@@ -482,4 +503,28 @@ export function renderReleaseButtons({ box, data, canManage, reload }) {
   no.addEventListener('click', () => reviewRelease(o, false, reload));
   row.append(yes, no);
   box.appendChild(row);
+}
+
+// ---------------- ব্যাচ (তালিকা পেজের "এলাকা ও দোকান" ভিউ) ----------------
+export function publishMany(list, label, reload) {
+  openSheet({
+    title: bn(list.length) + 'টা অর্ডার পাবলিশ করবেন?',
+    line: label,
+    build: (b) => {
+      b.appendChild(el('p', 'oa-hint', list.map((x) => x.order_no).join(', ')));
+      b.appendChild(el('p', 'oa-hint', 'পাবলিশ করলে অনলাইন রাইডাররা এগুলো দেখবে ও অফার দিতে পারবে।'));
+    },
+    okText: 'পাবলিশ করুন',
+    submit: async () => {
+      const { data, error } = await supabase.rpc('admin_publish_delivery_orders', { p_ids: list.map((x) => x.id) });
+      if (error || !data || !data.ok) return { error: 'পাবলিশ করা যায়নি।' };
+      toast(bn(data.published || 0) + 'টা পাবলিশ হয়েছে' + (data.skipped ? ' · ' + bn(data.skipped) + 'টা আগেই পাবলিশ/বাতিল' : ''));
+      reload();
+      return undefined;
+    },
+  });
+}
+
+export function assignMany(list, reload) {
+  assign({ category: 'delivery' }, false, reload, list);
 }

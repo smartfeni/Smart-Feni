@@ -7,7 +7,8 @@
 // ট্যাব: নতুন (পাবলিশের অপেক্ষা/হোল্ড) · চলমান · শেষ (সম্পন্ন/বাতিল/মেয়াদ শেষ)
 // কার্ডে চাপলে /console/order?no=... (বিস্তারিত)।
 // পাবলিশ/অ্যাসাইন/বাতিলের মতো কাজ এখনো পুরনো প্যানেলে (ভাগ ২-এ এখানে আসবে)।
-// URL: ?tab=new|live|history&q=...
+// নতুন ট্যাবে "এলাকা ও দোকান অনুযায়ী" = ব্যাচ (admin_delivery_batches union/shop): বেছে একসাথে পাবলিশ/এক রাইডারকে।
+// URL: ?tab=new|live|history&q=...&view=batch
 // ============================================================
 export const prerender = false;
 import ConsoleShell from '../../components/console/ConsoleShell.astro';
@@ -32,6 +33,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
       <div class="or-bar">
         <input type="search" id="orQ" placeholder="অর্ডার নম্বর, ফোন বা নাম" aria-label="অর্ডার খুঁজুন" />
         <div class="or-cats" id="orCats" role="group" aria-label="ধরন"></div>
+        <div class="or-cats" id="orView" role="group" aria-label="কীভাবে দেখাবে" hidden></div>
       </div>
       <p class="or-hint" id="orHint" hidden></p>
       <div class="or-list" id="orList"></div>
@@ -54,6 +56,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   .or-bar input { width: 100%; box-sizing: border-box; height: 44px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; padding: 0 14px; font: inherit; font-size: 15px; color: #1B2A4A; }
   .or-bar input:focus { outline: 2px solid #1B2A4A; outline-offset: -1px; }
   .or-cats { display: flex; gap: 8px; }
+  .or-cats[hidden] { display: none; }
   .or-cats button { height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
   .or-cats button[aria-pressed="true"] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
   .or-hint { margin: 0; font-size: 13px; color: #5F6B7E; }
@@ -72,6 +75,20 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   .or-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: #5F6B7E; }
   .or-meta b { color: #1B2A4A; font-weight: 700; }
   .or-flag { font-size: 12.5px; font-weight: 600; color: #B23A0B; }
+  .or-group { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 13px 15px; display: flex; flex-direction: column; gap: 8px; }
+  .or-gh { display: flex; align-items: center; gap: 8px; }
+  .or-gtype { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: #EAF1FF; color: #1D4ED8; }
+  .or-gtype.shop { background: #FFF4E0; color: #8A4B00; }
+  .or-gname { font-weight: 700; font-size: 15.5px; overflow-wrap: anywhere; flex: 1; min-width: 0; }
+  .or-gsub { font-size: 12.5px; color: #5F6B7E; }
+  .or-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .or-pick { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #E7E2DA; border-radius: 999px; padding: 4px 10px 4px 6px; font-size: 13px; }
+  .or-pick input { width: 18px; height: 18px; margin: 0; accent-color: #1B2A4A; }
+  .or-pick a { color: #1B2A4A; font-weight: 600; text-decoration: none; }
+  .or-gbtns { display: flex; gap: 8px; }
+  .or-gbtns button { flex: 1; height: 44px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .or-gbtns button.primary { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .or-gbtns button:disabled { opacity: .5; cursor: default; }
   .or-empty { padding: 26px 16px; text-align: center; display: flex; flex-direction: column; gap: 4px; }
   .or-empty b { font-size: 15px; }
   .or-more { align-self: center; height: 42px; padding: 0 22px; border-radius: 999px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-weight: 600; cursor: pointer; }
@@ -82,6 +99,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   import { onConsoleReady, canOpenAdminPath, bn, agoLabel } from '../../lib/consoleApp.js';
   import { splitMapLink } from '../../lib/mapLinks.js';
   import { ORDER_STATUS, orderStatusOf, money } from '../../lib/consoleOrders.js';
+  import { publishMany, assignMany } from '../../lib/consoleOrderActions.js';
 
   const $ = (id) => document.getElementById(id);
   const PAGE = 20;
@@ -97,10 +115,13 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
     tab: TABS.some((t) => t.k === params.get('tab')) ? params.get('tab') : 'new',
     cat: '',
     q: (params.get('q') || '').slice(0, 60),
+    view: params.get('view') === 'batch' ? 'batch' : 'list',
     offset: 0,
     total: 0,
   };
   let seq = 0;
+  let canManage = false;
+  const isBatch = () => state.tab === 'new' && !state.q && state.view === 'batch';
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -113,6 +134,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
     const u = new URL(location.href);
     u.searchParams.set('tab', state.tab);
     if (state.q) u.searchParams.set('q', state.q); else u.searchParams.delete('q');
+    if (state.tab === 'new' && state.view === 'batch') u.searchParams.set('view', 'batch'); else u.searchParams.delete('view');
     history.replaceState(null, '', u.pathname + u.search);
   }
 
@@ -131,10 +153,100 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
         state.tab = t.k;
         if (state.q) { state.q = ''; $('orQ').value = ''; }
         renderTabs(lastCounts);
+        renderView();
         loadList(true);
       });
       box.appendChild(b);
     });
+  }
+
+  function renderView() {
+    const box = $('orView');
+    box.hidden = !(state.tab === 'new' && !state.q);
+    $('orCats').hidden = isBatch();
+    box.textContent = '';
+    [['list', 'একটা একটা'], ['batch', 'এলাকা ও দোকান অনুযায়ী']].forEach(([k, name]) => {
+      const b = el('button', null, name);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(k === state.view));
+      b.addEventListener('click', () => {
+        if (state.view === k) return;
+        state.view = k;
+        renderView();
+        loadList(true);
+      });
+      box.appendChild(b);
+    });
+  }
+
+  const GTYPE = { union: 'ইউনিয়ন', upazila: 'উপজেলা', shop: 'দোকান' };
+  function ageText(at) {
+    const m = Math.max(0, Math.floor((Date.now() - new Date(at).getTime()) / 60000));
+    if (m < 60) return bn(m) + ' মিনিট';
+    if (m < 1440) return bn(Math.floor(m / 60)) + ' ঘণ্টা';
+    return bn(Math.floor(m / 1440)) + ' দিন';
+  }
+
+  function groupCard(g) {
+    const box = el('div', 'or-group');
+    const h = el('div', 'or-gh');
+    h.appendChild(el('span', 'or-gtype' + (g._type === 'shop' ? ' shop' : ''), GTYPE[g._type] || ''));
+    h.appendChild(el('span', 'or-gname', g.label || '—'));
+    box.appendChild(h);
+    box.appendChild(el('div', 'or-gsub', bn(g.count || 0) + 'টা অর্ডার' + (g._type === 'shop' ? ', একই দোকান থেকে' : '') + (g.oldest ? ' · সবচেয়ে পুরনোটা ' + ageText(g.oldest) + ' ধরে অপেক্ষায়' : '')));
+    const picks = el('div', 'or-picks');
+    const nos = g.order_nos || [];
+    const ids = g.order_ids || [];
+    nos.forEach((no, i) => {
+      const lab = el('label', 'or-pick');
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.checked = true;
+      cb.dataset.id = ids[i] || '';
+      cb.dataset.no = no;
+      cb.setAttribute('aria-label', no + ' বাছুন');
+      const a = el('a', null, no);
+      a.href = '/console/order?no=' + encodeURIComponent(no);
+      lab.append(cb, a);
+      picks.appendChild(lab);
+    });
+    box.appendChild(picks);
+    if (canManage) {
+      const btns = el('div', 'or-gbtns');
+      const pub = el('button', 'primary');
+      pub.type = 'button';
+      const as = el('button', null, 'এক রাইডারকে দিন');
+      as.type = 'button';
+      btns.append(pub, as);
+      box.appendChild(btns);
+      const sel = () => [...picks.querySelectorAll('input:checked')].filter((c) => c.dataset.id).map((c) => ({ id: c.dataset.id, order_no: c.dataset.no }));
+      const sync = () => { const n = sel().length; pub.textContent = bn(n) + 'টা পাবলিশ করুন'; pub.disabled = !n; as.disabled = !n; };
+      picks.addEventListener('change', sync);
+      sync();
+      const after = () => { loadCounts(); loadList(true); };
+      pub.addEventListener('click', () => publishMany(sel(), (GTYPE[g._type] || '') + ': ' + (g.label || ''), after));
+      as.addEventListener('click', () => assignMany(sel(), after));
+    }
+    return box;
+  }
+
+  async function loadBatches(my, silent) {
+    const list = $('orList');
+    const types = ['union', 'shop'];
+    const res = await Promise.all(types.map((t) => supabase.rpc('admin_delivery_batches', { p_group: t })));
+    if (my !== seq) return;
+    if (res.some((r) => r.error)) {
+      if (!silent) { list.textContent = ''; list.appendChild(empty('লোড করা যায়নি', 'একটু পরে আবার চেষ্টা করুন।')); }
+      return;
+    }
+    // কেউ টিক তুলে রাখলে চুপচাপ রিফ্রেশে বাছাই হারাবে না
+    if (silent && list.querySelector('.or-pick input:not(:checked)')) return;
+    list.textContent = '';
+    let n = 0;
+    res.forEach((r, i) => (Array.isArray(r.data) ? r.data : []).forEach((g) => { g._type = types[i]; list.appendChild(groupCard(g)); n += 1; }));
+    if (!n) list.appendChild(empty('কোনো ব্যাচ নেই', 'পাবলিশের অপেক্ষায় কোনো অর্ডার নেই।'));
+    $('orMore').hidden = true;
+    $('orHint').hidden = true;
   }
 
   function renderCats() {
@@ -244,6 +356,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
       $('orMore').hidden = true;
     }
     syncUrl();
+    if (isBatch()) { await loadBatches(my, silent); return; }
 
     const { data, error } = await supabase.rpc('admin_search_orders', {
       p_query: state.q || null,
@@ -290,9 +403,11 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
       return;
     }
     $('orMain').hidden = false;
+    canManage = !!(data.isSuper || !data.access.isStaff || data.access.can('delivery_orders.manage'));
     $('orQ').value = state.q;
     renderTabs(null);
     renderCats();
+    renderView();
     loadCounts();
     loadList(true);
 
@@ -304,6 +419,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
         if (v === state.q) return;
         state.q = v;
         renderTabs(lastCounts);
+        renderView();
         loadList(true);
       }, 400);
     });
