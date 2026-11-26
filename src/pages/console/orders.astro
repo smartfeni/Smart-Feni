@@ -8,6 +8,7 @@
 // কার্ডে চাপলে /console/order?no=... (বিস্তারিত)।
 // পাবলিশ/অ্যাসাইন/বাতিলের মতো কাজ এখনো পুরনো প্যানেলে (ভাগ ২-এ এখানে আসবে)।
 // নতুন ট্যাবে "এলাকা ও দোকান অনুযায়ী" = ব্যাচ (admin_delivery_batches union/shop): বেছে একসাথে পাবলিশ/এক রাইডারকে।
+// শেষ ট্যাবে ক্যালেন্ডার (admin_orders_calendar): দিন/রেঞ্জ বাছলে সেই সময়ের সব অর্ডার + সারাংশ।
 // URL: ?tab=new|live|history&q=...&view=batch
 // ============================================================
 export const prerender = false;
@@ -34,6 +35,11 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
         <input type="search" id="orQ" placeholder="অর্ডার নম্বর, ফোন বা নাম" aria-label="অর্ডার খুঁজুন" />
         <div class="or-cats" id="orCats" role="group" aria-label="ধরন"></div>
         <div class="or-cats" id="orView" role="group" aria-label="কীভাবে দেখাবে" hidden></div>
+      </div>
+      <div class="or-calwrap" id="orCalWrap" hidden>
+        <button type="button" class="or-calbtn" id="orCalBtn" aria-expanded="false" aria-controls="orCal"><span id="orCalLbl">তারিখ বেছে নিন</span><span id="orCalArrow">▾</span></button>
+        <div id="orCal" hidden></div>
+        <div class="or-sum" id="orSum" hidden></div>
       </div>
       <p class="or-hint" id="orHint" hidden></p>
       <div class="or-list" id="orList"></div>
@@ -89,6 +95,16 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   .or-gbtns button { flex: 1; height: 44px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
   .or-gbtns button.primary { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
   .or-gbtns button:disabled { opacity: .5; cursor: default; }
+  .or-calwrap { display: flex; flex-direction: column; gap: 8px; }
+  .or-calbtn { display: flex; justify-content: space-between; align-items: center; height: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  #orCal { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 10px; }
+  .or-sum { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .or-sum h3 { margin: 0; font-size: 13px; font-weight: 600; color: #5F6B7E; }
+  .or-sumgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .or-sumgrid div { background: #F7F5F2; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .or-sumgrid div.wide { grid-column: 1 / -1; }
+  .or-sumgrid small { font-size: 11.5px; color: #5F6B7E; }
+  .or-sumgrid b { font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-size: 17px; }
   .or-empty { padding: 26px 16px; text-align: center; display: flex; flex-direction: column; gap: 4px; }
   .or-empty b { font-size: 15px; }
   .or-more { align-self: center; height: 42px; padding: 0 22px; border-radius: 999px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-weight: 600; cursor: pointer; }
@@ -100,6 +116,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   import { splitMapLink } from '../../lib/mapLinks.js';
   import { ORDER_STATUS, orderStatusOf, money } from '../../lib/consoleOrders.js';
   import { publishMany, assignMany } from '../../lib/consoleOrderActions.js';
+  import { createRangeCalendar, dhakaRangeIso, monthRangeIso, labelKey } from '../../lib/adminCalendar.js';
 
   const $ = (id) => document.getElementById(id);
   const PAGE = 20;
@@ -116,6 +133,8 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
     cat: '',
     q: (params.get('q') || '').slice(0, 60),
     view: params.get('view') === 'batch' ? 'batch' : 'list',
+    from: '',
+    to: '',
     offset: 0,
     total: 0,
   };
@@ -154,9 +173,76 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
         if (state.q) { state.q = ''; $('orQ').value = ''; }
         renderTabs(lastCounts);
         renderView();
+        renderCalWrap();
         loadList(true);
       });
       box.appendChild(b);
+    });
+  }
+
+  // ---- শেষ ট্যাবের ক্যালেন্ডার: দিন বা রেঞ্জ ধরে অর্ডার + সামারি (বাংলাদেশ সময়) ----
+  let cal = null;
+  let calTok = 0;
+  function rangeLabel() {
+    if (!state.from || !state.to) return 'তারিখ বেছে নিন';
+    return state.from === state.to ? labelKey(state.from) : labelKey(state.from) + ' – ' + labelKey(state.to);
+  }
+  async function loadCalMonth() {
+    if (!cal) return;
+    const mon = cal.getMonth();
+    const r = monthRangeIso(mon.y, mon.m);
+    const { data, error } = await supabase.rpc('admin_orders_calendar', { p_from: r.fromIso, p_to: r.toIso, p_category: state.cat || null, p_upazila: null });
+    const map = {};
+    if (!error && data && Array.isArray(data.days)) data.days.forEach((d) => { map[d.d] = d.n; });
+    cal.setCounts(map);
+  }
+  async function paintSummary() {
+    const box = $('orSum');
+    const tok = ++calTok;
+    if (!state.from || !state.to) { box.hidden = true; box.textContent = ''; return; }
+    const r = dhakaRangeIso(state.from, state.to);
+    const { data, error } = await supabase.rpc('admin_orders_calendar', { p_from: r.fromIso, p_to: r.toIso, p_category: state.cat || null, p_upazila: null });
+    if (tok !== calTok) return;
+    box.textContent = '';
+    if (error || !data || !data.summary) { box.hidden = true; return; }
+    const sm = data.summary;
+    box.appendChild(el('h3', null, rangeLabel() + ' · সারাংশ'));
+    const g = el('div', 'or-sumgrid');
+    const cell = (k, v, wide) => { const d = el('div', wide ? 'wide' : null); d.append(el('small', null, k), el('b', null, v)); g.appendChild(d); };
+    cell('মোট অর্ডার', bn(sm.total || 0));
+    cell('সম্পন্ন', bn(sm.completed || 0));
+    cell('বাতিল', bn((sm.cancelled || 0) + (sm.expired || 0)));
+    cell('চলমান', bn(sm.live || 0));
+    cell('ডিসপিউট', bn(sm.disputed || 0));
+    cell('ডেলিভারি / রাইড', bn(sm.delivery || 0) + ' / ' + bn(sm.ride || 0));
+    cell('সম্পন্ন অর্ডারের মোট চার্জ', money(sm.completed_amount || 0), true);
+    box.appendChild(g);
+    box.hidden = false;
+  }
+  function renderCalWrap() {
+    $('orCalWrap').hidden = !(state.tab === 'history' && !state.q);
+    $('orCalLbl').textContent = rangeLabel();
+  }
+  function wireCal() {
+    $('orCalBtn').addEventListener('click', () => {
+      const c = $('orCal');
+      const open = c.hidden;
+      c.hidden = !open;
+      $('orCalBtn').setAttribute('aria-expanded', String(open));
+      $('orCalArrow').textContent = open ? '▴' : '▾';
+      if (open && !cal) {
+        cal = createRangeCalendar(c, {
+          onMonthChange: () => loadCalMonth(),
+          onRangeChange: (from, to) => {
+            state.from = from || '';
+            state.to = to || '';
+            renderCalWrap();
+            paintSummary();
+            loadList(true);
+          },
+        });
+        loadCalMonth();
+      }
     });
   }
 
@@ -261,6 +347,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
         state.cat = k;
         renderCats();
         loadList(true);
+        if (state.tab === 'history') { loadCalMonth(); paintSummary(); }
       });
       box.appendChild(b);
     });
@@ -358,10 +445,13 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
     syncUrl();
     if (isBatch()) { await loadBatches(my, silent); return; }
 
+    const rng = !state.q && state.tab === 'history' && state.from && state.to ? dhakaRangeIso(state.from, state.to) : null;
     const { data, error } = await supabase.rpc('admin_search_orders', {
       p_query: state.q || null,
-      p_group: state.q ? 'all' : (state.tab === 'new' ? 'live' : state.tab),
+      p_group: state.q || rng ? 'all' : (state.tab === 'new' ? 'live' : state.tab),
       p_category: state.cat || null,
+      p_from: rng ? rng.fromIso : null,
+      p_to: rng ? rng.toIso : null,
       p_filter: !state.q && state.tab === 'new' ? 'unpublished' : null,
       p_limit: PAGE,
       p_offset: reset ? 0 : state.offset,
@@ -408,6 +498,8 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
     renderTabs(null);
     renderCats();
     renderView();
+    renderCalWrap();
+    wireCal();
     loadCounts();
     loadList(true);
 
@@ -420,6 +512,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
         state.q = v;
         renderTabs(lastCounts);
         renderView();
+        renderCalWrap();
         loadList(true);
       }, 400);
     });
