@@ -1,0 +1,1538 @@
+---
+// ============================================================
+// /console/listings — লিস্টিং (নতুন অ্যাপ, ধাপ ৮.১)
+// পুরনো /admin/listings থেকে তৈরি; একই টেবিল/RPC, নতুন DB বদল নেই:
+//   listings, listing_edits (approve_listing_edit / reject_listing_edit), content_reports, scraper_blocklist
+// ট্যাব: লিস্টিং · এডিট রিভিউ (?tab=edits) · রিপোর্ট (?tab=reports)
+// দেখা: সুপার অ্যাডমিন, রোলহীন পুরনো মডেরেটর, বা listings.view
+// শুধু দেখার অনুমতি (listings.manage নেই) হলে বদলানোর বাটন লুকানো (body.cl-viewonly)।
+// পুরনো পেজে বদল হলে এখানেও তুলতে হবে, যতদিন দুটো আছে।
+// ============================================================
+export const prerender = false;
+
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+import { categories } from '../../data/services.js';
+
+const upazilaOptions = ['ফেনী সদর', 'ছাগলনাইয়া', 'দাগনভূঞা', 'পরশুরাম', 'ফুলগাজী', 'সোনাগাজী'];
+---
+
+<ConsoleShell title="লিস্টিং" active="menu">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="clDeny" class="cl-deny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+      <div id="clReadonly" class="cl-readonly" hidden>আপনার শুধু দেখার অনুমতি আছে। অনুমোদন, এডিট বা ডিলিট করতে "লিস্টিং — পরিচালনা" অনুমতি লাগবে।</div>
+
+      <div id="adminGuardedContent" class="admin-content" hidden>
+
+        <div class="admin-header">
+          <h1>লিস্টিং</h1>
+          <p class="admin-subtitle" id="resultCount"></p>
+        </div>
+
+        <!-- ===== ট্যাব সুইচার ===== -->
+        <div class="tab-switcher">
+          <button class="tab-btn active" data-tab="listings">লিস্টিং</button>
+          <button class="tab-btn" data-tab="edits">এডিট রিভিউ <span id="editsBadge" class="tab-badge" style="display:none;"></span></button>
+          <button class="tab-btn" data-tab="reports">রিপোর্ট <span id="reportsBadge" class="tab-badge" style="display:none;"></span></button>
+        </div>
+
+        <!-- ===== ট্যাব ১: লিস্টিং ===== -->
+        <div id="listingsTab" class="tab-panel">
+          <div class="filter-bar">
+            <select id="categoryFilter" class="filter-select">
+              <option value="all">সব ক্যাটাগরি</option>
+              {categories.filter((c) => c.id !== 'online-shop').map((c) => <option value={c.id}>{c.name}</option>)}
+            </select>
+
+            <select id="statusFilter" class="filter-select">
+              <option value="all">সব স্ট্যাটাস</option>
+              <option value="unreviewed">শুধু নতুন (আনরিভিউড)</option>
+              <option value="pending">রিভিউ বাকি</option>
+              <option value="active">সক্রিয়</option>
+              <option value="rejected">বাতিল</option>
+            </select>
+
+            <select id="sourceFilter" class="filter-select">
+              <option value="all">সব সোর্স</option>
+              <option value="manual">ম্যানুয়াল/ইউজার এন্ট্রি</option>
+              <option value="cnglagbe">cnglagbe থেকে</option>
+              <option value="screenshot-import">স্ক্রিনশট ইম্পোর্ট</option>
+            </select>
+          </div>
+
+          <div id="listingsContainer" class="listings-container"></div>
+
+          <div id="emptyState" class="empty-state" style="display:none;">
+            <i class="fas fa-inbox"></i>
+            <p>কোনো লিস্টিং পাওয়া যায়নি</p>
+          </div>
+        </div>
+
+        <!-- ===== ট্যাব ২ (নতুন): এডিট রিভিউ ===== -->
+        <div id="editsTab" class="tab-panel" style="display:none;">
+          <p class="edits-hint">
+            ইউজার অনুমোদিত লিস্টিং এডিট করলে নতুন তথ্য এখানে আসে। Approve না করা পর্যন্ত পাবলিকে আগের তথ্যই দেখা যায়।
+          </p>
+
+          <div class="filter-bar">
+            <select id="editStatusFilter" class="filter-select">
+              <option value="pending">রিভিউ বাকি</option>
+              <option value="approved">অনুমোদিত</option>
+              <option value="rejected">প্রত্যাখ্যাত</option>
+              <option value="all">সব স্ট্যাটাস</option>
+            </select>
+          </div>
+
+          <div id="editsContainer" class="listings-container"></div>
+
+          <div id="editsEmptyState" class="empty-state" style="display:none;">
+            <i class="fas fa-pen-to-square"></i>
+            <p>কোনো এডিট রিকোয়েস্ট নেই</p>
+          </div>
+        </div>
+
+        <!-- ===== ট্যাব ৪: রিপোর্ট/অভিযোগ ===== -->
+        <div id="reportsTab" class="tab-panel" style="display:none;">
+          <div class="filter-bar">
+            <select id="reportStatusFilter" class="filter-select">
+              <option value="pending">পেন্ডিং (একশন বাকি)</option>
+              <option value="dismissed">সক্রিয় করা হয়েছে</option>
+              <option value="resolved">সমাধান হয়েছে (ডিলিট)</option>
+              <option value="all">সব স্ট্যাটাস</option>
+            </select>
+
+            <select id="reportTargetTypeFilter" class="filter-select">
+              <option value="all">সব ধরনের কন্টেন্ট</option>
+              <option value="listing">লিস্টিং</option>
+              <option value="blood_profile">ব্লাড ডোনার (রেজিস্টার্ড)</option>
+              <option value="blood_manual">ব্লাড ডোনার (ম্যানুয়াল)</option>
+            </select>
+          </div>
+
+          <div id="reportsContainer" class="listings-container"></div>
+
+          <div id="reportsEmptyState" class="empty-state" style="display:none;">
+            <i class="fas fa-flag"></i>
+            <p>কোনো রিপোর্ট পাওয়া যায়নি</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .admin-page {
+      min-height: 60vh;
+      padding: 14px 0 40px;
+    }
+    #adminGuardedContent[hidden], .cl-deny[hidden], .cl-readonly[hidden] { display: none; }
+    .cl-deny { padding: 40px 16px; text-align: center; color: #64748B; font-weight: 600; }
+    .cl-readonly { margin: 0 0 12px; padding: 10px 14px; border-radius: 12px; background: #FFF4EC; color: #9A4A1F; font-size: .84rem; font-weight: 600; }
+    /* শুধু দেখার অনুমতি: বদলানোর বাটন লুকানো (প্রিভিউ ও লিংক থাকে) */
+    body.cl-viewonly .card-actions > :not(:first-child),
+    body.cl-viewonly .edit-actions > button,
+    body.cl-viewonly .report-actions > button,
+    body.cl-viewonly [data-slot="actions"] > button:not(:last-child),
+    body.cl-viewonly .bulk-bar { display: none !important; }
+
+    .admin-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 120px 0;
+      color: #5A6E85;
+      font-weight: 600;
+    }
+
+    .admin-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #E5EAF0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #5A6E85;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin-bottom: 20px;
+    }
+
+    .back-link:hover {
+      color: #FF6B35;
+    }
+
+    .admin-header {
+      margin-bottom: 20px;
+    }
+
+    .admin-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+
+    .admin-subtitle {
+      font-size: 0.85rem;
+      color: #8FA0BC;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .tab-switcher {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      border-bottom: 1.5px solid #E5EAF0;
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: none;
+      border: none;
+      padding: 10px 18px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #8FA0BC;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -1.5px;
+      white-space: nowrap;
+    }
+
+    .tab-btn.active {
+      color: #FF6B35;
+      border-bottom-color: #FF6B35;
+    }
+
+    .tab-badge {
+      background: #D14343;
+      color: #fff;
+      font-size: 0.68rem;
+      font-weight: 800;
+      padding: 1px 7px;
+      border-radius: 20px;
+    }
+
+    .filter-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .filter-select {
+      padding: 11px 16px;
+      border-radius: 12px;
+      border: 1.5px solid #E5EAF0;
+      background: #fff;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #1B2A4A;
+      cursor: pointer;
+      flex: 1;
+      min-width: 140px;
+    }
+
+    .listings-container {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 80px 0;
+      color: #B0BCCB;
+    }
+
+    .empty-state i {
+      font-size: 2.4rem;
+    }
+
+    .edits-hint {
+      font-size: 0.8rem;
+      color: #5A6E85;
+      background: #F4F7FC;
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+
+    .bulk-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #FFF3E0;
+      border-radius: 14px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #B36B00;
+    }
+
+    .bulk-btn {
+      border: none;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .bulk-btn.approve {
+      background: #1B7A3C;
+      color: #fff;
+    }
+
+    .bulk-btn.clear {
+      background: transparent;
+      color: #8FA0BC;
+      border: 1.5px solid #E5EAF0;
+    }
+
+    .link-section {
+      background: #E8F2FF;
+      border-radius: 16px;
+      padding: 18px;
+      margin-bottom: 24px;
+    }
+
+    .link-section h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1B2A4A;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .link-hint {
+      font-size: 0.8rem;
+      color: #5A6E85;
+      margin-bottom: 14px;
+    }
+
+    .link-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #fff;
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+
+    .link-row-name {
+      flex: 1;
+      min-width: 140px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      color: #1B2A4A;
+    }
+
+    .link-row-count {
+      font-size: 0.75rem;
+      color: #8FA0BC;
+      font-weight: 600;
+    }
+
+    .link-select {
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1.5px solid #E5EAF0;
+      font-size: 0.82rem;
+      font-family: inherit;
+      background: #fff;
+      min-width: 160px;
+    }
+
+    .link-btn {
+      background: #1D6FE0;
+      color: #fff;
+      border: none;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .link-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  </style>
+
+  <script type="application/json" id="upazilaOptionsData" set:html={JSON.stringify(upazilaOptions)} />
+
+  <script>
+    import { onConsoleReady } from '../../lib/consoleApp.js';
+    import { supabase } from '../../lib/supabase.js';
+    import { categories } from '../../data/services.js';
+
+    const upazilaOptionsEl = document.getElementById('upazilaOptionsData');
+    const upazilaOptions = upazilaOptionsEl ? JSON.parse(upazilaOptionsEl.textContent) : [];
+
+    const categoryNameMap = Object.fromEntries(categories.map((c) => [c.id, c.name]));
+
+    const VERIFY_ENABLED_CATEGORIES = ['car-rental', 'clubs'];
+    const CONNECT_ENABLED_CATEGORIES = ['car-rental'];
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    // স্ক্র্যাপ করা লিস্টিং-এ কোনো এডমিন একশন (approve/reject/edit/delete)
+    // নেওয়ার আগে ফোন নম্বরটা scraper_blocklist এ upsert করে — যাতে
+    // স্ক্র্যাপার পরের রানে এই এন্ট্রি আর ওভাররাইট/রিক্রিয়েট না করে
+    async function lockFromScraper(listing) {
+      if (!listing.source || !listing.contact_phone) return;
+      const { error } = await supabase
+        .from('scraper_blocklist')
+        .upsert(
+          { source: listing.source, phone: listing.contact_phone },
+          { onConflict: 'source,phone' }
+        );
+      if (error) {
+        console.error('ব্লকলিস্টে যোগ করতে ব্যর্থ:', error.message);
+      }
+    }
+
+    // ============================================================
+    // ট্যাব সুইচিং
+    // ============================================================
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const listingsTab = document.getElementById('listingsTab');
+    const editsTab = document.getElementById('editsTab');
+    const reportsTab = document.getElementById('reportsTab');
+
+    tabButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        tabButtons.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        listingsTab.style.display = 'none';
+        editsTab.style.display = 'none';
+        reportsTab.style.display = 'none';
+
+        if (btn.dataset.tab === 'listings') {
+          listingsTab.style.display = 'block';
+          loadListings();
+        } else if (btn.dataset.tab === 'edits') {
+          editsTab.style.display = 'block';
+          loadEdits();
+        } else {
+          reportsTab.style.display = 'block';
+          loadReports();
+        }
+      });
+    });
+
+    // ============================================================
+    // ট্যাব ১: লিস্টিং
+    // ============================================================
+    const container = document.getElementById('listingsContainer');
+    const emptyState = document.getElementById('emptyState');
+    const resultCount = document.getElementById('resultCount');
+    const categoryFilter = document.getElementById('categoryFilter');
+    const statusFilter = document.getElementById('statusFilter');
+    const sourceFilter = document.getElementById('sourceFilter');
+
+    const statusLabels = {
+      pending: { text: 'রিভিউ বাকি', bg: '#FFF3E0', color: '#B36B00' },
+      active: { text: 'সক্রিয়', color: '#1B7A3C', bg: '#EAFBF0' },
+      rejected: { text: 'বাতিল', color: '#D14343', bg: '#FFF0EA' },
+    };
+
+    const sourceLabels = {
+      cnglagbe: 'cnglagbe থেকে',
+      'screenshot-import': 'স্ক্রিনশট ইম্পোর্ট',
+    };
+
+    function renderEditForm(listing) {
+      const form = document.createElement('div');
+      form.style.cssText = 'margin-top:14px;padding:14px;background:#F8FAFC;border-radius:14px;border:1px solid #EEF3F9;display:flex;flex-direction:column;gap:10px;';
+
+      const upazilaOpts = upazilaOptions
+        .map((u) => `<option value="${u}" ${listing.upazila === u ? 'selected' : ''}>${u}</option>`)
+        .join('');
+
+      form.innerHTML = `
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">নাম <span class="required-mark" style="color:#D14343;">*</span>
+          <input type="text" data-field="title" required value="${escapeHtml(listing.title || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
+        </label>
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">বিবরণ / এলাকা
+          <textarea data-field="description" rows="2" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;resize:vertical;">${escapeHtml(listing.description || '')}</textarea>
+        </label>
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">দাম / মূল্য
+          <input type="text" data-field="price" value="${escapeHtml(listing.price || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
+        </label>
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">উপজেলা
+          <select data-field="upazila" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;background:#fff;">
+            <option value="">— নির্বাচন করুন —</option>
+            ${upazilaOpts}
+          </select>
+        </label>
+        <label style="font-size:0.78rem;font-weight:700;color:#5A6E85;">ফোন নম্বর <span class="required-mark" style="color:#D14343;">*</span>
+          <input type="text" data-field="contact_phone" required value="${escapeHtml(listing.contact_phone || '')}" style="width:100%;margin-top:4px;padding:9px 12px;border-radius:10px;border:1.5px solid #E5EAF0;font-size:0.88rem;font-family:inherit;" />
+        </label>
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <button data-action="save" style="flex:1;background:#1B2A4A;color:#fff;border:none;padding:10px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;">সেভ করুন</button>
+          <button data-action="cancel" style="background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:10px 16px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;">বাতিল</button>
+        </div>
+      `;
+
+      form.querySelector('[data-action="cancel"]').addEventListener('click', () => form.remove());
+
+      form.querySelector('[data-action="save"]').addEventListener('click', async () => {
+        const saveBtn = form.querySelector('[data-action="save"]');
+        saveBtn.textContent = 'সেভ হচ্ছে...';
+        saveBtn.disabled = true;
+
+        if (window.SFValidateForm && !window.SFValidateForm(form)) {
+          saveBtn.textContent = 'সেভ করুন';
+          saveBtn.disabled = false;
+          return;
+        }
+
+        // এডিট করে সেভ করলে ফোন নম্বর ব্লকলিস্টে যোগ — স্ক্র্যাপার যেন এই
+        // এডিটেড ডেটা আর ওভাররাইট না করে (পুরনো ফোন নম্বর দিয়ে ব্লক করা
+        // হচ্ছে, কারণ cnglagbe সাইটে এন্ট্রিটা এই নম্বরেই থাকবে)
+        await lockFromScraper(listing);
+
+        const updates = {
+          title: form.querySelector('[data-field="title"]').value.trim(),
+          description: form.querySelector('[data-field="description"]').value.trim(),
+          price: form.querySelector('[data-field="price"]').value.trim() || null,
+          upazila: form.querySelector('[data-field="upazila"]').value || null,
+          contact_phone: form.querySelector('[data-field="contact_phone"]').value.trim(),
+        };
+
+        const { error } = await supabase.from('listings').update(updates).eq('id', listing.id);
+
+        if (error && window.showToast) {
+          window.showToast('সেভ ব্যর্থ: ' + error.message, 'error');
+          saveBtn.textContent = 'সেভ করুন';
+          saveBtn.disabled = false;
+          return;
+        }
+        if (!error && window.showToast) window.showToast('লিস্টিং সেভ হয়েছে', 'success');
+
+        if (error) {
+          alert('সেভ ব্যর্থ: ' + error.message);
+          saveBtn.textContent = 'সেভ করুন';
+          saveBtn.disabled = false;
+          return;
+        }
+
+        loadListings();
+      });
+
+      return form;
+    }
+
+    function renderCard(listing) {
+      const status = statusLabels[listing.status] || statusLabels.pending;
+      const categoryName = categoryNameMap[listing.category] || listing.category;
+      const thumb = Array.isArray(listing.images) && listing.images.length > 0 ? listing.images[0] : null;
+      const sourceLabel = listing.source ? (sourceLabels[listing.source] || listing.source) : null;
+      const isUnclaimed = !listing.user_id;
+      const canVerify = VERIFY_ENABLED_CATEGORIES.includes(listing.category);
+      const canConnect = CONNECT_ENABLED_CATEGORIES.includes(listing.category);
+
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;gap:14px;flex-wrap:wrap;';
+
+      card.innerHTML = `
+        ${thumb
+          ? `<img loading="lazy" decoding="async" src="${escapeHtml(thumb)}" style="width:76px;height:76px;border-radius:14px;object-fit:cover;flex-shrink:0;" />`
+          : `<div style="width:76px;height:76px;border-radius:14px;background:#F4F7FC;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#B0BCCB;font-size:1.4rem;"><i class="fas fa-image"></i></div>`
+        }
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <h3 style="font-size:0.98rem;font-weight:700;color:#1B2A4A;">${escapeHtml(listing.title || '(শিরোনামহীন)')}</h3>
+            <span style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
+              ${!listing.is_reviewed ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#FF6B35;color:#fff;">নতুন</span>` : ''}
+              <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${status.bg};color:${status.color};">${status.text}</span>
+              ${listing.is_verified ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#E8F2FF;color:#1D6FE0;"><i class="fas fa-circle-check"></i> ভ্যারিফাইড</span>` : ''}
+              ${listing.is_disabled ? `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:#FFF0EA;color:#D14343;"><i class="fas fa-flag"></i> রিপোর্টেড</span>` : ''}
+            </span>
+          </div>
+          <p style="font-size:0.82rem;color:#8FA0BC;margin-top:4px;">
+            ${categoryName} ${listing.type ? '· ' + escapeHtml(listing.type) : ''}
+            ${sourceLabel ? ` · <span style="color:#B36B00;font-weight:700;">${sourceLabel}</span>` : ''}
+            ${isUnclaimed && listing.source ? ` · <span style="color:#8FA0BC;">আনক্লেইমড</span>` : ''}
+            ${!listing.upazila ? ` · <span style="color:#D14343;">উপজেলা নাই</span>` : ''}
+          </p>
+          ${listing.description ? `<p style="font-size:0.85rem;color:#5A6E85;margin-top:6px;">${escapeHtml(listing.description)}</p>` : ''}
+          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:0.8rem;color:#5A6E85;">
+            ${listing.price ? `<span><i class="fas fa-tag" style="color:#FF6B35;"></i> ${escapeHtml(listing.price)}</span>` : ''}
+            ${listing.upazila ? `<span><i class="fas fa-location-dot" style="color:#FF6B35;"></i> ${escapeHtml(listing.upazila)}</span>` : ''}
+            ${listing.contact_phone ? `<span><i class="fas fa-phone" style="color:#FF6B35;"></i> ${escapeHtml(listing.contact_phone)}</span>` : ''}
+            ${listing.rating_count > 0 ? `<span><i class="fas fa-star" style="color:#F5A623;"></i> ${Number(listing.rating).toFixed(1)} (${listing.rating_count})</span>` : ''}
+            <span><i class="fas fa-clock" style="color:#FF6B35;"></i> ${formatDate(listing.created_at)}</span>
+            <span style="flex-basis:100%;">${posterHtml(listing)}</span>
+          </div>
+          <div class="card-actions" style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"></div>
+          <div class="edit-form-slot"></div>
+        </div>
+      `;
+
+      const actionsWrap = card.querySelector('.card-actions');
+      const editSlot = card.querySelector('.edit-form-slot');
+
+      const previewBtn = document.createElement('button');
+      previewBtn.innerHTML = '<i class="fas fa-eye"></i> প্রিভিউ';
+      previewBtn.style.cssText = 'background:#1B2A4A;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+      previewBtn.addEventListener('click', () => openPreview(listing));
+      actionsWrap.appendChild(previewBtn);
+
+      if (listing.status !== 'active') {
+        const approveBtn = document.createElement('button');
+        approveBtn.textContent = 'Approve করুন';
+        approveBtn.style.cssText = 'background:#1B7A3C;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        approveBtn.addEventListener('click', () => updateStatusAndLock(listing, 'active'));
+        actionsWrap.appendChild(approveBtn);
+      }
+
+      if (listing.status !== 'rejected') {
+        const rejectBtn = document.createElement('button');
+        rejectBtn.textContent = 'Reject করুন';
+        rejectBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        rejectBtn.addEventListener('click', () => updateStatusAndLock(listing, 'rejected'));
+        actionsWrap.appendChild(rejectBtn);
+      }
+
+      if (!listing.is_reviewed) {
+        const reviewedBtn = document.createElement('button');
+        reviewedBtn.textContent = 'রিভিউ করা হয়েছে';
+        reviewedBtn.style.cssText = 'background:#F4F7FC;color:#1B2A4A;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        reviewedBtn.addEventListener('click', () => markReviewed(listing.id));
+        actionsWrap.appendChild(reviewedBtn);
+      }
+
+      if (canVerify) {
+        const verifyBtn = document.createElement('button');
+        verifyBtn.textContent = listing.is_verified ? 'আনভ্যারিফাই করুন' : 'ভ্যারিফাই করুন';
+        verifyBtn.style.cssText = listing.is_verified
+          ? 'background:#F4F7FC;color:#1B2A4A;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;'
+          : 'background:#E8F2FF;color:#1D6FE0;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        verifyBtn.addEventListener('click', () => toggleVerified(listing.id, !listing.is_verified));
+        actionsWrap.appendChild(verifyBtn);
+      }
+
+      if (isUnclaimed) {
+        const editBtn = document.createElement('button');
+        editBtn.textContent = 'এডিট করুন';
+        editBtn.style.cssText = 'background:#FFF0EA;color:#FF6B35;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        editBtn.addEventListener('click', () => {
+          editSlot.innerHTML = '';
+          editSlot.appendChild(renderEditForm(listing));
+        });
+        actionsWrap.appendChild(editBtn);
+
+        if (canConnect) {
+          const connectBtn = document.createElement('button');
+          connectBtn.textContent = 'ড্রাইভারের সাথে কানেক্ট করুন';
+          connectBtn.style.cssText = 'background:#1B2A4A;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+          connectBtn.addEventListener('click', () => connectToProfile(listing.id, listing.contact_phone));
+          actionsWrap.appendChild(connectBtn);
+        }
+      }
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'ডিলিট';
+      deleteBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+      let confirming = false;
+      deleteBtn.addEventListener('click', () => {
+        if (!confirming) {
+          confirming = true;
+          deleteBtn.textContent = 'নিশ্চিত করুন?';
+          deleteBtn.style.cssText = 'background:#D14343;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+          return;
+        }
+        deleteListing(listing);
+      });
+      actionsWrap.appendChild(deleteBtn);
+
+      return card;
+    }
+
+    async function markReviewed(id) {
+      const { error } = await supabase.from('listings').update({ is_reviewed: true }).eq('id', id);
+      if (error) { alert('আপডেট ব্যর্থ: ' + error.message); return; }
+      loadListings();
+    }
+
+    // পুরনো updateStatus() রেখে দেওয়া হলো (অন্য কোথাও রেফারেন্স থাকলে
+    // যেন না ভাঙে), কিন্তু approve/reject বাটন এখন updateStatusAndLock ব্যবহার করে
+    async function updateStatus(id, status) {
+      const { error } = await supabase.from('listings').update({ status }).eq('id', id);
+      if (error) { alert('আপডেট ব্যর্থ: ' + error.message); return; }
+      loadListings();
+    }
+
+    // Approve/Reject করার সাথে সাথে ফোন নম্বর ব্লকলিস্টে যোগ করে দেয় (যদি
+    // সোর্স-ট্যাগড হয়) — যাতে স্ক্র্যাপার এই এন্ট্রি আর নতুন করে upsert
+    // করে এডমিনের সিদ্ধান্ত ওভাররাইট না করে দেয়
+    async function updateStatusAndLock(listing, status) {
+      await lockFromScraper(listing);
+
+      const { error } = await supabase.from('listings').update({ status }).eq('id', listing.id);
+      if (error) { alert('আপডেট ব্যর্থ: ' + error.message); return; }
+      loadListings();
+    }
+
+    async function toggleVerified(id, nextValue) {
+      const { error } = await supabase.from('listings').update({ is_verified: nextValue }).eq('id', id);
+      if (error) { alert('আপডেট ব্যর্থ: ' + error.message); return; }
+      loadListings();
+    }
+
+    // ============================================================
+    // ডিলিট — সোর্স-ট্যাগড (স্ক্র্যাপড) লিস্টিং হলে আগে ফোন নম্বর
+    // scraper_blocklist এ যোগ করে, যাতে পরের স্ক্র্যাপ রানে এই এন্ট্রি
+    // আর ফিরিয়ে আনা না হয়
+    // ============================================================
+    async function deleteListing(listing) {
+      await lockFromScraper(listing);
+
+      const { error } = await supabase.from('listings').delete().eq('id', listing.id);
+      if (error) { alert('ডিলিট ব্যর্থ: ' + error.message); return; }
+      loadListings();
+    }
+
+    async function connectToProfile(listingId, currentPhone) {
+      const phone = prompt('ড্রাইভারের ফোন নম্বর দিন (যেটা দিয়ে তিনি Smart Feni-তে একাউন্ট খুলেছেন):', currentPhone || '');
+      if (!phone) return;
+
+      const cleanPhone = phone.trim();
+
+      const { data: profiles, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, phone')
+        .eq('phone', cleanPhone);
+
+      if (error) { alert('প্রোফাইল সার্চ ব্যর্থ: ' + error.message); return; }
+
+      if (!profiles || profiles.length === 0) {
+        alert('এই নম্বরে কোনো প্রোফাইল পাওয়া যায়নি। ড্রাইভারকে আগে Smart Feni-তে একাউন্ট খুলতে হবে (এই নম্বর দিয়েই)।');
+        return;
+      }
+
+      let selectedProfile = profiles[0];
+
+      if (profiles.length > 1) {
+        const list = profiles.map((p, i) => `${i + 1}. ${p.full_name || '(নাম নাই)'} — ${p.phone}`).join('\n');
+        const choice = prompt(`একাধিক প্রোফাইল পাওয়া গেছে, নম্বর লিখে বেছে নিন:\n${list}`, '1');
+        const idx = parseInt(choice, 10) - 1;
+        if (isNaN(idx) || !profiles[idx]) return;
+        selectedProfile = profiles[idx];
+      }
+
+      const confirmMsg = `"${selectedProfile.full_name || selectedProfile.phone}" এর প্রোফাইলের সাথে এই লিস্টিং কানেক্ট করবেন?\n\nএর পর থেকে এই ড্রাইভার নিজে লগইন করে লিস্টিং এডিট করতে পারবেন।`;
+      if (!confirm(confirmMsg)) return;
+
+      const { error: updateError } = await supabase.from('listings').update({ user_id: selectedProfile.id }).eq('id', listingId);
+      if (updateError) { alert('কানেক্ট করা ব্যর্থ: ' + updateError.message); return; }
+
+      alert('কানেক্ট সফল হয়েছে।');
+      loadListings();
+    }
+
+    // ============================================================
+    // রিভিউ সাজানো + পোস্টার তথ্য + প্রিভিউ শিট
+    // ============================================================
+
+    // অননুমোদিত (pending → rejected) সবার উপরে, active সবার নিচে।
+    // প্রতি গ্রুপের ভেতরে: আনরিভিউড আগে, তারপর নতুন তারিখ আগে
+    const STATUS_RANK = { pending: 0, rejected: 1, active: 2 };
+
+    function sortListingsForReview(list) {
+      return [...list].sort((a, b) => {
+        const ra = STATUS_RANK[a.status] ?? 0;
+        const rb = STATUS_RANK[b.status] ?? 0;
+        if (ra !== rb) return ra - rb;
+        const ua = a.is_reviewed ? 1 : 0;
+        const ub = b.is_reviewed ? 1 : 0;
+        if (ua !== ub) return ua - ub;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+    }
+
+    let posterMap = {};
+
+    async function loadPosters(list) {
+      posterMap = {};
+      const ids = [...new Set(list.map((l) => l.user_id).filter(Boolean))];
+      if (ids.length === 0) return;
+      const { data, error } = await supabase.from('profiles').select('id, full_name, phone').in('id', ids);
+      if (error) {
+        console.error('পোস্টারের তথ্য আনা যায়নি:', error.message);
+        return;
+      }
+      posterMap = Object.fromEntries((data || []).map((p) => [p.id, p]));
+    }
+
+    function telLink(phone) {
+      const raw = String(phone || '').trim();
+      if (!raw) return '';
+      const dialable = raw.replace(/[\s-]/g, '');
+      if (/^\+?\d{6,15}$/.test(dialable)) {
+        return `<a href="tel:${dialable}" style="color:#1D6FE0;font-weight:700;text-decoration:none;">${escapeHtml(raw)}</a>`;
+      }
+      return escapeHtml(raw);
+    }
+
+    function posterHtml(listing) {
+      if (!listing.user_id) {
+        return '<span style="color:#8FA0BC;"><i class="fas fa-user-slash"></i> পোস্টার নেই (আনক্লেইমড / অ্যাডমিন বা স্ক্র্যাপ এন্ট্রি)</span>';
+      }
+      const p = posterMap[listing.user_id];
+      if (!p) {
+        return '<span style="color:#8FA0BC;"><i class="fas fa-user"></i> পোস্টারের তথ্য পাওয়া যায়নি</span>';
+      }
+      const name = escapeHtml(p.full_name || '(নাম নাই)');
+      const phone = telLink(p.phone);
+      return `<i class="fas fa-user" style="color:#FF6B35;"></i> পোস্টার: <b style="color:#1B2A4A;">${name}</b>${phone ? ' · ' + phone : ''}`;
+    }
+
+    function closePreview() {
+      const el = document.getElementById('listingPreviewOverlay');
+      if (el) el.remove();
+      document.body.style.overflow = '';
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closePreview();
+    });
+
+    function openPreview(listing) {
+      closePreview();
+
+      const status = statusLabels[listing.status] || statusLabels.pending;
+      const categoryName = categoryNameMap[listing.category] || listing.category;
+      const sourceLabel = listing.source ? (sourceLabels[listing.source] || listing.source) : null;
+      const images = (Array.isArray(listing.images) ? listing.images : [])
+        .filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u));
+
+      const imagesHtml = images.length
+        ? `<div style="display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;margin-bottom:14px;">${images
+            .map((u) => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener" style="flex-shrink:0;scroll-snap-align:start;max-width:85%;"><img loading="lazy" decoding="async" src="${escapeHtml(u)}" style="height:220px;max-width:100%;border-radius:14px;object-fit:contain;background:#F4F7FC;display:block;" /></a>`)
+            .join('')}</div>`
+        : `<div style="height:90px;border-radius:14px;background:#F4F7FC;display:flex;align-items:center;justify-content:center;gap:8px;color:#B0BCCB;font-size:0.85rem;font-weight:600;margin-bottom:14px;"><i class="fas fa-image"></i> কোনো ছবি নেই</div>`;
+
+      const row = (label, valueHtml) => valueHtml
+        ? `<div style="padding:9px 0;border-top:1px solid #EEF3F9;font-size:0.85rem;"><div style="font-size:0.72rem;font-weight:700;color:#8FA0BC;margin-bottom:2px;">${label}</div><div style="color:#1B2A4A;word-break:break-word;">${valueHtml}</div></div>`
+        : '';
+
+      const pill = (text, bg, color) => `<span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${bg};color:${color};">${text}</span>`;
+
+      const overlay = document.createElement('div');
+      overlay.id = 'listingPreviewOverlay';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,0.55);display:flex;align-items:flex-end;justify-content:center;';
+
+      const sheet = document.createElement('div');
+      sheet.style.cssText = 'background:#fff;width:100%;max-width:560px;max-height:92vh;overflow-y:auto;border-radius:22px 22px 0 0;padding:18px 16px 28px;box-shadow:0 -8px 30px rgba(15,23,42,0.18);';
+
+      sheet.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;">
+          <div style="min-width:0;">
+            <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:#F4F7FC;color:#5A6E85;">${escapeHtml(categoryName)}${listing.type ? ' · ' + escapeHtml(listing.type) : ''}</span>
+            <h3 style="font-size:1.05rem;font-weight:700;color:#1B2A4A;margin-top:8px;word-break:break-word;">${escapeHtml(listing.title || '(শিরোনামহীন)')}</h3>
+          </div>
+          <button type="button" data-action="close" aria-label="বন্ধ করুন" style="flex-shrink:0;width:34px;height:34px;border-radius:50%;border:none;background:#F4F7FC;color:#5A6E85;font-size:1rem;cursor:pointer;"><i class="fas fa-xmark"></i></button>
+        </div>
+        ${imagesHtml}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+          ${pill(status.text, status.bg, status.color)}
+          ${!listing.is_reviewed ? pill('নতুন', '#FF6B35', '#fff') : ''}
+          ${listing.is_verified ? pill('ভ্যারিফাইড', '#E8F2FF', '#1D6FE0') : ''}
+          ${listing.is_disabled ? pill('রিপোর্টেড', '#FFF0EA', '#D14343') : ''}
+          ${sourceLabel ? pill(escapeHtml(sourceLabel), '#FFF3E0', '#B36B00') : ''}
+        </div>
+        ${row('দাম / মূল্য', listing.price ? escapeHtml(listing.price) : '')}
+        ${row('উপজেলা', listing.upazila ? escapeHtml(listing.upazila) : '')}
+        ${row('বিবরণ', listing.description ? `<span style="white-space:pre-wrap;">${escapeHtml(listing.description)}</span>` : '')}
+        ${row('যোগাযোগ নম্বর', telLink(listing.contact_phone))}
+        ${row('পোস্টার', posterHtml(listing))}
+        ${row('পোস্টের তারিখ', escapeHtml(formatDate(listing.created_at)))}
+        <div data-slot="actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;"></div>
+      `;
+
+      const actions = sheet.querySelector('[data-slot="actions"]');
+
+      if (listing.status !== 'active') {
+        const approveBtn = document.createElement('button');
+        approveBtn.type = 'button';
+        approveBtn.textContent = 'Approve করুন';
+        approveBtn.style.cssText = 'background:#1B7A3C;color:#fff;border:none;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;';
+        approveBtn.addEventListener('click', async () => {
+          approveBtn.disabled = true;
+          await updateStatusAndLock(listing, 'active');
+          closePreview();
+        });
+        actions.appendChild(approveBtn);
+      }
+
+      if (listing.status !== 'rejected') {
+        const rejectBtn = document.createElement('button');
+        rejectBtn.type = 'button';
+        rejectBtn.textContent = 'Reject করুন';
+        rejectBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;';
+        rejectBtn.addEventListener('click', async () => {
+          rejectBtn.disabled = true;
+          await updateStatusAndLock(listing, 'rejected');
+          closePreview();
+        });
+        actions.appendChild(rejectBtn);
+      }
+
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.textContent = 'বন্ধ করুন';
+      closeBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;';
+      closeBtn.addEventListener('click', closePreview);
+      actions.appendChild(closeBtn);
+
+      sheet.querySelector('[data-action="close"]').addEventListener('click', closePreview);
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closePreview();
+      });
+
+      overlay.appendChild(sheet);
+      document.body.appendChild(overlay);
+      document.body.style.overflow = 'hidden';
+    }
+
+    async function loadListings() {
+      container.innerHTML = (window.SFSkeleton ? window.SFSkeleton.html('listing', 5) : '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>');
+
+      let query = supabase
+        .from('listings')
+        .select('*')
+        // শপ প্রোডাক্ট শুধু শপের (shop_id) সাথে যুক্ত, অ্যাডমিনের রিভিউয়ের আওতায় নেই
+        .is('shop_id', null)
+        .neq('category', 'online-shop')
+        .order('is_reviewed', { ascending: true })
+        .order('created_at', { ascending: false });
+
+      const category = categoryFilter.value;
+      const status = statusFilter.value;
+      const source = sourceFilter.value;
+
+      if (category !== 'all') query = query.eq('category', category);
+
+      if (status === 'unreviewed') {
+        query = query.eq('is_reviewed', false);
+      } else if (status !== 'all') {
+        query = query.eq('status', status);
+      }
+
+      if (source === 'manual') {
+        query = query.is('source', null);
+      } else if (source !== 'all') {
+        query = query.eq('source', source);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        container.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      const listings = sortListingsForReview(data || []);
+      resultCount.textContent = `মোট ${listings.length} টি লিস্টিং`;
+      container.innerHTML = '';
+
+      if (listings.length === 0) {
+        emptyState.style.display = 'flex';
+        return;
+      }
+
+      emptyState.style.display = 'none';
+      await loadPosters(listings);
+      listings.forEach((listing) => container.appendChild(renderCard(listing)));
+    }
+
+    categoryFilter.addEventListener('change', loadListings);
+    statusFilter.addEventListener('change', loadListings);
+    sourceFilter.addEventListener('change', loadListings);
+
+    // ============================================================
+    // ট্যাব ২ (নতুন): এডিট রিভিউ (listing_edits)
+    // ============================================================
+    const editsContainer = document.getElementById('editsContainer');
+    const editsEmptyState = document.getElementById('editsEmptyState');
+    const editStatusFilter = document.getElementById('editStatusFilter');
+    const editsBadge = document.getElementById('editsBadge');
+
+    const editStatusLabels = {
+      pending: { text: 'রিভিউ বাকি', bg: '#FFF3E0', color: '#B36B00' },
+      approved: { text: 'অনুমোদিত', bg: '#EAFBF0', color: '#1B7A3C' },
+      rejected: { text: 'প্রত্যাখ্যাত', bg: '#FFF0EA', color: '#D14343' },
+    };
+
+    // তুলনার ফিল্ডগুলো (ছবি আলাদাভাবে তুলনা হয়)
+    const editFields = [
+      ['title', 'শিরোনাম'],
+      ['description', 'বিবরণ'],
+      ['price', 'দাম'],
+      ['upazila', 'উপজেলা'],
+      ['contact_phone', 'ফোন নম্বর'],
+      ['type', 'ধরন'],
+    ];
+
+    async function refreshEditsBadge() {
+      const { count } = await supabase
+        .from('listing_edits')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      if (count && count > 0) {
+        editsBadge.textContent = count;
+        editsBadge.style.display = 'inline-block';
+      } else {
+        editsBadge.style.display = 'none';
+      }
+    }
+
+    function renderEditRequestCard(edit, listing, owner) {
+      const status = editStatusLabels[edit.status] || editStatusLabels.pending;
+      const categoryName = listing ? (categoryNameMap[listing.category] || listing.category) : '';
+
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;flex-direction:column;gap:12px;';
+
+      // কোন কোন ফিল্ড বদলেছে (পুরোনো বনাম নতুন)
+      const changedRows = [];
+      const unchangedLabels = [];
+
+      editFields.forEach(([key, label]) => {
+        const oldVal = String(listing?.[key] ?? '').trim();
+        const newVal = String(edit[key] ?? '').trim();
+
+        if (oldVal === newVal) {
+          unchangedLabels.push(label);
+          return;
+        }
+
+        changedRows.push(`
+          <div style="padding:10px 12px;background:#F8FAFC;border-radius:12px;font-size:0.83rem;">
+            <div style="font-size:0.72rem;font-weight:700;color:#8FA0BC;margin-bottom:4px;">${label}</div>
+            <div style="color:#8FA0BC;text-decoration:line-through;word-break:break-word;">${oldVal ? escapeHtml(oldVal) : '(খালি)'}</div>
+            <div style="color:#1B7A3C;font-weight:700;margin-top:3px;word-break:break-word;">${newVal ? escapeHtml(newVal) : '(খালি)'}</div>
+          </div>
+        `);
+      });
+
+      const oldImages = Array.isArray(listing?.images) ? listing.images : [];
+      const newImages = Array.isArray(edit.images) ? edit.images : [];
+      if (JSON.stringify(oldImages) !== JSON.stringify(newImages)) {
+        const thumbs = newImages
+          .map((u) => `<img loading="lazy" decoding="async" src="${escapeHtml(u)}" style="width:56px;height:56px;border-radius:10px;object-fit:cover;" />`)
+          .join('');
+        changedRows.push(`
+          <div style="padding:10px 12px;background:#F8FAFC;border-radius:12px;font-size:0.83rem;">
+            <div style="font-size:0.72rem;font-weight:700;color:#8FA0BC;margin-bottom:6px;">ছবি (নতুন ${newImages.length} টি, আগে ${oldImages.length} টি)</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">${thumbs || '<span style="color:#8FA0BC;">(কোনো ছবি নেই)</span>'}</div>
+          </div>
+        `);
+      } else {
+        unchangedLabels.push('ছবি');
+      }
+
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          <div style="min-width:0;">
+            <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:#F4F7FC;color:#5A6E85;">${escapeHtml(categoryName)}</span>
+            <h3 style="font-size:1rem;font-weight:700;color:#1B2A4A;margin-top:6px;word-break:break-word;">${escapeHtml(listing?.title || edit.title || '(শিরোনামহীন)')}</h3>
+            <p style="font-size:0.8rem;color:#8FA0BC;margin-top:2px;">
+              ${escapeHtml(owner?.full_name || 'অজানা ইউজার')}${owner?.phone ? ' · ' + escapeHtml(owner.phone) : ''} · ${formatDate(edit.updated_at || edit.created_at)}
+            </p>
+          </div>
+          <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;background:${status.bg};color:${status.color};">${status.text}</span>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${changedRows.length ? changedRows.join('') : '<p style="font-size:0.82rem;color:#8FA0BC;">কোনো ফিল্ড বদলায়নি (আগের তথ্যের সাথে হুবহু এক)।</p>'}
+        </div>
+
+        ${unchangedLabels.length ? `<p style="font-size:0.75rem;color:#8FA0BC;">অপরিবর্তিত: ${unchangedLabels.join(', ')}</p>` : ''}
+
+        ${edit.status === 'rejected' && edit.rejection_reason ? `<p style="font-size:0.8rem;color:#D14343;font-weight:700;">প্রত্যাখ্যানের কারণ: ${escapeHtml(edit.rejection_reason)}</p>` : ''}
+
+        <div class="edit-actions" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+      `;
+
+      const actionsWrap = card.querySelector('.edit-actions');
+
+      if (listing) {
+        const viewLink = document.createElement('a');
+        viewLink.href = `/listing/${listing.id}`;
+        viewLink.target = '_blank';
+        viewLink.rel = 'noopener';
+        viewLink.textContent = 'বর্তমান লিস্টিং দেখুন';
+        viewLink.style.cssText = 'background:#F4F7FC;color:#1B2A4A;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;text-decoration:none;';
+        actionsWrap.appendChild(viewLink);
+      }
+
+      if (edit.status === 'pending') {
+        const approveBtn = document.createElement('button');
+        approveBtn.textContent = 'Approve করুন';
+        approveBtn.style.cssText = 'background:#1B7A3C;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        approveBtn.addEventListener('click', () => approveEdit(edit.id, approveBtn));
+        actionsWrap.appendChild(approveBtn);
+
+        const rejectBtn = document.createElement('button');
+        rejectBtn.textContent = 'Reject করুন';
+        rejectBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        rejectBtn.addEventListener('click', () => rejectEdit(edit.id, rejectBtn));
+        actionsWrap.appendChild(rejectBtn);
+      }
+
+      return card;
+    }
+
+    async function approveEdit(editId, btn) {
+      if (!confirm('এই এডিট অনুমোদন করবেন? নতুন তথ্য এখনই পাবলিকে আপডেট হবে।')) return;
+
+      btn.disabled = true;
+      btn.textContent = 'অনুমোদন হচ্ছে...';
+
+      const { error } = await supabase.rpc('approve_listing_edit', { p_edit_id: editId });
+      if (error) {
+        alert('Approve ব্যর্থ: ' + error.message);
+        btn.disabled = false;
+        btn.textContent = 'Approve করুন';
+        return;
+      }
+
+      loadEdits();
+    }
+
+    async function rejectEdit(editId, btn) {
+      const reason = prompt('প্রত্যাখ্যানের কারণ লিখুন (ঐচ্ছিক — মালিক নোটিফিকেশনে দেখবেন):', '');
+      if (reason === null) return; // বাতিল
+
+      btn.disabled = true;
+      btn.textContent = 'প্রত্যাখ্যান হচ্ছে...';
+
+      const { error } = await supabase.rpc('reject_listing_edit', {
+        p_edit_id: editId,
+        p_reason: reason.trim() || null,
+      });
+      if (error) {
+        alert('Reject ব্যর্থ: ' + error.message);
+        btn.disabled = false;
+        btn.textContent = 'Reject করুন';
+        return;
+      }
+
+      loadEdits();
+    }
+
+    async function loadEdits() {
+      editsContainer.innerHTML = (window.SFSkeleton ? window.SFSkeleton.html('listing', 5) : '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>');
+
+      let query = supabase
+        .from('listing_edits')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      const status = editStatusFilter.value;
+      if (status !== 'all') query = query.eq('status', status);
+
+      const { data: edits, error } = await query;
+
+      if (error) {
+        editsContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${escapeHtml(error.message)}</p>`;
+        return;
+      }
+
+      refreshEditsBadge();
+
+      if (!edits || edits.length === 0) {
+        editsContainer.innerHTML = '';
+        editsEmptyState.style.display = 'flex';
+        return;
+      }
+
+      editsEmptyState.style.display = 'none';
+
+      const listingIds = [...new Set(edits.map((e) => e.listing_id))];
+      const ownerIds = [...new Set(edits.map((e) => e.user_id))];
+
+      const [listingsRes, ownersRes] = await Promise.all([
+        supabase
+          .from('listings')
+          .select('id, title, description, price, upazila, type, contact_phone, images, category')
+          .in('id', listingIds),
+        supabase.from('profiles').select('id, full_name, phone').in('id', ownerIds),
+      ]);
+
+      const listingMap = Object.fromEntries((listingsRes.data || []).map((l) => [l.id, l]));
+      const ownerMap = Object.fromEntries((ownersRes.data || []).map((p) => [p.id, p]));
+
+      editsContainer.innerHTML = '';
+      edits.forEach((edit) => {
+        editsContainer.appendChild(
+          renderEditRequestCard(edit, listingMap[edit.listing_id], ownerMap[edit.user_id])
+        );
+      });
+    }
+
+    editStatusFilter.addEventListener('change', loadEdits);
+
+    // ============================================================
+    // ট্যাব ৪: রিপোর্ট/অভিযোগ (content_reports)
+    // ============================================================
+    const reportsContainer = document.getElementById('reportsContainer');
+    const reportsEmptyState = document.getElementById('reportsEmptyState');
+    const reportStatusFilter = document.getElementById('reportStatusFilter');
+    const reportTargetTypeFilter = document.getElementById('reportTargetTypeFilter');
+    const reportsBadge = document.getElementById('reportsBadge');
+
+    const reasonLabelMap = {
+      unavailable: 'এভেইলেবল না / প্রবাসে',
+      behavior: 'আচরণ খারাপ',
+      wrong_info: 'ভুল তথ্য',
+      sold: 'বিক্রি হয়ে গেছে',
+      rented: 'ভাড়া হয়ে গেছে',
+      other: 'অন্যান্য',
+    };
+
+    const targetTypeLabels = {
+      listing: 'লিস্টিং',
+      blood_profile: 'ব্লাড ডোনার (রেজিস্টার্ড)',
+      blood_manual: 'ব্লাড ডোনার (ম্যানুয়াল)',
+    };
+
+    async function refreshReportsBadge() {
+      const { count } = await supabase
+        .from('content_reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      if (count && count > 0) {
+        reportsBadge.textContent = count;
+        reportsBadge.style.display = 'inline-block';
+      } else {
+        reportsBadge.style.display = 'none';
+      }
+    }
+
+    function resolveTargetInfo(targetType, targetId, listingMap, profileMap, manualMap) {
+      if (targetType === 'listing') {
+        const l = listingMap[targetId];
+        if (!l) return { title: '(লিস্টিং পাওয়া যায়নি — ডিলিট হয়ে থাকতে পারে)', subtitle: '', ownerUserId: null, isActive: false, notFound: true };
+        return {
+          title: l.title || '(শিরোনামহীন)',
+          subtitle: categoryNameMap[l.category] || l.category,
+          ownerUserId: l.user_id || null,
+          isDisabled: !!l.is_disabled,
+          notFound: false,
+        };
+      }
+      if (targetType === 'blood_profile') {
+        const p = profileMap[targetId];
+        if (!p) return { title: '(প্রোফাইল পাওয়া যায়নি)', subtitle: '', ownerUserId: null, isDisabled: false, notFound: true };
+        return {
+          title: p.full_name || '(নাম নাই)',
+          subtitle: `রক্তদাতা · ${p.phone || ''}`,
+          ownerUserId: p.id,
+          isDisabled: !!p.donor_disabled,
+          notFound: false,
+        };
+      }
+      if (targetType === 'blood_manual') {
+        const m = manualMap[targetId];
+        if (!m) return { title: '(ডোনার পাওয়া যায়নি — ডিলিট হয়ে থাকতে পারে)', subtitle: '', ownerUserId: null, isDisabled: false, notFound: true };
+        return {
+          title: m.name || '(নাম নাই)',
+          subtitle: `রক্তদাতা (ম্যানুয়াল) · ${m.phone || ''}`,
+          ownerUserId: null,
+          isDisabled: m.status === 'disabled',
+          notFound: false,
+        };
+      }
+      return { title: targetId, subtitle: '', ownerUserId: null, isDisabled: false, notFound: true };
+    }
+
+    function renderReportGroupCard(group, targetInfo, reporterMap) {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(15,23,42,0.06);display:flex;flex-direction:column;gap:12px;';
+
+      const reportRows = group.reports
+        .map((r) => {
+          const reporter = reporterMap[r.user_id];
+          const reasonText = reasonLabelMap[r.reason_category] || r.reason_category;
+          return `
+            <div style="padding:10px 12px;background:#F8FAFC;border-radius:12px;font-size:0.82rem;color:#1B2A4A;">
+              <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                <span style="font-weight:700;">${escapeHtml(reporter?.full_name || 'অজানা ইউজার')} ${reporter?.phone ? `· ${escapeHtml(reporter.phone)}` : ''}</span>
+                <span style="color:#8FA0BC;font-size:0.75rem;">${formatDate(r.created_at)}</span>
+              </div>
+              <div style="margin-top:4px;color:#D14343;font-weight:700;">${escapeHtml(reasonText)}</div>
+              ${r.reason_details ? `<div style="margin-top:2px;color:#5A6E85;">${escapeHtml(r.reason_details)}</div>` : ''}
+            </div>
+          `;
+        })
+        .join('');
+
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          <div>
+            <span style="font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:20px;background:#F4F7FC;color:#5A6E85;">${targetTypeLabels[group.target_type] || group.target_type}</span>
+            <h3 style="font-size:1rem;font-weight:700;color:#1B2A4A;margin-top:6px;">${escapeHtml(targetInfo.title)}</h3>
+            ${targetInfo.subtitle ? `<p style="font-size:0.82rem;color:#8FA0BC;">${escapeHtml(targetInfo.subtitle)}</p>` : ''}
+          </div>
+          <span style="font-size:0.75rem;font-weight:800;padding:4px 12px;border-radius:20px;background:#FFF0EA;color:#D14343;white-space:nowrap;">
+            ${group.reports.length} টা অভিযোগ
+          </span>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">${reportRows}</div>
+
+        <div class="report-actions" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+      `;
+
+      const actionsWrap = card.querySelector('.report-actions');
+
+      if (!targetInfo.notFound) {
+        if (targetInfo.isDisabled) {
+          const activateBtn = document.createElement('button');
+          activateBtn.textContent = 'সক্রিয় করুন';
+          activateBtn.style.cssText = 'background:#1B7A3C;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+          activateBtn.addEventListener('click', () => activateTarget(group));
+          actionsWrap.appendChild(activateBtn);
+        }
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = group.target_type === 'blood_profile' ? 'তালিকা থেকে বাদ দিন' : 'ডিলিট করুন';
+        deleteBtn.style.cssText = 'background:#FFF0EA;color:#D14343;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+        let confirming = false;
+        deleteBtn.addEventListener('click', () => {
+          if (!confirming) {
+            confirming = true;
+            deleteBtn.textContent = 'নিশ্চিত করুন?';
+            deleteBtn.style.cssText = 'background:#D14343;color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+            return;
+          }
+          deleteTarget(group);
+        });
+        actionsWrap.appendChild(deleteBtn);
+
+        if (targetInfo.ownerUserId) {
+          const blockBtn = document.createElement('button');
+          blockBtn.textContent = 'ইউজার ব্লক করুন';
+          blockBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+          blockBtn.addEventListener('click', () => blockOwner(targetInfo.ownerUserId));
+          actionsWrap.appendChild(blockBtn);
+        }
+      }
+
+      const dismissBtn = document.createElement('button');
+      dismissBtn.textContent = 'রিপোর্ট বাতিল করুন (সমস্যা নাই)';
+      dismissBtn.style.cssText = 'background:transparent;color:#8FA0BC;border:1.5px solid #E5EAF0;padding:8px 16px;border-radius:10px;font-size:0.8rem;font-weight:700;cursor:pointer;';
+      dismissBtn.addEventListener('click', () => dismissReports(group));
+      actionsWrap.appendChild(dismissBtn);
+
+      return card;
+    }
+
+    async function activateTarget(group) {
+      let error = null;
+      if (group.target_type === 'listing') {
+        ({ error } = await supabase.from('listings').update({ is_disabled: false, disabled_at: null }).eq('id', group.target_id));
+      } else if (group.target_type === 'blood_profile') {
+        ({ error } = await supabase.from('profiles').update({ donor_disabled: false, donor_disabled_at: null }).eq('id', group.target_id));
+      } else if (group.target_type === 'blood_manual') {
+        ({ error } = await supabase.from('manual_blood_donors').update({ status: 'active' }).eq('id', group.target_id));
+      }
+
+      if (error) { alert('সক্রিয় করা ব্যর্থ: ' + error.message); return; }
+      await dismissReports(group, false);
+      loadReports();
+    }
+
+    async function deleteTarget(group) {
+      let error = null;
+
+      // লিস্টিং হলে, cnglagbe সোর্স হলে ব্লকলিস্টে ফোন নম্বর যোগ করা
+      if (group.target_type === 'listing') {
+        const { data: listingRow } = await supabase
+          .from('listings')
+          .select('source, contact_phone')
+          .eq('id', group.target_id)
+          .single();
+
+        if (listingRow?.source && listingRow?.contact_phone) {
+          await supabase
+            .from('scraper_blocklist')
+            .upsert(
+              { source: listingRow.source, phone: listingRow.contact_phone },
+              { onConflict: 'source,phone' }
+            );
+        }
+
+        ({ error } = await supabase.from('listings').delete().eq('id', group.target_id));
+      } else if (group.target_type === 'blood_manual') {
+        ({ error } = await supabase.from('manual_blood_donors').delete().eq('id', group.target_id));
+      } else if (group.target_type === 'blood_profile') {
+        ({ error } = await supabase.from('profiles').update({ is_blood_donor: false, donor_disabled: true }).eq('id', group.target_id));
+      }
+
+      if (error) { alert('ব্যর্থ: ' + error.message); return; }
+
+      const ids = group.reports.map((r) => r.id);
+      await supabase.from('content_reports').update({ status: 'resolved' }).in('id', ids);
+
+      loadReports();
+      refreshReportsBadge();
+    }
+
+    async function dismissReports(group, reload = true) {
+      const ids = group.reports.map((r) => r.id);
+      const { error } = await supabase.from('content_reports').update({ status: 'dismissed' }).in('id', ids);
+      if (error) { alert('ব্যর্থ: ' + error.message); return; }
+      if (reload) {
+        loadReports();
+        refreshReportsBadge();
+      }
+    }
+
+    async function blockOwner(userId) {
+      if (!confirm('এই ইউজারকে ব্লক করবেন? ব্লক হলে তিনি আর লগইন করতে পারবেন না।')) return;
+      const { error } = await supabase.from('profiles').update({ is_blocked: true }).eq('id', userId);
+      if (error) { alert('ব্লক করা ব্যর্থ: ' + error.message); return; }
+      alert('ইউজার ব্লক করা হয়েছে।');
+    }
+
+    async function loadReports() {
+      reportsContainer.innerHTML = (window.SFSkeleton ? window.SFSkeleton.html('listing', 5) : '<p style="text-align:center;color:#8FA0BC;padding:40px 0;">লোড হচ্ছে...</p>');
+
+      let query = supabase.from('content_reports').select('*').order('created_at', { ascending: false });
+
+      const status = reportStatusFilter.value;
+      const targetType = reportTargetTypeFilter.value;
+
+      if (status !== 'all') query = query.eq('status', status);
+      if (targetType !== 'all') query = query.eq('target_type', targetType);
+
+      const { data: reports, error } = await query;
+
+      if (error) {
+        reportsContainer.innerHTML = `<p style="text-align:center;color:#D14343;padding:40px 0;">লোড করা যায়নি: ${error.message}</p>`;
+        return;
+      }
+
+      if (!reports || reports.length === 0) {
+        reportsContainer.innerHTML = '';
+        reportsEmptyState.style.display = 'flex';
+        return;
+      }
+
+      reportsEmptyState.style.display = 'none';
+
+      const groups = {};
+      reports.forEach((r) => {
+        const key = `${r.target_type}:${r.target_id}`;
+        if (!groups[key]) groups[key] = { target_type: r.target_type, target_id: r.target_id, reports: [] };
+        groups[key].reports.push(r);
+      });
+      const groupList = Object.values(groups);
+
+      const reporterIds = [...new Set(reports.map((r) => r.user_id))];
+      const { data: reporterProfiles } = reporterIds.length
+        ? await supabase.from('profiles').select('id, full_name, phone').in('id', reporterIds)
+        : { data: [] };
+      const reporterMap = Object.fromEntries((reporterProfiles || []).map((p) => [p.id, p]));
+
+      const listingIds = groupList.filter((g) => g.target_type === 'listing').map((g) => g.target_id);
+      const profileIds = groupList.filter((g) => g.target_type === 'blood_profile').map((g) => g.target_id);
+      const manualIds = groupList.filter((g) => g.target_type === 'blood_manual').map((g) => g.target_id);
+
+      const [listingsRes, profilesRes, manualRes] = await Promise.all([
+        listingIds.length ? supabase.from('listings').select('id, title, category, user_id, is_disabled').in('id', listingIds) : Promise.resolve({ data: [] }),
+        profileIds.length ? supabase.from('profiles').select('id, full_name, phone, donor_disabled').in('id', profileIds) : Promise.resolve({ data: [] }),
+        manualIds.length ? supabase.from('manual_blood_donors').select('id, name, phone, status').in('id', manualIds) : Promise.resolve({ data: [] }),
+      ]);
+
+      const listingMap = Object.fromEntries((listingsRes.data || []).map((l) => [l.id, l]));
+      const profileMap = Object.fromEntries((profilesRes.data || []).map((p) => [p.id, p]));
+      const manualMap = Object.fromEntries((manualRes.data || []).map((m) => [m.id, m]));
+
+      reportsContainer.innerHTML = '';
+      groupList.forEach((group) => {
+        const targetInfo = resolveTargetInfo(group.target_type, group.target_id, listingMap, profileMap, manualMap);
+        reportsContainer.appendChild(renderReportGroupCard(group, targetInfo, reporterMap));
+      });
+    }
+
+    reportStatusFilter.addEventListener('change', loadReports);
+    reportTargetTypeFilter.addEventListener('change', loadReports);
+
+    // ============================================================
+    onConsoleReady((ctx) => {
+      // দেখা: সুপার অ্যাডমিন, রোলহীন পুরনো মডেরেটর, বা listings.view (পুরনো পেজের একই নিয়ম)
+      const acc = ctx.access;
+      const isSuper = !!ctx.isSuper;
+      const legacy = !(acc && acc.isStaff);
+      const canView = isSuper || legacy || acc.can('listings.view');
+      if (!canView) { document.getElementById('clDeny').hidden = false; return; }
+      const canManage = isSuper || legacy || acc.can('listings.manage');
+      if (!canManage) {
+        document.body.classList.add('cl-viewonly');
+        document.getElementById('clReadonly').hidden = false;
+      }
+      document.getElementById('adminGuardedContent').hidden = false;
+      loadListings();
+      refreshReportsBadge();
+      refreshEditsBadge();
+      // নোটিফিকেশন লিংক (?tab=edits / reports) থেকে সঠিক ট্যাব খোলা
+      const wantedTab = new URLSearchParams(location.search).get('tab');
+      if (['edits', 'reports'].includes(wantedTab)) {
+        document.querySelector(`.tab-btn[data-tab="${wantedTab}"]`)?.click();
+      }
+    });
+  </script>
+</ConsoleShell>

@@ -13,8 +13,8 @@
 // ============================================================
 
 export const TODO_ITEMS = [
-  { name: 'লিস্টিং অনুমোদন ও এডিট রিভিউ', desc: 'নতুন লিস্টিং ও লিস্টিংয়ের বদল অনুমোদন বা রিজেক্ট', href: '/admin/listings', keys: 'পোস্ট বিজ্ঞাপন', types: ['listing', 'listing_edit'] },
-  { name: 'লিস্টিং রিপোর্ট', desc: 'ইউজারদের রিপোর্ট করা লিস্টিং দেখা', href: '/admin/listings', keys: 'অভিযোগ', types: ['listing_report'] },
+  { name: 'লিস্টিং অনুমোদন ও এডিট রিভিউ', desc: 'নতুন লিস্টিং ও লিস্টিংয়ের বদল অনুমোদন বা রিজেক্ট', href: '/console/listings', perm: '/admin/listings', keys: 'পোস্ট বিজ্ঞাপন', types: ['listing', 'listing_edit'] },
+  { name: 'লিস্টিং রিপোর্ট', desc: 'ইউজারদের রিপোর্ট করা লিস্টিং দেখা', href: '/console/listings?tab=reports', perm: '/admin/listings', keys: 'অভিযোগ', types: ['listing_report'] },
   { name: 'ডেলিভারি হিরো ভেরিফিকেশন', desc: 'নতুন রাইডারের কাগজ দেখে অনুমোদন', href: '/console/riders?tab=pending', perm: '/admin/delivery-riders', keys: 'রাইডার আবেদন', types: ['rider'] },
   { name: 'লোকাল ড্রাইভার ভেরিফিকেশন', desc: 'সিএনজি/অটো ড্রাইভারের আবেদন যাচাই', href: '/console/drivers?tab=pending', perm: '/admin/local-drivers', keys: 'সিএনজি অটো', types: ['local_driver'] },
   { name: 'দোকানের আবেদন', desc: 'কুইক ডেলিভারিতে যুক্ত হতে চাওয়া দোকান', href: '/console/shop-apps', perm: '/admin/delivery-shop-applications', keys: 'শপ', types: ['shop_app'] },
@@ -31,9 +31,9 @@ export const TODO_ITEMS = [
 
 // admin_todo() RPC-র ধরন → দেখানো নাম ও লিংক
 export const TODO_TYPE = {
-  listing: { name: 'নতুন লিস্টিং', href: '/admin/listings' },
-  listing_edit: { name: 'লিস্টিং এডিট', href: '/admin/listings' },
-  listing_report: { name: 'লিস্টিং রিপোর্ট', href: '/admin/listings' },
+  listing: { name: 'নতুন লিস্টিং', href: '/console/listings' },
+  listing_edit: { name: 'লিস্টিং এডিট', href: '/console/listings?tab=edits' },
+  listing_report: { name: 'লিস্টিং রিপোর্ট', href: '/console/listings?tab=reports' },
   rider: { name: 'রাইডার আবেদন', href: '/console/riders?tab=pending' },
   local_driver: { name: 'লোকাল ড্রাইভার', href: '/console/drivers?tab=pending' },
   ride_report: { name: 'রাইড রিপোর্ট', href: '/admin/local-rides' },
@@ -100,7 +100,7 @@ export const MENU = [
     id: 'content', name: 'কনটেন্ট', desc: 'লিস্টিং ও সাইটের তথ্য',
     icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     items: [
-      { name: 'লিস্টিং', desc: 'সব লিস্টিং খোঁজা, এডিট ও রিপোর্ট', href: '/admin/listings', keys: 'পোস্ট বাসা টিউশন' },
+      { name: 'লিস্টিং', desc: 'সব লিস্টিং খোঁজা, এডিট, এডিট রিভিউ ও রিপোর্ট', href: '/console/listings', perm: '/admin/listings', keys: 'পোস্ট বাসা টিউশন' },
       { name: 'জরুরি নম্বর', desc: 'পুলিশ, ফায়ার, হাসপাতালের নম্বর', href: '/admin/emergency-contacts', keys: 'ইমার্জেন্সি' },
       { name: 'টিউটোরিয়াল ও ইনফো', desc: 'ইনফো বাটনের লেখা ও ভিডিও', href: '/admin/tutorials', adminOnly: true, keys: 'ভিডিও' },
     ],
