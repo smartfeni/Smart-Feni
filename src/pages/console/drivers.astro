@@ -1,0 +1,282 @@
+---
+// ============================================================
+// /console/drivers — লোকাল রাইডের ড্রাইভার (সিএনজি/অটো) (নতুন অ্যাপ, ধাপ ৬.২)
+// পুরনো /admin/local-drivers-এর একই ডাটা ও নিয়ম (নতুন DB বদল নেই):
+//   local_ride_drivers + profiles + local_ride_vehicle_types + local_ride_driver_areas/_upazilas + local_areas
+//   ছবি: নিজের ও গাড়ির (পাবলিক), আইডি কার্ড (প্রাইভেট rider-verification, signed URL)
+//   অনুমোদন/বাতিল: RPC admin_approve_local_ride_driver(p_driver_id, p_approve, p_reason) — বাতিলে কারণ বাধ্যতামূলক
+//   কাজের অনুমতি: local_ride.manage (দেখা: local_ride পেজের অনুমতি)
+// বাড়তি: এখন অনলাইন কিনা, কয়টা রাইড সম্পন্ন (local_ride_requests.accepted_driver_id)।
+// ড্রাইভার কম, তাই আলাদা পেজ নয়; কার্ডে চাপলে বিস্তারিত খোলে।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="লোকাল ড্রাইভার" active="menu">
+  <div class="cs-pad cm-page dv-page">
+    <div>
+      <h1 class="cs-h cm-title">লোকাল ড্রাইভার</h1>
+      <p class="cs-muted dv-sub" id="dvSub">সিএনজি ও অটো রাইডের ড্রাইভার</p>
+    </div>
+    <div class="dv-deny" id="dvDeny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+    <div class="dv-main" id="dvMain" hidden>
+      <div class="dv-tabs" id="dvTabs" role="tablist" aria-label="ড্রাইভারের অবস্থা"></div>
+      <input type="search" class="dv-q" id="dvQ" placeholder="নাম, ফোন বা গাড়ির নম্বর" aria-label="ড্রাইভার খুঁজুন" />
+      <div class="dv-list" id="dvList"></div>
+    </div>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .dv-sub { margin: 2px 0 0; }
+  .dv-main { display: flex; flex-direction: column; gap: 10px; }
+  .dv-tabs { display: grid; grid-template-columns: repeat(3, 1fr); background: #EFEBE5; border-radius: 14px; padding: 4px; gap: 4px; }
+  .dv-tabs button { height: 42px; border: 0; border-radius: 11px; background: transparent; font: inherit; font-size: 13.5px; font-weight: 600; color: #3D4A60; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+  .dv-tabs button[aria-selected="true"] { background: #fff; color: #1B2A4A; box-shadow: 0 1px 2px rgba(27,42,74,.12); }
+  .dv-tabs i { font-style: normal; font-size: 12px; min-width: 20px; height: 20px; line-height: 20px; border-radius: 999px; background: #DCD6CD; padding: 0 6px; box-sizing: border-box; }
+  .dv-tabs i.hot { background: #C2410C; color: #fff; }
+  .dv-q { width: 100%; box-sizing: border-box; height: 44px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; padding: 0 14px; font: inherit; font-size: 15px; color: #1B2A4A; }
+  .dv-list { display: flex; flex-direction: column; gap: 10px; }
+  .dv-card { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; overflow: hidden; }
+  .dv-top { display: flex; gap: 12px; align-items: center; width: 100%; padding: 12px 14px; background: none; border: 0; font: inherit; color: #1B2A4A; text-align: left; cursor: pointer; }
+  .dv-pic { position: relative; width: 50px; height: 50px; flex: none; border-radius: 50%; background: #EFEBE5 center/cover no-repeat; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 19px; color: #5F6B7E; }
+  .dv-dot { position: absolute; right: 1px; bottom: 1px; width: 13px; height: 13px; border-radius: 50%; border: 2px solid #fff; background: #9AA3B2; }
+  .dv-dot.on { background: #17A34A; }
+  .dv-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .dv-name { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; }
+  .dv-line { font-size: 12.5px; color: #5F6B7E; overflow-wrap: anywhere; }
+  .dv-arrow { color: #5F6B7E; font-size: 13px; font-weight: 600; }
+  .dv-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid #EFEBE5; }
+  .dv-body[hidden] { display: none; }
+  .dv-kv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; font-size: 14px; margin: 12px 0 0; }
+  .dv-kv dt { color: #5F6B7E; }
+  .dv-kv dd { margin: 0; overflow-wrap: anywhere; }
+  .dv-kv a { color: #1B2A4A; font-weight: 600; }
+  .dv-docs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .dv-doc { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #5F6B7E; }
+  .dv-doc button { height: 100px; border-radius: 12px; border: 1px solid #E7E2DA; background: #F7F5F2 center/cover no-repeat; cursor: pointer; padding: 0; color: #9AA3B2; font: inherit; font-size: 12px; }
+  .dv-doc button:disabled { cursor: default; }
+  .dv-reason { background: #FDF6F4; border-radius: 10px; padding: 8px 10px; font-size: 13.5px; overflow-wrap: anywhere; }
+  .dv-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .dv-btn { flex: 1 1 140px; height: 46px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer; }
+  .dv-btn.ok { background: #17663F; border-color: #17663F; color: #fff; }
+  .dv-btn.red { color: #B3261E; border-color: #F2B8A0; }
+  .dv-btn.redfill { background: #B3261E; border-color: #B3261E; color: #fff; }
+  .dv-btn:disabled { opacity: .55; }
+  .dv-rej { display: flex; flex-direction: column; gap: 8px; background: #FDF6F4; border-radius: 12px; padding: 10px; }
+  .dv-rej[hidden] { display: none; }
+  .dv-rej textarea { width: 100%; box-sizing: border-box; min-height: 70px; border: 1px solid #E7E2DA; border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 14.5px; }
+  .dv-empty, .dv-deny { padding: 30px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; color: #5F6B7E; }
+  .dv-deny { font-weight: 600; color: #1B2A4A; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, canOpenAdminPath, bn, dayLabel, agoLabel } from '../../lib/consoleApp.js';
+  import { signedRiderDoc, publicPhoto, openPhoto } from '../../lib/consoleRiders.js';
+
+  const $ = (id) => document.getElementById(id);
+  const toast = (t, type = 'success') => window.showToast?.(t, type);
+  const TABS = [['pending', 'অপেক্ষায়'], ['approved', 'চালু'], ['rejected', 'বাতিল']];
+  const params = new URLSearchParams(location.search);
+  const st = { tab: TABS.some(([k]) => k === params.get('tab')) ? params.get('tab') : 'approved', q: '' };
+  let drivers = [];
+  let canManage = false;
+  const open = new Set();
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  const qMatch = (d) => !st.q || [d.profile && d.profile.full_name, d.profile && d.profile.phone, d.vehicle_number].some((v) => String(v || '').toLowerCase().includes(st.q));
+
+  function renderTabs() {
+    const box = $('dvTabs');
+    box.textContent = '';
+    TABS.forEach(([k, name]) => {
+      const b = el('button');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(k === st.tab));
+      b.appendChild(document.createTextNode(name));
+      const n = drivers.filter((d) => d.status === k).length;
+      if (n) b.appendChild(el('i', k === 'pending' ? 'hot' : null, bn(n)));
+      b.addEventListener('click', () => { st.tab = k; render(); });
+      box.appendChild(b);
+    });
+  }
+
+  function doc(parent, label, url) {
+    const d = el('div', 'dv-doc');
+    d.appendChild(el('span', null, label));
+    const b = el('button');
+    b.type = 'button';
+    if (url) { b.style.backgroundImage = 'url("' + encodeURI(url) + '")'; b.setAttribute('aria-label', label + ' বড় করে দেখুন'); b.addEventListener('click', () => openPhoto(url, label)); }
+    else { b.textContent = 'দেওয়া নেই'; b.disabled = true; }
+    d.appendChild(b);
+    parent.appendChild(d);
+  }
+
+  async function decide(d, approve, reason, btn) {
+    btn.disabled = true;
+    const { error } = await supabase.rpc('admin_approve_local_ride_driver', { p_driver_id: d.id, p_approve: approve, p_reason: approve ? null : reason });
+    if (error) {
+      btn.disabled = false;
+      toast('হয়নি, আবার চেষ্টা করুন', 'error');
+      try { window.SFReportError?.({ kind: 'api_fail', action: 'console_local_driver_decide', title: 'লোকাল ড্রাইভার অনুমোদন/বাতিল ব্যর্থ', message: error.message }); } catch (e) { /* চুপ */ }
+      return;
+    }
+    toast(approve ? 'অনুমোদন দেওয়া হয়েছে' : 'বাতিল করা হয়েছে');
+    load();
+  }
+
+  function card(d) {
+    const p = d.profile || {};
+    const c = el('article', 'dv-card');
+    const top = el('button', 'dv-top');
+    top.type = 'button';
+    const bodyId = 'dvb-' + d.id;
+    top.setAttribute('aria-controls', bodyId);
+    top.setAttribute('aria-expanded', String(open.has(d.id)));
+    const pic = el('span', 'dv-pic');
+    if (d.own) pic.style.backgroundImage = 'url("' + encodeURI(d.own) + '")';
+    else pic.textContent = String(p.full_name || '?').trim().charAt(0);
+    if (d.status === 'approved') pic.appendChild(el('span', 'dv-dot' + (d.is_online ? ' on' : '')));
+    top.appendChild(pic);
+    const t = el('span', 'dv-t');
+    t.appendChild(el('span', 'dv-name', p.full_name || 'নাম নেই'));
+    t.appendChild(el('span', 'dv-line', [d.vtName, d.vehicle_number, d.status === 'approved' ? (d.is_online ? 'অনলাইন' : 'অফলাইন') : '', d.status === 'approved' ? bn(d.done || 0) + 'টা রাইড সম্পন্ন' : 'আবেদন ' + agoLabel(d.created_at)].filter(Boolean).join(' · ')));
+    top.appendChild(t);
+    const arr = el('span', 'dv-arrow', open.has(d.id) ? '▴' : '▾');
+    top.appendChild(arr);
+    c.appendChild(top);
+
+    const b = el('div', 'dv-body');
+    b.id = bodyId;
+    b.hidden = !open.has(d.id);
+    top.addEventListener('click', () => {
+      const o = b.hidden;
+      b.hidden = !o;
+      top.setAttribute('aria-expanded', String(o));
+      arr.textContent = o ? '▴' : '▾';
+      if (o) open.add(d.id); else open.delete(d.id);
+    });
+
+    const dl = el('dl', 'dv-kv');
+    const kv = (k, v) => { if (!v) return; dl.appendChild(el('dt', null, k)); const dd = el('dd'); if (v instanceof Node) dd.appendChild(v); else dd.textContent = v; dl.appendChild(dd); };
+    if (p.phone) { const a = el('a', null, p.phone); a.href = 'tel:' + String(p.phone).replace(/[^\d+]/g, ''); kv('ফোন', a); }
+    kv('গাড়ি', [d.vtName, d.vehicle_number].filter(Boolean).join(' · '));
+    const areas = d.areas.map((a) => (a.name_bn || '') + (a.upazila ? ' (' + a.upazila + ')' : '')).concat(d.upazilas.map((u) => u + ' (পুরো উপজেলা)'));
+    kv('এলাকা', areas.join(', ') || 'দেওয়া নেই');
+    kv('আবেদন', d.created_at ? dayLabel(d.created_at) : '');
+    if (d.reviewed_at) kv('যাচাই', dayLabel(d.reviewed_at));
+    b.appendChild(dl);
+
+    const docs = el('div', 'dv-docs');
+    doc(docs, 'নিজের ছবি', d.own);
+    doc(docs, 'আইডি কার্ড', d.idUrl);
+    doc(docs, 'গাড়ির ছবি', d.veh);
+    b.appendChild(docs);
+    if (d.status === 'rejected' && d.rejection_reason) b.appendChild(el('div', 'dv-reason', 'বাতিলের কারণ: ' + d.rejection_reason));
+
+    if (canManage) {
+      const acts = el('div', 'dv-acts');
+      const rej = el('div', 'dv-rej');
+      rej.hidden = true;
+      const ta = el('textarea');
+      ta.maxLength = 200;
+      ta.placeholder = 'কারণ লিখুন (ড্রাইভার দেখবেন)';
+      ta.setAttribute('aria-label', 'বাতিলের কারণ');
+      const go = el('button', 'dv-btn redfill', 'নিশ্চিত, বাতিল করুন');
+      go.type = 'button';
+      rej.append(ta, go);
+      if (d.status !== 'approved') {
+        const ok = el('button', 'dv-btn ok', d.status === 'rejected' ? 'আবার চালু করুন' : 'অনুমোদন দিন');
+        ok.type = 'button';
+        ok.addEventListener('click', () => {
+          if (!window.confirm((p.full_name || 'এই ড্রাইভার') + '-কে অনুমোদন দেবেন? তিনি লোকাল রাইডের অনুরোধ পাবেন।')) return;
+          decide(d, true, null, ok);
+        });
+        acts.appendChild(ok);
+      }
+      if (d.status !== 'rejected') {
+        const no = el('button', 'dv-btn red', d.status === 'approved' ? 'বন্ধ করুন (বাতিল)' : 'বাতিল করুন');
+        no.type = 'button';
+        no.addEventListener('click', () => { rej.hidden = !rej.hidden; if (!rej.hidden) ta.focus(); });
+        acts.appendChild(no);
+      }
+      go.addEventListener('click', () => {
+        const why = ta.value.trim();
+        if (!why) { toast('কারণ লিখুন', 'warning'); ta.focus(); return; }
+        decide(d, false, why, go);
+      });
+      b.append(acts, rej);
+    }
+    c.appendChild(b);
+    return c;
+  }
+
+  function render() {
+    renderTabs();
+    const box = $('dvList');
+    box.textContent = '';
+    const list = drivers.filter((d) => d.status === st.tab && qMatch(d));
+    if (!list.length) { box.appendChild(el('div', 'dv-empty', st.q ? 'কাউকে পাওয়া যায়নি।' : st.tab === 'pending' ? 'যাচাইয়ের অপেক্ষায় কেউ নেই।' : 'এখানে কেউ নেই।')); return; }
+    list.forEach((d) => box.appendChild(card(d)));
+  }
+
+  async function load() {
+    if (!drivers.length) $('dvList').innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 4) : '';
+    const { data: rows, error } = await supabase.from('local_ride_drivers')
+      .select('id, user_id, vehicle_type_id, vehicle_number, photo_url, id_card_photo_url, vehicle_photo_url, status, rejection_reason, is_online, reviewed_at, created_at')
+      .order('created_at', { ascending: false });
+    if (error) { $('dvList').textContent = ''; $('dvList').appendChild(el('div', 'dv-empty', 'লোড করা যায়নি।')); return; }
+    const ids = (rows || []).map((d) => d.id);
+    const uids = [...new Set((rows || []).map((d) => d.user_id))];
+    const [vt, ar, da, pr, du, rq] = await Promise.all([
+      supabase.from('local_ride_vehicle_types').select('id, name_bn'),
+      supabase.from('local_areas').select('id, name_bn, upazila'),
+      ids.length ? supabase.from('local_ride_driver_areas').select('driver_id, area_id').in('driver_id', ids) : Promise.resolve({ data: [] }),
+      uids.length ? supabase.from('profiles').select('id, full_name, phone').in('id', uids) : Promise.resolve({ data: [] }),
+      ids.length ? supabase.from('local_ride_driver_upazilas').select('driver_id, upazila').in('driver_id', ids) : Promise.resolve({ data: [] }),
+      ids.length ? supabase.from('local_ride_requests').select('accepted_driver_id').eq('status', 'completed').in('accepted_driver_id', ids) : Promise.resolve({ data: [] }),
+    ]);
+    const vtMap = new Map((vt.data || []).map((x) => [x.id, x.name_bn]));
+    const areaMap = new Map((ar.data || []).map((x) => [x.id, x]));
+    const prMap = new Map((pr.data || []).map((x) => [x.id, x]));
+    const areasBy = new Map();
+    (da.data || []).forEach((r) => { const a = areaMap.get(r.area_id); if (!a) return; if (!areasBy.has(r.driver_id)) areasBy.set(r.driver_id, []); areasBy.get(r.driver_id).push(a); });
+    const upaBy = new Map();
+    (du.data || []).forEach((r) => { if (!upaBy.has(r.driver_id)) upaBy.set(r.driver_id, []); upaBy.get(r.driver_id).push(r.upazila); });
+    const doneBy = {};
+    (rq.data || []).forEach((r) => { doneBy[r.accepted_driver_id] = (doneBy[r.accepted_driver_id] || 0) + 1; });
+    drivers = await Promise.all((rows || []).map(async (d) => ({
+      ...d,
+      own: publicPhoto(d.photo_url),
+      veh: publicPhoto(d.vehicle_photo_url),
+      idUrl: await signedRiderDoc(d.id_card_photo_url),
+      vtName: vtMap.get(d.vehicle_type_id) || '',
+      areas: areasBy.get(d.id) || [],
+      upazilas: upaBy.get(d.id) || [],
+      profile: prMap.get(d.user_id) || null,
+      done: doneBy[d.id] || 0,
+    })));
+    drivers.sort((a, b) => (b.is_online - a.is_online) || (b.done - a.done));
+    const ok = drivers.filter((d) => d.status === 'approved');
+    $('dvSub').textContent = bn(ok.length) + ' জন চালু · ' + bn(ok.filter((d) => d.is_online).length) + ' জন এখন অনলাইন';
+    if (!params.get('tab') && drivers.some((d) => d.status === 'pending')) st.tab = 'pending';
+    render();
+  }
+
+  onConsoleReady((ctx) => {
+    if (!canOpenAdminPath('/admin/local-drivers', ctx)) { $('dvDeny').hidden = false; return; }
+    canManage = !!(ctx.isSuper || !ctx.access.isStaff || ctx.access.can('local_ride.manage'));
+    $('dvMain').hidden = false;
+    let t = 0;
+    $('dvQ').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { st.q = String(e.target.value || '').trim().toLowerCase(); render(); }, 200); });
+    load();
+  });
+</script>
