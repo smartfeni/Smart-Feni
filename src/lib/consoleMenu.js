@@ -153,11 +153,11 @@ export const MENU = [
     id: 'system', name: 'রিপোর্ট ও সিস্টেম', desc: 'ব্যবহারের হিসাব ও প্রযুক্তিগত সমস্যা',
     icon: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
     items: [
-      { name: 'অ্যানালিটিক্স', desc: 'উপজেলা ও ক্যাটাগরি অনুযায়ী ব্যবহার', href: '/admin/analytics', keys: 'রিপোর্ট' },
-      { name: 'ইউজার হেলথ', desc: 'অ্যাপ ধীর বা আটকে যাওয়ার হিসাব', href: '/admin/health', adminOnly: true, keys: 'স্পিড' },
-      { name: 'এরর লগ', desc: 'অ্যাপ ও সার্ভারের সমস্যা', href: '/admin/errors', adminOnly: true, keys: 'বাগ ক্র্যাশ' },
-      { name: 'ডিভাইস ও আনইনস্টল', desc: 'কতজন অ্যাপ রেখেছে বা মুছেছে', href: '/admin/devices', adminOnly: true, keys: 'অ্যাপ' },
-      { name: 'বট চ্যাট', desc: 'স্ক্রিনশট-ইম্পোর্ট বট', href: '/admin/bot-chats', keys: 'বট' },
+      { name: 'অ্যানালিটিক্স', desc: 'উপজেলা ও ক্যাটাগরি অনুযায়ী ব্যবহার', href: '/console/analytics', perm: '/admin/analytics', keys: 'রিপোর্ট' },
+      { name: 'ইউজার হেলথ', desc: 'অ্যাপ ধীর বা আটকে যাওয়ার হিসাব', href: '/console/health', adminOnly: true, keys: 'স্পিড' },
+      { name: 'এরর লগ', desc: 'অ্যাপ ও সার্ভারের সমস্যা', href: '/console/errors', adminOnly: true, keys: 'বাগ ক্র্যাশ' },
+      { name: 'ডিভাইস ও আনইনস্টল', desc: 'কতজন অ্যাপ রেখেছে বা মুছেছে', href: '/console/devices', adminOnly: true, keys: 'অ্যাপ' },
+      { name: 'বট চ্যাট', desc: 'স্ক্রিনশট-ইম্পোর্ট বট', href: '/console/bot-chats', perm: '/admin/bot-chats', keys: 'বট' },
     ],
   },
 ];
