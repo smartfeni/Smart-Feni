@@ -109,7 +109,8 @@ export async function mountWalletCard(supabase, riderId, anchorEl) {
 }
 
 // ---------- ২) ওয়ালেট পেজ ----------
-const KIND = { advance: 'অগ্রিম', deposit: 'জমা', withdraw: 'তোলা' };
+const KIND_LONG = { advance: 'অগ্রিম', deposit: 'টাকা জমা', withdraw: 'টাকা তোলা' };
+const REQ_STATUS = { pending: ['প্রসেসিং', 'wait'], approved: ['অনুমোদিত', 'ok'], rejected: ['বাতিল হয়েছে', 'no'] };
 const ENTRY = {
   order_cash: 'কাস্টমারের হাতে নেওয়া নগদ', order_advance: 'আপনার বিকাশে আসা অগ্রিম', order_purchase: 'দোকানে দিয়েছেন',
   order_earning: 'ডেলিভারি চার্জ (আপনার আয়)', company_advance: 'কোম্পানি অগ্রিম পাঠিয়েছে', deposit: 'আপনি জমা দিয়েছেন',
@@ -212,7 +213,7 @@ export async function mountWalletPage(supabase, root) {
   async function send(kind, amount, extra) {
     const { error } = await supabase.rpc('rider_wallet_request', Object.assign({ p_kind: kind, p_amount: amount }, extra));
     if (error) return /[ঀ-৿]/.test(error.message || '') ? error.message : 'পাঠানো যায়নি, আবার চেষ্টা করুন';
-    toast(kind === 'deposit' ? 'জমার তথ্য পাঠানো হয়েছে, ম্যানেজার মিলিয়ে নেবেন' : kind === 'withdraw' ? 'তোলার অনুরোধ পাঠানো হয়েছে' : 'অগ্রিমের অনুরোধ পাঠানো হয়েছে');
+    toast(kind === 'deposit' ? 'জমার তথ্য পাঠানো হয়েছে' : kind === 'withdraw' ? 'তোলার অনুরোধ পাঠানো হয়েছে' : 'অগ্রিমের অনুরোধ পাঠানো হয়েছে');
     load();
     return null;
   }
@@ -221,7 +222,7 @@ export async function mountWalletPage(supabase, root) {
     const bal = Number(st.me.balance) || 0;
     sheet('টাকা জমা দিন', (b) => {
       const info = el('div', 'rw-office');
-      info.appendChild(el('p', null, 'নিচের অফিস নম্বরে Send Money করুন, তারপর TrxID দিন। ম্যানেজার মিলিয়ে নিলে ওয়ালেটে যোগ হবে।'));
+      info.appendChild(el('p', null, 'নিচের অফিস নম্বরে Send Money করুন, তারপর TrxID অথবা যে নম্বর থেকে পাঠিয়েছেন তার শেষ ৪ সংখ্যা দিন। অনুমোদন হলে ওয়ালেটে যোগ হবে।'));
       [['বিকাশ', st.me.office_bkash], ['নগদ', st.me.office_nagad]].forEach(([n, v]) => {
         if (!v) return;
         const r = el('div', 'rw-office-row');
@@ -236,7 +237,7 @@ export async function mountWalletPage(supabase, root) {
       const amt = field(b, 'কত টাকা', inp('number', { min: 1, step: 1, inputMode: 'numeric', name: 'amount', value: bal < 0 ? String(Math.round(-bal)) : '' }), true);
       void amt;
       const m = methodPick(b, true);
-      const trx = field(b, 'TrxID', inp('text', { maxLength: 40, name: 'trx', placeholder: 'যেমন 9K2B7XQ1ZP', autocapitalize: 'characters' }), true, 'বিকাশ/নগদের মেসেজে থাকে');
+      const trx = field(b, 'TrxID বা নম্বরের শেষ ৪ সংখ্যা', inp('text', { maxLength: 40, name: 'trx', placeholder: 'যেমন 9K2B7XQ1ZP বা 4821', autocapitalize: 'characters' }), true, 'যেকোনো একটা দিলেই হবে');
       const trxWrap = trx.parentNode;
       m.el.addEventListener('change', () => { const cash = m.get() === 'cash'; trxWrap.hidden = cash; trx.required = !cash; });
       b._m = m;
@@ -245,7 +246,7 @@ export async function mountWalletPage(supabase, root) {
       if (!amount || amount <= 0) return 'টাকার পরিমাণ দিন';
       const method = b._m.get();
       const trx = b.querySelector('[name="trx"]').value.trim();
-      if (method !== 'cash' && !trx) return 'TrxID দিন';
+      if (method !== 'cash' && trx.length < 4) return 'TrxID বা নম্বরের শেষ ৪ সংখ্যা দিন';
       return send('deposit', amount, { p_method: method, p_trx_id: method === 'cash' ? null : trx });
     });
   }
@@ -254,7 +255,7 @@ export async function mountWalletPage(supabase, root) {
     const bal = Number(st.me.balance) || 0;
     if (bal <= 0) { toast('তোলার মতো ব্যালেন্স নেই', 'warning'); return; }
     sheet('টাকা তুলুন', (b) => {
-      b.appendChild(el('p', 'rw-p', 'আপনি পাবেন ' + tk(bal) + '। ম্যানেজার টাকা পাঠালে ওয়ালেট থেকে কাটা যাবে।'));
+      b.appendChild(el('p', 'rw-p', 'আপনি পাবেন ' + tk(bal) + '। অনুমোদন হলে টাকা পাঠানো হবে, তখন ওয়ালেট থেকে কাটা যাবে।'));
       field(b, 'কত টাকা', inp('number', { min: 1, max: Math.floor(bal), step: 1, inputMode: 'numeric', name: 'amount', value: String(Math.floor(bal)) }), true);
       const m = methodPick(b, false);
       field(b, 'কোন নম্বরে নেবেন', inp('tel', { maxLength: 14, inputMode: 'numeric', name: 'number', value: st.me.my_number || '', placeholder: '01XXXXXXXXX' }), true);
@@ -270,7 +271,7 @@ export async function mountWalletPage(supabase, root) {
   function openAdvance(preId) {
     if (!st.orders.length) { toast('এখন আপনার কোনো চলমান অর্ডার নেই। অর্ডার নেওয়ার পর অগ্রিম চাইতে পারবেন।', 'warning'); return; }
     sheet('অগ্রিম চান', (b) => {
-      b.appendChild(el('p', 'rw-p', 'অর্ডারের জিনিস কিনতে টাকা লাগলে চান। ম্যানেজার টাকা পাঠালে ওয়ালেটে কোম্পানির পাওনা হিসেবে লেখা হবে, কাস্টমার থেকে টাকা নিয়ে জমা দেবেন।'));
+      b.appendChild(el('p', 'rw-p', 'অর্ডারের জিনিস কিনতে টাকা লাগলে চান। অনুমোদন হলে টাকা পাঠানো হবে আর ওয়ালেটে কোম্পানির পাওনা হিসেবে লেখা হবে; কাস্টমার থেকে টাকা নিয়ে জমা দেবেন।'));
       const sel = el('select', 'rw-in');
       sel.name = 'order';
       st.orders.forEach((o) => {
@@ -355,20 +356,26 @@ export async function mountWalletPage(supabase, root) {
     bk.append(im, bt2, eb);
     root.appendChild(bk);
 
-    // অপেক্ষায় থাকা অনুরোধ
-    const pend = st.reqs.filter((r) => r.status === 'pending');
-    if (pend.length) {
-      root.appendChild(el('h3', 'rw-h', 'অপেক্ষায়'));
-      pend.forEach((r) => {
-        const c = el('div', 'rw-pend');
-        c.append(el('span', null, KIND[r.kind] + ' ' + tk(r.amount) + (r.order_no ? ' · ' + r.order_no : '')), el('small', null, 'ম্যানেজার দেখছেন · ' + dayText(r.created_at)));
-        root.appendChild(c);
+    // আমার অনুরোধ: প্রসেসিং / অনুমোদিত / বাতিল (প্রসেসিং আগে, তারপর সাম্প্রতিক ৫টা)
+    const reqRows = st.reqs.filter((r) => r.status === 'pending')
+      .concat(st.reqs.filter((r) => r.status !== 'pending').slice(0, 5));
+    if (reqRows.length) {
+      root.appendChild(el('h3', 'rw-h', 'আমার অনুরোধ'));
+      const rl = el('div', 'rw-list');
+      reqRows.forEach((r) => {
+        const row = el('div', 'rw-row');
+        const t = el('span', 'rw-row-t');
+        t.append(el('span', null, KIND_LONG[r.kind] + ' ' + tk(r.amount) + (r.order_no ? ' · ' + r.order_no : '')),
+          el('small', null, dayText(r.created_at) + (r.status === 'rejected' && r.admin_note ? ' · কারণ: ' + r.admin_note : '')));
+        const s = REQ_STATUS[r.status] || REQ_STATUS.pending;
+        row.append(t, el('span', 'rw-st ' + s[1], s[0]));
+        rl.appendChild(row);
       });
+      root.appendChild(rl);
     }
 
     // লেনদেন (অনুরোধের বাতিলও)
-    const rejected = st.reqs.filter((r) => r.status === 'rejected').map((r) => ({ t: 'rej', at: r.decided_at || r.created_at, r }));
-    const rows = st.entries.map((e) => ({ t: 'e', at: e.created_at, e })).concat(rejected).sort((a, b) => new Date(b.at) - new Date(a.at));
+    const rows = st.entries.map((e) => ({ t: 'e', at: e.created_at, e }));
     root.appendChild(el('h3', 'rw-h', 'লেনদেন'));
     const list = el('div', 'rw-list');
     if (!rows.length) list.appendChild(el('p', 'rw-empty', 'এখনো কোনো লেনদেন নেই। কুইক ডেলিভারির অর্ডার সম্পন্ন হলে এখানে নিজে থেকে যোগ হবে।'));
@@ -376,16 +383,10 @@ export async function mountWalletPage(supabase, root) {
       const r = el('div', 'rw-row');
       if (i >= 5 && !st.showAll) r.hidden = true;
       const t = el('span', 'rw-row-t');
-      if (x.t === 'e') {
-        const no = x.e.delivery_requests && x.e.delivery_requests.order_no;
-        t.append(el('span', null, (ENTRY[x.e.kind] || x.e.kind) + (no ? ' · ' + no : '')), el('small', null, dayText(x.e.created_at) + (x.e.kind === 'adjust' && x.e.note ? ' · ' + x.e.note : '')));
-        const v = Number(x.e.amount);
-        r.append(t, el('b', v < 0 ? 'neg' : 'pos', (v > 0 ? '+' : '−') + tk(v)));
-      } else {
-        t.append(el('span', null, KIND[x.r.kind] + ' ' + tk(x.r.amount) + ' গ্রহণ হয়নি'), el('small', null, (x.r.admin_note ? 'কারণ: ' + x.r.admin_note + ' · ' : '') + dayText(x.at)));
-        r.classList.add('rej');
-        r.append(t, el('b', 'zero', '—'));
-      }
+      const no = x.e.delivery_requests && x.e.delivery_requests.order_no;
+      t.append(el('span', null, (ENTRY[x.e.kind] || x.e.kind) + (no ? ' · ' + no : '')), el('small', null, dayText(x.e.created_at) + (x.e.kind === 'adjust' && x.e.note ? ' · ' + x.e.note : '')));
+      const v = Number(x.e.amount);
+      r.append(t, el('b', v < 0 ? 'neg' : 'pos', (v > 0 ? '+' : '−') + tk(v)));
       list.appendChild(r);
     });
     root.appendChild(list);
