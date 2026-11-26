@@ -101,6 +101,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
 
 <script>
   import { supabase } from '../../lib/supabase.js';
+  import { sendFeeField, addSendFee } from '../../lib/consoleSendFee.js';
   import { onConsoleReady, canOpenAdminPath, bn, dayLabel, timeLabel, agoLabel } from '../../lib/consoleApp.js';
 
   const $ = (id) => document.getElementById(id);
@@ -155,11 +156,12 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   }
 
   // ---------- অনুরোধ ----------
-  async function decide(r, approve, trx, note, btn) {
+  async function decide(r, approve, trx, note, btn, fee) {
     btn.disabled = true;
     const { error } = await supabase.rpc('admin_wallet_decide', { p_id: r.id, p_approve: approve, p_trx_id: trx || null, p_note: note || null });
+    if (error) { btn.disabled = false; toast(error.message && /[ঀ-৿]/.test(error.message) ? error.message : 'হয়নি, আবার চেষ্টা করুন', 'error'); return; }
+    if (approve && fee != null) await addSendFee('rider_wallet', r.id, fee);
     btn.disabled = false;
-    if (error) { toast(error.message && /[ঀ-৿]/.test(error.message) ? error.message : 'হয়নি, আবার চেষ্টা করুন', 'error'); return; }
     toast(approve ? 'হয়েছে, ওয়ালেটে লেখা হয়েছে' : 'বাতিল করা হয়েছে, রাইডারকে জানানো হয়েছে');
     load();
   }
@@ -204,6 +206,8 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
       trx.setAttribute('aria-label', 'TrxID');
       act.appendChild(trx);
     }
+    const feeF = (r.kind !== 'deposit' && r.method !== 'cash') ? sendFeeField(true) : null;
+    if (feeF) act.appendChild(feeF.el);
     const ok = el('button', 'wl-btn ok', r.kind === 'deposit' ? 'পেয়েছি' : 'পাঠিয়েছি');
     ok.type = 'button';
     const no = el('button', 'wl-btn red', 'বাতিল');
@@ -214,11 +218,13 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
     ok.addEventListener('click', () => {
       const t = trx ? trx.value.trim() : '';
       if (trx && t.length < 4) { toast('TrxID বা নম্বরের শেষ ৪ সংখ্যা লিখুন', 'warning'); trx.focus(); return; }
+      const fee = feeF ? feeF.amount() : null;
+      if (Number.isNaN(fee)) { toast('সেন্ড মানি খরচ ১ থেকে ৫০০ টাকার মধ্যে দিন', 'warning'); feeF.focus(); return; }
       const msg = r.kind === 'deposit'
         ? (p.name || 'রাইডার') + '-এর ' + tk(r.amount) + ' (' + (METHOD[r.method] || '') + (r.trx_id ? ', TrxID ' + r.trx_id : '') + ') অফিসের নম্বরে এসেছে, মিলিয়ে দেখেছেন?'
-        : (p.name || 'রাইডার') + '-কে ' + tk(r.amount) + ' পাঠিয়েছেন' + (r.number ? ' (' + r.number + ')' : '') + '? রাইডারের ওয়ালেট থেকে কাটা যাবে।';
+        : (p.name || 'রাইডার') + '-কে ' + tk(r.amount) + ' পাঠিয়েছেন' + (r.number ? ' (' + r.number + ')' : '') + '? রাইডারের ওয়ালেট থেকে কাটা যাবে।' + (fee != null ? ' সাথে সেন্ড মানি খরচ ' + tk(fee) + ' হিসাবে উঠবে।' : '');
       if (!window.confirm(msg)) return;
-      decide(r, true, t, null, ok);
+      decide(r, true, t, null, ok, fee);
     });
     no.addEventListener('click', () => {
       const why = (window.prompt('বাতিলের কারণ (রাইডার দেখবেন)') || '').trim();

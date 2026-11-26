@@ -1,0 +1,594 @@
+---
+// ============================================================
+// /console/scratch-cards — স্ক্রেচ কার্ড (নতুন অ্যাপ, ধাপ ৭.৪)
+// পুরনো /admin/scratch-cards থেকে তৈরি; একই টেবিল/RPC/অনুমতি:
+//   দেখা: সুপার অ্যাডমিন বা scratch_card.view · বদল/পেমেন্ট: সুপার অ্যাডমিন বা scratch_card.manage
+//   scratch_config, scratch_cards, RPC admin_mark_scratch_paid
+// নতুন: পেইড করার সময় "সেন্ড মানি খরচ" টিক বক্স (consoleSendFee.js)।
+// পেইড হলে কোম্পানির হিসাবে "স্ক্রেচ কার্ড পুরস্কার" খরচ DB ট্রিগারে নিজে ওঠে।
+// ============================================================
+export const prerender = false;
+
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="স্ক্রেচ কার্ড" active="menu">
+  <div class="sca-page">
+    <div class="container">
+
+      <div id="scaDeny" class="sca-deny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+
+      <div id="adminGuardedContent" hidden>
+
+        <div class="sca-header">
+          <h1><i class="fas fa-gift"></i> স্ক্রেচ কার্ড</h1>
+          <p>ক্যাম্পেইন সেটিং, বিজয়ীর বিকাশ নম্বর ও পেমেন্ট। পেইড করলে কোম্পানির হিসাবে খরচ নিজে ওঠে।</p>
+        </div>
+
+        <div class="sca-stats" id="scaStats"></div>
+
+        <div class="sca-readonly" id="scaReadonly" style="display:none;">আপনার শুধু দেখার অনুমতি আছে। সেটিং বদলাতে বা পেমেন্ট মার্ক করতে "পরিচালনা" অনুমতি লাগবে।</div>
+
+        <div class="sca-tabs" role="tablist">
+          <button type="button" class="sca-tab active" data-tab="winners" role="tab">বিজয়ী <span class="sca-tab-count" id="scaPendingCount" style="display:none;">0</span></button>
+          <button type="button" class="sca-tab" data-tab="recent" role="tab">সাম্প্রতিক কার্ড</button>
+          <button type="button" class="sca-tab" data-tab="settings" role="tab">সেটিং</button>
+        </div>
+
+        <!-- বিজয়ী -->
+        <div id="scaPaneWinners">
+          <div class="sca-chips" id="scaChips">
+            <button type="button" class="sca-chip active" data-filter="pending">নম্বর জমা (পেন্ডিং)</button>
+            <button type="button" class="sca-chip" data-filter="none">নম্বর বাকি</button>
+            <button type="button" class="sca-chip" data-filter="paid">পেইড</button>
+            <button type="button" class="sca-chip" data-filter="rejected">বাতিল</button>
+            <button type="button" class="sca-chip" data-filter="all">সব</button>
+          </div>
+          <div id="scaWinnerList"></div>
+        </div>
+
+        <!-- সাম্প্রতিক -->
+        <div id="scaPaneRecent" style="display:none;">
+          <div id="scaRecentList"></div>
+        </div>
+
+        <!-- সেটিং -->
+        <div id="scaPaneSettings" style="display:none;">
+          <div class="sca-card">
+            <div class="sca-switch-row">
+              <div>
+                <strong>ক্যাম্পেইন চালু</strong>
+                <small id="scaEnabledNote">বন্ধ থাকলে ইউজার কিছুই দেখবে না</small>
+              </div>
+              <button type="button" id="scaToggle" class="sca-toggle" aria-pressed="false"><span></span></button>
+            </div>
+          </div>
+
+          <div class="sca-card">
+            <h3>সময়কাল</h3>
+            <label class="sca-label" for="scaStart">শুরুর তারিখ</label>
+            <input id="scaStart" class="sca-input" type="date" />
+            <label class="sca-label" for="scaEnd">শেষ তারিখ</label>
+            <input id="scaEnd" class="sca-input" type="date" />
+            <label class="sca-label" for="scaMega">মেগা চমকের দিন (তারিখ, কমা দিয়ে: ২০২৬-১২-২৭, ২০২৬-১২-২৮)</label>
+            <input id="scaMega" class="sca-input" type="text" placeholder="YYYY-MM-DD, YYYY-MM-DD" />
+            <label class="sca-check"><input id="scaMegaOn" type="checkbox" /> মেগা চমক চালু আছে</label>
+            <p class="sca-note">মেগা ১ জনই পাবে, এই দিনগুলোর মধ্যে যে দিন আগে ঘটে যায়। তারিখ বাংলাদেশ সময় ধরে। এই সুইচ বন্ধ করলে, বা মেগা বিজয়ী হয়ে গেলে, বা মেগার সব দিন পেরিয়ে গেলে ইউজারের "পুরস্কার ও নিয়ম" অংশ থেকে মেগার কথা নিজে থেকে মুছে যায়।</p>
+          </div>
+
+          <div class="sca-card">
+            <h3>পয়েন্টের অনুপাত (কার্ড পিছু)</h3>
+            <div class="sca-grid4">
+              <div><label class="sca-label" for="scaW10">১০ পয়েন্ট</label><input id="scaW10" class="sca-input" type="number" min="0" /></div>
+              <div><label class="sca-label" for="scaW20">২০ পয়েন্ট</label><input id="scaW20" class="sca-input" type="number" min="0" /></div>
+              <div><label class="sca-label" for="scaW50">৫০ পয়েন্ট</label><input id="scaW50" class="sca-input" type="number" min="0" /></div>
+              <div><label class="sca-label" for="scaW100">১০০ পয়েন্ট</label><input id="scaW100" class="sca-input" type="number" min="0" /></div>
+            </div>
+            <p class="sca-note">সংখ্যাগুলো আপেক্ষিক ভাগ (যেমন ৭০:২০:৮:২)। সবাই কমপক্ষে ১০ পয়েন্ট পায়।</p>
+          </div>
+
+          <div class="sca-card">
+            <h3>ক্যাশ পুরস্কার (৳)</h3>
+            <label class="sca-label" for="scaDaily">দৈনিক ১ জন (কমা দিয়ে, যেমন ৫০, ১০০)</label>
+            <input id="scaDaily" class="sca-input" type="text" />
+            <label class="sca-label" for="scaWeekly">সাপ্তাহিক ১ জন (যেমন ৫০০, ১০০০)</label>
+            <input id="scaWeekly" class="sca-input" type="text" />
+            <label class="sca-label" for="scaMegaAmt">মেগা চমক (১ জন)</label>
+            <input id="scaMegaAmt" class="sca-input" type="number" min="1" />
+            <label class="sca-label" for="scaAge">ক্যাশ পেতে অ্যাকাউন্টের ন্যূনতম বয়স (ঘণ্টা)</label>
+            <input id="scaAge" class="sca-input" type="number" min="0" />
+            <p class="sca-note">একাধিক অংক দিলে তার একটা র‍্যান্ডম বাছাই হয়। একই অংক বেশি দিলে সেটার সম্ভাবনা বাড়ে (যেমন ৫০, ৫০, ১০০)।</p>
+          </div>
+
+          <div class="sca-card">
+            <h3>স্ট্রিক বোনাস (টানা দিন)</h3>
+            <label class="sca-label" for="scaStreak">টানা কত দিনে কত পয়েন্ট (ফরম্যাট দিন:পয়েন্ট, কমা দিয়ে)</label>
+            <input id="scaStreak" class="sca-input" type="text" placeholder="7:50, 14:100, 30:300" />
+            <p class="sca-note">যেমন "7:50" মানে টানা ৭ দিন কার্ড ঘষলে +৫০ পয়েন্ট। একদিন মিস হলে স্ট্রিক নতুন করে শুরু। ফাঁকা রাখলে কোনো স্ট্রিক বোনাস থাকবে না।</p>
+          </div>
+
+          <div class="sca-card">
+            <h3>শুভেচ্ছা লাইন</h3>
+            <label class="sca-label" for="scaGreet">প্রতি লাইনে একটা (প্রতিজন নিজের কার্ডে এর একটা র‍্যান্ডম লাইন পায়, শুরুতে "প্রিয় নাম," নিজে বসে)</label>
+            <textarea id="scaGreet" class="sca-input" rows="7"></textarea>
+          </div>
+
+          <div class="sca-error" id="scaSettingsError" style="display:none;"></div>
+          <button type="button" id="scaSave" class="sca-btn">সেটিং সেভ করুন</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- পেইড / রিজেক্ট মডাল (Android back বাটনের জন্য ক্লাসে "overlay" + ".open") -->
+  <div class="sca-modal-overlay" id="scaModalOverlay">
+    <div class="sca-modal-backdrop" id="scaModalBackdrop"></div>
+    <div class="sca-modal" role="dialog" aria-modal="true" aria-labelledby="scaModalTitle">
+      <div class="sca-modal-head">
+        <h3 id="scaModalTitle"></h3>
+        <button type="button" class="sca-modal-close" id="scaModalClose" aria-label="বন্ধ করুন"><i class="fas fa-xmark"></i></button>
+      </div>
+      <p class="sca-modal-info" id="scaModalInfo"></p>
+      <label class="sca-label" for="scaModalNote">নোট (ঐচ্ছিক)</label>
+      <textarea id="scaModalNote" class="sca-input" rows="3" maxlength="300"></textarea>
+      <div id="scaModalFee" style="margin:10px 0;"></div>
+      <button type="button" id="scaModalSubmit" class="sca-btn"></button>
+    </div>
+  </div>
+
+  <style is:global>
+    .sca-page { padding: 14px 0 40px; min-height: 60vh; }
+    #adminGuardedContent[hidden], .sca-deny[hidden] { display: none; }
+    .sca-deny { padding: 40px 16px; text-align: center; color: #64748B; font-weight: 600; }
+    .sca-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
+    .sca-spinner { width: 36px; height: 36px; border: 3px solid #E5EAF0; border-top-color: #FF6B35; border-radius: 50%; animation: sca-spin 0.8s linear infinite; }
+    @keyframes sca-spin { to { transform: rotate(360deg); } }
+    .sca-back { display: inline-flex; align-items: center; gap: 8px; color: #5A6E85; text-decoration: none; font-weight: 600; font-size: 0.88rem; margin-bottom: 18px; }
+    .sca-header h1 { font-size: 1.5rem; font-weight: 800; color: #1B2A4A; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+    .sca-header h1 i { color: #FF6B35; }
+    .sca-header p { color: #5A6E85; margin: 0 0 18px; font-size: 0.92rem; }
+
+    .sca-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+    .sca-stat { background: #fff; border: 1px solid #E5EAF0; border-radius: 16px; padding: 14px; }
+    .sca-stat strong { display: block; font-size: 1.3rem; font-weight: 800; color: #1B2A4A; line-height: 1.2; }
+    .sca-stat span { display: block; font-size: 0.76rem; color: #64748B; margin-top: 4px; line-height: 1.4; }
+    .sca-stat.warn strong { color: #B42318; }
+
+    .sca-tabs { display: flex; gap: 6px; margin-bottom: 14px; overflow-x: auto; }
+    .sca-tab { flex: 0 0 auto; border: 1.5px solid #E5EAF0; background: #fff; color: #3C4C66; font-weight: 700; font-size: 0.86rem; padding: 9px 16px; border-radius: 40px; cursor: pointer; font-family: inherit; }
+    .sca-tab.active { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+    .sca-tab-count { background: #D14343; color: #fff; border-radius: 99px; font-size: 0.7rem; padding: 1px 7px; margin-left: 4px; }
+
+    .sca-chips { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 12px; }
+    .sca-chip { flex: 0 0 auto; border: 1px solid #E5EAF0; background: #fff; color: #3C4C66; font-weight: 700; font-size: 0.8rem; padding: 7px 13px; border-radius: 40px; cursor: pointer; font-family: inherit; }
+    .sca-chip.active { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+
+    .sca-item { background: #fff; border: 1px solid #E5EAF0; border-radius: 18px; padding: 14px; margin-bottom: 10px; }
+    .sca-item-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .sca-item-name { font-weight: 800; color: #1B2A4A; font-size: 0.95rem; }
+    .sca-item-sub { color: #64748B; font-size: 0.78rem; margin-top: 2px; }
+    .sca-amount { font-size: 1.15rem; font-weight: 800; color: #FF6B35; white-space: nowrap; }
+    .sca-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 0.86rem; color: #1B2A4A; }
+    .sca-row b { font-weight: 800; letter-spacing: 0.02em; }
+    .sca-pill { display: inline-block; border-radius: 40px; padding: 3px 10px; font-size: 0.72rem; font-weight: 800; }
+    .sca-pill.pending { background: #FFF4E5; color: #B54708; }
+    .sca-pill.paid { background: #E7F8EF; color: #067647; }
+    .sca-pill.rejected { background: #FFE3E0; color: #B42318; }
+    .sca-pill.none { background: #EEF2F7; color: #475569; }
+    .sca-pill.flag { background: #FFE3E0; color: #B42318; }
+    .sca-mini { border: 1px solid #D5DCE8; background: #fff; color: #1B2A4A; border-radius: 10px; font-size: 0.78rem; font-weight: 700; padding: 5px 10px; cursor: pointer; text-decoration: none; font-family: inherit; }
+    .sca-actions { display: flex; gap: 8px; margin-top: 12px; }
+    .sca-act { flex: 1; border: none; border-radius: 12px; padding: 10px; font-weight: 800; font-size: 0.86rem; cursor: pointer; font-family: inherit; }
+    .sca-act.pay { background: #16A34A; color: #fff; }
+    .sca-act.rej { background: #FFE3E0; color: #B42318; }
+    .sca-empty { text-align: center; color: #64748B; padding: 40px 0; font-size: 0.9rem; }
+
+    .sca-card { background: #fff; border: 1px solid #E5EAF0; border-radius: 18px; padding: 16px; margin-bottom: 12px; }
+    .sca-card h3 { margin: 0 0 4px; font-size: 1rem; font-weight: 800; color: #1B2A4A; }
+    .sca-label { display: block; font-size: 0.84rem; font-weight: 700; color: #1B2A4A; margin: 10px 0 6px; }
+    .sca-input { width: 100%; box-sizing: border-box; border: 1.5px solid #E5EAF0; border-radius: 12px; padding: 11px; font-size: 0.95rem; font-family: inherit; background: #fff; }
+    .sca-input:focus { outline: none; border-color: #FF6B35; }
+    .sca-grid4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .sca-note { font-size: 0.78rem; color: #6B7A90; line-height: 1.6; margin: 8px 0 0; }
+    .sca-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .sca-switch-row strong { display: block; color: #1B2A4A; }
+    .sca-switch-row small { color: #64748B; font-size: 0.78rem; }
+    .sca-toggle { width: 54px; height: 30px; border-radius: 30px; border: none; background: #CBD5E1; position: relative; cursor: pointer; flex: 0 0 auto; transition: background 0.2s; }
+    .sca-toggle span { position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+    .sca-toggle[aria-pressed="true"] { background: #16A34A; }
+    .sca-toggle[aria-pressed="true"] span { transform: translateX(24px); }
+    .sca-btn { width: 100%; border: none; border-radius: 14px; background: #FF6B35; color: #fff; font-size: 1rem; font-weight: 800; padding: 13px; cursor: pointer; font-family: inherit; }
+    .sca-btn:disabled { opacity: 0.6; }
+    .sca-error { background: #FFF0F0; color: #B42318; border-radius: 12px; padding: 10px 12px; font-size: 0.86rem; margin-bottom: 12px; line-height: 1.6; }
+
+    .sca-readonly { background: #FFF7E6; color: #93370D; border-radius: 12px; padding: 10px 12px; font-size: 0.84rem; line-height: 1.6; margin-bottom: 14px; }
+    .sca-check { display: flex; align-items: center; gap: 8px; margin: 12px 0 2px; font-size: 0.88rem; font-weight: 700; color: #1B2A4A; }
+    .sca-check input { width: 18px; height: 18px; accent-color: #FF6B35; }
+    .sca-modal-overlay { position: fixed; inset: 0; z-index: 3600; display: none; }
+    .sca-modal-overlay.open { display: block; }
+    .sca-modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.55); }
+    .sca-modal { position: absolute; left: 0; right: 0; bottom: 0; max-width: 520px; margin: 0 auto; background: #fff; border-radius: 22px 22px 0 0; padding: 18px 18px calc(22px + env(safe-area-inset-bottom, 0px)); }
+    .sca-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .sca-modal-head h3 { margin: 0; font-size: 1.05rem; font-weight: 800; color: #1B2A4A; }
+    .sca-modal-close { border: none; background: #F1F4F9; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; color: #1B2A4A; }
+    .sca-modal-info { font-size: 0.86rem; color: #3C4C66; margin: 0 0 6px; line-height: 1.6; }
+    .sca-modal .sca-btn { margin-top: 12px; }
+  </style>
+
+  <script>
+    import { onConsoleReady } from '../../lib/consoleApp.js';
+    import { sendFeeField, addSendFee } from '../../lib/consoleSendFee.js';
+    import { supabase } from '../../lib/supabase.js';
+
+    const $ = (id) => document.getElementById(id);
+    const KIND = { daily_cash: 'দৈনিক', weekly_cash: 'সাপ্তাহিক', mega: 'মেগা চমক', points: 'পয়েন্ট' };
+    const STATUS = { none: 'নম্বর বাকি', pending: 'পেন্ডিং', paid: 'পেইড', rejected: 'বাতিল' };
+
+    let cfg = null;
+    let cash = [];
+    let recent = [];
+    let filter = 'pending';
+    let modalState = null; // { status, card }
+    let canManage = false;
+
+    function bn(n) { return Number(n || 0).toLocaleString('bn-BD'); }
+    function toast(msg, type) { if (typeof window.showToast === 'function') window.showToast(msg, type || 'success'); }
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text !== undefined) n.textContent = text;
+      return n;
+    }
+    function fmtDate(iso) {
+      try { return new Date(iso).toLocaleString('bn-BD', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; }
+    }
+    function fmtDay(d) {
+      try { return new Date(d + 'T00:00:00').toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) { return d; }
+    }
+    function bdToday() { return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' }); }
+    function isHttp(v) { return /^https?:\/\/\S+$/i.test(String(v || '')); }
+
+    // ---------- লোড ----------
+    async function loadConfig() {
+      const { data, error } = await supabase.from('scratch_config').select('*').eq('id', 1).single();
+      if (error || !data) { toast('সেটিং লোড হয়নি', 'error'); return; }
+      cfg = data;
+      fillSettings();
+    }
+
+    async function loadCards() {
+      const sel = 'id, user_id, card_date, kind, points, cash_amount, bkash_number, post_link, pay_status, flags, submitted_at, paid_at, admin_note, created_at, profiles:user_id(full_name, phone)';
+      const [c, r] = await Promise.all([
+        supabase.from('scratch_cards').select(sel).gt('cash_amount', 0).order('card_date', { ascending: false }).limit(500),
+        supabase.from('scratch_cards').select(sel).order('created_at', { ascending: false }).limit(100),
+      ]);
+      cash = c.data || [];
+      recent = r.data || [];
+      renderStats();
+      renderWinners();
+      renderRecent();
+    }
+
+    // ---------- সামারি ----------
+    function renderStats() {
+      const box = $('scaStats');
+      box.textContent = '';
+      const today = bdToday();
+      const todayCount = recent.filter((x) => x.card_date === today).length;
+      const pending = cash.filter((x) => x.pay_status === 'pending');
+      const paid = cash.filter((x) => x.pay_status === 'paid');
+      const awaiting = cash.filter((x) => x.pay_status === 'none');
+      const sum = (arr) => arr.reduce((s, x) => s + Number(x.cash_amount || 0), 0);
+      const items = [
+        { n: bn(todayCount), t: 'আজ কার্ড ঘষা হয়েছে (শেষ ১০০-এর মধ্যে)' },
+        { n: bn(cash.length), t: 'মোট ক্যাশ বিজয়ী' },
+        { n: bn(pending.length) + ' (৳' + bn(sum(pending)) + ')', t: 'পেমেন্টের অপেক্ষায়', warn: pending.length > 0 },
+        { n: bn(awaiting.length) + ' (৳' + bn(sum(awaiting)) + ')', t: 'এখনো নম্বর দেয়নি' },
+        { n: '৳' + bn(sum(paid)), t: 'মোট পেইড' },
+      ];
+      items.forEach((i) => {
+        const d = el('div', 'sca-stat' + (i.warn ? ' warn' : ''));
+        d.appendChild(el('strong', '', i.n));
+        d.appendChild(el('span', '', i.t));
+        box.appendChild(d);
+      });
+      const pc = $('scaPendingCount');
+      pc.textContent = String(pending.length);
+      pc.style.display = pending.length ? '' : 'none';
+    }
+
+    // ---------- বিজয়ী তালিকা ----------
+    async function copyText(t) {
+      try { await navigator.clipboard.writeText(t); toast('কপি হয়েছে'); } catch (e) { toast('কপি করা যায়নি', 'error'); }
+    }
+
+    function renderWinners() {
+      const list = $('scaWinnerList');
+      list.textContent = '';
+      const rows = filter === 'all' ? cash : cash.filter((x) => x.pay_status === filter);
+      if (!rows.length) { list.appendChild(el('div', 'sca-empty', 'কিছু নেই')); return; }
+      rows.forEach((w) => {
+        const item = el('div', 'sca-item');
+        const top = el('div', 'sca-item-top');
+        const left = el('div');
+        left.appendChild(el('div', 'sca-item-name', (w.profiles && w.profiles.full_name) || 'নাম নেই'));
+        left.appendChild(el('div', 'sca-item-sub', (KIND[w.kind] || w.kind) + ' · ' + fmtDay(w.card_date) + ((w.profiles && w.profiles.phone) ? ' · ' + w.profiles.phone : '')));
+        top.appendChild(left);
+        top.appendChild(el('div', 'sca-amount', '৳' + bn(w.cash_amount)));
+        item.appendChild(top);
+
+        const st = el('div', 'sca-row');
+        st.appendChild(el('span', 'sca-pill ' + w.pay_status, STATUS[w.pay_status] || w.pay_status));
+        (w.flags || []).forEach((f) => st.appendChild(el('span', 'sca-pill flag', f === 'dup_number' ? 'ডুপ্লিকেট নম্বর' : f)));
+        item.appendChild(st);
+
+        if (w.bkash_number) {
+          const r = el('div', 'sca-row');
+          r.appendChild(document.createTextNode('বিকাশ: '));
+          r.appendChild(el('b', '', w.bkash_number));
+          const cp = el('button', 'sca-mini', 'কপি');
+          cp.type = 'button';
+          cp.addEventListener('click', () => copyText(w.bkash_number));
+          r.appendChild(cp);
+          item.appendChild(r);
+        }
+        if (w.post_link) {
+          const r = el('div', 'sca-row');
+          r.appendChild(document.createTextNode('ফেসবুক পোস্ট: '));
+          if (isHttp(w.post_link)) {
+            const a = el('a', 'sca-mini', 'খুলুন');
+            a.href = w.post_link;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            r.appendChild(a);
+          } else {
+            r.appendChild(el('span', '', w.post_link));
+          }
+          item.appendChild(r);
+        }
+        if (w.submitted_at) item.appendChild(el('div', 'sca-item-sub', 'জমা: ' + fmtDate(w.submitted_at) + (w.paid_at ? ' · পেইড: ' + fmtDate(w.paid_at) : '')));
+        if (w.admin_note) item.appendChild(el('div', 'sca-item-sub', 'নোট: ' + w.admin_note));
+
+        if (canManage && w.pay_status === 'pending') {
+          const act = el('div', 'sca-actions');
+          const pay = el('button', 'sca-act pay', 'পেইড মার্ক করুন');
+          pay.type = 'button';
+          pay.addEventListener('click', () => openModal('paid', w));
+          const rej = el('button', 'sca-act rej', 'রিজেক্ট');
+          rej.type = 'button';
+          rej.addEventListener('click', () => openModal('rejected', w));
+          act.appendChild(pay);
+          act.appendChild(rej);
+          item.appendChild(act);
+        }
+        list.appendChild(item);
+      });
+    }
+
+    function renderRecent() {
+      const list = $('scaRecentList');
+      list.textContent = '';
+      if (!recent.length) { list.appendChild(el('div', 'sca-empty', 'এখনো কোনো কার্ড ঘষা হয়নি')); return; }
+      recent.forEach((c) => {
+        const item = el('div', 'sca-item');
+        const top = el('div', 'sca-item-top');
+        const left = el('div');
+        left.appendChild(el('div', 'sca-item-name', (c.profiles && c.profiles.full_name) || 'নাম নেই'));
+        left.appendChild(el('div', 'sca-item-sub', fmtDate(c.created_at)));
+        top.appendChild(left);
+        top.appendChild(el('div', 'sca-amount', c.cash_amount > 0 ? '৳' + bn(c.cash_amount) : bn(c.points) + ' পয়েন্ট'));
+        item.appendChild(top);
+        list.appendChild(item);
+      });
+    }
+
+    // ---------- পেইড / রিজেক্ট মডাল ----------
+    function openModal(status, w) {
+      modalState = { status, w };
+      const name = (w.profiles && w.profiles.full_name) || 'ইউজার';
+      $('scaModalTitle').textContent = status === 'paid' ? 'পেইড মার্ক করবেন?' : 'রিজেক্ট করবেন?';
+      $('scaModalInfo').textContent = status === 'paid'
+        ? name + '-কে বিকাশ ' + w.bkash_number + '-এ ৳' + bn(w.cash_amount) + ' পাঠানোর পর এটা চাপুন। ইউজার নোটিফিকেশন পাবে।'
+        : name + '-এর এই পুরস্কার বাতিল হবে। কারণ নোটে লিখে রাখতে পারেন।';
+      $('scaModalNote').value = '';
+      const feeBox = $('scaModalFee');
+      feeBox.textContent = '';
+      scaFee = status === 'paid' ? sendFeeField(true) : null;
+      if (scaFee) feeBox.appendChild(scaFee.el);
+      $('scaModalSubmit').textContent = status === 'paid' ? 'পেইড নিশ্চিত করুন' : 'রিজেক্ট নিশ্চিত করুন';
+      $('scaModalOverlay').classList.add('open');
+    }
+    let scaFee = null;
+    function closeModal() { $('scaModalOverlay').classList.remove('open'); modalState = null; }
+
+    $('scaModalClose').addEventListener('click', closeModal);
+    $('scaModalBackdrop').addEventListener('click', closeModal);
+    $('scaModalSubmit').addEventListener('click', async () => {
+      if (!modalState) return;
+      const fee = modalState.status === 'paid' && scaFee ? scaFee.amount() : null;
+      if (Number.isNaN(fee)) { toast('সেন্ড মানি খরচ ১ থেকে ৫০০ টাকার মধ্যে দিন', 'warning'); scaFee.focus(); return; }
+      const btn = $('scaModalSubmit');
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'হচ্ছে...';
+      try {
+        const { error } = await supabase.rpc('admin_mark_scratch_paid', {
+          p_card_id: modalState.w.id,
+          p_status: modalState.status,
+          p_note: $('scaModalNote').value || null,
+        });
+        if (error) { toast(error.message || 'হয়নি, আবার চেষ্টা করুন', 'error'); }
+        else {
+          if (modalState.status === 'paid' && fee != null) await addSendFee('scratch_card', modalState.w.id, fee);
+          toast('সম্পন্ন'); closeModal(); await loadCards();
+        }
+      } catch (e) {
+        toast('নেটওয়ার্ক সমস্যা', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    });
+
+    // ---------- সেটিং ----------
+    function fillSettings() {
+      if (!cfg) return;
+      $('scaToggle').setAttribute('aria-pressed', cfg.enabled ? 'true' : 'false');
+      $('scaEnabledNote').textContent = cfg.enabled ? 'এখন চালু আছে' : 'বন্ধ আছে, ইউজার কিছুই দেখছে না';
+      $('scaStart').value = cfg.start_date || '';
+      $('scaEnd').value = cfg.end_date || '';
+      $('scaMega').value = (cfg.mega_dates || []).join(', ');
+      $('scaMegaOn').checked = cfg.mega_enabled !== false;
+      const w = cfg.point_weights || {};
+      ['10', '20', '50', '100'].forEach((k) => { $('scaW' + k).value = w[k] ?? 0; });
+      $('scaDaily').value = (cfg.daily_cash_amounts || []).join(', ');
+      $('scaWeekly').value = (cfg.weekly_cash_amounts || []).join(', ');
+      $('scaMegaAmt').value = cfg.mega_amount;
+      $('scaAge').value = cfg.cash_min_account_age_hours;
+      $('scaStreak').value = Object.entries(cfg.streak_milestones || {})
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([d, p]) => d + ':' + p)
+        .join(', ');
+      $('scaGreet').value = (cfg.greetings || []).join('\n');
+    }
+
+    function intList(str) {
+      return String(str || '').split(/[,،\s]+/).filter(Boolean).map((x) => Number(x));
+    }
+
+    function showSettingsError(msg) {
+      const box = $('scaSettingsError');
+      box.textContent = msg || '';
+      box.style.display = msg ? '' : 'none';
+    }
+
+    $('scaSave').addEventListener('click', async () => {
+      if (!canManage) return;
+      showSettingsError('');
+      const start = $('scaStart').value || null;
+      const end = $('scaEnd').value || null;
+      if ((start && !end) || (!start && end)) return showSettingsError('শুরু ও শেষ, দুটো তারিখই দিন (বা দুটোই খালি রাখুন)');
+      if (start && end && end < start) return showSettingsError('শেষ তারিখ শুরুর আগে হতে পারে না');
+
+      const mega = String($('scaMega').value || '').split(/[,،\s]+/).filter(Boolean);
+      for (const d of mega) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return showSettingsError('মেগার তারিখ ভুল: ' + d + ' (ফরম্যাট YYYY-MM-DD)');
+        if (start && end && (d < start || d > end)) return showSettingsError('মেগার তারিখ ' + d + ' সময়কালের বাইরে');
+      }
+
+      const weights = {};
+      let total = 0;
+      for (const k of ['10', '20', '50', '100']) {
+        const v = Number($('scaW' + k).value);
+        if (!Number.isFinite(v) || v < 0) return showSettingsError('পয়েন্টের অনুপাত ঠিক নয়');
+        weights[k] = v;
+        total += v;
+      }
+      if (total <= 0) return showSettingsError('পয়েন্টের অনুপাতের যোগফল ০-র বেশি হতে হবে');
+
+      const daily = intList($('scaDaily').value);
+      const weekly = intList($('scaWeekly').value);
+      const bad = (a) => !a.length || a.some((n) => !Number.isInteger(n) || n <= 0);
+      if (bad(daily)) return showSettingsError('দৈনিক ক্যাশের অংক ঠিক নয়');
+      if (bad(weekly)) return showSettingsError('সাপ্তাহিক ক্যাশের অংক ঠিক নয়');
+
+      const megaAmt = Number($('scaMegaAmt').value);
+      if (!Number.isInteger(megaAmt) || megaAmt <= 0) return showSettingsError('মেগার অংক ঠিক নয়');
+      const age = Number($('scaAge').value);
+      if (!Number.isInteger(age) || age < 0) return showSettingsError('ন্যূনতম বয়স ঠিক নয়');
+
+      const streakMs = {};
+      for (const part of String($('scaStreak').value || '').split(/[,،]+/).map((x) => x.trim()).filter(Boolean)) {
+        const m = part.match(/^(\d{1,3})\s*[:=]\s*(\d{1,5})$/);
+        if (!m || Number(m[1]) < 2 || Number(m[2]) <= 0) return showSettingsError('স্ট্রিক বোনাস ঠিক নয়: ' + part + ' (ফরম্যাট ৭:৫০)');
+        streakMs[m[1]] = Number(m[2]);
+      }
+
+      const greetings = String($('scaGreet').value || '').split('\n').map((x) => x.trim()).filter(Boolean);
+      if (!greetings.length) return showSettingsError('অন্তত একটা শুভেচ্ছা লাইন দিন');
+
+      const btn = $('scaSave');
+      btn.disabled = true;
+      btn.textContent = 'সেভ হচ্ছে...';
+      try {
+        const { error } = await supabase.from('scratch_config').update({
+          start_date: start,
+          end_date: end,
+          mega_dates: mega,
+          mega_enabled: $('scaMegaOn').checked,
+          point_weights: weights,
+          daily_cash_amounts: daily,
+          weekly_cash_amounts: weekly,
+          mega_amount: megaAmt,
+          cash_min_account_age_hours: age,
+          greetings,
+          streak_milestones: streakMs,
+          updated_at: new Date().toISOString(),
+        }).eq('id', 1);
+        if (error) showSettingsError(error.message || 'সেভ হয়নি');
+        else { toast('সেটিং সেভ হয়েছে'); await loadConfig(); }
+      } catch (e) {
+        showSettingsError('নেটওয়ার্ক সমস্যা, আবার চেষ্টা করুন');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'সেটিং সেভ করুন';
+      }
+    });
+
+    // অন/অফ: সেভ করা তারিখ না থাকলে চালু করতে দেয় না
+    $('scaToggle').addEventListener('click', async () => {
+      if (!cfg || !canManage) return;
+      showSettingsError('');
+      const next = !cfg.enabled;
+      if (next && (!cfg.start_date || !cfg.end_date)) {
+        return showSettingsError('আগে শুরু ও শেষ তারিখ সেভ করুন, তারপর চালু করুন');
+      }
+      const { error } = await supabase.from('scratch_config').update({ enabled: next, updated_at: new Date().toISOString() }).eq('id', 1);
+      if (error) { showSettingsError(error.message || 'হয়নি'); return; }
+      toast(next ? 'ক্যাম্পেইন চালু হয়েছে' : 'ক্যাম্পেইন বন্ধ হয়েছে');
+      await loadConfig();
+    });
+
+    // ---------- ট্যাব/ফিল্টার ----------
+    document.querySelectorAll('.sca-tab').forEach((b) => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('.sca-tab').forEach((x) => x.classList.toggle('active', x === b));
+        const t = b.getAttribute('data-tab');
+        $('scaPaneWinners').style.display = t === 'winners' ? '' : 'none';
+        $('scaPaneRecent').style.display = t === 'recent' ? '' : 'none';
+        $('scaPaneSettings').style.display = t === 'settings' ? '' : 'none';
+      });
+    });
+    document.querySelectorAll('.sca-chip').forEach((b) => {
+      b.addEventListener('click', () => {
+        filter = b.getAttribute('data-filter');
+        document.querySelectorAll('.sca-chip').forEach((x) => x.classList.toggle('active', x === b));
+        renderWinners();
+      });
+    });
+
+    // শুধু দেখার অনুমতি হলে সব ইনপুট/বোতাম বন্ধ
+    function applyPermissions() {
+      $('scaReadonly').style.display = canManage ? 'none' : '';
+      if (canManage) return;
+      document.querySelectorAll('#scaPaneSettings input, #scaPaneSettings textarea').forEach((x) => { x.disabled = true; });
+      $('scaSave').style.display = 'none';
+      $('scaToggle').disabled = true;
+    }
+
+    // ---------- শুরু ----------
+    onConsoleReady(async (ctx) => {
+      // টাকার হিসাব: সুপার অ্যাডমিন অথবা রোলে scratch_card পারমিশন থাকা স্টাফ (পুরনো পেজের একই নিয়ম)
+      const acc = ctx.access;
+      const isSuper = !!ctx.isSuper;
+      const staffView = !!(acc && acc.isStaff && acc.can('scratch_card.view'));
+      if (!isSuper && !staffView) { $('scaDeny').hidden = false; return; }
+      $('adminGuardedContent').hidden = false;
+      canManage = isSuper || !!(acc && acc.isStaff && acc.can('scratch_card.manage'));
+      await Promise.all([loadConfig(), loadCards()]);
+      applyPermissions();
+      const q = new URLSearchParams(window.location.search).get('tab');
+      if (q) document.querySelector('.sca-tab[data-tab="' + q + '"]')?.click();
+    });
+  </script>
+</ConsoleShell>

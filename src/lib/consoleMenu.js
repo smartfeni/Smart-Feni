@@ -25,8 +25,8 @@ export const TODO_ITEMS = [
   { name: 'ডাক্তারের সিরিয়াল রিকোয়েস্ট', desc: 'রোগীর সিরিয়াল অনুরোধ দেখা ও নিশ্চিত করা', href: '/admin/doctors', keys: 'সিরিয়াল', types: ['serial'] },
   { name: 'ডেলিভারি ডিসপিউট', desc: 'কাস্টমার বা রাইডারের অভিযোগ মীমাংসা', href: '/admin/delivery-disputes', keys: 'অভিযোগ সমস্যা', types: ['dispute'] },
   { name: 'লোকাল রাইড রিপোর্ট', desc: 'লোকাল রাইড নিয়ে আসা রিপোর্ট', href: '/admin/local-rides', keys: 'অভিযোগ', types: ['ride_report'] },
-  { name: 'রেফারের উইথড্র', desc: 'পয়েন্ট তুলতে চাওয়া ইউজারকে টাকা পাঠানো', href: '/admin/referrals', adminOnly: true, keys: 'পয়েন্ট বিকাশ', types: ['withdraw'] },
-  { name: 'স্ক্রেচ কার্ড বিজয়ীর পেমেন্ট', desc: 'বিজয়ীর নম্বর যাচাই ও টাকা পাঠানো', href: '/admin/scratch-cards', adminOnly: true, keys: 'পুরস্কার', types: ['scratch'] },
+  { name: 'রেফারের উইথড্র', desc: 'পয়েন্ট তুলতে চাওয়া ইউজারকে টাকা পাঠানো', href: '/console/referrals', adminOnly: true, keys: 'পয়েন্ট বিকাশ', types: ['withdraw'] },
+  { name: 'স্ক্রেচ কার্ড বিজয়ীর পেমেন্ট', desc: 'বিজয়ীর নম্বর যাচাই ও টাকা পাঠানো', href: '/console/scratch-cards', perm: '/admin/scratch-cards', keys: 'পুরস্কার', types: ['scratch'] },
 ];
 
 // admin_todo() RPC-র ধরন → দেখানো নাম ও লিংক
@@ -44,8 +44,8 @@ export const TODO_TYPE = {
   serial: { name: 'সিরিয়াল রিকোয়েস্ট', href: '/admin/doctors' },
   club: { name: 'ক্লাব আবেদন', href: '/admin/clubs' },
   clinic_rep: { name: 'প্রতিনিধি আবেদন', href: '/admin/clinics' },
-  withdraw: { name: 'রেফার উইথড্র', href: '/admin/referrals' },
-  scratch: { name: 'স্ক্রেচ কার্ড পেমেন্ট', href: '/admin/scratch-cards' },
+  withdraw: { name: 'রেফার উইথড্র', href: '/console/referrals' },
+  scratch: { name: 'স্ক্রেচ কার্ড পেমেন্ট', href: '/console/scratch-cards' },
 };
 
 export const MENU = [
@@ -93,7 +93,7 @@ export const MENU = [
       { name: 'রাইডার ওয়ালেট', desc: 'রাইডারের ব্যালেন্স ও অগ্রিম/জমা/তোলার অনুরোধ', href: '/console/wallets', perm: '/admin/delivery-orders', keys: 'ওয়ালেট ক্যাশ' },
       { name: 'অগ্রিম পেমেন্ট যাচাই', desc: 'কাস্টমারের বিকাশ/নগদ অগ্রিম: কোন নম্বরে, কে যাচাই করেছে', href: '/console/payments', perm: '/admin/delivery-orders', keys: 'TrxID বিকাশ নগদ' },
       { name: 'মার্কেটপ্লেসের হিসাব', desc: 'লাভ-লস ও চুক্তিবদ্ধ দোকানের পাওনা', href: '/console/money', perm: '/admin/delivery-orders', keys: 'পাওনা লাভ লস ক্ষতি' },
-      { name: 'রেফার ও রিওয়ার্ড', desc: 'রেফারের তালিকা, পয়েন্ট ও লগ', href: '/admin/referrals', adminOnly: true, keys: 'রেফার পয়েন্ট' },
+      { name: 'রেফার ও রিওয়ার্ড', desc: 'উইথড্র পেমেন্ট, রেফারের তালিকা ও লগ', href: '/console/referrals', adminOnly: true, keys: 'রেফার পয়েন্ট' },
     ],
   },
   {
@@ -135,7 +135,7 @@ export const MENU = [
     icon: '<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/>',
     items: [
       { name: 'নোটিফিকেশন পাঠান', desc: 'নির্দিষ্ট ইউজার, গ্রুপ বা সবাইকে; কে পড়েছে', href: '/admin/notifications', keys: 'পুশ মেসেজ প্রমো' },
-      { name: 'স্ক্রেচ কার্ড ক্যাম্পেইন', desc: 'পুরস্কার, সময়কাল ও নিয়ম', href: '/admin/scratch-cards', adminOnly: true, keys: 'পুরস্কার' },
+      { name: 'স্ক্রেচ কার্ড ক্যাম্পেইন', desc: 'পুরস্কার, সময়কাল, নিয়ম ও বিজয়ীর পেমেন্ট', href: '/console/scratch-cards', perm: '/admin/scratch-cards', keys: 'পুরস্কার' },
     ],
   },
   {
