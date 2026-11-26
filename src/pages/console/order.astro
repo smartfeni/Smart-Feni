@@ -4,7 +4,8 @@
 // ডাটা: admin_get_order(p_key) — পুরনো পেজের একই RPC (সার্ভারে অনুমতি চেক)।
 // পেমেন্ট প্রুফ: delivery_payment_proofs + private bucket delivery-proofs → signed URL।
 // চ্যাট: ChatModal শুধু পড়ার মোডে (কাস্টমার/রাইডার লেবেল সহ)।
-// পাবলিশ/অ্যাসাইন/বাতিল/এলার্ট এখনো পুরনো প্যানেলে ("কাজ করুন ↗"), ভাগ ২-এ এখানে আসবে।
+// কাজ (পাবলিশ/হোল্ড/অ্যাসাইন/বদল/বাতিল/ফেরত/এলার্ট/নোট/ছাড়ার অনুরোধ/ডিল চ্যাট): consoleOrderActions.js।
+// কাজের অনুমতি: সুপার অ্যাডমিন, রোলহীন মডারেটর বা delivery_orders.manage (সার্ভারেও চেক)।
 // ============================================================
 export const prerender = false;
 import ConsoleShell from '../../components/console/ConsoleShell.astro';
@@ -63,6 +64,46 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
   .od-btn { flex: 1 1 140px; display: inline-flex; align-items: center; justify-content: center; height: 46px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; padding: 0 12px; }
   .od-btn.primary { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
   .od-empty { padding: 30px 16px; text-align: center; display: flex; flex-direction: column; gap: 4px; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; }
+  .od-actions .oa-hint { flex-basis: 100%; margin: 0; }
+  .oa-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .od-btn.oa-more { flex: 0 0 auto; }
+  .od-btn:disabled { opacity: .55; cursor: default; }
+  .oa-sheet { position: fixed; inset: 0; z-index: 8000; background: rgba(15,22,38,.45); display: flex; align-items: flex-end; justify-content: center; }
+  .oa-sheet[hidden] { display: none; }
+  .oa-box { width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; background: #fff; border-radius: 20px 20px 0 0; padding: 18px 18px calc(16px + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; color: #1B2A4A; font-family: 'Hind Siliguri', sans-serif; }
+  @media (min-width: 700px) { .oa-sheet { align-items: center; } .oa-box { border-radius: 20px; } }
+  .oa-title { margin: 0; font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-size: 19px; font-weight: 600; }
+  .oa-line { margin: -6px 0 0; font-size: 13px; color: #5F6B7E; }
+  .oa-body { display: flex; flex-direction: column; gap: 10px; }
+  .oa-hint { margin: 0; font-size: 13px; color: #5F6B7E; line-height: 1.5; }
+  .oa-msg { margin: 0; font-size: 13.5px; font-weight: 600; color: #B3261E; background: #FDECEA; border-radius: 10px; padding: 8px 10px; }
+  .oa-field { display: flex; flex-direction: column; gap: 4px; }
+  .oa-field label { font-size: 13px; font-weight: 600; }
+  .oa-input { width: 100%; box-sizing: border-box; border: 1px solid #E7E2DA; border-radius: 12px; padding: 10px 12px; font: inherit; font-size: 15px; color: #1B2A4A; background: #fff; }
+  input.oa-input { height: 44px; padding: 0 12px; }
+  .oa-input:focus { outline: 2px solid #1B2A4A; outline-offset: -1px; }
+  .oa-check { display: flex; align-items: center; gap: 6px; font-size: 14px; min-height: 36px; }
+  .oa-radios { display: flex; flex-direction: column; }
+  .oa-riders { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
+  .oa-rider { display: flex; align-items: center; gap: 10px; text-align: left; border: 1px solid #E7E2DA; background: #fff; border-radius: 12px; padding: 10px 12px; font: inherit; color: #1B2A4A; cursor: pointer; }
+  .oa-rider[aria-pressed="true"] { border-color: #1B2A4A; box-shadow: inset 0 0 0 1px #1B2A4A; background: #F5F7FB; }
+  .oa-rider-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .oa-rider-t b { font-size: 14.5px; font-weight: 600; }
+  .oa-rider-t small { font-size: 12px; color: #5F6B7E; overflow-wrap: anywhere; }
+  .oa-tags { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .oa-tag { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #EEF1F5; color: #3D4A60; white-space: nowrap; }
+  .oa-tag.own { background: #FFF4E0; color: #8A4B00; }
+  .oa-tag.on { background: #E6F6EE; color: #17663F; }
+  .oa-list { display: flex; flex-direction: column; }
+  .oa-li { display: block; text-align: left; background: none; border: 0; border-top: 1px solid #EFEBE5; padding: 14px 4px; font: inherit; font-size: 15px; color: #1B2A4A; text-decoration: none; cursor: pointer; }
+  .oa-li:first-child { border-top: 0; }
+  .oa-li.danger { color: #B3261E; font-weight: 600; }
+  .oa-btns { display: flex; gap: 8px; }
+  .oa-btn { flex: 1; height: 46px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .oa-btn[hidden] { display: none; }
+  .oa-btn.primary { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .oa-btn.danger { background: #B3261E; border-color: #B3261E; color: #fff; }
+  .oa-btn:disabled { opacity: .6; }
   .od-lightbox { position: fixed; inset: 0; z-index: 9000; background: rgba(10,16,30,.92); display: flex; align-items: center; justify-content: center; }
   .od-lightbox[hidden] { display: none; }
   .od-lightbox img { max-width: 94vw; max-height: 86vh; border-radius: 8px; }
@@ -75,10 +116,12 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
   import { renderAddressWithNav } from '../../lib/mapLinks.js';
   import { onConsoleReady, canOpenAdminPath, bn, dayLabel, timeLabel, agoLabel } from '../../lib/consoleApp.js';
   import { ORDER_STATUS, orderStatusOf, money, eventText, DISPUTE_RESULT } from '../../lib/consoleOrders.js';
+  import { renderOrderActions, renderReleaseButtons } from '../../lib/consoleOrderActions.js';
 
   const $ = (id) => document.getElementById(id);
   const body = $('odBody');
   const key = (new URLSearchParams(location.search).get('no') || '').trim().slice(0, 40);
+  let canManage = false;
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -174,9 +217,9 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
     body.appendChild(e);
   }
 
-  async function load() {
+  async function load(silent = false) {
     if (!key) { showEmpty('কোনো অর্ডার নম্বর নেই', 'তালিকা থেকে একটা অর্ডার বেছে নিন।'); return; }
-    body.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('profile', 1) + window.SFSkeleton.html('row', 4) : '';
+    if (!silent) body.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('profile', 1) + window.SFSkeleton.html('row', 4) : '';
 
     const { data, error } = await supabase.rpc('admin_get_order', { p_key: key });
     if (error || !data || !data.order) {
@@ -274,6 +317,7 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
       const d = section('রাইডার ছাড়তে চান');
       d.appendChild(el('div', 'od-reason', o.release_reason || 'কারণ লেখা নেই'));
       d.appendChild(el('div', 'od-small', 'অনুরোধ: ' + when(o.release_requested_at) + '। অনুমোদন না হওয়া পর্যন্ত অর্ডারটা এই রাইডারেরই।'));
+      renderReleaseButtons({ box: d, data, canManage, reload: () => load(true) });
     }
     if (st === 'cancelled' && o.cancel_reason) {
       const d = section('বাতিলের কারণ');
@@ -324,15 +368,13 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
     });
     tlInner.appendChild(ul);
 
-    // ---- নিচের বোতাম ----
+    // ---- নিচের বোতাম (কাজ: consoleOrderActions.js) ----
     const bar = el('div', 'od-actions');
-    const work = el('a', 'od-btn primary', 'কাজ করুন (পুরনো পেজ) ↗');
-    work.href = '/admin/delivery-orders?open=' + encodeURIComponent(o.order_no);
-    bar.appendChild(work);
+    let chatBtn = null;
     if ((data.chat_count || 0) > 0) {
-      const ch = el('button', 'od-btn', 'চ্যাট দেখুন (' + bn(data.chat_count) + ')');
-      ch.type = 'button';
-      ch.addEventListener('click', () => {
+      chatBtn = el('button', 'od-btn', 'চ্যাট দেখুন (' + bn(data.chat_count) + ')');
+      chatBtn.type = 'button';
+      chatBtn.addEventListener('click', () => {
         window.openChatModal?.({
           requestId: o.id,
           otherPartyName: (c.name || 'কাস্টমার') + ' ↔ ' + ((r && r.name) || 'রাইডার'),
@@ -343,13 +385,8 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
           riderName: (r && r.name) || '',
         });
       });
-      bar.appendChild(ch);
     }
-    if (st === 'disputed') {
-      const d = el('a', 'od-btn', 'ডিসপিউট পেজ ↗');
-      d.href = '/admin/delivery-disputes?q=' + encodeURIComponent(o.order_no);
-      bar.appendChild(d);
-    }
+    renderOrderActions({ bar, data, st, canManage, reload: () => load(true), chatBtn });
     body.appendChild(bar);
   }
 
@@ -366,6 +403,7 @@ import ChatModal from '../../components/delivery/ChatModal.astro';
       showEmpty('এই পেজ দেখার অনুমতি নেই', 'ডেলিভারি অর্ডার দেখার অনুমতি লাগবে।');
       return;
     }
+    canManage = !!(ctx.isSuper || !ctx.access.isStaff || ctx.access.can('delivery_orders.manage'));
     load();
   });
 </script>
