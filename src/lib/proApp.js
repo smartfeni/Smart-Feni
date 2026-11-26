@@ -66,6 +66,8 @@ export function isProApp() {
 // ---------- Smart Feni Admin (com.smartfeni.admin) ----------
 // অ্যাডমিন অ্যাপ চেনা (পুশ টোকেনের app_id = 'admin' বসাতে)। ব্রাউজার/মেইন/Pro-তে false।
 export const ADMIN_APP_ID = 'com.smartfeni.admin';
+export const ADMIN_HOME = '/console';
+export const ADMIN_FLAG_KEY = 'sf_admin_app';
 let adminPromise = null;
 export function isAdminApp() {
   if (adminPromise) return adminPromise;
@@ -77,12 +79,39 @@ export function isAdminApp() {
         App.getInfo(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
       ]);
-      return !!info && info.id === ADMIN_APP_ID;
+      const admin = !!info && info.id === ADMIN_APP_ID;
+      // ফ্ল্যাগ: পরের পেজ লোডে BaseLayout-এর head স্ক্রিপ্ট আঁকার আগেই মেইন হোম আটকায়
+      try {
+        if (admin) localStorage.setItem(ADMIN_FLAG_KEY, '1');
+        else localStorage.removeItem(ADMIN_FLAG_KEY);
+      } catch (_) { /* উপেক্ষা */ }
+      return admin;
     } catch (_) {
       return false;
     }
   })();
   return adminPromise;
+}
+
+// Pro ও Admin অ্যাপ কখনো মেইন অ্যাপের হোমে (/) যাবে না (SF সিদ্ধান্ত, ২৬ নভে ২০২৬)।
+// Pro: '/' → /pro, মেইনের পাতা → Pro পাতা (proPath)। Admin: '/' → /console, /pro/login → /console/login।
+// মেইন অ্যাপ ও ব্রাউজারে পাথ অপরিবর্তিত।
+export async function scopedAppPath(target) {
+  try {
+    const u = new URL(String(target || '/'), window.location.origin);
+    if (u.origin !== window.location.origin) return target;
+    if (await isProApp()) {
+      const p = u.pathname === '/' ? PRO_HOME : proPath(u.pathname);
+      return p + u.search + u.hash;
+    }
+    if (await isAdminApp()) {
+      let p = u.pathname;
+      if (p === '/') p = ADMIN_HOME;
+      else if (p === '/pro/login') p = ADMIN_HOME + '/login';
+      return p + u.search + u.hash;
+    }
+  } catch (_) { /* উপেক্ষা */ }
+  return target;
 }
 
 export async function applyProNav() {

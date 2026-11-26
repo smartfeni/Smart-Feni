@@ -304,6 +304,12 @@ export async function initBackButtonHandler() {
   // সরাসরি লিংকের পেজে যাওয়া যায়
   await handleDeepLink(await App.getLaunchUrl().catch(() => null));
 
+  // Pro/Admin অ্যাপ মেইন হোমে (/) এসে পড়লে (এরর পেজের "হোম", পুরনো ইতিহাস ইত্যাদি) নিজের হোমে
+  if (window.location.pathname === '/') {
+    const home = await scopedAppPath('/');
+    if (home !== '/') { navigatingAway = true; window.location.replace(home); return; }
+  }
+
   // ড্যাশবোর্ড রিডাইরেক্ট (শপ মালিক/রাইডারের কাজ থাকলে) — splash সরানোর আগে,
   // যাতে হোম পেজের ঝলক না দেখা যায়
   await maybeRedirectToDashboard();
@@ -381,6 +387,8 @@ async function waitForConnection(retries) {
 // retries: নোটিফিকেশন/ডিপ লিংকে বেশি (৬), সাধারণ লিংকে ২
 async function safeNavigate(target, { retries = 2 } = {}) {
   if (navCheckBusy) return;
+  // Pro/Admin অ্যাপে মেইন হোম বা মেইনের পাতায় না গিয়ে নিজের পাতায় (proApp.js scopedAppPath)
+  target = await scopedAppPath(target);
   navCheckBusy = true;
   let ok = false;
   try {
@@ -728,7 +736,7 @@ const PRO_CHANNELS_FLAG = 'sf_pro_channels_v1';
 const PRO_SOUND_CHANNEL = { id: 'sf_pro_orders_v2', name: '🔔 নতুন অর্ডার ও রিকোয়েস্ট', description: 'শপের নতুন অর্ডার ও হিরো রিকোয়েস্ট (জরুরি রিংটোন)', importance: 5, visibility: 1, vibration: true, sound: 'order_alert.mp3' };
 const PRO_SOUND_FLAG = 'sf_pro_sound_channel_v2';
 
-import { isProApp, proPath } from './proApp.js';
+import { isProApp, proPath, scopedAppPath } from './proApp.js';
 
 // একই নোটিফিকেশনের ট্যাপ বারবার প্রসেস না করার জন্য (শেষ ৭ দিনের হ্যান্ডেল হওয়া আইডি মনে রাখে)
 const TAP_SEEN_KEY = 'sf_notif_tap_seen_v1';
