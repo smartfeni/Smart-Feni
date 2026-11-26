@@ -5,7 +5,8 @@
 //   delivery_shops (RLS: চালু দোকান সবাই, বাকিগুলো delivery_shops.view)
 //   delivery_shop_items (shop_id গুনে পণ্যের সংখ্যা) · delivery_market_categories · profiles (মালিকের নাম)
 // খোঁজা: দোকানের নাম, ফোন, মালিকের নাম/ফোন, এলাকা। ফিল্টার: দেখাচ্ছে/লুকানো, এখনই/প্রি-অর্ডার, ক্যাটাগরি, মালিক নেই।
-// কার্ডে চাপলে /console/shop?id=...
+// কার্ডে চাপলে /console/shop?id=... · "+ নতুন দোকান" → /console/shop-edit
+// "ক্রম বদলান": টেনে সাজানো (sortable.js) → RPC admin_reorder_delivery_shops(p_ids)
 // ============================================================
 export const prerender = false;
 import ConsoleShell from '../../components/console/ConsoleShell.astro';
@@ -18,7 +19,10 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
         <h1 class="cs-h cm-title">দোকান</h1>
         <p class="cs-muted sh-sub" id="shSub">কুইক ডেলিভারি মার্কেটের দোকান</p>
       </div>
-      <a class="sh-old" href="/admin/delivery-shops" id="shAdd" hidden>+ নতুন দোকান ↗</a>
+      <div class="sh-acts" id="shAdd" hidden>
+        <a class="sh-new" href="/console/shop-edit">+ নতুন দোকান</a>
+        <button type="button" class="sh-ord" id="shOrder">ক্রম বদলান</button>
+      </div>
     </div>
 
     <div class="cm-body" id="shDeny" hidden>
@@ -26,6 +30,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
     </div>
 
     <div class="sh-main" id="shMain" hidden>
+      <p class="sh-ordhint" id="shOrdHint" hidden>দোকান চেপে ধরে ওপর-নিচে টেনে ক্রম বদলান। মার্কেটে এই ক্রমেই দেখায়। শেষ হলে "ক্রম ঠিক আছে" চাপুন।</p>
       <input type="search" class="sh-q" id="shQ" placeholder="দোকান, ফোন, মালিক বা এলাকা" aria-label="দোকান খুঁজুন" />
       <div class="sh-chips" id="shShow" role="group" aria-label="অবস্থা"></div>
       <div class="sh-chips" id="shKind" role="group" aria-label="ডেলিভারির ধরন"></div>
@@ -38,7 +43,12 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
 <style is:global>
   .sh-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
   .sh-sub { margin: 2px 0 0; }
-  .sh-old { margin-top: 12px; font-size: 13px; font-weight: 600; color: #C2410C; text-decoration: none; white-space: nowrap; }
+  .sh-acts { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-top: 8px; }
+  .sh-new { height: 38px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: 10px; background: #1B2A4A; color: #fff; font-size: 13.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+  .sh-ord { background: none; border: 0; padding: 2px; font: inherit; font-size: 13px; font-weight: 600; color: #5F6B7E; cursor: pointer; }
+  .sh-ordhint { margin: 0; font-size: 13px; background: #FFF4E0; color: #6B3E00; border-radius: 12px; padding: 10px 12px; }
+  .sh-main.ordering .sh-q, .sh-main.ordering .sh-chips { display: none; }
+  .sh-card.drag { cursor: grab; }
   .sh-main { display: flex; flex-direction: column; gap: 10px; }
   .sh-q { width: 100%; box-sizing: border-box; height: 44px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; padding: 0 14px; font: inherit; font-size: 15px; color: #1B2A4A; }
   .sh-q:focus { outline: 2px solid #1B2A4A; outline-offset: -1px; }
@@ -68,6 +78,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   import { supabase } from '../../lib/supabase.js';
   import { onConsoleReady, canOpenAdminPath, bn } from '../../lib/consoleApp.js';
   import { shopOpenState } from '../../lib/marketApi.js';
+  import { makeSortable } from '../../lib/sortable.js';
 
   const $ = (id) => document.getElementById(id);
   const st = { q: '', show: 'all', kind: 'all', cat: 'all' };
@@ -75,6 +86,7 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   let counts = {};
   let owners = {};
   let cats = [];
+  let ordering = false;
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -120,8 +132,9 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   }
 
   function card(s) {
-    const a = el('a', 'sh-card' + (s.is_active ? '' : ' off'));
-    a.href = '/console/shop?id=' + encodeURIComponent(s.id);
+    const a = el(ordering ? 'div' : 'a', 'sh-card' + (s.is_active ? '' : ' off') + (ordering ? ' drag' : ''));
+    a.dataset.id = s.id;
+    if (!ordering) a.href = '/console/shop?id=' + encodeURIComponent(s.id);
     const pic = el('span', 'sh-pic');
     const url = s.logo_url || s.image_url;
     if (url) pic.style.backgroundImage = 'url("' + encodeURI(url) + '")';
@@ -144,7 +157,24 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
     return a;
   }
 
+  async function saveOrder(ids) {
+    ids.forEach((id, n) => { const x = shops.find((y) => y.id === id); if (x) x.sort_order = (n + 1) * 10; });
+    shops.sort((a, b) => ((a.sort_order || 0) - (b.sort_order || 0)) || String(a.name).localeCompare(String(b.name)));
+    const { data, error } = await supabase.rpc('admin_reorder_delivery_shops', { p_ids: ids });
+    if (error || !data || !data.ok) { window.showToast?.('ক্রম সেভ হয়নি, আবার চেষ্টা করুন', 'error'); load(); return; }
+    window.showToast?.('দোকানের ক্রম সেভ হয়েছে', 'success');
+  }
+
   function renderAll() {
+    if (ordering) {
+      const box = $('shList');
+      box.textContent = '';
+      // ক্রম = মার্কেটের ক্রম (sort_order), লুকানো দোকানও থাকে
+      shops.slice().sort((a, b) => ((a.sort_order || 0) - (b.sort_order || 0)) || String(a.name).localeCompare(String(b.name)))
+        .forEach((x) => box.appendChild(card(x)));
+      makeSortable(box, { itemSelector: '.sh-card', onChange: (ids) => saveOrder(ids) });
+      return;
+    }
     chips('shShow', SHOW, 'show', (k) => shops.filter((s) => SHOW.find((x) => x[0] === k)[2](s) && pass(s, 'show')).length);
     chips('shKind', KIND, 'kind', (k) => shops.filter((s) => (k === 'all' || s.delivery_kind === k) && pass(s, 'kind')).length);
     const catList = [['all', 'সব ক্যাটাগরি']].concat(cats.map((c) => [c.id, c.name]));
@@ -198,6 +228,14 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
     if (!canOpenAdminPath('/admin/delivery-shops', data)) { $('shDeny').hidden = false; return; }
     $('shMain').hidden = false;
     if (data.isSuper || !data.access.isStaff || data.access.can('delivery_shops.manage')) $('shAdd').hidden = false;
+    $('shOrder').addEventListener('click', () => {
+      ordering = !ordering;
+      $('shOrder').textContent = ordering ? 'ক্রম ঠিক আছে' : 'ক্রম বদলান';
+      $('shOrdHint').hidden = !ordering;
+      $('shMain').classList.toggle('ordering', ordering);
+      if (!ordering) location.reload();
+      else renderAll();
+    });
     let t = 0;
     $('shQ').addEventListener('input', (e) => {
       clearTimeout(t);

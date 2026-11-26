@@ -1,0 +1,344 @@
+---
+// ============================================================
+// /console/shop-edit[?id=<delivery_shops.id>] — দোকান যোগ / এডিট / ডিলিট (নতুন অ্যাপ, ধাপ ৫.২)
+// id না থাকলে নতুন দোকান। পুরনো /admin/delivery-shops-এর হুবহু নিয়ম ও যাচাই:
+//   নাম*, ম্যাপ পিন*, ক্যাটাগরি* (সর্বোচ্চ ৩), প্রস্তুতি ১–২৪০ মিনিট, টেস্ট দোকান = কাস্টমারকে দেখায় না
+//   লেখা: delivery_shops insert/update/delete (RLS: delivery_shops.manage)
+//   ছবি: consoleShopKit (delivery-shop-images বাকেট)
+// লোকেশন: LocationPicker (lp:location-changed ইভেন্ট, ম্যাপ থেকে উপজেলা/ইউনিয়ন বসে)
+// প্রতিটা বদল অ্যাক্টিভিটি লগে ওঠে (zz_admin_audit)।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+import LocationPicker from '../../components/delivery/LocationPicker.astro';
+---
+
+<ConsoleShell title="দোকানের তথ্য" active="menu">
+  <div class="cs-pad cm-page se-page">
+    <a class="se-back" href="/console/shops" id="seBack">← ফিরে যান</a>
+    <h1 class="cs-h cm-title" id="seTitle">দোকানের তথ্য</h1>
+    <div class="se-deny" id="seDeny" hidden></div>
+
+    <form class="se-form" id="seForm" novalidate hidden>
+      <section class="se-card"><h2>ছবি</h2><div id="seImg"></div></section>
+
+      <section class="se-card" id="seBasic"><h2>নাম ও এলাকা</h2></section>
+
+      <section class="se-card">
+        <h2>লোকেশন<span class="required-mark">*</span></h2>
+        <LocationPicker id="shop" label="দোকানের লোকেশন" required={false} allowAutoLocate={true} enableSavedLocations={false} placeholder="ঠিকানা লিখুন বা ম্যাপে সিলেক্ট করুন" />
+        <p class="sk-hint" id="seLocHint"></p>
+      </section>
+
+      <section class="se-card">
+        <h2>ক্যাটাগরি<span class="required-mark">*</span> <small>সর্বোচ্চ ৩টা</small></h2>
+        <div class="sk-chips" id="seCats"></div>
+        <p class="sk-hint" id="seCatHint"></p>
+      </section>
+
+      <section class="se-card" id="seHours"><h2>সময়</h2></section>
+
+      <section class="se-card" id="seSwitches"><h2>দেখানো</h2></section>
+
+      <p class="sk-err" id="seErr" hidden></p>
+      <div class="se-actions">
+        <button type="submit" class="se-save" id="seSave">সেভ করুন</button>
+      </div>
+      <button type="button" class="se-del" id="seDel" hidden>দোকান ডিলিট করুন</button>
+    </form>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .se-back { font-size: 13.5px; font-weight: 600; color: #5F6B7E; text-decoration: none; margin-top: 4px; }
+  .se-form { display: flex; flex-direction: column; gap: 12px; padding-bottom: 20px; }
+  .se-form[hidden] { display: none; }
+  .se-card { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .se-card h2 { margin: 0; font-size: 13px; font-weight: 600; color: #5F6B7E; }
+  .se-card h2 small { font-weight: 400; }
+  .se-actions { position: sticky; bottom: calc(68px + env(safe-area-inset-bottom)); background: #F7F5F2; padding: 10px 0; z-index: 5; }
+  @media (min-width: 900px) { .se-actions { bottom: 0; } }
+  .se-save { width: 100%; height: 50px; border-radius: 14px; border: 0; background: #1B2A4A; color: #fff; font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; }
+  .se-save:disabled { opacity: .6; }
+  .se-del { align-self: center; background: none; border: 0; color: #B3261E; font: inherit; font-size: 14px; font-weight: 600; padding: 10px; cursor: pointer; }
+  .se-del[hidden] { display: none; }
+  .se-deny { padding: 30px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; font-weight: 600; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, canOpenAdminPath, bn } from '../../lib/consoleApp.js';
+  import { UPAZILAS, getUnionsOfUpazilaName, getUnionBn } from '../../data/feniAreas.js';
+  import { makeImagePicker, removeStored, field, switchRow, injectShopKitCss, WEEK_DAYS } from '../../lib/consoleShopKit.js';
+
+  injectShopKitCss();
+  const $ = (id) => document.getElementById(id);
+  const shopId = (new URLSearchParams(location.search).get('id') || '').trim() || null;
+  const toast = (t, type = 'success') => window.showToast?.(t, type);
+  const picker = () => document.querySelector('[data-lp-id="shop"]');
+
+  let shop = null;
+  let mkCats = [];
+  let sel = [];
+  let loc = { lat: null, lng: null };
+  let me = null;
+  let busy = false;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function input(type, cls = 'sk-in') { const i = el('input', cls); i.type = type; return i; }
+  function select(opts) {
+    const s = el('select', 'sk-in');
+    opts.forEach(([v, t]) => { const o = el('option', null, t); o.value = v; s.appendChild(o); });
+    return s;
+  }
+
+  // ---- ফর্মের ঘর ----
+  const img = makeImagePicker($('seImg'), 'ছবি');
+  const basic = $('seBasic');
+  const fName = field(basic, 'দোকানের নাম', Object.assign(input('text'), { maxLength: 120, placeholder: 'যেমন: কাচ্চি ঘর' }), { required: true, errorText: 'দোকানের নাম লিখুন' });
+  const two = el('div', 'sk-two');
+  basic.appendChild(two);
+  const fUp = field(two, 'উপজেলা', select([['', 'উপজেলা বাছুন']].concat(UPAZILAS.map((u) => [u.name, u.name]))));
+  const fUn = field(two, 'ইউনিয়ন / পৌরসভা', select([['', 'ইউনিয়ন বাছুন']]));
+  const fPhone = field(basic, 'দোকানের ফোন', Object.assign(input('tel'), { maxLength: 20, inputMode: 'tel', placeholder: '01XXXXXXXXX' }), { hint: '(ঐচ্ছিক)' });
+
+  function fillUnions(up, selected) {
+    fUn.textContent = '';
+    const o0 = el('option', null, 'ইউনিয়ন বাছুন'); o0.value = ''; fUn.appendChild(o0);
+    const list = up ? getUnionsOfUpazilaName(up) : [];
+    list.forEach((n) => { const o = el('option', null, n); o.value = n; fUn.appendChild(o); });
+    if (selected) {
+      if (!list.includes(selected)) { const o = el('option', null, selected); o.value = selected; fUn.appendChild(o); }
+      fUn.value = selected;
+    }
+  }
+  fUp.addEventListener('change', () => fillUnions(fUp.value));
+
+  const hours = $('seHours');
+  const fPrep = field(hours, 'গড় প্রস্তুতির সময় (মিনিট)', Object.assign(input('number'), { min: 1, max: 240, step: 1, inputMode: 'numeric', value: '15' }));
+  const two2 = el('div', 'sk-two');
+  hours.appendChild(two2);
+  const fOpen = field(two2, 'খোলে', input('time'));
+  const fClose = field(two2, 'বন্ধ হয়', input('time'));
+  const fOff = field(hours, 'সাপ্তাহিক ছুটি', select([['', 'নেই']].concat(WEEK_DAYS.map((d, i) => [String(i), d]))));
+
+  const sws = $('seSwitches');
+  const swActive = switchRow(sws, 'কাস্টমারকে দেখাবে', 'বন্ধ থাকলে মার্কেটে দোকানটা দেখা যায় না।', true);
+  const swPopular = switchRow(sws, 'জনপ্রিয়', '"জনপ্রিয়" ব্যাজ পায় ও উপরের দিকে আসে।', false);
+  const swTest = switchRow(sws, 'টেস্ট দোকান', 'শুধু স্টাফ দেখে, কাস্টমার নয়। চালু করলে "কাস্টমারকে দেখাবে" নিজে বন্ধ হয়।', false);
+  swTest.sw.addEventListener('click', () => { if (swTest.get()) swActive.set(false); });
+  swActive.sw.addEventListener('click', () => { if (swActive.get() && swTest.get()) { swActive.set(false); toast('টেস্ট দোকান কাস্টমারকে দেখানো যায় না। আগে "টেস্ট" বন্ধ করুন।', 'warning'); } });
+
+  function renderCats() {
+    const box = $('seCats');
+    box.textContent = '';
+    mkCats.filter((c) => c.is_active || sel.includes(c.id)).forEach((c) => {
+      const b = el('button', null, c.name);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(sel.includes(c.id)));
+      b.addEventListener('click', () => {
+        const i = sel.indexOf(c.id);
+        if (i !== -1) sel.splice(i, 1);
+        else if (sel.length >= 3) { toast('সর্বোচ্চ ৩টা ক্যাটাগরি বাছা যাবে।', 'warning'); return; }
+        else sel.push(c.id);
+        renderCats();
+      });
+      box.appendChild(b);
+    });
+    $('seCatHint').textContent = bn(sel.length) + '/৩টা বাছা হয়েছে';
+  }
+
+  // ---- লোকেশন পিকার ----
+  function setPicker(address, lat, lng, up, un) {
+    const w = picker();
+    if (!w) return;
+    const set = (q, v) => { const e = w.querySelector(q); if (e) e.value = v == null ? '' : String(v); };
+    set('.lp-address-input', address); set('.lp-out-address', address);
+    set('.lp-out-lat', lat); set('.lp-out-lng', lng);
+    set('.lp-out-upazila', up); set('.lp-out-union', un);
+  }
+  function paintLoc() {
+    $('seLocHint').textContent = loc.lat != null && loc.lng != null ? 'ম্যাপ পিন বসানো আছে। রাইডার এখান থেকেই পিকআপ করবে।' : 'ম্যাপে পিন বসান, রাইডার এটাকেই পিকআপ লোকেশন ধরবে।';
+  }
+  document.addEventListener('lp:location-changed', (e) => {
+    const d = (e && e.detail) || {};
+    if (d.id !== 'shop') return;
+    if (d.cleared) { loc = { lat: null, lng: null }; paintLoc(); return; }
+    if (typeof d.lat === 'number' && typeof d.lng === 'number' && !isNaN(d.lat) && !isNaN(d.lng)) loc = { lat: d.lat, lng: d.lng };
+    if (d.upazila && UPAZILAS.some((u) => u.name === d.upazila)) {
+      fUp.value = d.upazila;
+      fillUnions(d.upazila);
+      const list = getUnionsOfUpazilaName(d.upazila);
+      const bnU = d.union ? getUnionBn(d.union) : '';
+      const hit = list.includes(d.union) ? d.union : (list.includes(bnU) ? bnU : null);
+      if (hit) fUn.value = hit;
+    }
+    paintLoc();
+  });
+
+  function showErr(t) {
+    const e = $('seErr');
+    e.textContent = t || '';
+    e.hidden = !t;
+    if (t) toast(t, 'error');
+  }
+
+  function fill() {
+    $('seTitle').textContent = shop ? shop.name : 'নতুন দোকান';
+    document.title = (shop ? shop.name : 'নতুন দোকান') + ' | Smart Feni Admin';
+    $('seBack').href = shop ? '/console/shop?id=' + encodeURIComponent(shop.id) : '/console/shops';
+    img.reset(shop ? shop.image_url : null);
+    fName.value = shop ? shop.name || '' : '';
+    fUp.value = shop && shop.upazila ? shop.upazila : '';
+    fillUnions(fUp.value, shop ? shop.union_name : '');
+    fPhone.value = shop && shop.phone ? shop.phone : '';
+    fPrep.value = String(shop && shop.prep_minutes ? shop.prep_minutes : 15);
+    fOpen.value = shop && shop.opens_at ? String(shop.opens_at).slice(0, 5) : '';
+    fClose.value = shop && shop.closes_at ? String(shop.closes_at).slice(0, 5) : '';
+    fOff.value = shop && shop.weekly_off != null ? String(shop.weekly_off) : '';
+    swActive.set(shop ? shop.is_active : true);
+    swPopular.set(shop ? shop.is_popular : false);
+    swTest.set(shop ? shop.is_test : false);
+    sel = shop && Array.isArray(shop.market_category_ids) ? shop.market_category_ids.slice(0, 3) : [];
+    renderCats();
+    // পিন না থাকলে ফেনীর ডিফল্ট পিন (পরে ম্যাপে বদলানো যায়), পুরনো পেজের মতো
+    loc = {
+      lat: shop && shop.lat != null ? Number(shop.lat) : 23.0159,
+      lng: shop && shop.lng != null ? Number(shop.lng) : 91.3976,
+    };
+    setPicker(shop ? shop.address : '', loc.lat, loc.lng, fUp.value, shop ? shop.union_name : '');
+    paintLoc();
+    $('seDel').hidden = !shop;
+    // টাইম পিকার (১২ ঘণ্টা) BaseLayout নিজে বসায়; মান বদলের পর জানাই
+    [fOpen, fClose].forEach((i) => i.dispatchEvent(new Event('change', { bubbles: true })));
+  }
+
+  async function save(e) {
+    e.preventDefault();
+    if (busy) return;
+    showErr('');
+    if (window.SFValidateForm && !window.SFValidateForm($('seForm'))) { showErr('লাল চিহ্নিত ঘরগুলো পূরণ করুন।'); return; }
+    const name = fName.value.trim();
+    if (!name) { showErr('দোকানের নাম লিখুন।'); return; }
+    const w = picker();
+    const addrEl = w ? w.querySelector('.lp-address-input') : null;
+    const address = addrEl ? addrEl.value.trim() : '';
+    if (address.length > 300) { showErr('ঠিকানা ৩০০ অক্ষরের মধ্যে রাখুন।'); return; }
+    let { lat, lng } = loc;
+    if ((lat == null || lng == null) && w) {
+      const hl = parseFloat((w.querySelector('.lp-out-lat') || {}).value);
+      const hg = parseFloat((w.querySelector('.lp-out-lng') || {}).value);
+      if (!isNaN(hl) && !isNaN(hg)) { lat = hl; lng = hg; }
+    }
+    if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) { showErr('ম্যাপে পিন বসান, রাইডার এটাকেই পিকআপ লোকেশন ধরবে।'); return; }
+    if (!sel.length) { showErr('কমপক্ষে ১টা ক্যাটাগরি বাছুন।'); return; }
+    const prep = parseInt(fPrep.value, 10);
+    if (!Number.isFinite(prep) || prep < 1 || prep > 240) { showErr('প্রস্তুতির সময় ১ থেকে ২৪০ মিনিটের মধ্যে দিন।'); return; }
+    const phone = fPhone.value.trim();
+    if (phone && !/^[0-9+\-\s]{6,20}$/.test(phone)) { showErr('ফোন নম্বর সঠিক নয়।'); return; }
+
+    const payload = {
+      name,
+      upazila: fUp.value || null,
+      union_name: fUn.value || null,
+      address: address || null,
+      lat, lng,
+      phone: phone || null,
+      is_popular: swPopular.get(),
+      is_active: swActive.get(),
+      is_test: swTest.get(),
+      market_category_ids: sel.slice(0, 3),
+      prep_minutes: prep,
+      opens_at: fOpen.value || null,
+      closes_at: fClose.value || null,
+      weekly_off: fOff.value === '' ? null : parseInt(fOff.value, 10),
+    };
+    if (payload.is_test) payload.is_active = false;
+    if (shop && shop.is_active && !payload.is_active && !window.confirm('"' + name + '" দোকান কাস্টমার থেকে লুকিয়ে যাবে। সেভ করবেন?')) return;
+
+    busy = true;
+    const btn = $('seSave');
+    btn.disabled = true;
+    btn.textContent = 'সেভ হচ্ছে…';
+    let up = null;
+    try {
+      up = await img.prepare('shops');
+      if (up.value !== undefined) payload.image_url = up.value;
+      let res;
+      if (shop) {
+        res = await supabase.from('delivery_shops').update(payload).eq('id', shop.id).select('id').single();
+      } else {
+        const { data: last } = await supabase.from('delivery_shops').select('sort_order').order('sort_order', { ascending: false }).limit(1).maybeSingle();
+        payload.sort_order = ((last && last.sort_order) || 0) + 10;
+        if (me) payload.created_by = me;
+        res = await supabase.from('delivery_shops').insert(payload).select('id').single();
+      }
+      if (res.error) throw res.error;
+      if (up.old && up.value !== undefined) removeStored(up.old);
+      toast(shop ? 'সেভ হয়েছে' : 'দোকান যোগ হয়েছে। এবার মেনুতে পণ্য যোগ করুন।');
+      location.href = shop ? '/console/shop?id=' + encodeURIComponent(res.data.id) : '/console/shop-menu?id=' + encodeURIComponent(res.data.id);
+    } catch (err) {
+      if (up && up.newUrl) removeStored(up.newUrl);
+      showErr('সেভ হয়নি। আবার চেষ্টা করুন।');
+      btn.disabled = false;
+      btn.textContent = 'সেভ করুন';
+      busy = false;
+    }
+  }
+
+  async function del() {
+    if (!shop || busy) return;
+    const { count } = await supabase.from('delivery_shop_items').select('id', { count: 'exact', head: true }).eq('shop_id', shop.id);
+    const msg = '"' + shop.name + '" ডিলিট করবেন?' + (count ? ' এর ' + bn(count) + 'টা পণ্যও মুছে যাবে।' : '') + ' এটা আর ফেরানো যাবে না। শুধু লুকাতে চাইলে "কাস্টমারকে দেখাবে" বন্ধ করুন।';
+    if (!window.confirm(msg)) return;
+    if (!window.confirm('নিশ্চিত? "' + shop.name + '" চিরতরে মুছে যাবে।')) return;
+    busy = true;
+    $('seDel').disabled = true;
+    try {
+      const ir = await supabase.from('delivery_shop_items').select('image_url').eq('shop_id', shop.id);
+      const imgs = [shop.image_url].concat((ir.data || []).map((r) => r.image_url)).filter(Boolean);
+      const { error } = await supabase.from('delivery_shops').delete().eq('id', shop.id);
+      if (error) throw error;
+      imgs.forEach((u) => removeStored(u));
+      toast('দোকান ডিলিট হয়েছে');
+      location.href = '/console/shops';
+    } catch (err) {
+      toast('ডিলিট হয়নি। দোকানে চলমান অর্ডার বা হিসাব থাকলে ডিলিট হয় না, লুকিয়ে রাখুন।', 'error');
+      busy = false;
+      $('seDel').disabled = false;
+    }
+  }
+
+  $('seForm').addEventListener('submit', save);
+  // ম্যাপ পিকারের ঘরে Enter চাপলে ফর্ম সেভ না হয়ে যায়
+  $('seForm').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.closest && e.target.closest('[data-lp-id]')) e.preventDefault(); });
+  $('seDel').addEventListener('click', del);
+
+  onConsoleReady(async (ctx) => {
+    const can = ctx.isSuper || !ctx.access.isStaff || ctx.access.can('delivery_shops.manage');
+    if (!canOpenAdminPath('/admin/delivery-shops', ctx) || !can) {
+      $('seDeny').textContent = 'দোকান যোগ বা এডিট করার অনুমতি নেই।';
+      $('seDeny').hidden = false;
+      return;
+    }
+    me = ctx.profile && ctx.profile.id ? ctx.profile.id : null;
+    const [sr, cr] = await Promise.all([
+      shopId ? supabase.from('delivery_shops').select('*').eq('id', shopId).maybeSingle() : Promise.resolve({ data: null }),
+      supabase.from('delivery_market_categories').select('id, name, sort_order, is_active').order('sort_order', { ascending: true }),
+    ]);
+    if (shopId && !sr.data) {
+      $('seDeny').textContent = 'দোকানটি পাওয়া যায়নি।';
+      $('seDeny').hidden = false;
+      return;
+    }
+    shop = sr.data || null;
+    mkCats = cr.data || [];
+    $('seForm').hidden = false;
+    fill();
+  });
+</script>

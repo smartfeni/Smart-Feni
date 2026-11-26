@@ -1,0 +1,353 @@
+---
+// ============================================================
+// /console/shop-menu?id=<delivery_shops.id> — একটা দোকানের মেনু (নতুন অ্যাপ, ধাপ ৫.২)
+// পুরনো /admin/delivery-shops-এর মেনু অংশের হুবহু নিয়ম:
+//   delivery_shop_items insert/update/delete (RLS: delivery_shops.manage বা দোকানের মালিক)
+//   "পাওয়া যাচ্ছে" সুইচ সরাসরি, দাম ০–১০,০০,০০০, আগের দাম > নতুন দাম, ট্যাগ (জনপ্রিয়/ঝাল/নতুন)
+//   মেনু ক্যাটাগরি: menuCategories.js (openCategorySheet) · ক্রম: sortable.js + RPC shop_reorder(items)
+//   ছবি: consoleShopKit (items/<shop_id>/...)
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="মেনু" active="menu">
+  <div class="cs-pad cm-page mn-page">
+    <a class="mn-back" href="/console/shops" id="mnBack">← দোকান</a>
+    <div class="mn-head">
+      <div>
+        <h1 class="cs-h cm-title" id="mnTitle">মেনু</h1>
+        <p class="cs-muted mn-sub" id="mnSub"></p>
+      </div>
+    </div>
+    <div class="mn-deny" id="mnDeny" hidden></div>
+    <div class="mn-main" id="mnMain" hidden>
+      <div class="mn-bar">
+        <button type="button" class="mn-add" id="mnAdd">+ পণ্য যোগ করুন</button>
+        <button type="button" class="mn-ghost" id="mnCats">ক্যাটাগরি</button>
+      </div>
+      <input type="search" class="mn-q" id="mnQ" placeholder="মেনুতে খুঁজুন" aria-label="মেনুতে খুঁজুন" />
+      <p class="sk-hint" id="mnHint"></p>
+      <div id="mnList"></div>
+    </div>
+  </div>
+
+  <div class="mn-sheet" id="mnSheet" hidden>
+    <form class="mn-box" id="mnForm" novalidate role="dialog" aria-modal="true" aria-labelledby="mnFormTitle">
+      <div class="mn-box-h">
+        <h2 id="mnFormTitle">নতুন পণ্য</h2>
+        <button type="button" class="mn-x" id="mnClose" aria-label="বন্ধ করুন">✕</button>
+      </div>
+      <div id="mnImg"></div>
+      <div id="mnFields" class="mn-fields"></div>
+      <p class="sk-err" id="mnErr" hidden></p>
+      <div class="mn-box-btns">
+        <button type="button" class="mn-del" id="mnDel" hidden>ডিলিট</button>
+        <button type="submit" class="mn-save" id="mnSave">সেভ করুন</button>
+      </div>
+    </form>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .mn-back { font-size: 13.5px; font-weight: 600; color: #5F6B7E; text-decoration: none; margin-top: 4px; }
+  .mn-sub { margin: 2px 0 0; }
+  .mn-main { display: flex; flex-direction: column; gap: 10px; }
+  .mn-bar { display: flex; gap: 8px; }
+  .mn-add { flex: 1; height: 46px; border-radius: 12px; border: 0; background: #1B2A4A; color: #fff; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .mn-ghost { height: 46px; padding: 0 16px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .mn-q { width: 100%; box-sizing: border-box; height: 44px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; padding: 0 14px; font: inherit; font-size: 15px; color: #1B2A4A; }
+  .mn-group { margin-top: 6px; }
+  .mn-gh { font-size: 13px; font-weight: 600; color: #5F6B7E; margin: 6px 2px; }
+  .mn-gbox { background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; overflow: hidden; }
+  .mn-it { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fff; }
+  .mn-it + .mn-it { border-top: 1px solid #EFEBE5; }
+  .mn-it.off .mn-it-name { color: #9AA3B2; }
+  .mn-it-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 0; font: inherit; color: #1B2A4A; text-align: left; cursor: pointer; }
+  .mn-it-pic { width: 48px; height: 48px; flex: none; border-radius: 12px; background: #EFEBE5 center/cover no-repeat; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #5F6B7E; }
+  .mn-it-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .mn-it-name { font-size: 14.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .mn-it-sub { font-size: 12.5px; color: #5F6B7E; }
+  .mn-it-sub s { margin-right: 4px; }
+  .mn-tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 5px; background: #FFF4E0; color: #8A4B00; margin-left: 4px; }
+  .mn-empty { padding: 26px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; color: #5F6B7E; font-size: 14px; }
+  .mn-deny { padding: 30px 16px; text-align: center; background: #fff; border: 1px solid #E7E2DA; border-radius: 16px; font-weight: 600; }
+  .mn-sheet { position: fixed; inset: 0; z-index: 8000; background: rgba(15,22,38,.45); display: flex; align-items: flex-end; justify-content: center; }
+  .mn-sheet[hidden] { display: none; }
+  .mn-box { width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; background: #fff; border-radius: 20px 20px 0 0; padding: 16px 18px calc(16px + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; color: #1B2A4A; }
+  @media (min-width: 700px) { .mn-sheet { align-items: center; } .mn-box { border-radius: 20px; } }
+  .mn-box-h { display: flex; align-items: center; justify-content: space-between; }
+  .mn-box-h h2 { margin: 0; font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif; font-size: 19px; font-weight: 600; }
+  .mn-x { width: 40px; height: 40px; border-radius: 50%; border: 0; background: #F1EEE9; font-size: 16px; cursor: pointer; color: #1B2A4A; }
+  .mn-fields { display: flex; flex-direction: column; gap: 12px; }
+  .mn-box-btns { display: flex; gap: 8px; position: sticky; bottom: 0; background: #fff; padding-top: 6px; }
+  .mn-save { flex: 1; height: 48px; border-radius: 12px; border: 0; background: #1B2A4A; color: #fff; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .mn-save:disabled { opacity: .6; }
+  .mn-del { height: 48px; padding: 0 18px; border-radius: 12px; border: 1px solid #F2B8A0; background: #fff; color: #B3261E; font: inherit; font-weight: 600; cursor: pointer; }
+  .mn-del[hidden] { display: none; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, canOpenAdminPath, bn } from '../../lib/consoleApp.js';
+  import { makeSortable } from '../../lib/sortable.js';
+  import { openCategorySheet } from '../../lib/menuCategories.js';
+  import { thumbUrl } from '../../lib/thumb.js';
+  import { makeImagePicker, removeStored, field, switchRow, injectShopKitCss, ITEM_TAGS } from '../../lib/consoleShopKit.js';
+
+  injectShopKitCss();
+  const $ = (id) => document.getElementById(id);
+  const shopId = (new URLSearchParams(location.search).get('id') || '').trim();
+  const toast = (t, type = 'success') => window.showToast?.(t, type);
+  let shop = null;
+  let items = [];
+  let cats = [];
+  let q = '';
+  let editing = null;
+  let busy = false;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  const price = (n) => { const v = Number(n); return '৳' + bn(Number.isInteger(v) ? v : v.toFixed(2)); };
+
+  // ---------- তালিকা ----------
+  function groups() {
+    if (!cats.length) return [{ key: 'all', label: null, items }];
+    const g = cats.map((c) => ({ key: c.id, label: c.name, items: items.filter((i) => i.category_id === c.id) }));
+    const rest = items.filter((i) => !i.category_id || !cats.some((c) => c.id === i.category_id));
+    if (rest.length) g.push({ key: 'none', label: 'ক্যাটাগরি ছাড়া', items: rest });
+    return g;
+  }
+
+  function row(it) {
+    const r = el('div', 'mn-it' + (it.is_available ? '' : ' off'));
+    r.dataset.id = it.id;
+    const main = el('button', 'mn-it-main');
+    main.type = 'button';
+    main.setAttribute('aria-label', (it.name || '') + ' এডিট');
+    const pic = el('span', 'mn-it-pic');
+    if (it.image_url) pic.style.backgroundImage = 'url("' + encodeURI(thumbUrl(it.image_url)) + '")';
+    else pic.textContent = String(it.name || '?').trim().charAt(0);
+    main.appendChild(pic);
+    const t = el('span', 'mn-it-t');
+    const nm = el('span', 'mn-it-name', it.name || 'পণ্য');
+    (it.tags || []).forEach((tg) => { if (ITEM_TAGS[tg]) nm.appendChild(el('span', 'mn-tag', ITEM_TAGS[tg])); });
+    t.appendChild(nm);
+    const sub = el('span', 'mn-it-sub');
+    if (Number(it.old_price) > Number(it.price)) sub.appendChild(el('s', null, price(it.old_price)));
+    sub.appendChild(document.createTextNode(price(it.price) + (it.price_unit ? ' / ' + it.price_unit : '') + (it.is_available ? '' : ' · পাওয়া যাচ্ছে না')));
+    t.appendChild(sub);
+    main.appendChild(t);
+    main.addEventListener('click', () => openItem(it));
+    r.appendChild(main);
+    const sw = el('button', 'sk-toggle');
+    sw.type = 'button';
+    sw.setAttribute('role', 'switch');
+    sw.setAttribute('aria-label', (it.name || '') + ' পাওয়া যাচ্ছে');
+    sw.setAttribute('aria-checked', String(!!it.is_available));
+    sw.addEventListener('click', async () => {
+      const want = !it.is_available;
+      sw.disabled = true;
+      sw.setAttribute('aria-checked', String(want));
+      const { error } = await supabase.from('delivery_shop_items').update({ is_available: want }).eq('id', it.id);
+      sw.disabled = false;
+      if (error) { sw.setAttribute('aria-checked', String(!want)); toast('বদলানো যায়নি', 'error'); return; }
+      it.is_available = want;
+      r.classList.toggle('off', !want);
+      paintSub();
+    });
+    r.appendChild(sw);
+    return r;
+  }
+
+  function paintSub() {
+    const avail = items.filter((i) => i.is_available).length;
+    $('mnSub').textContent = bn(items.length) + 'টা পণ্য · ' + bn(avail) + 'টা পাওয়া যাচ্ছে';
+  }
+
+  async function saveOrder(ids) {
+    ids.forEach((id, n) => { const it = items.find((x) => x.id === id); if (it) it.sort_order = (n + 1) * 10; });
+    items.sort((a, b) => ((a.sort_order || 0) - (b.sort_order || 0)) || String(a.name).localeCompare(String(b.name)));
+    const { data, error } = await supabase.rpc('shop_reorder', { p_shop_id: shopId, p_kind: 'items', p_ids: ids });
+    if (error || !data || !data.ok) { toast('ক্রম সেভ হয়নি', 'error'); await load(); return; }
+    toast('ক্রম সেভ হয়েছে');
+  }
+
+  function render() {
+    const box = $('mnList');
+    box.textContent = '';
+    paintSub();
+    if (!items.length) { box.appendChild(el('div', 'mn-empty', 'মেনুতে এখনো কোনো পণ্য নেই। "+ পণ্য যোগ করুন" চাপুন।')); return; }
+    let shown = 0;
+    groups().forEach((g) => {
+      const list = g.items.filter((i) => !q || ((i.name || '') + ' ' + (i.description || '')).toLowerCase().includes(q));
+      if (!list.length) return;
+      const wrap = el('div', 'mn-group');
+      if (g.label) wrap.appendChild(el('div', 'mn-gh', g.label + ' (' + bn(list.length) + ')'));
+      const gb = el('div', 'mn-gbox');
+      list.forEach((it) => gb.appendChild(row(it)));
+      wrap.appendChild(gb);
+      box.appendChild(wrap);
+      shown += list.length;
+      if (!q && list.length > 1) makeSortable(gb, { itemSelector: '.mn-it', onChange: (ids) => saveOrder(ids) });
+    });
+    if (!shown) box.appendChild(el('div', 'mn-empty', 'এই নামে কোনো পণ্য নেই।'));
+    $('mnHint').textContent = items.length > 1 && !q ? 'পণ্য চেপে ধরে ওপর-নিচে টেনে ক্রম বদলান।' : '';
+  }
+
+  async function load() {
+    const [ir, cr] = await Promise.all([
+      supabase.from('delivery_shop_items').select('*').eq('shop_id', shopId).order('sort_order', { ascending: true }).order('name', { ascending: true }),
+      supabase.from('delivery_shop_categories').select('id, name, sort_order').eq('shop_id', shopId).order('sort_order', { ascending: true }).order('name', { ascending: true }),
+    ]);
+    if (ir.error) { $('mnList').textContent = ''; $('mnList').appendChild(el('div', 'mn-empty', 'মেনু লোড হয়নি। একটু পরে আবার চেষ্টা করুন।')); return; }
+    items = ir.data || [];
+    cats = cr.data || [];
+    render();
+  }
+
+  // ---------- পণ্যের ফর্ম ----------
+  const img = makeImagePicker($('mnImg'), 'ছবি');
+  const F = $('mnFields');
+  const iName = field(F, 'পণ্যের নাম', Object.assign(el('input', 'sk-in'), { type: 'text', maxLength: 120, placeholder: 'যেমন: কাচ্চি বিরিয়ানি' }), { required: true, errorText: 'পণ্যের নাম লিখুন' });
+  const two = el('div', 'sk-two');
+  F.appendChild(two);
+  const iPrice = field(two, 'দাম (৳)', Object.assign(el('input', 'sk-in'), { type: 'number', min: 0, max: 1000000, step: 'any', inputMode: 'decimal' }), { required: true, errorText: 'দাম লিখুন' });
+  const iOld = field(two, 'আগের দাম', Object.assign(el('input', 'sk-in'), { type: 'number', min: 0, max: 1000000, step: 'any', inputMode: 'decimal' }), { hint: '(ছাড় দেখাতে)' });
+  const iCat = field(F, 'মেনুর ক্যাটাগরি', el('select', 'sk-in'));
+  const tagWrap = el('div', 'sk-field');
+  tagWrap.appendChild(el('label', null, 'ট্যাগ'));
+  const tagBox = el('div', 'sk-chips');
+  Object.entries(ITEM_TAGS).forEach(([k, v]) => {
+    const b = el('button', null, v);
+    b.type = 'button';
+    b.dataset.tag = k;
+    b.setAttribute('aria-pressed', 'false');
+    b.addEventListener('click', () => b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')));
+    tagBox.appendChild(b);
+  });
+  tagWrap.appendChild(tagBox);
+  F.appendChild(tagWrap);
+  const iDesc = field(F, 'বিবরণ', Object.assign(el('textarea', 'sk-in'), { rows: 3, maxLength: 500, placeholder: 'যেমন: ৩ পিস মুরগি, পোলাও ও সালাদ সহ' }), { hint: '(ঐচ্ছিক)' });
+  const swAvail = switchRow(F, 'পাওয়া যাচ্ছে', 'বন্ধ করলে কাস্টমার এটা অর্ডার করতে পারে না।', true);
+
+  function err(t) { const e = $('mnErr'); e.textContent = t || ''; e.hidden = !t; if (t) toast(t, 'error'); }
+
+  function openItem(it) {
+    editing = it || null;
+    err('');
+    $('mnFormTitle').textContent = it ? 'পণ্য এডিট' : 'নতুন পণ্য';
+    img.reset(it ? it.image_url : null);
+    iName.value = it ? it.name || '' : '';
+    iPrice.value = it ? String(Number(it.price)) : '';
+    iOld.value = it && it.old_price ? String(Number(it.old_price)) : '';
+    iCat.textContent = '';
+    const o0 = el('option', null, 'ক্যাটাগরি ছাড়া'); o0.value = ''; iCat.appendChild(o0);
+    cats.forEach((c) => { const o = el('option', null, c.name); o.value = c.id; iCat.appendChild(o); });
+    iCat.value = it && it.category_id ? it.category_id : '';
+    tagBox.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(!!(it && (it.tags || []).includes(b.dataset.tag)))));
+    iDesc.value = it && it.description ? it.description : '';
+    swAvail.set(it ? it.is_available : true);
+    $('mnDel').hidden = !it;
+    $('mnSheet').hidden = false;
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => iName.focus(), 60);
+  }
+  function closeItem() { $('mnSheet').hidden = true; document.body.style.overflow = ''; editing = null; }
+
+  async function saveItem(e) {
+    e.preventDefault();
+    if (busy) return;
+    err('');
+    if (window.SFValidateForm && !window.SFValidateForm($('mnForm'))) { err('লাল চিহ্নিত ঘরগুলো পূরণ করুন।'); return; }
+    const name = iName.value.trim();
+    if (!name) { err('পণ্যের নাম লিখুন।'); return; }
+    const p = parseFloat(iPrice.value);
+    if (isNaN(p) || p < 0 || p > 1000000) { err('দাম ০ থেকে ১০,০০,০০০ টাকার মধ্যে দিন।'); return; }
+    const oldRaw = iOld.value.trim();
+    const old = oldRaw === '' ? null : parseFloat(oldRaw);
+    if (old !== null && (isNaN(old) || old <= p || old > 1000000)) { err('আগের দাম নতুন দামের চেয়ে বেশি হতে হবে।'); return; }
+    const payload = {
+      shop_id: shopId,
+      name,
+      price: Math.round(p * 100) / 100,
+      old_price: old === null ? null : Math.round(old * 100) / 100,
+      is_available: swAvail.get(),
+      description: iDesc.value.trim() || null,
+      category_id: iCat.value || null,
+      tags: [...tagBox.querySelectorAll('button[aria-pressed="true"]')].map((b) => b.dataset.tag),
+    };
+    if (!editing) payload.sort_order = items.length ? Math.max(...items.map((i) => i.sort_order || 0)) + 10 : 10;
+    busy = true;
+    const btn = $('mnSave');
+    btn.disabled = true;
+    btn.textContent = 'সেভ হচ্ছে…';
+    let up = null;
+    try {
+      up = await img.prepare('items/' + shopId);
+      if (up.value !== undefined) payload.image_url = up.value;
+      const res = editing
+        ? await supabase.from('delivery_shop_items').update(payload).eq('id', editing.id)
+        : await supabase.from('delivery_shop_items').insert(payload);
+      if (res.error) throw res.error;
+      if (up.old && up.value !== undefined) removeStored(up.old);
+      toast(editing ? 'পণ্য সেভ হয়েছে' : 'পণ্য যোগ হয়েছে');
+      closeItem();
+      await load();
+    } catch (x) {
+      if (up && up.newUrl) removeStored(up.newUrl);
+      err('সেভ হয়নি। আবার চেষ্টা করুন।');
+    } finally {
+      busy = false;
+      btn.disabled = false;
+      btn.textContent = 'সেভ করুন';
+    }
+  }
+
+  async function deleteItem() {
+    if (!editing || busy) return;
+    if (!window.confirm('"' + (editing.name || '') + '" মেনু থেকে মুছে ফেলবেন? শুধু সাময়িক বন্ধ করতে "পাওয়া যাচ্ছে" বন্ধ করুন।')) return;
+    busy = true;
+    const it = editing;
+    const { error } = await supabase.from('delivery_shop_items').delete().eq('id', it.id);
+    busy = false;
+    if (error) { toast('ডিলিট হয়নি', 'error'); return; }
+    if (it.image_url) removeStored(it.image_url);
+    toast('পণ্য মুছে ফেলা হয়েছে');
+    closeItem();
+    await load();
+  }
+
+  $('mnForm').addEventListener('submit', saveItem);
+  $('mnDel').addEventListener('click', deleteItem);
+  $('mnClose').addEventListener('click', closeItem);
+  $('mnSheet').addEventListener('click', (e) => { if (e.target === $('mnSheet')) closeItem(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('mnSheet').hidden) closeItem(); });
+  $('mnAdd').addEventListener('click', () => openItem(null));
+  $('mnCats').addEventListener('click', () => openCategorySheet({ supabase, shopId, toast, onChanged: () => load() }));
+  let t = 0;
+  $('mnQ').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { q = String(e.target.value || '').trim().toLowerCase(); render(); }, 200); });
+
+  onConsoleReady(async (ctx) => {
+    const can = ctx.isSuper || !ctx.access.isStaff || ctx.access.can('delivery_shops.manage');
+    if (!shopId || !canOpenAdminPath('/admin/delivery-shops', ctx) || !can) {
+      $('mnDeny').textContent = !shopId ? 'কোনো দোকান বাছা হয়নি।' : 'মেনু এডিট করার অনুমতি নেই।';
+      $('mnDeny').hidden = false;
+      return;
+    }
+    const { data } = await supabase.from('delivery_shops').select('id, name').eq('id', shopId).maybeSingle();
+    if (!data) { $('mnDeny').textContent = 'দোকানটি পাওয়া যায়নি।'; $('mnDeny').hidden = false; return; }
+    shop = data;
+    $('mnTitle').textContent = 'মেনু · ' + shop.name;
+    document.title = 'মেনু · ' + shop.name + ' | Smart Feni Admin';
+    $('mnBack').href = '/console/shop?id=' + encodeURIComponent(shop.id);
+    $('mnBack').textContent = '← ' + shop.name;
+    $('mnMain').hidden = false;
+    $('mnList').innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 6) : '';
+    load();
+  });
+</script>
