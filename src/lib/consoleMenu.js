@@ -134,7 +134,7 @@ export const MENU = [
     id: 'marketing', name: 'মার্কেটিং', desc: 'নোটিফিকেশন ও ক্যাম্পেইন',
     icon: '<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/>',
     items: [
-      { name: 'নোটিফিকেশন পাঠান', desc: 'নির্দিষ্ট ইউজার, গ্রুপ বা সবাইকে; কে পড়েছে', href: '/admin/notifications', keys: 'পুশ মেসেজ প্রমো' },
+      { name: 'নোটিফিকেশন পাঠান', desc: 'নির্দিষ্ট ইউজার, গ্রুপ বা সবাইকে; কে পড়েছে', href: '/console/notifications', perm: '/admin/notifications', keys: 'পুশ মেসেজ প্রমো' },
       { name: 'স্ক্রেচ কার্ড ক্যাম্পেইন', desc: 'পুরস্কার, সময়কাল, নিয়ম ও বিজয়ীর পেমেন্ট', href: '/console/scratch-cards', perm: '/admin/scratch-cards', keys: 'পুরস্কার' },
     ],
   },
@@ -143,10 +143,10 @@ export const MENU = [
     icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
     items: [
       { name: 'সার্ভিস, অর্ডার ও টাকার নিয়ম', desc: 'কোন সার্ভিস চালু, অটো-পাবলিশ টাইমার, রাইডারের এলাকা, কমিশন, বিকাশ/নগদ নম্বর, অগ্রিম কে নেবে', href: '/console/settings', perm: '/admin/delivery-orders', keys: 'চালু বন্ধ সুইচ টাইমার উপজেলা কমিশন বিকাশ নগদ অগ্রিম' },
-      { name: 'ডেলিভারি চার্জ', desc: 'দূরত্ব অনুযায়ী চার্জ ও নির্দিষ্ট জায়গার চার্জ', href: '/admin/delivery-fare', adminOnly: true, keys: 'ভাড়া চার্জ' },
-      { name: 'হোমপেজ ও ক্যাটাগরি', desc: 'হোমপেজের সেকশনের ক্রম, ক্যাটাগরির সিরিয়াল', href: '/admin/categories', keys: 'সিরিয়াল' },
-      { name: 'ছবি', desc: 'ফিচার্ড ছবি, হেডার, ক্যাটাগরির ছবি, লোগো, ছবি ছোট করা', href: '/admin/images', keys: 'লোগো ব্যানার' },
-      { name: 'লোকেশন ইম্পোর্ট', desc: 'ম্যাপ থেকে জায়গার নাম যোগ (ডেলিভারির সাজেশন)', href: '/admin/seed-locations', keys: 'OSM ম্যাপ' },
+      { name: 'ডেলিভারি চার্জ', desc: 'দূরত্ব অনুযায়ী চার্জ ও নির্দিষ্ট জায়গার চার্জ', href: '/console/delivery-fare', adminOnly: true, keys: 'ভাড়া চার্জ' },
+      { name: 'হোমপেজ ও ক্যাটাগরি', desc: 'হোমপেজের সেকশনের ক্রম, ক্যাটাগরির সিরিয়াল', href: '/console/categories', perm: '/admin/categories', keys: 'সিরিয়াল' },
+      { name: 'ছবি', desc: 'ফিচার্ড ছবি, হেডার, ক্যাটাগরির ছবি, লোগো, ছবি ছোট করা', href: '/console/images', perm: '/admin/images', keys: 'লোগো ব্যানার' },
+      { name: 'লোকেশন ইম্পোর্ট', desc: 'ম্যাপ থেকে জায়গার নাম যোগ (ডেলিভারির সাজেশন)', href: '/console/seed-locations', perm: '/admin/seed-locations', keys: 'OSM ম্যাপ' },
     ],
   },
   {

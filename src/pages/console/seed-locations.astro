@@ -1,0 +1,225 @@
+---
+// ============================================================
+// /console/seed-locations — লোকেশন ইম্পোর্ট (নতুন অ্যাপ, ধাপ ১১)
+// পুরনো /admin/seed-locations থেকে তৈরি; একই টেবিল/RPC/API, DB বদল নেই। কে খুলতে পারবে: পুরনো পেজের একই নিয়ম।
+// ============================================================
+export const prerender = false;
+
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="লোকেশন ইম্পোর্ট" active="menu">
+  <div class="admin-page">
+    <div class="container">
+
+      <div id="cxDeny" class="cx-deny" hidden>এই পেজ দেখার অনুমতি নেই।</div>
+
+      <div id="adminGuardedContent" class="admin-content" hidden>
+
+        <div class="admin-header">
+          <h1>OSM থেকে লোকেশন ইম্পোর্ট</h1>
+          <p class="admin-subtitle">ফেনী জেলার রেস্টুরেন্ট/হোটেল/ক্যাফে OSM থেকে টেনে Delivery Hero পিকআপ সাজেশনে যোগ করবে</p>
+        </div>
+
+        <div class="seed-card">
+          <p class="seed-note">
+            <i class="fas fa-circle-info"></i>
+            বাটনে চাপলে শুরু হবে, ৩০ সেকেন্ড-১ মিনিট লাগতে পারে। বারবার চাপলেও সমস্যা নেই — আগে যোগ হওয়া জায়গা আবার ডুপ্লিকেট হবে না।
+          </p>
+          <button type="button" id="seedBtn" class="seed-btn">
+            <i class="fas fa-download"></i> ইম্পোর্ট শুরু করুন
+          </button>
+          <div id="seedResult" class="seed-result" style="display:none;"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</ConsoleShell>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, canOpenAdminPath } from '../../lib/consoleApp.js';
+
+  onConsoleReady((ctx) => {
+    if (!canOpenAdminPath('/admin/seed-locations', ctx)) { document.getElementById('cxDeny').hidden = false; return; }
+    document.getElementById('adminGuardedContent').hidden = false;
+    // বাটন নিচের কোডে
+  });
+
+  const seedBtn = document.getElementById('seedBtn') as HTMLButtonElement;
+  const seedResult = document.getElementById('seedResult') as HTMLElement;
+
+  seedBtn?.addEventListener('click', async () => {
+    seedBtn.disabled = true;
+    seedBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ইম্পোর্ট হচ্ছে...';
+    seedResult.style.display = 'none';
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/admin/seed-osm-locations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+      });
+      const result = await res.json();
+
+      if (res.ok && result.success) {
+        seedResult.className = 'seed-result seed-result-success';
+        seedResult.innerHTML = `
+          <i class="fas fa-circle-check"></i>
+          মোট ${result.totalFromOsm}টা OSM-এ পাওয়া গেছে, ${result.inserted}টা যোগ/আপডেট হয়েছে
+          (নাম না থাকায় বাদ: ${result.skippedNoName}, ব্যর্থ: ${result.failed})
+        `;
+      } else {
+        seedResult.className = 'seed-result seed-result-error';
+        seedResult.innerHTML = `<i class="fas fa-circle-exclamation"></i> ${result.error || 'ব্যর্থ হয়েছে'}`;
+      }
+    } catch (err: any) {
+      seedResult.className = 'seed-result seed-result-error';
+      seedResult.innerHTML = `<i class="fas fa-circle-exclamation"></i> ${err.message}`;
+    }
+
+    seedResult.style.display = 'flex';
+    seedBtn.disabled = false;
+    seedBtn.innerHTML = '<i class="fas fa-download"></i> ইম্পোর্ট শুরু করুন';
+  });
+</script>
+
+<style>
+  .admin-page {
+    padding: 14px 0 40px;
+    min-height: 60vh;
+  }
+  #adminGuardedContent[hidden], .cx-deny[hidden] { display: none !important; }
+    .cx-deny { padding: 40px 16px; text-align: center; color: #64748B; font-weight: 600; }
+
+  .admin-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 0;
+    color: #5A6E85;
+    gap: 12px;
+  }
+
+  .admin-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #E5EAF0;
+    border-top-color: #FF6B35;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: #5A6E85;
+    text-decoration: none;
+    margin-bottom: 16px;
+  }
+
+  .admin-header {
+    margin-bottom: 20px;
+  }
+
+  .admin-header h1 {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: #1B2A4A;
+    margin: 0 0 6px;
+  }
+
+  .admin-subtitle {
+    font-size: 0.86rem;
+    color: #5A6E85;
+    margin: 0;
+  }
+
+  .seed-card {
+    background: #fff;
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 2px 12px rgba(27, 42, 74, 0.06);
+  }
+
+  .seed-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.82rem;
+    color: #5A6E85;
+    background: #F4F7FC;
+    padding: 12px 14px;
+    border-radius: 12px;
+    line-height: 1.5;
+    margin: 0 0 16px;
+  }
+
+  .seed-note i {
+    color: #FF6B35;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+
+  .seed-btn {
+    width: 100%;
+    background: #1B2A4A;
+    color: #fff;
+    border: none;
+    padding: 14px;
+    border-radius: 40px;
+    font-weight: 800;
+    font-size: 0.92rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .seed-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+
+  .seed-result {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 0.82rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    line-height: 1.5;
+  }
+
+  .seed-result-success {
+    background: #EAFBF1;
+    color: #1B7A43;
+  }
+
+  .seed-result-success i {
+    color: #1B7A43;
+  }
+
+  .seed-result-error {
+    background: #FDEEEE;
+    color: #B23B3B;
+  }
+
+  .seed-result-error i {
+    color: #B23B3B;
+  }
+</style>
