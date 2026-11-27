@@ -74,6 +74,57 @@ try {
           <span class="ht-g ht-g-evening">শুভ সন্ধ্যা</span>
           <span class="ht-g ht-g-night">শুভ রাত্রি</span>
         </h1>
+        <p class="ht-date" data-no-i18n></p>
+        <script is:inline>
+          // দিন + বঙ্গাব্দ তারিখ + ঘড়ি (ফেনী/বাংলাদেশ সময়), প্রতি মিনিটে আপডেট। English মোডে ইংরেজি তারিখ।
+          (function () {
+            var el = document.currentScript && document.currentScript.previousElementSibling;
+            if (!el) return;
+            var BD = '০১২৩৪৫৬৭৮৯';
+            var bn = function (n) { return String(n).replace(/\d/g, function (d) { return BD[d]; }); };
+            var DAYS = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+            var MONTHS = ['বৈশাখ', 'জ্যৈষ্ঠ', 'আষাঢ়', 'শ্রাবণ', 'ভাদ্র', 'আশ্বিন', 'কার্তিক', 'অগ্রহায়ণ', 'পৌষ', 'মাঘ', 'ফাল্গুন', 'চৈত্র'];
+            function parts() {
+              var o = {};
+              new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Dhaka', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hourCycle: 'h23' })
+                .formatToParts(new Date()).forEach(function (p) { o[p.type] = p.value; });
+              return { y: +o.year, m: +o.month, d: +o.day, h: +o.hour, min: o.minute };
+            }
+            // বাংলাদেশের সংশোধিত বঙ্গাব্দ (২০১৯): ১৪ এপ্রিল পহেলা বৈশাখ; প্রথম ৬ মাস ৩১ দিন, কার্তিক–মাঘ ও চৈত্র ৩০, ফাল্গুন ২৯ (অধিবর্ষে ৩০)
+            function bangla(y, m, d) {
+              var today = Date.UTC(y, m - 1, d);
+              var by = (m > 4 || (m === 4 && d >= 14)) ? y : y - 1;
+              var idx = Math.round((today - Date.UTC(by, 3, 14)) / 864e5);
+              var g = by + 1;
+              var leap = (g % 4 === 0 && g % 100 !== 0) || g % 400 === 0;
+              var len = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, leap ? 30 : 29, 30];
+              var i = 0;
+              while (i < 11 && idx >= len[i]) { idx -= len[i]; i++; }
+              return bn(idx + 1) + ' ' + MONTHS[i] + ' ' + bn(by - 593);
+            }
+            function period(h) {
+              return h >= 4 && h < 6 ? 'ভোর' : h >= 6 && h < 12 ? 'সকাল' : h >= 12 && h < 15 ? 'দুপুর' : h >= 15 && h < 17 ? 'বিকাল' : h >= 17 && h < 20 ? 'সন্ধ্যা' : 'রাত';
+            }
+            function render() {
+              try {
+                var p = parts();
+                var h12 = p.h % 12 || 12;
+                var en = window.SFLang && window.SFLang.get && window.SFLang.get() === 'en';
+                if (en) {
+                  el.textContent = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dhaka', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()) +
+                    ' · ' + h12 + ':' + p.min + (p.h < 12 ? ' AM' : ' PM');
+                } else {
+                  var wd = new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay();
+                  el.textContent = DAYS[wd] + ', ' + bangla(p.y, p.m, p.d) + ' · ' + period(p.h) + ' ' + bn(h12) + ':' + bn(p.min);
+                }
+                if (typeof window.sfHomeSlot === 'function') window.sfHomeSlot();
+              } catch (e) {}
+            }
+            render();
+            setTimeout(function () { render(); setInterval(render, 60000); }, 60000 - (Date.now() % 60000) + 50);
+            document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') render(); });
+          })();
+        </script>
       </div>
       <Hero />
       <div class="container">
@@ -110,6 +161,7 @@ try {
   html body .home-t .ht-band { background: var(--hs-bg); color: var(--hs-ink); padding: 22px 0 30px; transition: background-color 0.4s ease; }
   html body .home-t .ht-greet { margin: 0; font-size: 3.1rem; line-height: 1.05; font-weight: 800; letter-spacing: -0.5px; color: var(--hs-ink); }
   html body .home-t .ht-g { display: none; }
+  html body .home-t .ht-date { margin: 8px 0 0; min-height: 1.5em; font-size: 1rem; font-weight: 600; line-height: 1.5; color: var(--hs-sub); font-variant-numeric: tabular-nums; }
   html body .home-t[data-slot='morning'] .ht-g-morning,
   html body .home-t[data-slot='noon'] .ht-g-noon,
   html body .home-t[data-slot='evening'] .ht-g-evening,
