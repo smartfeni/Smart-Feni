@@ -1,0 +1,710 @@
+---
+// ============================================================
+// পেজ: /ride — লোকাল রাইড চাওয়া, Uber-এর মতো ধাপে ধাপে (ধাপ ১, নভে ২০২৬; ডিজাইন: Claude Design ক্যানভাস)
+// ১) পিকআপ: পুরো স্ক্রিন ম্যাপ, মাঝে স্থির পিন (ম্যাপ সরালে পিকআপ বদলায়), GPS, ইউনিয়ন নিজে বসে (বদলানো যায়)
+// ২) গন্তব্য: উপজেলা + ইউনিয়ন বাধ্যতামূলক (ঘর থেকে বা ম্যাপে ইউনিয়নে চেপে); দূরত্ব = পিকআপ → ইউনিয়নের মাঝখান
+// ৩) গাড়ি: আইকন, আনুমানিক সিট, অনলাইন আছে কিনা (RPC local_ride_availability, ধরন পিছু); যাত্রী সংখ্যা
+// ৪) ভাড়া: সাজেস্টেড (calc_delivery_fare, শুধু ডিফল্ট) ± বদলানো, নোট, সারাংশ → RPC local_ride_create (আগের একই)
+// DB বদল নেই। ড্রপ লোকেশন = ইউনিয়নের মাঝখান (drop_loc_source 'manual')। জমার পর /my-orders।
+// ধাপ বদলে history.pushState — ফোনের ব্যাক বাটনে আগের ধাপ। খসড়া sessionStorage-এ (sf_ride_draft)।
+// পুরনো /local-ride-request চালু থাকে; SF টেস্টের পর "রাইড চাই" বাটন এখানে আনা হবে।
+// ইউজার/ডিবির লেখা সব textContent।
+// ============================================================
+export const prerender = false;
+import BaseLayout from '../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="রাইড চাই | স্মার্ট ফেনী" noindex>
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="rd" data-no-ptr data-step="1" id="rd">
+    <div id="rdMap" class="rd-map" aria-label="ম্যাপ"></div>
+
+    <div class="rd-pin" id="rdPin" aria-hidden="true">
+      <span class="rd-pin-tag" id="rdPinTag">এখান থেকে উঠবেন</span>
+      <svg width="44" height="56" viewBox="0 0 44 56"><path d="M22 54c0 0 18-19.5 18-32A18 18 0 0 0 4 22c0 12.5 18 32 18 32z" fill="#FF6B35"/><circle cx="22" cy="22" r="7" fill="#fff"/></svg>
+      <span class="rd-pin-dot"></span>
+    </div>
+
+    <div class="rd-top" id="rdTop">
+      <button type="button" class="rd-round" id="rdBack" aria-label="পেছনে যান"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="rd-pill">
+        <span class="rd-pill-t" id="rdTitle">রাইড চাই</span>
+        <span class="rd-dots" id="rdDots" aria-label="ধাপ"><i></i><i></i><i></i><i></i></span>
+      </div>
+    </div>
+
+    <div class="rd-droptop" id="rdDropTop" hidden>
+      <div class="rd-sel-row">
+        <label class="rd-sel">উপজেলা <span class="required-mark">*</span>
+          <select id="rdDUpa" required><option value="">বাছুন</option></select>
+        </label>
+        <label class="rd-sel">ইউনিয়ন <span class="required-mark">*</span>
+          <select id="rdDUni" required><option value="">বাছুন</option></select>
+        </label>
+      </div>
+      <p class="rd-hint">ম্যাপে ইউনিয়নে চাপলেও এই ঘর নিজে বসে যাবে</p>
+    </div>
+
+    <button type="button" class="rd-locate" id="rdLocate" aria-label="আমার লোকেশন"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+
+    <!-- ধাপ ১: পিকআপ -->
+    <section class="rd-sheet" id="rdS1">
+      <div class="rd-grip"></div>
+      <div>
+        <h1 class="rd-h">আপনি কোথায়?</h1>
+        <p class="rd-sub">ম্যাপ সরিয়ে পিনটা ঠিক জায়গায় আনুন</p>
+      </div>
+      <div class="rd-place">
+        <span class="rd-place-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span>
+        <span class="rd-place-t">
+          <b id="rdPName">লোকেশন খোঁজা হচ্ছে…</b>
+          <small id="rdPSub"></small>
+        </span>
+        <button type="button" class="rd-link" id="rdPChange">বদলান</button>
+      </div>
+      <div class="rd-sel-row" id="rdPSel" hidden>
+        <label class="rd-sel">উপজেলা <span class="required-mark">*</span>
+          <select id="rdPUpa"><option value="">বাছুন</option></select>
+        </label>
+        <label class="rd-sel">ইউনিয়ন <span class="required-mark">*</span>
+          <select id="rdPUni"><option value="">বাছুন</option></select>
+        </label>
+      </div>
+      <label class="rd-field">কোথায় দাঁড়াবেন (ঐচ্ছিক)
+        <input type="text" id="rdPLand" maxlength="120" placeholder="যেমন: মসজিদের সামনে" autocomplete="off" />
+      </label>
+      <button type="button" class="rd-cta" id="rdNext1">পিকআপ নিশ্চিত</button>
+    </section>
+
+    <!-- ধাপ ২: গন্তব্য -->
+    <section class="rd-sheet" id="rdS2" hidden>
+      <div class="rd-grip"></div>
+      <div class="rd-dest">
+        <span>
+          <small>গন্তব্য</small>
+          <b id="rdDName">ইউনিয়ন বাছুন</b>
+        </span>
+        <span class="rd-dest-km">
+          <b id="rdDKm"></b>
+          <small id="rdDMin"></small>
+        </span>
+      </div>
+      <label class="rd-field">জায়গার নাম (ঐচ্ছিক)
+        <input type="text" id="rdDLand" maxlength="120" placeholder="যেমন: বাজার, স্কুলের সামনে" autocomplete="off" />
+      </label>
+      <button type="button" class="rd-cta" id="rdNext2">পরের ধাপ</button>
+    </section>
+
+    <!-- ধাপ ৩: গাড়ি -->
+    <section class="rd-sheet rd-sheet-tall" id="rdS3" hidden>
+      <div class="rd-grip"></div>
+      <div class="rd-route" id="rdRoute"></div>
+      <div class="rd-vlist" id="rdVList"></div>
+      <div class="rd-pax">
+        <span>যাত্রী</span>
+        <span class="rd-step">
+          <button type="button" id="rdPaxMinus" aria-label="কমান">−</button>
+          <b id="rdPax">১</b>
+          <button type="button" id="rdPaxPlus" class="dark" aria-label="বাড়ান">+</button>
+        </span>
+      </div>
+      <button type="button" class="rd-cta" id="rdNext3">পরের ধাপ</button>
+    </section>
+
+    <!-- ধাপ ৪: ভাড়া -->
+    <section class="rd-full" id="rdS4" hidden>
+      <div class="rd-card rd-fare">
+        <small>আপনার প্রস্তাবিত ভাড়া</small>
+        <div class="rd-fare-row">
+          <button type="button" class="rd-circ" id="rdFareMinus" aria-label="ভাড়া কমান">−</button>
+          <label class="rd-fare-in"><span>৳</span><input type="number" id="rdFare" inputmode="numeric" min="1" max="100000" required aria-label="ভাড়া" /></label>
+          <button type="button" class="rd-circ dark" id="rdFarePlus" aria-label="ভাড়া বাড়ান">+</button>
+        </div>
+        <div class="rd-chips">
+          <button type="button" data-add="5">+৫</button>
+          <button type="button" data-add="10">+১০</button>
+          <button type="button" data-add="20">+২০</button>
+        </div>
+        <small class="rd-muted" id="rdFareHint">ড্রাইভার চাইলে অন্য দাম অফার করবেন</small>
+      </div>
+      <div class="rd-card" id="rdSummary"></div>
+      <label class="rd-field">ড্রাইভারকে কিছু বলবেন? (ঐচ্ছিক)
+        <textarea id="rdNote" rows="2" maxlength="300" placeholder="যেমন: সাথে একটা ব্যাগ আছে"></textarea>
+      </label>
+      <div class="rd-full-foot">
+        <p class="rd-info"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg> ড্রাইভাররা অফার পাঠাবেন, আপনি যেটা পছন্দ বেছে নেবেন</p>
+        <button type="button" class="rd-cta" id="rdSubmit">রাইড খুঁজুন</button>
+      </div>
+    </section>
+
+    <!-- লগইন লাগবে -->
+    <div class="rd-login" id="rdLogin" hidden>
+      <div class="rd-card">
+        <h2 class="rd-h">রাইড চাইতে লগইন করুন</h2>
+        <p class="rd-sub">ড্রাইভার আপনার সাথে যোগাযোগ করবেন, তাই অ্যাকাউন্ট লাগে।</p>
+        <button type="button" class="rd-cta" id="rdLoginBtn">লগইন করুন</button>
+        <a class="rd-link" href="/services/local-ride">ফিরে যান</a>
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .navbar, .bottom-nav, .psh-nav, #sfActBar { display: none !important; }
+    body { padding-bottom: 0 !important; overscroll-behavior: none; }
+    .rd { position: fixed; inset: 0; z-index: 30; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F1ECE4; overflow: hidden; }
+    .rd [hidden] { display: none !important; }
+    .rd-map { position: absolute; inset: 0; z-index: 1; }
+    .rd-pin { position: absolute; left: 50%; top: 38%; z-index: 5; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; pointer-events: none; transition: transform .15s; }
+    .rd.dragging .rd-pin { transform: translate(-50%, calc(-100% - 10px)); }
+    .rd-pin-tag { background: #1B2A4A; color: #fff; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 12px; margin-bottom: 6px; white-space: nowrap; }
+    .rd-pin-dot { width: 14px; height: 6px; border-radius: 50%; background: rgba(27,42,74,.25); margin-top: -2px; }
+    .rd:not([data-step="1"]) .rd-pin, .rd:not([data-step="1"]) .rd-locate { display: none; }
+    .rd-top { position: absolute; top: 0; left: 0; right: 0; z-index: 8; padding: calc(12px + env(safe-area-inset-top)) 14px 0; display: flex; gap: 10px; align-items: center; }
+    .rd[data-step="2"] .rd-top .rd-pill, .rd[data-step="4"] .rd-top { background: transparent; }
+    .rd-round { width: 44px; height: 44px; border-radius: 22px; border: 0; background: #fff; box-shadow: 0 4px 14px rgba(27,42,74,.16); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+    .rd-round svg { width: 20px; height: 20px; fill: none; stroke: #1B2A4A; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .rd-pill { flex: 1; height: 44px; border-radius: 22px; background: #fff; box-shadow: 0 4px 14px rgba(27,42,74,.16); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+    .rd-pill-t { font-weight: 700; font-size: 15px; }
+    .rd-dots { display: flex; gap: 5px; }
+    .rd-dots i { width: 6px; height: 6px; border-radius: 3px; background: #D9DEE7; transition: all .2s; }
+    .rd-dots i.done { background: #FFB48F; }
+    .rd-dots i.on { width: 18px; background: #FF6B35; }
+    .rd-droptop { position: absolute; z-index: 7; top: 0; left: 0; right: 0; background: #fff; border-radius: 0 0 24px 24px; box-shadow: 0 6px 24px rgba(27,42,74,.12); padding: calc(68px + env(safe-area-inset-top)) 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .rd-sel-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .rd-sel { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: #5A6E85; }
+    .rd-sel select { height: 48px; border-radius: 14px; border: 1.5px solid #E2E6EE; padding: 0 10px; font: inherit; font-size: 15px; font-weight: 700; color: #1B2A4A; background: #fff; }
+    .rd-sel select.picked { border-color: #FF6B35; background: #FFF4EC; }
+    .rd-hint { margin: 0; font-size: 12px; color: #8FA0BC; }
+    .rd-locate { position: absolute; right: 14px; z-index: 6; bottom: 360px; width: 48px; height: 48px; border-radius: 24px; border: 0; background: #fff; box-shadow: 0 4px 14px rgba(27,42,74,.18); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .rd-locate svg { width: 22px; height: 22px; fill: none; stroke: #FF6B35; stroke-width: 2.2; stroke-linecap: round; }
+    .rd-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 9; background: #fff; border-radius: 26px 26px 0 0; box-shadow: 0 -8px 30px rgba(27,42,74,.14); padding: 10px 18px calc(22px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 14px; max-width: 640px; margin: 0 auto; box-sizing: border-box; }
+    .rd-sheet-tall { max-height: 72vh; overflow-y: auto; }
+    .rd-grip { width: 40px; height: 4px; border-radius: 2px; background: #E2E6EE; align-self: center; flex-shrink: 0; }
+    .rd-h { margin: 0; font-size: 22px; font-weight: 700; }
+    .rd-sub { margin: 2px 0 0; font-size: 14px; color: #5A6E85; }
+    .rd-place { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; background: #FFF4EC; border: 1px solid #FFE0CC; }
+    .rd-place-ic { width: 40px; height: 40px; border-radius: 12px; background: #FF6B35; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .rd-place-ic svg { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .rd-place-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .rd-place-t b { font-size: 16px; }
+    .rd-place-t small { font-size: 13px; color: #5A6E85; }
+    .rd-place.bad { background: #FDECEA; border-color: #F8C9C4; }
+    .rd-link { border: 0; background: none; color: #FF6B35; font: inherit; font-size: 14px; font-weight: 700; padding: 8px 4px; cursor: pointer; text-decoration: none; text-align: center; }
+    .rd-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: #5A6E85; }
+    .rd-field input, .rd-field textarea { border-radius: 14px; border: 1.5px solid #E2E6EE; padding: 0 14px; height: 46px; font: inherit; font-size: 16px; color: #1B2A4A; background: #fff; box-sizing: border-box; width: 100%; }
+    .rd-field textarea { height: auto; padding: 10px 14px; resize: none; }
+    .rd-field input:focus, .rd-field textarea:focus, .rd-sel select:focus { outline: none; border-color: #FF6B35; }
+    .rd-cta { height: 54px; border-radius: 16px; border: 0; background: #FF6B35; color: #fff; font: inherit; font-size: 17px; font-weight: 700; cursor: pointer; flex-shrink: 0; width: 100%; }
+    .rd-cta:disabled { background: #FFC3A8; }
+    .rd-dest { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .rd-dest small { display: block; font-size: 13px; color: #5A6E85; }
+    .rd-dest b { display: block; font-size: 18px; }
+    .rd-dest-km { text-align: right; }
+    .rd-dest-km b { color: #FF6B35; font-size: 20px; }
+    .rd-route { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #5A6E85; flex-wrap: wrap; }
+    .rd-route i { width: 9px; height: 9px; border-radius: 5px; background: #1B2A4A; flex-shrink: 0; }
+    .rd-route i.o { background: #FF6B35; }
+    .rd-route b { margin-left: auto; color: #1B2A4A; }
+    .rd-vlist { display: flex; flex-direction: column; gap: 8px; }
+    .rd-v { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; border: 1.5px solid #E2E6EE; background: #fff; cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%; }
+    .rd-v[aria-pressed="true"] { border: 2px solid #FF6B35; background: #FFF4EC; padding: 9.5px 11.5px; }
+    .rd-v-ic { width: 52px; height: 44px; border-radius: 12px; background: #F6F7FA; display: flex; align-items: center; justify-content: center; color: #1B2A4A; flex-shrink: 0; }
+    .rd-v[aria-pressed="true"] .rd-v-ic { background: #fff; color: #1B8A4A; }
+    .rd-v-ic svg { width: 36px; height: 28px; }
+    .rd-v-t { flex: 1; min-width: 0; }
+    .rd-v-t b { display: block; font-size: 16px; }
+    .rd-v-t small { display: block; font-size: 12px; color: #5A6E85; }
+    .rd-v-t .on { color: #16A34A; font-weight: 700; }
+    .rd-v-t .off { color: #8FA0BC; }
+    .rd-v-check { width: 24px; height: 24px; border-radius: 8px; border: 2px solid #D5DCE8; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .rd-v[aria-pressed="true"] .rd-v-check { background: #FF6B35; border-color: #FF6B35; }
+    .rd-v-check svg { width: 14px; height: 14px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    .rd-grp { font-size: 12px; font-weight: 700; color: #8FA0BC; margin: 4px 2px 0; }
+    .rd-pax { display: flex; align-items: center; justify-content: space-between; padding: 8px 4px; border-top: 1px solid #F0F2F6; font-size: 15px; font-weight: 600; }
+    .rd-step { display: flex; align-items: center; gap: 14px; }
+    .rd-step button, .rd-circ { width: 42px; height: 42px; border-radius: 21px; border: 1.5px solid #E2E6EE; background: #fff; font-size: 22px; font-weight: 700; color: #1B2A4A; cursor: pointer; line-height: 1; }
+    .rd-step button.dark, .rd-circ.dark { border: 0; background: #1B2A4A; color: #fff; }
+    .rd-step b { font-size: 18px; min-width: 20px; text-align: center; }
+    .rd-full { position: absolute; inset: 0; z-index: 9; background: #FFF4EC; overflow-y: auto; padding: calc(72px + env(safe-area-inset-top)) 16px 0; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
+    .rd-card { background: #fff; border-radius: 22px; padding: 16px 18px; box-shadow: 0 4px 18px rgba(27,42,74,.06); display: flex; flex-direction: column; gap: 12px; }
+    .rd-fare { align-items: center; text-align: center; }
+    .rd-fare > small { font-size: 13px; font-weight: 600; color: #5A6E85; }
+    .rd-fare-row { display: flex; align-items: center; gap: 14px; }
+    .rd-circ { width: 48px; height: 48px; border-radius: 24px; font-size: 24px; }
+    .rd-fare-in { display: flex; align-items: center; font-size: 40px; font-weight: 700; }
+    .rd-fare-in input { width: 120px; border: 0; border-bottom: 2px dashed #FFD2BC; font: inherit; font-size: 40px; font-weight: 700; color: #1B2A4A; text-align: center; background: transparent; padding: 0; -moz-appearance: textfield; }
+    .rd-fare-in input::-webkit-outer-spin-button, .rd-fare-in input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .rd-fare-in input:focus { outline: none; border-bottom-color: #FF6B35; }
+    .rd-chips { display: flex; gap: 8px; }
+    .rd-chips button { min-width: 64px; height: 38px; border-radius: 19px; border: 1.5px solid #FFD2BC; background: #FFF4EC; font: inherit; font-size: 14px; font-weight: 700; color: #B4421A; cursor: pointer; }
+    .rd-muted { font-size: 12px; color: #8FA0BC; }
+    .rd-sum { display: flex; gap: 12px; }
+    .rd-sum-line { display: flex; flex-direction: column; align-items: center; padding-top: 6px; }
+    .rd-sum-line i { width: 10px; height: 10px; border-radius: 5px; background: #1B2A4A; }
+    .rd-sum-line i.o { background: #FF6B35; }
+    .rd-sum-line span { width: 2px; flex: 1; min-height: 28px; background: #E2E6EE; }
+    .rd-sum-t { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .rd-sum-t small { display: block; font-size: 12px; color: #8FA0BC; }
+    .rd-sum-t b { display: block; font-size: 15px; }
+    .rd-tags { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid #F0F2F6; }
+    .rd-tags span { font-size: 13px; font-weight: 600; background: #F3F5F9; padding: 6px 10px; border-radius: 10px; }
+    .rd-full-foot { margin-top: auto; position: sticky; bottom: 0; background: #FFF4EC; padding: 10px 0 calc(22px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; }
+    .rd-info { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #5A6E85; }
+    .rd-info svg { width: 18px; height: 18px; fill: none; stroke: #FF6B35; stroke-width: 2; stroke-linecap: round; flex-shrink: 0; }
+    .rd-login { position: absolute; inset: 0; z-index: 20; background: rgba(27,42,74,.45); display: flex; align-items: flex-end; }
+    .rd-login .rd-card { width: 100%; border-radius: 26px 26px 0 0; padding: 22px 18px calc(24px + env(safe-area-inset-bottom)); }
+    @media (min-width: 700px) { .rd-sheet { left: 50%; right: auto; width: 520px; transform: translateX(-50%); border-radius: 26px 26px 0 0; } .rd-full { padding-left: calc(50% - 260px); padding-right: calc(50% - 260px); } }
+  </style>
+
+  <script>
+    import { supabase } from '../lib/supabase.js';
+    import { loadLeaflet, mapRetryBox, removeMapRetryBox } from '../lib/leafletLoader.js';
+    import { addBaseMap } from '../lib/baseMap.js';
+    import { loadFeniGeo, findAreaAt, getLabelPoints, getFeniBounds } from '../data/feniAreas.js';
+    import { getCurrentPosition } from '../lib/native-bridge.js';
+    import { fetchDeliveryFare } from '../lib/fareCalc.js';
+    import { FENI_CENTER, bn, estimateTrip, kmLabel, unionEnOf, upazilaBnOfUnionEn, pickupIcon, dropIcon, vehicleMeta } from '../lib/rideMap.js';
+
+    const $ = (id) => document.getElementById(id);
+    const DRAFT_KEY = 'sf_ride_draft';
+    const TITLES = { 1: 'রাইড চাই', 2: 'কোথায় যাবেন?', 3: 'গাড়ি বাছুন', 4: 'ভাড়া ঠিক করুন' };
+    const ERR = {
+      AUTH_REQUIRED: 'আগে লগইন করুন',
+      PICKUP_AREA_REQUIRED: 'পিকআপের ইউনিয়ন বেছে নিন',
+      DROP_AREA_INVALID: 'গন্তব্যের ইউনিয়ন ঠিক নেই, আবার বাছুন',
+      DROP_REQUIRED: 'গন্তব্য দিন',
+      VEHICLE_TYPE_REQUIRED: 'কমপক্ষে ১টা গাড়ি বেছে নিন',
+      FARE_INVALID: 'ভাড়া ঠিকভাবে লিখুন',
+      PASSENGERS_INVALID: 'যাত্রী সংখ্যা ঠিক নেই',
+      TOO_MANY_OPEN: 'আপনার ২টা রিকোয়েস্ট এখনো চালু আছে, আগে সেগুলো শেষ করুন বা বাতিল করুন',
+      SERVICE_PAUSED: 'লোকাল রাইড এখন সাময়িক বন্ধ আছে, একটু পরে চেষ্টা করুন',
+    };
+
+    let L = null, map = null, geo = null, labels = null;
+    let areas = [], types = [];
+    let step = 1;
+    const st = {
+      pLat: null, pLng: null, pAreaId: '', pManual: false, pLand: '',
+      dAreaId: '', dLand: '',
+      types: [], pax: 1, fare: null, note: '',
+    };
+    let suggest = null;
+    let unionLayer = null, pMarker = null, dMarker = null, line = null;
+    const avail = {};
+    let submitting = false;
+
+    const toast = (m, t) => { if (window.showToast) window.showToast(m, t || 'error'); };
+    const mk = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    const areaById = (id) => areas.find((a) => a.id === id) || null;
+    const findArea = (upa, uni) => areas.find((a) => a.name_bn === uni && (!upa || a.upazila === upa)) || null;
+    function save() { try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(st)); } catch (_) {} }
+    function load() { try { Object.assign(st, JSON.parse(sessionStorage.getItem(DRAFT_KEY) || '{}')); } catch (_) {} }
+
+    function dropPoint() {
+      const a = areaById(st.dAreaId);
+      if (!a || !labels) return null;
+      const en = unionEnOf(a.name_bn);
+      const pt = en && labels.unions[en];
+      return pt ? { lat: pt[0], lng: pt[1] } : null;
+    }
+    function trip() {
+      const d = dropPoint();
+      if (!d || st.pLat == null) return null;
+      return estimateTrip(st.pLat, st.pLng, d.lat, d.lng);
+    }
+
+    // ---------- সিলেক্ট ----------
+    function fillUpazilas(sel) {
+      const seen = [];
+      areas.forEach((a) => { if (a.upazila && !seen.includes(a.upazila)) seen.push(a.upazila); });
+      seen.forEach((u) => { const o = mk('option', null, u); o.value = u; sel.appendChild(o); });
+    }
+    function fillUnions(sel, upazila, selectedId) {
+      sel.textContent = '';
+      const f = mk('option', null, 'বাছুন'); f.value = ''; sel.appendChild(f);
+      areas.filter((a) => a.upazila === upazila).forEach((a) => {
+        const o = mk('option', null, a.name_bn); o.value = a.id; if (a.id === selectedId) o.selected = true; sel.appendChild(o);
+      });
+    }
+
+    // ---------- ধাপ ----------
+    function paintDots() {
+      $('rdDots').querySelectorAll('i').forEach((d, i) => {
+        d.className = i + 1 === step ? 'on' : i + 1 < step ? 'done' : '';
+      });
+      $('rdDots').setAttribute('aria-label', 'ধাপ ' + bn(step) + ' / ৪');
+      $('rdTitle').textContent = TITLES[step];
+    }
+    function showStep(n, push) {
+      step = n;
+      $('rd').dataset.step = String(n);
+      [1, 2, 3, 4].forEach((i) => { $('rdS' + i).hidden = i !== n; });
+      $('rdDropTop').hidden = n !== 2;
+      paintDots();
+      if (push) history.pushState({ rdStep: n }, '', location.pathname + location.search);
+      if (map) setTimeout(() => drawForStep(), 30);
+      if (n === 3) renderVehicles();
+      if (n === 4) renderFare();
+    }
+
+    // ---------- ম্যাপ ----------
+    function sheetPad() {
+      const s = $('rdS' + step);
+      const h = s && !s.hidden ? s.getBoundingClientRect().height : 0;
+      const top = step === 2 ? $('rdDropTop').getBoundingClientRect().height : 70;
+      return { paddingTopLeft: [30, top + 20], paddingBottomRight: [30, h + 30] };
+    }
+    function clearRoute() {
+      [pMarker, dMarker, line].forEach((x) => { if (x) map.removeLayer(x); });
+      pMarker = dMarker = line = null;
+    }
+    function styleUnions() {
+      if (!unionLayer) return;
+      const sel = areaById(st.dAreaId);
+      const selEn = sel ? unionEnOf(sel.name_bn) : null;
+      unionLayer.eachLayer((ly) => {
+        const on = ly.feature && ly.feature.properties && ly.feature.properties.shapeName === selEn;
+        ly.setStyle(on
+          ? { color: '#FF6B35', weight: 3, fillColor: '#FF6B35', fillOpacity: 0.28, dashArray: null }
+          : { color: '#0D9488', weight: 1.4, fillColor: '#ffffff', fillOpacity: step === 2 ? 0.05 : 0, opacity: step === 2 ? 0.8 : 0.25, dashArray: '4 4' });
+      });
+    }
+    function drawForStep() {
+      clearRoute();
+      if (unionLayer) {
+        if (step === 2 || step === 3) { if (!map.hasLayer(unionLayer)) unionLayer.addTo(map); styleUnions(); }
+        else if (map.hasLayer(unionLayer)) map.removeLayer(unionLayer);
+      }
+      if (step === 1) {
+        map.dragging.enable();
+        if (st.pLat != null) map.setView([st.pLat, st.pLng], Math.max(map.getZoom(), 15), { animate: false });
+        return;
+      }
+      if (st.pLat != null) pMarker = L.marker([st.pLat, st.pLng], { icon: pickupIcon(L), interactive: false }).addTo(map);
+      const d = dropPoint();
+      if (d) {
+        dMarker = L.marker([d.lat, d.lng], { icon: dropIcon(L), interactive: false }).addTo(map);
+        if (st.pLat != null) line = L.polyline([[st.pLat, st.pLng], [d.lat, d.lng]], { color: '#1B2A4A', weight: 3, dashArray: '8 8', interactive: false }).addTo(map);
+      }
+      const pts = [];
+      if (st.pLat != null) pts.push([st.pLat, st.pLng]);
+      if (d) pts.push([d.lat, d.lng]);
+      if (pts.length === 2) map.fitBounds(pts, Object.assign({ maxZoom: 15 }, sheetPad()));
+      else if (step === 2 && geo) map.fitBounds(getFeniBounds(geo), sheetPad());
+    }
+
+    function updatePickupFromMap() {
+      if (step !== 1) return;
+      const c = map.getCenter();
+      st.pLat = Math.round(c.lat * 1e6) / 1e6;
+      st.pLng = Math.round(c.lng * 1e6) / 1e6;
+      if (!st.pManual && geo) {
+        const hit = findAreaAt(c.lat, c.lng, geo);
+        const a = hit ? findArea(hit.upazilaName, hit.unionBn) : null;
+        st.pAreaId = a ? a.id : '';
+      }
+      paintPickup();
+      save();
+    }
+    function paintPickup() {
+      const a = areaById(st.pAreaId);
+      const box = $('rdPName').closest('.rd-place');
+      box.classList.toggle('bad', !a);
+      if (a) {
+        $('rdPName').textContent = (st.pLand || a.name_bn);
+        $('rdPSub').textContent = (st.pLand ? a.name_bn + ' · ' : 'ইউনিয়ন · ') + a.upazila;
+        $('rdPinTag').textContent = 'এখান থেকে উঠবেন';
+      } else {
+        $('rdPName').textContent = st.pLat == null ? 'লোকেশন খোঁজা হচ্ছে…' : 'ফেনী জেলার বাইরে';
+        $('rdPSub').textContent = st.pLat == null ? '' : 'পিন ফেনীর ভেতরে আনুন, অথবা "বদলান" চেপে ইউনিয়ন বাছুন';
+        $('rdPinTag').textContent = 'পিন ফেনীর ভেতরে আনুন';
+      }
+      $('rdNext1').disabled = !a || st.pLat == null;
+      if (!$('rdPSel').hidden && a) {
+        $('rdPUpa').value = a.upazila;
+        fillUnions($('rdPUni'), a.upazila, a.id);
+      }
+    }
+
+    async function initMap() {
+      try {
+        await loadLeaflet();
+        L = window.L;
+        removeMapRetryBox($('rdMap'));
+      } catch (_) {
+        mapRetryBox($('rdMap'), initMap);
+        return;
+      }
+      if (map) return;
+      const start = st.pLat != null ? [st.pLat, st.pLng] : FENI_CENTER;
+      map = L.map('rdMap', { zoomControl: false, attributionControl: true }).setView(start, st.pLat != null ? 16 : 13);
+      addBaseMap(L, map, { poi: true }).catch(() => {});
+      map.on('movestart', () => { if (step === 1) $('rd').classList.add('dragging'); });
+      map.on('moveend', () => { $('rd').classList.remove('dragging'); updatePickupFromMap(); });
+      try {
+        geo = await loadFeniGeo();
+        labels = getLabelPoints(geo);
+        unionLayer = L.geoJSON(geo, {
+          style: () => ({ color: '#0D9488', weight: 1.4, fillOpacity: 0 }),
+          onEachFeature: (f, ly) => {
+            ly.on('click', () => {
+              if (step !== 2) return;
+              const en = f.properties && f.properties.shapeName;
+              const upa = en ? upazilaBnOfUnionEn(en) : '';
+              const a = en ? areas.find((x) => unionEnOf(x.name_bn) === en && (!upa || x.upazila === upa)) : null;
+              if (a) pickDrop(a.id);
+            });
+          },
+        });
+      } catch (_) { geo = null; }
+      if (st.pLat == null) locate(true); else updatePickupFromMap();
+      drawForStep();
+    }
+
+    function locate(silent) {
+      getCurrentPosition((pos) => {
+        const lat = pos.coords.latitude, lng = pos.coords.longitude;
+        st.pManual = false;
+        if (map) map.setView([lat, lng], 17);
+      }, () => {
+        if (!silent) toast('লোকেশন পাওয়া যায়নি। ম্যাপ সরিয়ে পিন বসান।', 'warning');
+        if (st.pLat == null && map) updatePickupFromMap();
+      }, { enableHighAccuracy: true, timeout: 9000 });
+    }
+
+    // ---------- ধাপ ২: গন্তব্য ----------
+    function pickDrop(areaId) {
+      st.dAreaId = areaId || '';
+      const a = areaById(st.dAreaId);
+      if (a) { $('rdDUpa').value = a.upazila; fillUnions($('rdDUni'), a.upazila, a.id); }
+      $('rdDUpa').classList.toggle('picked', !!a);
+      $('rdDUni').classList.toggle('picked', !!a);
+      paintDrop();
+      save();
+      if (map) drawForStep();
+    }
+    function paintDrop() {
+      const a = areaById(st.dAreaId);
+      $('rdDName').textContent = a ? a.name_bn + ', ' + a.upazila : 'ইউনিয়ন বাছুন';
+      const t = trip();
+      $('rdDKm').textContent = t ? kmLabel(t.km) : '';
+      $('rdDMin').textContent = t ? 'আনুমানিক ' + bn(t.min) + ' মিনিট' : '';
+      $('rdNext2').disabled = !a;
+    }
+
+    // ---------- ধাপ ৩: গাড়ি ----------
+    async function loadAvail() {
+      if (!st.pAreaId) return;
+      await Promise.all(types.map(async (t) => {
+        const key = st.pAreaId + ':' + t.id;
+        if (key in avail) return;
+        try {
+          const { data, error } = await supabase.rpc('local_ride_availability', { p_pickup_area_id: st.pAreaId, p_vehicle_type_ids: [t.id] });
+          avail[key] = !error && data ? data.online === true : null;
+        } catch (_) { avail[key] = null; }
+      }));
+      if (step === 3) renderVehicles(true);
+    }
+    function renderVehicles(fromAvail) {
+      const pa = areaById(st.pAreaId), da = areaById(st.dAreaId), t = trip();
+      const r = $('rdRoute');
+      r.textContent = '';
+      r.append(mk('i'), document.createTextNode(st.pLand || (pa ? pa.name_bn : 'পিকআপ')), mk('span', null, '→'), mk('i', 'o'), document.createTextNode(st.dLand || (da ? da.name_bn : '')));
+      if (t) r.appendChild(mk('b', null, kmLabel(t.km) + ' · ' + bn(t.min) + ' মিনিট'));
+      const box = $('rdVList');
+      box.textContent = '';
+      [['union', 'নিজের ইউনিয়নের গাড়ি'], ['upazila', 'পুরো উপজেলার গাড়ি']].forEach(([scope, title]) => {
+        const list = types.filter((x) => (scope === 'upazila') === (x.area_scope === 'upazila'));
+        if (!list.length) return;
+        box.appendChild(mk('div', 'rd-grp', title));
+        list.forEach((ty) => {
+          const on = st.types.includes(ty.id);
+          const meta = vehicleMeta(ty.name_bn);
+          const b = mk('button', 'rd-v');
+          b.type = 'button';
+          b.setAttribute('aria-pressed', String(on));
+          const ic = mk('span', 'rd-v-ic'); ic.innerHTML = meta.icon;
+          const tx = mk('span', 'rd-v-t');
+          tx.appendChild(mk('b', null, ty.name_bn));
+          const sm = mk('small');
+          if (meta.seats) sm.appendChild(document.createTextNode(bn(meta.seats) + ' জন বসতে পারবে · '));
+          const k = st.pAreaId + ':' + ty.id;
+          if (!(k in avail)) sm.appendChild(mk('span', 'off', 'দেখা হচ্ছে…'));
+          else if (avail[k] === true) sm.appendChild(mk('span', 'on', 'ড্রাইভার অনলাইন আছে'));
+          else if (avail[k] === false) sm.appendChild(mk('span', 'off', 'এখন কেউ অনলাইন নেই'));
+          tx.appendChild(sm);
+          const ck = mk('span', 'rd-v-check'); ck.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>';
+          b.append(ic, tx, ck);
+          b.addEventListener('click', () => {
+            const i = st.types.indexOf(ty.id);
+            if (i >= 0) st.types.splice(i, 1); else st.types.push(ty.id);
+            save(); renderVehicles(true);
+          });
+          box.appendChild(b);
+        });
+      });
+      $('rdPax').textContent = bn(st.pax);
+      $('rdNext3').disabled = !st.types.length;
+      if (!fromAvail) loadAvail();
+    }
+
+    // ---------- ধাপ ৪: ভাড়া ----------
+    async function renderFare() {
+      const pa = areaById(st.pAreaId), da = areaById(st.dAreaId), t = trip();
+      const s = $('rdSummary');
+      s.textContent = '';
+      const sum = mk('div', 'rd-sum');
+      const ln = mk('div', 'rd-sum-line'); ln.append(mk('i'), mk('span'), mk('i', 'o'));
+      const tx = mk('div', 'rd-sum-t');
+      const p = mk('div'); p.append(mk('small', null, 'পিকআপ'), mk('b', null, [st.pLand, pa && pa.name_bn, pa && pa.upazila].filter(Boolean).join(' · ')));
+      const d = mk('div'); d.append(mk('small', null, 'গন্তব্য'), mk('b', null, [st.dLand, da && da.name_bn, da && da.upazila].filter(Boolean).join(' · ')));
+      tx.append(p, d); sum.append(ln, tx); s.appendChild(sum);
+      const tags = mk('div', 'rd-tags');
+      types.filter((x) => st.types.includes(x.id)).forEach((x) => tags.appendChild(mk('span', null, x.name_bn)));
+      tags.appendChild(mk('span', null, bn(st.pax) + ' জন যাত্রী'));
+      if (t) tags.appendChild(mk('span', null, kmLabel(t.km)));
+      s.appendChild(tags);
+      $('rdNote').value = st.note || '';
+      if (st.fare) $('rdFare').value = String(st.fare);
+      if (suggest == null) {
+        const dp = dropPoint();
+        const r = dp && st.pLat != null ? await fetchDeliveryFare({ pickup: { lat: st.pLat, lng: st.pLng }, drop: dp, dropUnion: da ? da.name_bn : null }) : null;
+        suggest = r && r.enabled && r.fare ? Math.round(r.fare) : 0;
+      }
+      if (suggest) {
+        $('rdFareHint').textContent = 'সাজেস্টেড ভাড়া ৳' + bn(suggest) + ' · ড্রাইভার চাইলে অন্য দাম অফার করবেন';
+        if (!$('rdFare').value) { $('rdFare').value = String(suggest); st.fare = suggest; }
+      } else {
+        $('rdFareHint').textContent = 'যে ভাড়া দিতে চান লিখুন · ড্রাইভার চাইলে অন্য দাম অফার করবেন';
+      }
+    }
+    function setFare(v) {
+      const n = Math.max(1, Math.min(100000, Math.round(Number(v) || 0)));
+      $('rdFare').value = String(n); st.fare = n; save();
+    }
+
+    async function submit() {
+      if (submitting) return;
+      const fare = Math.round(Number($('rdFare').value));
+      if (!fare || fare < 1 || fare > 100000) { toast('ভাড়া ঠিকভাবে লিখুন'); $('rdFare').focus(); return; }
+      if (!st.pAreaId) { toast(ERR.PICKUP_AREA_REQUIRED); showStep(1, true); return; }
+      if (!st.dAreaId) { toast('গন্তব্যের ইউনিয়ন বাছুন'); showStep(2, true); return; }
+      if (!st.types.length) { toast(ERR.VEHICLE_TYPE_REQUIRED); showStep(3, true); return; }
+      const pa = areaById(st.pAreaId), da = areaById(st.dAreaId), dp = dropPoint();
+      st.note = $('rdNote').value.trim();
+      const btn = $('rdSubmit');
+      submitting = true; btn.disabled = true; btn.textContent = 'পাঠানো হচ্ছে…';
+      try {
+        const { error } = await supabase.rpc('local_ride_create', {
+          p_pickup_area_id: st.pAreaId,
+          p_pickup_text: (st.pLand ? st.pLand + ', ' : '') + pa.name_bn + ', ' + pa.upazila,
+          p_pickup_lat: st.pLat,
+          p_pickup_lng: st.pLng,
+          p_pickup_loc_source: st.pLat != null ? 'map' : 'manual',
+          p_drop_area_id: st.dAreaId,
+          p_drop_text: (st.dLand ? st.dLand + ', ' : '') + da.name_bn + ', ' + da.upazila,
+          p_drop_lat: dp ? dp.lat : null,
+          p_drop_lng: dp ? dp.lng : null,
+          p_drop_loc_source: 'manual',
+          p_vehicle_type_ids: st.types,
+          p_passengers: st.pax,
+          p_fare: fare,
+          p_note: st.note || null,
+        });
+        if (error) {
+          const m = String(error.message || '');
+          const k = Object.keys(ERR).find((x) => m.includes(x));
+          toast(k ? ERR[k] : 'রিকোয়েস্ট পাঠানো যায়নি, আবার চেষ্টা করুন');
+          if (m.includes('TOO_MANY_OPEN')) setTimeout(() => { location.href = '/my-orders'; }, 1800);
+          else if (!k && window.SFReportError) window.SFReportError({ kind: 'api_fail', action: 'local_ride_create', title: 'লোকাল রাইড রিকোয়েস্ট ব্যর্থ (/ride)', message: m });
+          return;
+        }
+        try { sessionStorage.removeItem(DRAFT_KEY); } catch (_) {}
+        toast('রিকোয়েস্ট পাঠানো হয়েছে ✓', 'success');
+        location.href = '/my-orders';
+      } catch (_) {
+        toast('সমস্যা হয়েছে, আবার চেষ্টা করুন');
+      } finally {
+        submitting = false; btn.disabled = false; btn.textContent = 'রাইড খুঁজুন';
+      }
+    }
+
+    // ---------- ইভেন্ট ----------
+    $('rdBack').addEventListener('click', () => {
+      if (step > 1 && history.state && history.state.rdStep) history.back();
+      else if (step > 1) showStep(step - 1, false);
+      else location.href = '/services/local-ride';
+    });
+    window.addEventListener('popstate', (e) => {
+      const n = (e.state && e.state.rdStep) || 1;
+      showStep(n, false);
+    });
+    $('rdLocate').addEventListener('click', () => locate(false));
+    $('rdPChange').addEventListener('click', () => {
+      const sel = $('rdPSel');
+      sel.hidden = !sel.hidden;
+      const a = areaById(st.pAreaId);
+      if (!sel.hidden && a) { $('rdPUpa').value = a.upazila; fillUnions($('rdPUni'), a.upazila, a.id); }
+    });
+    $('rdPUpa').addEventListener('change', () => { fillUnions($('rdPUni'), $('rdPUpa').value, null); });
+    $('rdPUni').addEventListener('change', () => {
+      if (!$('rdPUni').value) return;
+      st.pAreaId = $('rdPUni').value; st.pManual = true; paintPickup(); save();
+    });
+    $('rdPLand').addEventListener('input', (e) => { st.pLand = e.target.value.trim().slice(0, 120); paintPickup(); save(); });
+    $('rdNext1').addEventListener('click', () => {
+      if (!st.pAreaId) { toast(ERR.PICKUP_AREA_REQUIRED); return; }
+      showStep(2, true);
+    });
+    $('rdDUpa').addEventListener('change', () => { fillUnions($('rdDUni'), $('rdDUpa').value, null); pickDrop(''); });
+    $('rdDUni').addEventListener('change', () => pickDrop($('rdDUni').value));
+    $('rdDLand').addEventListener('input', (e) => { st.dLand = e.target.value.trim().slice(0, 120); save(); });
+    $('rdNext2').addEventListener('click', () => {
+      if (!st.dAreaId) { toast('গন্তব্যের উপজেলা ও ইউনিয়ন বাছুন'); return; }
+      suggest = null;
+      showStep(3, true);
+    });
+    $('rdPaxMinus').addEventListener('click', () => { if (st.pax > 1) { st.pax--; $('rdPax').textContent = bn(st.pax); save(); } });
+    $('rdPaxPlus').addEventListener('click', () => { if (st.pax < 20) { st.pax++; $('rdPax').textContent = bn(st.pax); save(); } });
+    $('rdNext3').addEventListener('click', () => {
+      if (!st.types.length) { toast(ERR.VEHICLE_TYPE_REQUIRED); return; }
+      showStep(4, true);
+    });
+    $('rdFareMinus').addEventListener('click', () => setFare((Number($('rdFare').value) || 0) - 10));
+    $('rdFarePlus').addEventListener('click', () => setFare((Number($('rdFare').value) || 0) + 10));
+    document.querySelectorAll('.rd-chips [data-add]').forEach((b) => b.addEventListener('click', () => setFare((Number($('rdFare').value) || 0) + Number(b.dataset.add))));
+    $('rdFare').addEventListener('change', () => setFare($('rdFare').value));
+    $('rdNote').addEventListener('input', (e) => { st.note = e.target.value; save(); });
+    $('rdSubmit').addEventListener('click', submit);
+    $('rdLoginBtn').addEventListener('click', () => { if (window.openAuthModal) window.openAuthModal('login'); });
+
+    // ---------- শুরু ----------
+    async function init() {
+      load();
+      st.pManual = false;
+      history.replaceState({ rdStep: 1 }, '', location.pathname + location.search);
+      showStep(1, false);
+      initMap();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        $('rdLogin').hidden = false;
+        supabase.auth.onAuthStateChange((ev, s) => { if (s) location.reload(); });
+      }
+      const [t, a] = await Promise.all([
+        supabase.from('local_ride_vehicle_types').select('id, name_bn, area_scope').eq('is_active', true).order('sort_order'),
+        supabase.from('local_areas').select('id, name_bn, upazila').eq('is_active', true).order('sort_order'),
+      ]);
+      if (t.error || a.error) { toast('তথ্য লোড করা যায়নি, পেজটা আবার খুলুন'); return; }
+      types = t.data || [];
+      areas = a.data || [];
+      st.types = st.types.filter((id) => types.some((x) => x.id === id));
+      fillUpazilas($('rdPUpa'));
+      fillUpazilas($('rdDUpa'));
+      $('rdPLand').value = st.pLand || '';
+      $('rdDLand').value = st.dLand || '';
+      if (st.dAreaId && areaById(st.dAreaId)) pickDrop(st.dAreaId); else paintDrop();
+      if (map) updatePickupFromMap(); else paintPickup();
+    }
+    init();
+  </script>
+</BaseLayout>
