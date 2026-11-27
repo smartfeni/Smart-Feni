@@ -10,6 +10,7 @@
 const SIMPLE = {
   'manual-orders': 'manual-orders',
   'delivery-market-payments': 'payments',
+  'delivery-market-accounts': 'money',
   'delivery-disputes': 'disputes',
   'delivery-shop-applications': 'shop-apps',
   'delivery-shops': 'shops',
