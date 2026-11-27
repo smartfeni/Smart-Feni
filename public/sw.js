@@ -300,9 +300,18 @@ self.addEventListener("notificationclick", (event) => {
   const notificationId = event.notification.data?.notification_id;
   const actionUrl = event.notification.data?.action_url || "/";
 
-  const targetUrl = notificationId
-    ? `${actionUrl.split("?")[0]}?notif=${notificationId}`
-    : actionUrl;
+  // action_url-এর নিজের query (?id=, ?tab=, ?open=) রেখে notif যোগ — আগে ? এর পরের সব মুছে যেত,
+  // তাই /ride/trip?id=... খুললে id হারিয়ে লোকাল রাইডের প্রথম পেজে চলে যেত (২৭ নভে ২০২৬ ফিক্স)
+  let targetUrl = actionUrl;
+  if (notificationId) {
+    try {
+      const u = new URL(actionUrl, self.location.origin);
+      u.searchParams.set("notif", notificationId);
+      targetUrl = u.origin === self.location.origin ? u.pathname + u.search + u.hash : actionUrl;
+    } catch (_) {
+      targetUrl = `${actionUrl}${actionUrl.includes("?") ? "&" : "?"}notif=${notificationId}`;
+    }
+  }
 
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {

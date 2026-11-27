@@ -3615,4 +3615,7 @@ window.SF_I18N_EN = {
 "চালক একদম কাছে": "Driver is very close",
 "ট্রিপ চলাকালে অ্যাপ খোলা রাখুন, যাত্রী ম্যাপে আপনার গাড়ি দেখবেন।": "Keep the app open during the trip so the rider can see your car on the map.",
 "এখন কাছাকাছি কোনো গাড়ি অনলাইন নেই, তবু রিকোয়েস্ট দিতে পারবেন": "No vehicles online nearby right now, but you can still send a request",
+"আপনার চলমান রাইড": "Your ongoing ride",
+"লাইভ ম্যাপে দেখুন →": "View on live map →",
+"চালক খোঁজা হচ্ছে": "Finding a driver",
 };

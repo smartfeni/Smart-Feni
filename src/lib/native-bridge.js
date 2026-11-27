@@ -840,7 +840,10 @@ function handleNotificationTap(event) {
       const qs = q.toString();
       target = proPath(url.pathname) + (qs ? '?' + qs : '');
     } else if (notifId) {
-      target = `${url.pathname}?notif=${encodeURIComponent(notifId)}`;
+      // action_url-এর নিজের query (?id=, ?tab=) রেখে notif যোগ (আগে মুছে যেত → /ride/trip id হারাত)
+      const q = new URLSearchParams(url.search);
+      q.set('notif', notifId);
+      target = `${url.pathname}?${q.toString()}`;
     } else if (guestPromoId && !data.action_url) {
       // লিংক ছাড়া গেস্ট প্রমো — হোমে গিয়ে "অফার ও খবর" তালিকা খোলে
       target = `/?promo=${encodeURIComponent(guestPromoId)}`;
