@@ -1,0 +1,200 @@
+---
+// ============================================================
+// কম্পোনেন্ট: HomeServices — সময়ের সাথে বদলানো হোম পেজ (রিডিজাইন, নভে ২০২৬)
+//
+// part="now":  "এখন যা লাগতে পারে" — দিনের সময় (সকাল/দুপুর/সন্ধ্যা/রাত) অনুযায়ী ৩টা সেবা।
+//              কুইক ডেলিভারি সবসময় ১ নম্বরে (SF সিদ্ধান্ত)। চারটা তালিকাই সার্ভারে রেন্ডার হয়,
+//              কোনটা দেখাবে তা ঠিক করে হোম রুটের data-slot (index.astro-র ইনলাইন স্ক্রিপ্ট, পেইন্টের আগে)।
+// part="grid": সব সেবা ৪ কলামে — CategoryGrid-এর একই ডেটা লজিক: category_settings.sort_order,
+//              hidden বাদ, কুইক ডেলিভারি সুইচ (marketAccess) বন্ধ হলে ডেলিভারি হিরো ও অনলাইন শপ আগের নিয়মে,
+//              ক্লিকে category_click ট্র্যাকিং।
+// ছবি: লেখা-ছাড়া ক্রপ করা ছবি public/categories/home/ থেকে, বাকিগুলো আগের মতো।
+// ============================================================
+import { categories } from '../../data/services.js';
+import { supabase } from '../../lib/supabase.js';
+
+interface Props {
+  part: 'now' | 'grid';
+}
+const { part } = Astro.props;
+
+const popularSlugs = ['local-ride', 'doctor-directory'];
+
+const dbImages: Record<string, string> = {};
+const sortMap: Record<string, number> = {};
+if (part === 'grid') {
+  const sortPromise = supabase.from('category_settings').select('category_id, sort_order');
+  const imagesPromise = supabase.from('category_images').select('category_slug, storage_path, updated_at');
+  try {
+    const { data, error } = await sortPromise;
+    if (!error && data) data.forEach((r: any) => { sortMap[r.category_id] = r.sort_order; });
+  } catch (e) {}
+  try {
+    const { data, error } = await imagesPromise;
+    if (!error && data) {
+      data.forEach((r: any) => {
+        const { data: u } = supabase.storage.from('listing-images').getPublicUrl(r.storage_path);
+        const bust = r.updated_at ? new Date(r.updated_at).getTime() : Date.now();
+        dbImages[r.category_slug] = `${u.publicUrl}?t=${bust}`;
+      });
+    }
+  } catch (e) {}
+}
+
+// লেখা-ছাড়া ক্রপ (হোমের জন্য); বাকি লোকাল ছবি আগের মতো; নতুন ক্যাটাগরি Supabase থেকে
+const CROPPED = ['blood', 'clubs', 'housing', 'job', 'local-ride', 'recycle', 'repair', 'sports', 'tuition'];
+const LOCAL = ['car-rental', 'courier', 'doctor-directory', 'health', 'online-shop', 'ride'];
+function imgOf(slug: string): string {
+  if (slug === 'quick-delivery') return dbImages['quick-delivery'] || '/categories/quick-delivery.webp?v=2';
+  if (CROPPED.includes(slug)) return `/categories/home/${slug}.webp?v=1`;
+  if (LOCAL.includes(slug)) return `/categories/${slug}.webp?v=1`;
+  return dbImages[slug] || '';
+}
+function hrefOf(slug: string): string {
+  if (slug === 'quick-delivery') return '/market';
+  if (slug === 'clubs') return '/clubs';
+  if (slug === 'online-shop') return '/online-shop';
+  return `/services/${slug}`;
+}
+
+type Item = { id: string; name: string; slug: string; href: string; img: string; icon: string; cls: string; hidden: boolean; why?: string };
+const qdCat = { id: 'quick-delivery', name: 'কুইক ডেলিভারি', slug: 'quick-delivery', icon: 'fa-bolt' };
+const bySlug = (s: string): any => (s === 'quick-delivery' ? qdCat : categories.find((c: any) => c.slug === s));
+const toItem = (c: any, extra: Partial<Item> = {}): Item => ({
+  id: c.id, name: c.name, slug: c.slug, href: hrefOf(c.slug), img: imgOf(c.slug), icon: c.icon, cls: '', hidden: false, ...extra,
+});
+const courierCat = categories.find((c: any) => c.slug === 'courier');
+
+// ---------- part="now": দিনের সময় অনুযায়ী ----------
+const NOW: Record<string, { qdWhy: string; rest: [string, string][] }> = {
+  morning: { qdWhy: 'সকালের বাজার বাসায়', rest: [['doctor-directory', 'আজকের সিরিয়াল এখনই নিন'], ['tuition', 'টিউটর বা স্টুডেন্ট খুঁজুন']] },
+  noon: { qdWhy: 'দুপুরের খাবার আনিয়ে নিন', rest: [['job', 'আজকের নতুন চাকরির খবর'], ['repair', 'মিস্ত্রি ডাকুন']] },
+  evening: { qdWhy: 'সন্ধ্যার নাস্তা ও বাজার', rest: [['local-ride', 'বাড়ি ফেরার সিএনজি, অটো'], ['sports', 'আজ কোথায় কী হচ্ছে']] },
+  night: { qdWhy: 'রাতের দরকারি জিনিস', rest: [['blood', 'জরুরি রক্তের দরকারে'], ['doctor-directory', 'চেম্বার ও সময় দেখুন']] },
+};
+const nowLists = Object.entries(NOW).map(([slot, cfg]) => {
+  const items: Item[] = [toItem(qdCat, { cls: 'qd-entry', why: cfg.qdWhy })];
+  if (courierCat) items.push(toItem(courierCat, { cls: 'qd-fallback', hidden: true, why: 'কুরিয়ার ও ডেলিভারি' }));
+  cfg.rest.forEach(([s, why]) => {
+    const c = bySlug(s);
+    if (c && !c.hidden) items.push(toItem(c, { why }));
+  });
+  return { slot, items };
+});
+
+// ---------- part="grid": সব সেবা ----------
+const withOrder = categories.map((c: any, i: number) => ({ ...c, __o: sortMap[c.id] ?? i * 10 }));
+const popular = withOrder.filter((c: any) => popularSlugs.includes(c.slug) && !c.hidden).sort((a: any, b: any) => a.__o - b.__o).map((c: any) => toItem(c));
+const general = withOrder
+  .filter((c: any) => !popularSlugs.includes(c.slug) && (!c.hidden || c.slug === 'online-shop'))
+  .sort((a: any, b: any) => a.__o - b.__o)
+  .map((c: any) => toItem(c, { cls: c.slug === 'online-shop' ? 'qd-entry' : '' }));
+const all: Item[] = [toItem(qdCat, { cls: 'qd-entry' })];
+if (courierCat) all.push(toItem(courierCat, { cls: 'qd-fallback', hidden: true }));
+all.push(...popular, ...general);
+---
+
+{part === 'now' && (
+  <div class="hs hs-now">
+    <h2 class="hs-now-title">এখন যা লাগতে পারে</h2>
+    {nowLists.map((l) => (
+      <div class={`hs-now-list hs-now-${l.slot}`}>
+        {l.items.map((it) => (
+          <a href={it.href} class={`hs-now-row ${it.cls}`} hidden={it.hidden} data-category-id={it.id} data-category-name={it.name}>
+            {it.img ? <img class="hs-img" src={it.img} alt="" loading="eager" decoding="async" /> : <span class="hs-noimg"><i class={`fas ${it.icon}`} aria-hidden="true"></i></span>}
+            <span class="hs-now-txt">
+              <b>{it.name}</b>
+              <span>{it.why}</span>
+            </span>
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 6 6 6-6 6" /></svg>
+          </a>
+        ))}
+      </div>
+    ))}
+  </div>
+)}
+
+{part === 'grid' && (
+  <section class="hs hs-grid-wrap">
+    <h2 class="hs-h2">সব সেবা</h2>
+    <div class="hs-grid">
+      {all.map((it) => (
+        <a href={it.href} class={`hs-tile ${it.cls}`} hidden={it.hidden} data-category-id={it.id} data-category-name={it.name}>
+          <span class="hs-tile-img">
+            {it.img ? <img class="hs-img" src={it.img} alt="" loading="lazy" decoding="async" /> : <i class={`fas ${it.icon}`} aria-hidden="true"></i>}
+          </span>
+          <span class="hs-tile-name">{it.name}</span>
+        </a>
+      ))}
+    </div>
+  </section>
+)}
+
+<script>
+  import { marketAccess } from '../../lib/marketApi.js';
+  import { trackEvent } from '../../lib/analytics.js';
+  import { setupCardImages } from '../../lib/imgRetry.js';
+
+  // একই কম্পোনেন্ট পেজে দুইবার বসে, তাই সেটআপ একবারই
+  const w = window as any;
+  if (!w.__sfHomeServicesInit) {
+    w.__sfHomeServicesInit = true;
+    const applyQd = (show: boolean) => {
+      document.querySelectorAll<HTMLElement>('.hs .qd-entry').forEach((el) => { el.hidden = !show; });
+      document.querySelectorAll<HTMLElement>('.hs .qd-fallback').forEach((el) => { el.hidden = show; });
+    };
+    marketAccess().then((a: any) => applyQd(!!(a && a.allowed))).catch(() => applyQd(false));
+
+    const popular = new Set(['quick-delivery', 'courier', 'local-ride', 'doctor-directory']);
+    document.querySelectorAll<HTMLElement>('.hs [data-category-id]').forEach((card) => {
+      card.addEventListener('click', () => {
+        const id = card.dataset.categoryId;
+        if (!id) return;
+        const up = localStorage.getItem('smartfeni_upazila');
+        const params: Record<string, any> = { category: id, upazila: up || null };
+        if (popular.has(id)) params.is_popular = true;
+        if (card.classList.contains('hs-now-row')) params.source = 'home_now';
+        trackEvent('category_click', params);
+      });
+    });
+    setupCardImages('.hs .hs-img');
+
+    // অ্যাপ অনেকক্ষণ খোলা থাকলে ফিরে এলে সময়ের অংশ আবার মেলানো
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && typeof w.sfHomeSlot === 'function') w.sfHomeSlot();
+    });
+  }
+</script>
+
+<style is:global>
+  .hs [hidden] { display: none !important; }
+  .hs .hs-img { display: block; object-fit: cover; }
+  .hs .hs-noimg { display: flex; align-items: center; justify-content: center; color: #FF6B35; font-size: 1.4rem; background: #fff; }
+
+  /* ===== এখন যা লাগতে পারে ===== */
+  .hs-now { max-width: 640px; }
+  .hs-now-title { margin: 26px 0 10px; font-size: 0.95rem; font-weight: 600; color: var(--hs-sub); }
+  .hs-now-list { display: none; flex-direction: column; gap: 8px; }
+  .home-t[data-slot='morning'] .hs-now-morning,
+  .home-t[data-slot='noon'] .hs-now-noon,
+  .home-t[data-slot='evening'] .hs-now-evening,
+  .home-t[data-slot='night'] .hs-now-night { display: flex; }
+  .hs-now-row { display: flex; align-items: center; gap: 14px; min-height: 76px; box-sizing: border-box; padding: 8px 14px 8px 8px; border-radius: 22px; background: var(--hs-row); color: var(--hs-ink); text-decoration: none; -webkit-tap-highlight-color: transparent; transition: background-color 0.15s ease; }
+  .hs-now-row:active { background: var(--hs-row-press); }
+  .hs-now-row .hs-img, .hs-now-row .hs-noimg { width: 60px; height: 60px; border-radius: 18px; flex: none; background: #fff; }
+  .hs-now-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+  .hs-now-txt b { font-size: 1.08rem; font-weight: 700; }
+  .hs-now-txt span { font-size: 0.85rem; color: var(--hs-sub); }
+
+  /* ===== সব সেবা ===== */
+  .hs-h2 { margin: 6px 2px 14px; font-size: 1.15rem; font-weight: 800; color: #13202B; }
+  .hs-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 8px; }
+  .hs-tile { display: flex; flex-direction: column; align-items: center; gap: 7px; text-align: center; text-decoration: none; color: #13202B; -webkit-tap-highlight-color: transparent; }
+  .hs-tile-img { width: 72px; height: 72px; max-width: 100%; border-radius: 22px; overflow: hidden; background: #fff; box-shadow: 0 3px 10px rgba(19, 32, 43, 0.08); display: flex; align-items: center; justify-content: center; color: #FF6B35; font-size: 1.5rem; transition: transform 0.15s ease; }
+  .hs-tile:active .hs-tile-img { transform: scale(0.94); }
+  .hs-tile-img .hs-img { width: 100%; height: 100%; }
+  .hs-tile-name { font-size: 0.8rem; font-weight: 600; line-height: 1.25; }
+  @media (min-width: 769px) {
+    .hs-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  }
+</style>
