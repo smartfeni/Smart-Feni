@@ -2,7 +2,10 @@ name: Build Admin APK
 
 # শুধু ম্যানুয়ালি চলবে (GitHub → Actions → Build Admin APK → Run workflow, ব্রান্চ main)।
 # Smart Feni Admin = com.smartfeni.admin, অ্যাপ খুললে শুরু হয় https://smartfeni.com/console।
-# Pro-এর বিল্ড (build-pro-apk.yml) দেখে বানানো; Play Store নয়, সরাসরি APK।
+# বিতরণ: Google Play Internal testing (স্টাফদের Gmail তালিকা) — তাই AAB বানায় (smart-feni-admin-aab)।
+# Play-তে নতুন ভার্সন দিলে অ্যাপ নিজেই Play-এর আপডেট ডায়ালগ দেখায় (native-bridge.js checkForAppUpdate)।
+# পাশাপাশি সাইন করা APK-ও থাকে (smart-feni-admin-apk), দরকারে সরাসরি দেওয়ার জন্য।
+# versionCode = এই workflow-এর run নম্বর, প্রতি রানে বাড়ে (Play-তে আগেরটার চেয়ে বড় হতে হয়)।
 # রিপোর কোনো ফাইল বদলায় না: সব বদল শুধু এই বিল্ডের অস্থায়ী কপিতে (মেইন অ্যাপ অক্ষত)।
 # নেটিভ কিছু (আইকন, প্লাগিন, AndroidManifest) বদলালে তবেই আবার চালান;
 # src/ এর ওয়েব বদল Vercel ডেপ্লয়েই অ্যাপে পৌঁছে যায়।
@@ -128,18 +131,25 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$GITHUB_WORKSPACE/android/app/signing.keystore"
 
-      - name: Build signed release APK
+      - name: Build signed release AAB + APK
         working-directory: android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          ./gradlew assembleRelease \
+          ./gradlew bundleRelease assembleRelease \
             -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/android/app/signing.keystore" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+
+      - name: Upload Admin AAB artifact (Play Console-এ আপলোডের জন্য)
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-feni-admin-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
 
       - name: Upload Admin APK artifact
         uses: actions/upload-artifact@v4
