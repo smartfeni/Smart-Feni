@@ -414,7 +414,7 @@ import Skeleton from '../../components/ui/Skeleton.astro';
       const card = el('div', 'pl-card' + (done ? ' pl-done' : ''));
       const row = el('div', 'pl-row');
       row.appendChild(el('span', 'pl-no', t.request_no || ''));
-      row.appendChild(el('span', 'pl-left', done ? 'সম্পন্ন' : 'কনফার্ম'));
+      row.appendChild(el('span', 'pl-left', done ? (t.rating ? 'সম্পন্ন · ' + '★'.repeat(t.rating) : 'সম্পন্ন') : t.started_at ? 'যাত্রা চলছে' : t.arrived_at ? 'পিকআপে পৌঁছেছেন' : 'কনফার্ম'));
       card.appendChild(row);
 
       const route = el('div', 'pl-route');
@@ -443,19 +443,31 @@ import Skeleton from '../../components/ui/Skeleton.astro';
           call.appendChild(icon('fas fa-phone')); call.appendChild(document.createTextNode(' যাত্রীকে কল'));
           acts.appendChild(call);
         }
-        const nav = navUrl(t.pickup_lat, t.pickup_lng);
+        // যাত্রা শুরুর আগে পিকআপে, পরে গন্তব্যে নেভিগেট
+        const nav = t.started_at ? navUrl(t.drop_lat, t.drop_lng) : navUrl(t.pickup_lat, t.pickup_lng);
         if (nav) {
           const a = el('a', 'pl-btn pl-line'); a.href = nav; a.target = '_blank'; a.rel = 'noopener';
-          a.appendChild(icon('fas fa-location-arrow')); a.appendChild(document.createTextNode(' পিকআপে নেভিগেট'));
+          a.appendChild(icon('fas fa-location-arrow')); a.appendChild(document.createTextNode(t.started_at ? ' গন্তব্যে নেভিগেট' : ' পিকআপে নেভিগেট'));
           acts.appendChild(a);
         }
-        const fin = el('button', 'pl-btn pl-ok', confirmDone.has(t.id) ? 'নিশ্চিত, ট্রিপ শেষ' : 'ট্রিপ শেষ'); fin.type = 'button';
-        fin.addEventListener('click', () => {
-          if (!confirmDone.has(t.id)) { confirmDone.add(t.id); renderTrips(); return; }
-          confirmDone.delete(t.id);
-          act(fin, () => supabase.rpc('local_ride_driver_complete', { p_request_id: t.id }), 'ট্রিপ শেষ হয়েছে ✓');
-        });
-        acts.appendChild(fin);
+        // ধাপ: পৌঁছেছি → যাত্রা শুরু → ট্রিপ শেষ (যাত্রী প্রতিটার নোটিফিকেশন পান)
+        if (!t.arrived_at && !t.started_at) {
+          const ar = el('button', 'pl-btn pl-ok', 'পিকআপে পৌঁছেছি'); ar.type = 'button';
+          ar.addEventListener('click', () => act(ar, () => supabase.rpc('local_ride_driver_arrived', { p_request_id: t.id }), 'যাত্রীকে জানানো হয়েছে ✓'));
+          acts.appendChild(ar);
+        } else if (!t.started_at) {
+          const sb = el('button', 'pl-btn pl-ok', 'যাত্রা শুরু'); sb.type = 'button';
+          sb.addEventListener('click', () => act(sb, () => supabase.rpc('local_ride_driver_start', { p_request_id: t.id }), 'যাত্রা শুরু হয়েছে ✓'));
+          acts.appendChild(sb);
+        } else {
+          const fin = el('button', 'pl-btn pl-ok', confirmDone.has(t.id) ? 'নিশ্চিত, ট্রিপ শেষ' : 'ট্রিপ শেষ'); fin.type = 'button';
+          fin.addEventListener('click', () => {
+            if (!confirmDone.has(t.id)) { confirmDone.add(t.id); renderTrips(); return; }
+            confirmDone.delete(t.id);
+            act(fin, () => supabase.rpc('local_ride_driver_complete', { p_request_id: t.id }), 'ট্রিপ শেষ হয়েছে ✓');
+          });
+          acts.appendChild(fin);
+        }
         card.appendChild(acts);
       }
       // রিপোর্ট: কনফার্ম ট্রিপে, বা সম্পন্ন হওয়ার ২৪ ঘণ্টার মধ্যে
