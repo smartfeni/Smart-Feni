@@ -1,0 +1,282 @@
+---
+// ============================================================
+// /console/inbox — অ্যাডমিন নোটিফিকেশন ইনবক্স (নভে ২০২৬)
+// ডাটা: নিজের user_notifications (RLS: নিজেরটাই পড়া/আপডেট), শুধু অ্যাডমিন অ্যালার্ট
+// (action_url /admin বা /console দিয়ে শুরু, consoleApp.js-এর ADMIN_NOTIF_OR)।
+// স্টাফ শুধু নিজের অনুমতির এলাকার অ্যালার্ট পায় — সেটা পাঠানোর সময়েই ঠিক হয়।
+// ফিল্টার: ধরন (action_url-এর পাথ দেখে), "শুধু না-পড়া"। ৩০টা করে, "আরও দেখুন"।
+// ট্যাপ = পড়া হিসেবে চিহ্ন + action_url-এ যাওয়া। "সব পড়া হয়েছে" = সব অ্যাডমিন অ্যালার্ট পড়া।
+// সব লেখা DOM/textContent দিয়ে বসানো (এস্কেপ ঝুঁকি নেই)।
+// ============================================================
+export const prerender = false;
+import ConsoleShell from '../../components/console/ConsoleShell.astro';
+---
+
+<ConsoleShell title="নোটিফিকেশন" active="inbox">
+  <div class="cs-pad ib-page">
+    <div class="ib-head">
+      <div class="ib-head-t">
+        <h1 class="cs-h">নোটিফিকেশন</h1>
+        <span class="cs-muted" id="ibUnreadLine" aria-live="polite"></span>
+      </div>
+      <button type="button" class="ib-all" id="ibMarkAll" disabled>সব পড়া হয়েছে</button>
+    </div>
+
+    <div class="ib-chips" id="ibChips" role="group" aria-label="ধরন">
+      <button type="button" data-k="" aria-pressed="true">সব</button>
+      <button type="button" data-k="order" aria-pressed="false">অর্ডার</button>
+      <button type="button" data-k="listing" aria-pressed="false">লিস্টিং</button>
+      <button type="button" data-k="shop" aria-pressed="false">শপ ও ক্লাব</button>
+      <button type="button" data-k="scratch" aria-pressed="false">স্ক্র্যাচ ও রেফার</button>
+      <button type="button" data-k="error" aria-pressed="false">এরর</button>
+      <button type="button" data-k="other" aria-pressed="false">অন্যান্য</button>
+    </div>
+
+    <div class="ib-toggle">
+      <span id="ibOnlyLbl">শুধু না-পড়া দেখান</span>
+      <button type="button" role="switch" aria-checked="false" aria-labelledby="ibOnlyLbl" id="ibOnly" class="ib-switch"><span></span></button>
+    </div>
+
+    <div id="ibList" class="ib-list" aria-live="polite"></div>
+    <button type="button" class="ib-more" id="ibMore" hidden>আরও দেখুন</button>
+  </div>
+</ConsoleShell>
+
+<style is:global>
+  .ib-page { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+  .ib-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 6px; }
+  .ib-head-t { display: flex; flex-direction: column; min-width: 0; }
+  .ib-head h1 { margin: 0; font-size: 26px; }
+  .ib-all { flex-shrink: 0; min-height: 44px; padding: 0 14px; border-radius: 12px; border: 1.5px solid #D5DCE8; background: #fff; color: #1B2A4A; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+  .ib-all:disabled { opacity: .5; cursor: default; }
+  .ib-chips { display: flex; gap: 8px; overflow-x: auto; margin: 0 -20px; padding: 0 20px 2px; scrollbar-width: none; }
+  .ib-chips::-webkit-scrollbar { display: none; }
+  .ib-chips button { flex: none; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1.5px solid #E7E2DA; background: #fff; color: #1B2A4A; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .ib-chips button[aria-pressed="true"] { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+  .ib-chips .ib-cnt { font-size: 12px; opacity: .8; }
+  .ib-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #fff; border: 1px solid #E7E2DA; border-radius: 14px; padding: 0 14px; min-height: 52px; font-size: 14px; font-weight: 500; }
+  .ib-switch { width: 46px; height: 28px; border-radius: 14px; border: 0; padding: 3px; background: #CBD5E1; cursor: pointer; display: flex; justify-content: flex-start; transition: background-color .2s; }
+  .ib-switch span { width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  .ib-switch[aria-checked="true"] { background: #0A662A; justify-content: flex-end; }
+  .ib-list { display: flex; flex-direction: column; gap: 14px; }
+  .ib-day h2 { margin: 0 0 8px 2px; font-size: 13px; font-weight: 600; color: #5F6B7E; }
+  .ib-box { background: #fff; border: 1px solid #E7E2DA; border-radius: 18px; overflow: hidden; }
+  .ib-row { display: flex; gap: 12px; align-items: flex-start; padding: 14px; text-decoration: none; color: #3A4658; cursor: pointer; }
+  .ib-row + .ib-row { border-top: 1px solid #F0ECE6; }
+  .ib-row:hover { background: #FBFAF8; }
+  .ib-row.is-unread { background: #FFF8F4; color: #1B2A4A; }
+  .ib-row.is-unread .ib-msg { font-weight: 600; }
+  .ib-ic { flex: none; width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+  .ib-ic svg { width: 20px !important; height: 20px !important; stroke-width: 2 !important; }
+  .ib-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .ib-msg { font-size: 14.5px; line-height: 1.45; overflow-wrap: anywhere; }
+  .ib-sub { font-size: 12.5px; color: #5F6B7E; }
+  .ib-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #E8541C; margin-top: 7px; }
+  .ib-empty { padding: 28px 20px; display: flex; flex-direction: column; gap: 4px; text-align: center; }
+  .ib-empty b { font-family: 'Anek Bangla', sans-serif; font-size: 18px; }
+  .ib-more { align-self: center; min-height: 44px; padding: 0 22px; border-radius: 12px; border: 1px solid #E7E2DA; background: #fff; font: inherit; font-weight: 600; color: #1B2A4A; cursor: pointer; }
+</style>
+
+<script>
+  import { supabase } from '../../lib/supabase.js';
+  import { onConsoleReady, dayLabel, agoLabel, bn, ADMIN_NOTIF_OR, refreshInboxBadge } from '../../lib/consoleApp.js';
+
+  const PAGE = 30;
+  const $ = (id) => document.getElementById(id);
+
+  // ধরন: action_url-এর /admin/<এলাকা> দেখে
+  const KINDS = {
+    order: { label: 'অর্ডার', bg: '#FDEBE2', fg: '#C2410C', icon: '<path d="M6 7h12l-1 13H7L6 7z"/><path d="M9 7a3 3 0 0 1 6 0"/>',
+      paths: ['delivery-orders', 'manual-orders', 'delivery-market-payments', 'delivery-disputes', 'shop-orders', 'quick-delivery', 'local-rides', 'orders', 'order', 'payments', 'disputes', 'preorders', 'wallets', 'money'] },
+    listing: { label: 'লিস্টিং', bg: '#E4ECFD', fg: '#1D4ED8', icon: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
+      paths: ['listings'] },
+    shop: { label: 'শপ ও ক্লাব', bg: '#E3F1E7', fg: '#0A662A', icon: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9h16v11H4z"/><path d="M9 20v-6h6v6"/>',
+      paths: ['delivery-shop-applications', 'delivery-shops', 'shops', 'shop-apps', 'shop', 'clubs', 'clinics', 'doctors', 'local-drivers', 'drivers', 'delivery-riders', 'riders', 'rider'] },
+    scratch: { label: 'স্ক্র্যাচ ও রেফার', bg: '#FBF1DC', fg: '#8A5A0B', icon: '<path d="M3 9h18v4H3z"/><path d="M5 13h14v8H5z"/><path d="M12 9v12"/>',
+      paths: ['scratch-cards', 'referrals', 'lucky-draw'] },
+    error: { label: 'এরর', bg: '#FCE4E4', fg: '#B42318', icon: '<path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17h.01"/>',
+      paths: ['errors', 'health', 'devices'] },
+    other: { label: 'অন্যান্য', bg: '#EEF1F5', fg: '#475467', icon: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>', paths: [] },
+  };
+
+  function kindOf(url) {
+    const m = /^\/(?:admin|console)\/([^/?#]+)/.exec(url || '');
+    const seg = m ? m[1] : '';
+    for (const k of Object.keys(KINDS)) if (KINDS[k].paths.includes(seg)) return k;
+    return 'other';
+  }
+
+  // ধরন অনুযায়ী DB ফিল্টার (or-শর্ত), "অন্যান্য" = বাকি সব (ক্লায়েন্টে বাছাই)
+  function kindOr(k) {
+    return KINDS[k].paths.flatMap((p) => [`action_url.like./admin/${p}*`, `action_url.like./console/${p}*`]).join(',');
+  }
+
+  const state = { kind: '', only: false, offset: 0, loading: false, uid: null };
+  let lastDay = null;
+  let lastBox = null;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function safeHref(u) {
+    return typeof u === 'string' && u.startsWith('/') && !u.startsWith('//') ? u : '/console';
+  }
+
+  function rowEl(n) {
+    const k = kindOf(n.action_url);
+    const meta = KINDS[k];
+    const a = el('a', 'ib-row' + (n.is_read ? '' : ' is-unread'));
+    a.href = safeHref(n.action_url);
+    const ic = el('span', 'ib-ic');
+    ic.style.background = meta.bg;
+    ic.style.color = meta.fg;
+    ic.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${meta.icon}</svg>`; // ফিক্সড আইকন, ইউজারের লেখা নয়
+    a.appendChild(ic);
+    const t = el('span', 'ib-t');
+    t.appendChild(el('span', 'ib-msg', n.message || ''));
+    t.appendChild(el('span', 'ib-sub', meta.label + ' · ' + agoLabel(n.created_at)));
+    a.appendChild(t);
+    if (!n.is_read) {
+      const d = el('span', 'ib-dot');
+      d.setAttribute('aria-label', 'না-পড়া');
+      a.appendChild(d);
+    }
+    a.addEventListener('click', async (e) => {
+      if (n.is_read) return;
+      e.preventDefault();
+      try { await supabase.from('user_notifications').update({ is_read: true }).eq('id', n.id); } catch (_) {}
+      window.location.href = a.href;
+    });
+    return a;
+  }
+
+  function addRow(n) {
+    const day = dayLabel(n.created_at);
+    if (day !== lastDay) {
+      const sec = el('section', 'ib-day');
+      sec.appendChild(el('h2', null, day));
+      lastBox = el('div', 'ib-box');
+      sec.appendChild(lastBox);
+      $('ibList').appendChild(sec);
+      lastDay = day;
+    }
+    lastBox.appendChild(rowEl(n));
+  }
+
+  function baseQuery() {
+    // ধরনের পাথগুলো নিজেই /admin বা /console-এর ভেতরে, তাই একটাই or-শর্ত যথেষ্ট
+    const or = state.kind && state.kind !== 'other' ? kindOr(state.kind) : ADMIN_NOTIF_OR;
+    let q = supabase
+      .from('user_notifications')
+      .select('id, message, is_read, created_at, action_url')
+      .eq('user_id', state.uid)
+      .or(or);
+    if (state.only) q = q.eq('is_read', false);
+    return q;
+  }
+
+  async function load(reset) {
+    if (state.loading) return;
+    state.loading = true;
+    const list = $('ibList');
+    if (reset) {
+      state.offset = 0;
+      lastDay = null;
+      lastBox = null;
+      list.innerHTML = window.SFSkeleton ? window.SFSkeleton.html('row', 6) : '';
+    }
+    $('ibMore').hidden = true;
+    const { data, error } = await baseQuery()
+      .order('created_at', { ascending: false })
+      .range(state.offset, state.offset + PAGE - 1);
+    if (reset) list.textContent = '';
+    state.loading = false;
+    if (error) {
+      const box = el('div', 'cs-card ib-empty');
+      box.appendChild(el('b', null, 'নোটিফিকেশন আনা যায়নি'));
+      box.appendChild(el('span', 'cs-muted', 'ইন্টারনেট দেখে আবার চেষ্টা করুন।'));
+      list.appendChild(box);
+      return;
+    }
+    let rows = data || [];
+    if (state.kind === 'other') rows = rows.filter((n) => kindOf(n.action_url) === 'other');
+    rows.forEach(addRow);
+    state.offset += (data || []).length;
+    if (!list.children.length) {
+      const box = el('div', 'cs-card ib-empty');
+      box.appendChild(el('b', null, 'সব দেখা হয়ে গেছে'));
+      box.appendChild(el('span', 'cs-muted', state.only ? 'কোনো না-পড়া নোটিফিকেশন নেই।' : 'এই ধরনের কোনো নোটিফিকেশন নেই।'));
+      list.appendChild(box);
+    }
+    $('ibMore').hidden = (data || []).length < PAGE;
+  }
+
+  // না-পড়ার সংখ্যা: উপরের লাইন + চিপের পাশে (শেষ ৫০০টা না-পড়া থেকে গোনা)
+  async function loadCounts() {
+    const { data } = await supabase
+      .from('user_notifications')
+      .select('action_url')
+      .eq('user_id', state.uid)
+      .eq('is_read', false)
+      .or(ADMIN_NOTIF_OR)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    const rows = data || [];
+    const by = {};
+    rows.forEach((r) => { const k = kindOf(r.action_url); by[k] = (by[k] || 0) + 1; });
+    const total = rows.length;
+    $('ibUnreadLine').textContent = total ? (total >= 500 ? '৫০০+' : bn(total)) + 'টি না-পড়া' : 'সব পড়া হয়েছে';
+    $('ibMarkAll').disabled = total === 0;
+    document.querySelectorAll('#ibChips button').forEach((b) => {
+      b.querySelector('.ib-cnt')?.remove();
+      const k = b.dataset.k;
+      const c = k ? by[k] || 0 : total;
+      if (c) b.appendChild(el('span', 'ib-cnt', c > 99 ? '৯৯+' : bn(c)));
+    });
+    refreshInboxBadge();
+  }
+
+  onConsoleReady(async ({ profile }) => {
+    state.uid = profile.id;
+
+    $('ibChips').addEventListener('click', (e) => {
+      const b = e.target instanceof Element ? e.target.closest('button[data-k]') : null;
+      if (!b) return;
+      state.kind = b.dataset.k || '';
+      document.querySelectorAll('#ibChips button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      load(true);
+    });
+
+    $('ibOnly').addEventListener('click', () => {
+      state.only = !state.only;
+      $('ibOnly').setAttribute('aria-checked', String(state.only));
+      load(true);
+    });
+
+    $('ibMore').addEventListener('click', () => load(false));
+
+    $('ibMarkAll').addEventListener('click', async () => {
+      const btn = $('ibMarkAll');
+      btn.disabled = true;
+      const { error } = await supabase
+        .from('user_notifications')
+        .update({ is_read: true })
+        .eq('user_id', state.uid)
+        .eq('is_read', false)
+        .or(ADMIN_NOTIF_OR);
+      if (error) {
+        window.showToast?.('পড়া হিসেবে চিহ্ন দেওয়া যায়নি, আবার চেষ্টা করুন', 'error');
+        btn.disabled = false;
+        return;
+      }
+      window.showToast?.('সব নোটিফিকেশন পড়া হয়েছে', 'success');
+      await Promise.all([load(true), loadCounts()]);
+    });
+
+    await Promise.all([load(true), loadCounts()]);
+  });
+</script>

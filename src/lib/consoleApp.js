@@ -110,6 +110,34 @@ export async function initConsole() {
 
   refreshTodoBadge();
   setInterval(() => { if (document.visibilityState === 'visible') refreshTodoBadge(); }, 120000);
+  refreshInboxBadge();
+  setInterval(() => { if (document.visibilityState === 'visible') refreshInboxBadge(); }, 60000);
+}
+
+// ---------- নোটিফিকেশন ইনবক্স (/console/inbox) ----------
+// অ্যাডমিন অ্যালার্ট = নিজের user_notifications-এর যেগুলোর action_url /admin বা /console দিয়ে শুরু
+// (স্টাফের অনুমতির বাইরের অ্যালার্ট পাঠানোর সময়েই আলাদা হয়: private.admin_notify_permission_for_url)
+export const ADMIN_NOTIF_OR = 'action_url.like./admin*,action_url.like./console*';
+
+export async function refreshInboxBadge() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const { count } = await supabase
+      .from('user_notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', session.user.id)
+      .eq('is_read', false)
+      .or(ADMIN_NOTIF_OR);
+    const n = Number(count) || 0;
+    document.querySelectorAll('[data-cs-inbox-badge]').forEach((b) => {
+      b.textContent = n > 99 ? '৯৯+' : bn(n);
+      b.hidden = n === 0;
+    });
+    document.querySelectorAll('.cs-bell').forEach((a) => {
+      a.setAttribute('aria-label', n ? 'নোটিফিকেশন, ' + bn(n) + 'টি না-পড়া' : 'নোটিফিকেশন');
+    });
+  } catch (_) { /* উপেক্ষা */ }
 }
 
 // নিচের "করণীয়" ট্যাবে মোট অপেক্ষার সংখ্যা (admin_todo, অনুমতি অনুযায়ী)
