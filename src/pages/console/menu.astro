@@ -1,7 +1,8 @@
 ---
 // ============================================================
 // /console/menu — মেনু-ট্রি (কাজের ধরন অনুযায়ী বিভাগ, src/lib/consoleMenu.js)
-// বিভাগগুলো ডিফল্টে ভাঁজ করা; খোলা/বন্ধ ফোনে মনে রাখে। #বিভাগ-id দিয়ে সরাসরি খোলে।
+// বিভাগগুলো ডিফল্টে ভাঁজ করা; একসাথে একটাই খোলা (অন্যটা খুললে আগেরটা বন্ধ, SF সিদ্ধান্ত)।
+// খোলা বিভাগ ও স্ক্রল ফোনে মনে রাখে, ফিরে এলে একই জায়গায় থাকে। #বিভাগ-id দিয়ে সরাসরি খোলে।
 // স্টাফ শুধু নিজের অনুমতির অপশন দেখে; খালি বিভাগ লুকানো।
 // ============================================================
 export const prerender = false;
@@ -24,6 +25,12 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   import { onConsoleReady, canOpenAdminPath, bn } from '../../lib/consoleApp.js';
 
   const KEY = 'sf_console_menu_open';
+  const SCROLL_KEY = 'sf_console_menu_scroll';
+  // ফিরে এলে স্ক্রল ব্রাউজার নিজে বদলাবে না; আমরা নিজেরা আগের জায়গায় নিই
+  try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (_) {}
+  function saveScroll() { try { sessionStorage.setItem(SCROLL_KEY, String(window.scrollY || 0)); } catch (_) {} }
+  window.addEventListener('pagehide', saveScroll);
+  document.addEventListener('click', (e) => { if (e.target instanceof Element && e.target.closest('a[href]')) saveScroll(); }, true);
   const tree = document.getElementById('cmTree');
 
   function readOpen() {
@@ -34,9 +41,11 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   }
 
   onConsoleReady((data) => {
-    const open = new Set(readOpen());
+    // একটাই খোলা: #বিভাগ থাকলে সেটা, না হলে শেষবার যেটা খোলা ছিল
     const hash = location.hash.replace('#', '');
-    if (hash) open.add(hash);
+    const prev = readOpen();
+    const open = new Set(hash ? [hash] : prev.slice(-1));
+    const setters = new Map();
 
     MENU.forEach((sec) => {
       const items = sec.items.filter((it) => visibleItem(it, data, canOpenAdminPath));
@@ -76,10 +85,17 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
 
       const set = (on) => { btn.setAttribute('aria-expanded', String(on)); body.hidden = !on; };
       set(open.has(sec.id));
+      setters.set(sec.id, set);
       btn.addEventListener('click', () => {
         const on = btn.getAttribute('aria-expanded') !== 'true';
+        // অন্য সব বিভাগ বন্ধ
+        setters.forEach((fn, id) => { if (id !== sec.id) fn(false); });
+        open.clear();
         set(on);
-        if (on) open.add(sec.id); else open.delete(sec.id);
+        if (on) {
+          open.add(sec.id);
+          box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        }
         saveOpen([...open]);
       });
 
@@ -87,6 +103,13 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
       tree.appendChild(box);
     });
 
-    if (hash) document.getElementById(hash)?.scrollIntoView({ block: 'start' });
+    if (hash) {
+      document.getElementById(hash)?.scrollIntoView({ block: 'start' });
+    } else {
+      // পেছনে ফিরে এলে আগের স্ক্রলে
+      let y = 0;
+      try { y = Number(sessionStorage.getItem(SCROLL_KEY)) || 0; } catch (_) {}
+      if (y > 0) requestAnimationFrame(() => window.scrollTo(0, y));
+    }
   });
 </script>
