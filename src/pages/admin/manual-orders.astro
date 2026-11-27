@@ -256,8 +256,11 @@ import Skeleton from '../../components/ui/Skeleton.astro';
           <p class="mo-muted" id="asInfo"></p>
           <input class="mo-in" id="asSearch" type="search" placeholder="নাম বা ফোন দিয়ে খুঁজুন" autocomplete="off" aria-label="রাইডার খুঁজুন" />
           <div class="mo-as-list" id="asList"></div>
-          <label class="mo-lbl" for="as_pay">রাইডারের ডেলিভারি চার্জ (৳)<span class="required-mark">*</span></label>
-          <input class="mo-in" id="as_pay" type="number" inputmode="decimal" min="0" step="any" />
+          <div id="asPayBox">
+            <label class="mo-lbl" for="as_pay">রাইডারের ডেলিভারি চার্জ (৳)<span class="required-mark">*</span></label>
+            <input class="mo-in" id="as_pay" type="number" inputmode="decimal" min="0" step="any" />
+          </div>
+          <p class="mo-as-ownnote" id="asOwnNote" hidden>নিজস্ব রাইডার — আলাদা পে লাগবে না</p>
           <p class="mo-err" id="asErr" style="display:none;"></p>
           <div class="mo-actions">
             <button class="mo-cta" id="asSave" type="button">রাইডার ঠিক করুন</button>
@@ -327,6 +330,9 @@ import Skeleton from '../../components/ui/Skeleton.astro';
     .mo-as-row.sel { border-color: #FF6B35; background: #FFF6F1; }
     .mo-as-name { font-weight: 700; font-size: 15px; color: #1B2A4A; }
     .mo-as-sub { font-size: 12.5px; color: #5B6B86; }
+    .mo-as-own { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 800; color: #1B7A3C; background: #EAFBF0; border-radius: 20px; padding: 1px 8px; vertical-align: middle; }
+    .mo-as-ownnote { margin: 4px 0 8px; font-size: 13px; font-weight: 700; color: #1B7A3C; background: #EAFBF0; border-radius: 12px; padding: 8px 12px; }
+    .mo-as-ownnote[hidden], #asPayBox[hidden] { display: none !important; }
     .mo-ctr-box { background: #FFF6F1; border: 1.5px solid #FFD9C7; border-radius: 18px; padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
     .mo-ctr-h { font-weight: 700; color: #C2410C; }
     .mo-ctr { background: #fff; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -584,7 +590,7 @@ import Skeleton from '../../components/ui/Skeleton.astro';
       lines.push('Order: ' + o.details);
       lines.push('Product Price: BDT ' + o.product_price);
       lines.push('Collect Cash: BDT ' + o.cod_amount + (Number(o.cod_amount) === 0 ? ' (advance paid)' : ''));
-      lines.push('Your Pay: BDT ' + o.rider_pay);
+      if (Number(o.rider_pay) > 0) lines.push('Your Pay: BDT ' + o.rider_pay);
       return lines.join('\n');
     }
     function customerMsg(o) {
@@ -1090,6 +1096,8 @@ import Skeleton from '../../components/ui/Skeleton.astro';
       $('asInfo').textContent = o.order_no + ' · ' + o.customer_name + ' · ' + (o.is_asap ? 'এখনই' : dayLabel(when) + ' ' + timeBn(when));
       $('as_pay').value = Number(o.rider_pay) > 0 ? o.rider_pay : '';
       $('asSearch').value = '';
+      $('asPayBox').hidden = false;
+      $('asOwnNote').hidden = true;
       showErr('asErr', '');
       $('asList').replaceChildren(el('p', 'mo-muted', 'রাইডারের লিস্ট লোড হচ্ছে...'));
       openSheet('asOverlay');
@@ -1107,10 +1115,16 @@ import Skeleton from '../../components/ui/Skeleton.astro';
       const list = asRiders.filter((r) => !s || String(r.name || '').toLowerCase().includes(s) || String(r.phone || '').includes(s));
       box.replaceChildren();
       if (!list.length) { box.appendChild(el('p', 'mo-muted', 'কোনো রাইডার পাওয়া যায়নি।')); return; }
+      const selR = asRiders.find((x) => x.rider_id === asSel);
+      const own = !!(selR && selR.is_own);
+      $('asPayBox').hidden = own;
+      $('asOwnNote').hidden = !own;
       list.forEach((r) => {
         const row = el('button', 'mo-as-row' + (asSel === r.rider_id ? ' sel' : ''));
         row.type = 'button';
-        row.appendChild(el('div', 'mo-as-name', (r.online ? '🟢 ' : '⚪ ') + (r.name || 'নাম নেই')));
+        const nm = el('div', 'mo-as-name', (r.online ? '🟢 ' : '⚪ ') + (r.name || 'নাম নেই'));
+        if (r.is_own) nm.appendChild(el('span', 'mo-as-own', 'নিজস্ব'));
+        row.appendChild(nm);
         row.appendChild(el('div', 'mo-as-sub', (r.phone || 'ফোন নেই') + (r.vehicle_type ? ' · ' + r.vehicle_type : '') + (r.upazila ? ' · ' + r.upazila : '')));
         row.addEventListener('click', () => { asSel = r.rider_id; renderAssignList(); });
         box.appendChild(row);
@@ -1119,8 +1133,11 @@ import Skeleton from '../../components/ui/Skeleton.astro';
     async function saveAssign() {
       if (busy || !asOrder) return;
       if (!asSel) return showErr('asErr', 'তালিকা থেকে একজন রাইডার বাছুন।');
-      const pay = num($('as_pay').value);
-      if (pay <= 0) return showErr('asErr', AS_REASONS.pay_required);
+      const selR = asRiders.find((x) => x.rider_id === asSel);
+      const own = !!(selR && selR.is_own);
+      // নিজস্ব রাইডার: পে লাগে না (০ গেলে সার্ভার ৳০ রাখে)
+      const pay = own ? 0 : num($('as_pay').value);
+      if (!own && pay <= 0) return showErr('asErr', AS_REASONS.pay_required);
       busy = true;
       $('asSave').disabled = true;
       const res = await supabase.rpc('admin_assign_manual_order', { p_order_id: asOrder.id, p_delivery_rider_id: asSel, p_rider_pay: pay });
