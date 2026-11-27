@@ -12,6 +12,7 @@
 //   • ৬ উপজেলা: প্রতিটার নিজের রঙে হালকা ফিল + সাদা হ্যালোসহ গাঢ় বর্ডার
 //   • ইউনিয়ন: উপজেলার গাঢ় রঙে সরু ড্যাশ বর্ডার
 //   • নাম: উপজেলার নাম পিল (দূর থেকে), ইউনিয়নের নাম (জুম ১১.৫+), কাছে গেলে উপজেলার পিল লুকায়
+//   • উপজেলার নামে ট্যাপ: সেই উপজেলায় জুম হয়ে ইউনিয়ন দেখায় (হেডারের ম্যাপের মতো)
 //   • ফ্রি প্যান: ফেনীর যেকোনো কোণ (সোনাগাজীর চরসহ) টেনে ম্যাপের মাঝখানে আনা যায়,
 //     উপর-নিচ-ডান-বাম সব দিকে; ফেনী থেকে অনেক দূরে গেলে নরমভাবে ফিরে আসে
 //
@@ -57,14 +58,15 @@ const CSS = `
 .fo-up{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;gap:6px;white-space:nowrap;
   padding:5px 11px 5px 7px;border-radius:999px;background:rgba(255,255,255,.96);color:#1B2A4A;
   font:700 13px/1.2 'Hind Siliguri','Noto Sans Bengali',system-ui,sans-serif;
-  box-shadow:0 2px 10px rgba(27,42,74,.18),0 0 0 1.5px var(--c);pointer-events:none;transition:opacity .2s}
+  box-shadow:0 2px 10px rgba(27,42,74,.18),0 0 0 1.5px var(--c);pointer-events:auto;cursor:pointer;transition:opacity .2s,transform .15s}
+.fo-up:active{transform:translate(-50%,-50%) scale(.95)}
 .fo-up i{width:10px;height:10px;border-radius:50%;background:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent)}
 .fo-un{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;pointer-events:none;
   font:600 11px/1.2 'Hind Siliguri','Noto Sans Bengali',system-ui,sans-serif;color:var(--c);letter-spacing:.1px;
   text-shadow:0 0 2px #fff,0 0 3px #fff,0 0 5px #fff,0 1px 0 #fff;transition:opacity .2s,font-size .2s}
 .fo-un.on{transform:translate(-50%,45%);color:#fff;background:var(--c);padding:3px 9px;border-radius:999px;text-shadow:none;box-shadow:0 2px 8px rgba(0,0,0,.22)}
 .fo-z1 .fo-un{opacity:0}
-.fo-z3 .fo-up{opacity:0}
+.fo-z3 .fo-up{opacity:0;pointer-events:none}
 .fo-z3 .fo-un{font-size:13px}
 `;
 function injectCss() {
@@ -106,6 +108,7 @@ export async function addFeniOverlay(L, map, opts = {}) {
     freePan: true,
     fit: false,
     onAreaTap: null, // (area, latlng) => {} — দিলে ইউনিয়ন ট্যাপযোগ্য
+    upazilaTap: true, // উপজেলার নামে ট্যাপ = সেই উপজেলায় জুম, ইউনিয়ন দেখায় (হেডারের মতো)
   }, opts);
   injectCss();
   const geo = o.geo || (await loadFeniGeo());
@@ -180,7 +183,19 @@ export async function addFeniOverlay(L, map, opts = {}) {
     });
     UPAZILAS.forEach((u) => {
       const pt = pts.upazilas[u.id];
-      if (pt) group.addLayer(lbl(pt, `<div class="fo-up" style="--c:${upazilaColor(u.id)}"><i></i>${esc(u.name)}</div>`));
+      if (!pt) return;
+      const html = `<div class="fo-up" role="button" aria-label="${esc(u.name)} উপজেলায় যান" style="--c:${upazilaColor(u.id)}"><i></i>${esc(u.name)}</div>`;
+      if (!o.upazilaTap) { group.addLayer(lbl(pt, html)); return; }
+      // ট্যাপযোগ্য পিল: সেই উপজেলায় জুম → ইউনিয়নের নাম/বর্ডার দেখা যায়
+      const m = L.marker(pt, {
+        pane: 'foLabels', interactive: true, keyboard: false, bubblingMouseEvents: false,
+        icon: L.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] }),
+      });
+      m.on('click', (e) => {
+        if (e.originalEvent) L.DomEvent.stop(e.originalEvent);
+        flyToUpazila(u.id);
+      });
+      group.addLayer(m);
     });
   }
 
@@ -197,6 +212,14 @@ export async function addFeniOverlay(L, map, opts = {}) {
   if (o.fit) map.fitBounds(feniBounds, { padding: [16, 16] });
   const unFree = o.freePan ? freePanToFeni(L, map, feniBounds) : null;
   zoomClass();
+
+  function flyToUpazila(id) {
+    const b = getUpazilaBounds(geo, id);
+    if (!b) return;
+    // জুম অন্তত ইউনিয়নের নাম দেখানোর মাত্রায় (unionLabelZoom)
+    const z = Math.max(map.getBoundsZoom(b, false, L.point(40, 40)), o.unionLabelZoom);
+    map.flyTo(L.latLngBounds(b).getCenter(), z, { duration: 0.6 });
+  }
 
   function highlight(en) {
     if (selected && unionLayers[selected]) {
@@ -217,7 +240,7 @@ export async function addFeniOverlay(L, map, opts = {}) {
     highlight,
     areaAt: (ll) => findAreaAt(ll.lat, ll.lng, geo),
     fitAll: () => map.flyToBounds(feniBounds, { padding: [16, 16], duration: 0.6 }),
-    flyToUpazila: (id) => { const b = getUpazilaBounds(geo, id); if (b) map.flyToBounds(b, { padding: [20, 20], duration: 0.6 }); },
+    flyToUpazila,
     remove: () => { group.remove(); map.off('zoomend', zoomClass); unFree && unFree(); el.classList.remove('fo-z1', 'fo-z3'); },
   };
 }
