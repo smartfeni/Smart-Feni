@@ -1,0 +1,525 @@
+---
+// ============================================================
+// পেজ: /ride/trip?id=<request> — লোকাল রাইডের লাইভ স্ক্রিন (ধাপ ২, নভে ২০২৬; ডিজাইন: ক্যানভাস "অফার আসছে")
+// অবস্থা অনুযায়ী নিচের শিট বদলায় (৫ সেকেন্ড পর পর RPC local_ride_trip; পেজে ফিরলে সাথে সাথে):
+//   open      → খোঁজা হচ্ছে: রাডার, বাকি সময়, অফার কার্ড (রেটিং/ট্রিপ সংখ্যা), গ্রহণ/বাদ,
+//               "ভাড়া +১০ বাড়ান" (local_ride_raise_fare), "রাইড বাতিল" (local_ride_cancel)
+//   confirmed → ড্রাইভার কার্ড, কল/হোয়াটসঅ্যাপ, ট্রিপ শেয়ার, ধাপ (কনফার্ম → পৌঁছেছেন → যাত্রা চলছে → শেষ)।
+//               কনফার্মের পর বাতিল নেই (SF); সমস্যা হলে রিপোর্ট (local_ride_report_create)
+//   completed → ভাড়া, ১–৫ স্টার রেটিং + মন্তব্য (local_ride_rate, ৭ দিনের মধ্যে একবার), রিপোর্ট (২৪ ঘণ্টা)
+//   expired/cancelled → আবার রিকোয়েস্টের বোতাম
+// "বাদ" শুধু এই ফোনে লুকায় (সার্ভারে কিছু হয় না)। ইউজার/ডিবির লেখা সব textContent।
+// ============================================================
+export const prerender = false;
+import BaseLayout from '../../components/layout/BaseLayout.astro';
+---
+
+<BaseLayout title="আপনার রাইড | স্মার্ট ফেনী" noindex>
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <div class="rt" id="rt" data-no-ptr data-state="loading">
+    <div id="rtMap" class="rt-map" aria-label="ম্যাপ"></div>
+
+    <div class="rt-top">
+      <a href="/services/local-ride" class="rt-round" aria-label="পেছনে যান"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></a>
+      <div class="rt-pill" id="rtPill">
+        <i class="rt-pulse"></i>
+        <span>
+          <b id="rtPillT">লোড হচ্ছে…</b>
+          <small id="rtPillS"></small>
+        </span>
+      </div>
+    </div>
+
+    <section class="rt-sheet" id="rtSheet">
+      <div class="rt-grip"></div>
+      <div id="rtBody"></div>
+    </section>
+
+    <div class="rt-modal" id="rtModal" hidden>
+      <div class="rt-modal-card" role="dialog" aria-modal="true" aria-labelledby="rtModalT">
+        <h2 id="rtModalT"></h2>
+        <div id="rtModalBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <style is:global>
+    .navbar, .bottom-nav, .psh-nav, #sfActBar { display: none !important; }
+    body { padding-bottom: 0 !important; overscroll-behavior: none; }
+    .rt { position: fixed; inset: 0; z-index: 30; font-family: 'Hind Siliguri', system-ui, sans-serif; color: #1B2A4A; background: #F1ECE4; overflow: hidden; }
+    .rt [hidden] { display: none !important; }
+    .rt-map { position: absolute; inset: 0 0 35% 0; z-index: 1; }
+    .rt-top { position: absolute; top: 0; left: 0; right: 0; z-index: 8; padding: calc(12px + env(safe-area-inset-top)) 14px 0; display: flex; gap: 10px; align-items: center; }
+    .rt-round { width: 44px; height: 44px; border-radius: 22px; background: #fff; box-shadow: 0 4px 14px rgba(27,42,74,.16); display: flex; align-items: center; justify-content: center; flex-shrink: 0; text-decoration: none; }
+    .rt-round svg { width: 20px; height: 20px; fill: none; stroke: #1B2A4A; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .rt-pill { flex: 1; min-height: 48px; border-radius: 18px; background: #fff; box-shadow: 0 4px 14px rgba(27,42,74,.16); display: flex; align-items: center; gap: 12px; padding: 6px 14px; }
+    .rt-pill b { display: block; font-size: 15px; }
+    .rt-pill small { display: block; font-size: 12px; color: #5A6E85; }
+    .rt-pulse { width: 10px; height: 10px; border-radius: 5px; background: #16A34A; flex-shrink: 0; box-shadow: 0 0 0 0 rgba(22,163,74,.5); animation: rtPulse 1.6s infinite; }
+    .rt[data-state="expired"] .rt-pulse, .rt[data-state="cancelled"] .rt-pulse { background: #D14343; animation: none; }
+    .rt[data-state="completed"] .rt-pulse { background: #1B2A4A; animation: none; }
+    @keyframes rtPulse { 0% { box-shadow: 0 0 0 0 rgba(22,163,74,.5); } 70% { box-shadow: 0 0 0 10px rgba(22,163,74,0); } 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); } }
+    .rt-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 9; max-height: 72%; overflow-y: auto; background: #fff; border-radius: 26px 26px 0 0; box-shadow: 0 -8px 30px rgba(27,42,74,.14); padding: 10px 16px calc(22px + env(safe-area-inset-bottom)); box-sizing: border-box; max-width: 640px; margin: 0 auto; }
+    @media (min-width: 700px) { .rt-sheet { left: 50%; right: auto; width: 520px; transform: translateX(-50%); } }
+    .rt-grip { width: 40px; height: 4px; border-radius: 2px; background: #E2E6EE; margin: 0 auto 12px; }
+    #rtBody { display: flex; flex-direction: column; gap: 12px; }
+    .rt-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .rt-h h1 { margin: 0; font-size: 20px; font-weight: 700; }
+    .rt-h h1 em { font-style: normal; color: #FF6B35; }
+    .rt-h span { font-size: 13px; color: #5A6E85; }
+    .rt-wait { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px; text-align: center; color: #5A6E85; font-size: 14px; }
+    .rt-wait svg { width: 46px; height: 46px; }
+    .rt-offer { border: 1.5px solid #E2E6EE; border-radius: 18px; padding: 12px; display: flex; flex-direction: column; gap: 10px; animation: rtIn .35s ease-out; }
+    @keyframes rtIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    .rt-who { display: flex; align-items: center; gap: 12px; }
+    .rt-av { width: 46px; height: 46px; border-radius: 23px; background: #DDF3E5; color: #1B8A4A; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; font-size: 18px; }
+    .rt-av img { width: 100%; height: 100%; object-fit: cover; }
+    .rt-who-t { flex: 1; min-width: 0; }
+    .rt-who-t b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rt-who-t small { display: block; font-size: 12px; color: #5A6E85; }
+    .rt-star { color: #B7791F; font-weight: 700; }
+    .rt-price { text-align: right; }
+    .rt-price b { display: block; font-size: 22px; }
+    .rt-price small { display: block; font-size: 11px; font-weight: 700; color: #B4421A; }
+    .rt-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .rt-btn { min-height: 46px; border-radius: 14px; border: 1.5px solid #E2E6EE; background: #fff; font: inherit; font-size: 15px; font-weight: 700; color: #1B2A4A; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; padding: 0 12px; }
+    .rt-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .rt-btn.green { background: #16A34A; border-color: #16A34A; color: #fff; }
+    .rt-btn.wa { background: #25D366; border-color: #25D366; color: #fff; }
+    .rt-btn.navy { background: #1B2A4A; border-color: #1B2A4A; color: #fff; }
+    .rt-btn.orange { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+    .rt-btn.soft { background: #FFF4EC; border-color: #FFD2BC; color: #B4421A; }
+    .rt-btn.red { color: #D14343; }
+    .rt-btn.muted { color: #5A6E85; }
+    .rt-btn:disabled { opacity: .6; }
+    .rt-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+    .rt-step { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: #8FA0BC; text-align: center; line-height: 1.3; position: relative; }
+    .rt-step i { width: 26px; height: 26px; border-radius: 13px; background: #EEF1F6; display: flex; align-items: center; justify-content: center; font-style: normal; font-weight: 700; font-size: 12px; color: #8FA0BC; z-index: 1; }
+    .rt-step::before { content: ''; position: absolute; top: 12px; left: -50%; width: 100%; height: 2px; background: #EEF1F6; }
+    .rt-step:first-child::before { display: none; }
+    .rt-step.done i { background: #16A34A; color: #fff; }
+    .rt-step.done::before, .rt-step.now::before { background: #16A34A; }
+    .rt-step.now i { background: #FF6B35; color: #fff; box-shadow: 0 0 0 5px rgba(255,107,53,.18); }
+    .rt-step.done, .rt-step.now { color: #1B2A4A; font-weight: 600; }
+    .rt-card { border: 1.5px solid #E2E6EE; border-radius: 18px; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+    .rt-route { display: flex; gap: 10px; font-size: 13px; }
+    .rt-route-l { display: flex; flex-direction: column; align-items: center; padding-top: 5px; }
+    .rt-route-l i { width: 9px; height: 9px; border-radius: 5px; background: #1B2A4A; }
+    .rt-route-l i.o { background: #FF6B35; }
+    .rt-route-l span { width: 2px; flex: 1; min-height: 18px; background: #E2E6EE; }
+    .rt-route-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    .rt-route-t b { font-weight: 600; }
+    .rt-fare-line { display: flex; align-items: center; justify-content: space-between; font-size: 14px; color: #5A6E85; padding-top: 10px; border-top: 1px solid #F0F2F6; }
+    .rt-fare-line b { font-size: 20px; color: #1B2A4A; }
+    .rt-link { border: 0; background: none; font: inherit; font-size: 14px; font-weight: 700; color: #5A6E85; text-decoration: underline; cursor: pointer; padding: 8px; align-self: center; }
+    .rt-note { margin: 0; padding: 10px 12px; border-radius: 12px; background: #F6F7FA; font-size: 13px; color: #5A6E85; }
+    .rt-done { text-align: center; display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
+    .rt-done b { font-size: 34px; }
+    .rt-stars { display: flex; justify-content: center; gap: 6px; }
+    .rt-stars button { width: 48px; height: 48px; border: 0; background: none; cursor: pointer; padding: 0; }
+    .rt-stars svg { width: 40px; height: 40px; fill: #E2E6EE; }
+    .rt-stars button.on svg { fill: #F5B301; }
+    .rt-ta { width: 100%; box-sizing: border-box; border-radius: 14px; border: 1.5px solid #E2E6EE; padding: 10px 14px; font: inherit; font-size: 15px; color: #1B2A4A; resize: none; }
+    .rt-ta:focus { outline: none; border-color: #FF6B35; }
+    .rt-modal { position: absolute; inset: 0; z-index: 40; background: rgba(27,42,74,.45); display: flex; align-items: flex-end; }
+    .rt-modal-card { width: 100%; background: #fff; border-radius: 24px 24px 0 0; padding: 20px 16px calc(22px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; max-width: 640px; margin: 0 auto; box-sizing: border-box; }
+    .rt-modal-card h2 { margin: 0; font-size: 18px; }
+    #rtModalBody { display: flex; flex-direction: column; gap: 10px; }
+    .rt-reason { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1.5px solid #E2E6EE; border-radius: 14px; font-size: 15px; cursor: pointer; }
+    .rt-reason input { width: 20px; height: 20px; accent-color: #FF6B35; }
+  </style>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { loadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
+    import { addBaseMap } from '../../lib/baseMap.js';
+    import { FENI_CENTER, bn, pickupIcon, dropIcon } from '../../lib/rideMap.js';
+
+    const $ = (id) => document.getElementById(id);
+    const id = new URLSearchParams(location.search).get('id') || '';
+    const HIDE_KEY = 'sf_ride_hidden_offers';
+    const POLL_MS = 5000;
+    const ERR = {
+      REQUEST_NOT_AVAILABLE: 'রিকোয়েস্টটা আর চালু নেই',
+      OFFER_NOT_ACTIVE: 'অফারটা আর নেই, চালক তুলে নিয়েছেন',
+      DRIVER_NOT_AVAILABLE: 'এই চালক এখন পাওয়া যাচ্ছে না',
+      CANNOT_CANCEL: 'চালক কনফার্ম করে ফেলেছেন, এখন আর বাতিল করা যাবে না',
+      ALREADY_RATED: 'আগেই রেটিং দিয়েছেন',
+      RATING_WINDOW_CLOSED: 'রেটিং দেওয়ার সময় শেষ',
+      ALREADY_REPORTED: 'এই রাইডে আপনার একটা রিপোর্ট আগেই আছে',
+      DAILY_LIMIT: 'আজ আর রিপোর্ট করা যাবে না',
+      REPORT_WINDOW_CLOSED: 'রিপোর্টের সময় শেষ (২৪ ঘণ্টা)',
+    };
+    const REASONS = [['driver_no_show', 'চালক আসেননি'], ['fare_dispute', 'ভাড়া নিয়ে সমস্যা'], ['unsafe_behavior', 'খারাপ আচরণ বা নিরাপত্তার সমস্যা'], ['wrong_info', 'ভুল তথ্য (গাড়ি/নম্বর মেলেনি)'], ['other', 'অন্য কিছু']];
+
+    let trip = null;
+    let L = null, map = null, layers = [], fitted = '';
+    let pollT = null, tickT = null, busy = false;
+    let pickedStars = 0;
+    let lastOfferCount = -1;
+
+    const toast = (m, t) => { if (window.showToast) window.showToast(m, t || 'error'); };
+    const mk = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    const svgI = (paths) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('aria-hidden', 'true'); paths.forEach((d) => { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); s.appendChild(p); }); return s; };
+    const errMsg = (e, fb) => { const m = String((e && e.message) || ''); const k = Object.keys(ERR).find((x) => m.includes(x)); return k ? ERR[k] : fb; };
+    const tk = (n) => '৳' + bn(Math.round(Number(n) || 0));
+    const hidden = () => { try { return JSON.parse(sessionStorage.getItem(HIDE_KEY) || '[]'); } catch (_) { return []; } };
+    function hideOffer(oid) { try { const h = hidden(); h.push(oid); sessionStorage.setItem(HIDE_KEY, JSON.stringify(h.slice(-50))); } catch (_) {} }
+    const bdPhone = (p) => { const d = String(p || '').replace(/\D/g, ''); return /^01\d{9}$/.test(d) ? '88' + d : /^8801\d{9}$/.test(d) ? d : ''; };
+    const safeImg = (u) => (typeof u === 'string' && /^https:\/\//.test(u) ? u : '');
+
+    // ---------- ম্যাপ ----------
+    async function initMap() {
+      try { await loadLeaflet(); L = window.L; removeMapRetryBox($('rtMap')); } catch (_) { mapRetryBox($('rtMap'), initMap); return; }
+      if (map) return;
+      map = L.map('rtMap', { zoomControl: false, attributionControl: true }).setView(FENI_CENTER, 13);
+      addBaseMap(L, map, { poi: true }).catch(() => {});
+      drawMap();
+    }
+    function radarIcon() {
+      return L.divIcon({ className: '', iconSize: [220, 220], iconAnchor: [110, 110],
+        html: '<div class="rt-radar"><span></span><span></span><span></span><b></b></div>' });
+    }
+    function drawMap() {
+      if (!map || !trip) return;
+      layers.forEach((l) => map.removeLayer(l));
+      layers = [];
+      const hasP = trip.pickup_lat != null, hasD = trip.drop_lat != null;
+      if (hasP) {
+        if (trip.status === 'open') layers.push(L.marker([trip.pickup_lat, trip.pickup_lng], { icon: radarIcon(), interactive: false }).addTo(map));
+        layers.push(L.marker([trip.pickup_lat, trip.pickup_lng], { icon: pickupIcon(L), interactive: false }).addTo(map));
+      }
+      if (hasD) layers.push(L.marker([trip.drop_lat, trip.drop_lng], { icon: dropIcon(L), interactive: false }).addTo(map));
+      if (hasP && hasD) layers.push(L.polyline([[trip.pickup_lat, trip.pickup_lng], [trip.drop_lat, trip.drop_lng]], { color: '#1B2A4A', weight: 3, dashArray: '8 8', interactive: false }).addTo(map));
+      const key = trip.status === 'open' ? 'open' : 'route';
+      if (fitted === key) return;
+      fitted = key;
+      if (trip.status === 'open' && hasP) map.setView([trip.pickup_lat, trip.pickup_lng], 15);
+      else if (hasP && hasD) map.fitBounds([[trip.pickup_lat, trip.pickup_lng], [trip.drop_lat, trip.drop_lng]], { padding: [50, 80], maxZoom: 15 });
+      else if (hasP) map.setView([trip.pickup_lat, trip.pickup_lng], 15);
+    }
+
+    // ---------- ড্রাইভার ----------
+    function avatar(name, photo) {
+      const av = mk('span', 'rt-av');
+      const u = safeImg(photo);
+      if (u) { const im = mk('img'); im.src = u; im.alt = ''; im.loading = 'lazy'; im.onerror = () => { im.remove(); av.textContent = (name || 'চ').trim().charAt(0); }; av.appendChild(im); }
+      else av.textContent = (name || 'চ').trim().charAt(0);
+      return av;
+    }
+    function statsLine(s) {
+      if (!s || !s.rating_count) return 'নতুন চালক' + (s && s.trips ? ' · ' + bn(s.trips) + ' ট্রিপ' : '');
+      return '★ ' + bn(Number(s.rating).toFixed(1)) + ' · ' + bn(s.trips || 0) + ' ট্রিপ';
+    }
+    function whoRow(d) {
+      const row = mk('div', 'rt-who');
+      row.appendChild(avatar(d.name || d.driver_name, d.photo || d.driver_photo));
+      const t = mk('span', 'rt-who-t');
+      t.appendChild(mk('b', null, d.name || d.driver_name || 'চালক'));
+      const sm = mk('small');
+      sm.appendChild(mk('span', 'rt-star', statsLine(d.stats)));
+      sm.appendChild(document.createTextNode(' · ' + [d.vehicle_type, d.vehicle_number].filter(Boolean).join(' · ')));
+      t.appendChild(sm);
+      row.appendChild(t);
+      return row;
+    }
+    function routeBox() {
+      const r = mk('div', 'rt-route');
+      const l = mk('span', 'rt-route-l'); l.append(mk('i'), mk('span'), mk('i', 'o'));
+      const t = mk('span', 'rt-route-t');
+      t.append(mk('b', null, trip.pickup_text || trip.pickup_area || 'পিকআপ'), mk('b', null, trip.drop_text || trip.drop_area || 'গন্তব্য'));
+      r.append(l, t);
+      return r;
+    }
+
+    // ---------- অবস্থা অনুযায়ী ----------
+    function setPill(t, s) { $('rtPillT').textContent = t; $('rtPillS').textContent = s || ''; }
+    function remaining() {
+      if (!trip || !trip.expires_at) return '';
+      // সার্ভার ঘড়ি − ফোনের ঘড়ি (ফোনের সময় ভুল থাকলেও কাউন্টডাউন ঠিক থাকে)
+      const skew = trip.server_now && trip.__fetchedAt ? new Date(trip.server_now).getTime() - trip.__fetchedAt : 0;
+      const ms = new Date(trip.expires_at).getTime() - (Date.now() + skew);
+      if (ms <= 0) return 'মেয়াদ শেষ';
+      const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+      return 'রিকোয়েস্ট চালু থাকবে আরো ' + bn(m) + ':' + bn(String(s).padStart(2, '0'));
+    }
+
+    function renderOpen(body) {
+      setPill('কাছের চালকদের জানানো হয়েছে', remaining());
+      const hid = hidden();
+      const offers = (trip.offers || []).filter((o) => !hid.includes(o.id));
+      const h = mk('div', 'rt-h');
+      const h1 = mk('h1');
+      if (offers.length) { h1.appendChild(document.createTextNode('অফার এসেছে ')); h1.appendChild(mk('em', null, bn(offers.length) + 'টা')); }
+      else h1.textContent = 'অফারের অপেক্ষা';
+      h.append(h1, mk('span', null, 'আপনার ভাড়া ' + tk(trip.fare)));
+      body.appendChild(h);
+      if (!offers.length) {
+        const w = mk('div', 'rt-wait');
+        w.appendChild(svgI(['M12 7v5l3 2', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z']));
+        w.lastChild.setAttribute('style', 'fill:none;stroke:#FF6B35;stroke-width:1.6;stroke-linecap:round');
+        w.appendChild(mk('span', null, 'চালকরা দেখছেন। অফার এলে এখানে দেখাবে, সাধারণত ১–২ মিনিট লাগে।'));
+        w.appendChild(mk('span', null, 'বেশি দেরি হলে ভাড়া একটু বাড়িয়ে দেখুন।'));
+        body.appendChild(w);
+      }
+      offers.forEach((o) => {
+        const c = mk('div', 'rt-offer');
+        const row = whoRow(o);
+        const pr = mk('span', 'rt-price');
+        pr.appendChild(mk('b', null, tk(o.price)));
+        const diff = Math.round(Number(o.price) - Number(trip.fare));
+        if (diff > 0) pr.appendChild(mk('small', null, '+' + tk(diff)));
+        row.appendChild(pr);
+        c.appendChild(row);
+        const b2 = mk('div', 'rt-2');
+        const no = mk('button', 'rt-btn muted', 'বাদ'); no.type = 'button';
+        const ok = mk('button', 'rt-btn green', 'গ্রহণ করুন'); ok.type = 'button';
+        no.addEventListener('click', () => { hideOffer(o.id); render(); });
+        ok.addEventListener('click', () => acceptOffer(o, ok));
+        b2.append(no, ok);
+        c.appendChild(b2);
+        body.appendChild(c);
+      });
+      if (offers.length > lastOfferCount && lastOfferCount >= 0) { try { navigator.vibrate && navigator.vibrate(120); } catch (_) {} }
+      lastOfferCount = offers.length;
+      const foot = mk('div', 'rt-2');
+      const raise = mk('button', 'rt-btn soft', 'ভাড়া +১০ বাড়ান'); raise.type = 'button';
+      const cancel = mk('button', 'rt-btn red', 'রাইড বাতিল'); cancel.type = 'button';
+      raise.addEventListener('click', () => raiseFare(raise));
+      cancel.addEventListener('click', () => cancelRide(cancel));
+      foot.append(raise, cancel);
+      body.appendChild(foot);
+    }
+
+    function stepsBar() {
+      const now = trip.completed_at ? 4 : trip.started_at ? 3 : trip.arrived_at ? 2 : 1;
+      const box = mk('div', 'rt-steps');
+      ['কনফার্ম', 'চালক পৌঁছেছেন', 'যাত্রা চলছে', 'শেষ'].forEach((t, i) => {
+        const n = i + 1;
+        const s = mk('span', 'rt-step' + (n < now || (n === 4 && now === 4) ? ' done' : n === now ? ' now' : ''));
+        s.append(mk('i', null, n < now || now === 4 ? '✓' : bn(n)), mk('span', null, t));
+        box.appendChild(s);
+      });
+      return box;
+    }
+
+    function contactButtons(d) {
+      const ph = bdPhone(d.phone);
+      if (!ph) return null;
+      const b2 = mk('div', 'rt-2');
+      const call = mk('a', 'rt-btn navy'); call.href = 'tel:+' + ph;
+      call.append(svgI(['M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z']), document.createTextNode('কল করুন'));
+      const wa = mk('a', 'rt-btn wa'); wa.href = 'https://wa.me/' + ph; wa.target = '_blank'; wa.rel = 'noopener';
+      wa.append(svgI(['M3 21l1.6-4.7A9 9 0 1 1 8 19.6L3 21z']), document.createTextNode('হোয়াটসঅ্যাপ'));
+      b2.append(call, wa);
+      return b2;
+    }
+
+    function renderConfirmed(body) {
+      const st = trip.started_at ? 'যাত্রা চলছে' : trip.arrived_at ? 'চালক পিকআপে পৌঁছেছেন' : 'চালক আসছেন';
+      setPill(st, trip.started_at ? 'নিরাপদে পৌঁছান' : trip.arrived_at ? 'গাড়ির নম্বর মিলিয়ে উঠুন' : 'রাইড কনফার্ম হয়েছে');
+      body.appendChild(stepsBar());
+      const d = trip.driver || {};
+      const card = mk('div', 'rt-card');
+      card.appendChild(whoRow(d));
+      const cb = contactButtons(d);
+      if (cb) card.appendChild(cb);
+      body.appendChild(card);
+      const info = mk('div', 'rt-card');
+      info.appendChild(routeBox());
+      const fl = mk('div', 'rt-fare-line'); fl.append(mk('span', null, 'ভাড়া (চালককে সরাসরি দিন)'), mk('b', null, tk(trip.final_price || trip.fare)));
+      info.appendChild(fl);
+      body.appendChild(info);
+      const b2 = mk('div', 'rt-2');
+      const share = mk('button', 'rt-btn'); share.type = 'button';
+      share.append(svgI(['M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7', 'M16 6l-4-4-4 4', 'M12 2v13']), document.createTextNode('ট্রিপ শেয়ার'));
+      share.addEventListener('click', shareTrip);
+      b2.appendChild(share);
+      b2.appendChild(reportButton());
+      body.appendChild(b2);
+    }
+
+    function renderCompleted(body) {
+      setPill('রাইড শেষ', 'স্মার্ট ফেনীর সাথে থাকার জন্য ধন্যবাদ');
+      const done = mk('div', 'rt-done');
+      done.append(mk('small', null, 'মোট ভাড়া'), mk('b', null, tk(trip.final_price || trip.fare)));
+      body.appendChild(done);
+      const d = trip.driver || {};
+      const card = mk('div', 'rt-card');
+      card.appendChild(whoRow(d));
+      if (trip.my_rating) {
+        card.appendChild(mk('p', 'rt-note', 'আপনার রেটিং: ' + '★'.repeat(trip.my_rating.stars) + (trip.my_rating.comment ? ' · ' + trip.my_rating.comment : '')));
+      } else {
+        card.appendChild(mk('b', null, 'রাইডটা কেমন ছিল?'));
+        const stars = mk('div', 'rt-stars');
+        [1, 2, 3, 4, 5].forEach((n) => {
+          const b = mk('button'); b.type = 'button'; b.setAttribute('aria-label', bn(n) + ' স্টার');
+          if (n <= pickedStars) b.classList.add('on');
+          const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24');
+          const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', 'M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z'); s.appendChild(p);
+          b.appendChild(s);
+          b.addEventListener('click', () => { pickedStars = n; stars.querySelectorAll('button').forEach((x, i) => x.classList.toggle('on', i < n)); });
+          stars.appendChild(b);
+        });
+        card.appendChild(stars);
+        const ta = mk('textarea', 'rt-ta'); ta.rows = 2; ta.maxLength = 300; ta.placeholder = 'চালক সম্পর্কে কিছু বলবেন? (ঐচ্ছিক)'; ta.id = 'rtComment';
+        card.appendChild(ta);
+        const sb = mk('button', 'rt-btn orange', 'রেটিং দিন'); sb.type = 'button';
+        sb.addEventListener('click', () => rate(sb));
+        card.appendChild(sb);
+      }
+      body.appendChild(card);
+      const b2 = mk('div', 'rt-2');
+      const again = mk('a', 'rt-btn navy', 'আবার রাইড'); again.href = '/ride';
+      b2.append(again, reportButton());
+      body.appendChild(b2);
+    }
+
+    function renderEnded(body, expired) {
+      setPill(expired ? 'কোনো চালক রাজি হননি' : 'রাইড বাতিল হয়েছে', expired ? 'রিকোয়েস্টের মেয়াদ শেষ' : '');
+      const w = mk('div', 'rt-wait');
+      w.appendChild(mk('b', null, expired ? 'এবার কোনো চালক পাওয়া যায়নি' : 'এই রাইড বাতিল করা হয়েছে'));
+      if (expired) w.appendChild(mk('span', null, 'ভাড়া একটু বাড়িয়ে বা আরো গাড়ির ধরন বেছে আবার চেষ্টা করুন।'));
+      body.appendChild(w);
+      const info = mk('div', 'rt-card'); info.appendChild(routeBox()); body.appendChild(info);
+      const again = mk('a', 'rt-btn orange', 'আবার রিকোয়েস্ট করুন'); again.href = '/ride';
+      body.appendChild(again);
+    }
+
+    function reportButton() {
+      const b = mk('button', 'rt-btn muted'); b.type = 'button';
+      if (trip.has_open_report) { b.textContent = 'রিপোর্ট জমা আছে'; b.disabled = true; return b; }
+      b.append(svgI(['M4 21V4h12l-1.5 4L16 12H4']), document.createTextNode('সমস্যা? রিপোর্ট'));
+      b.addEventListener('click', openReport);
+      return b;
+    }
+
+    function render() {
+      const body = $('rtBody');
+      body.textContent = '';
+      if (!trip) return;
+      $('rt').dataset.state = trip.status;
+      if (trip.status === 'open') renderOpen(body);
+      else if (trip.status === 'confirmed') renderConfirmed(body);
+      else if (trip.status === 'completed') renderCompleted(body);
+      else renderEnded(body, trip.status === 'expired');
+      drawMap();
+    }
+
+    // ---------- কাজ ----------
+    async function act(btn, fn, okMsg, fb) {
+      if (busy) return false;
+      busy = true; if (btn) btn.disabled = true;
+      try {
+        const { error } = await fn();
+        if (error) { toast(errMsg(error, fb || 'হয়নি, আবার চেষ্টা করুন')); return false; }
+        if (okMsg) toast(okMsg, 'success');
+        await load();
+        return true;
+      } catch (_) { toast('নেটওয়ার্ক সমস্যা, আবার চেষ্টা করুন'); return false; }
+      finally { busy = false; if (btn) btn.disabled = false; }
+    }
+    function confirmBox(title, text, okLabel, okCls) {
+      return new Promise((resolve) => {
+        $('rtModalT').textContent = title;
+        const b = $('rtModalBody'); b.textContent = '';
+        if (text) b.appendChild(mk('p', 'rt-note', text));
+        const row = mk('div', 'rt-2');
+        const no = mk('button', 'rt-btn muted', 'না'); no.type = 'button';
+        const ok = mk('button', 'rt-btn ' + (okCls || 'orange'), okLabel); ok.type = 'button';
+        const close = (v) => { $('rtModal').hidden = true; resolve(v); };
+        no.addEventListener('click', () => close(false));
+        ok.addEventListener('click', () => close(true));
+        row.append(no, ok); b.appendChild(row);
+        $('rtModal').hidden = false;
+      });
+    }
+    async function acceptOffer(o, btn) {
+      const ok = await confirmBox('অফার গ্রহণ করবেন?', (o.driver_name || 'চালক') + ' · ' + tk(o.price) + '। গ্রহণের পর আর বাতিল করা যাবে না।', 'গ্রহণ করুন', 'green');
+      if (!ok) return;
+      act(btn, () => supabase.rpc('local_ride_customer_accept_offer', { p_offer_id: o.id }), 'রাইড কনফার্ম হয়েছে ✓');
+    }
+    function raiseFare(btn) { act(btn, () => supabase.rpc('local_ride_raise_fare', { p_request_id: id, p_amount: 10 }), 'ভাড়া ৳১০ বাড়ানো হয়েছে'); }
+    async function cancelRide(btn) {
+      const ok = await confirmBox('রাইড বাতিল করবেন?', 'বাতিল করলে চালকদের কাছে আর দেখাবে না।', 'বাতিল করুন', 'navy');
+      if (!ok) return;
+      act(btn, () => supabase.rpc('local_ride_cancel', { p_request_id: id }), 'রাইড বাতিল হয়েছে');
+    }
+    function rate(btn) {
+      if (!pickedStars) { toast('স্টার বেছে নিন', 'warning'); return; }
+      const c = ($('rtComment') && $('rtComment').value.trim()) || null;
+      act(btn, () => supabase.rpc('local_ride_rate', { p_request_id: id, p_stars: pickedStars, p_comment: c }), 'ধন্যবাদ, রেটিং জমা হয়েছে');
+    }
+    function openReport() {
+      $('rtModalT').textContent = 'কী সমস্যা হয়েছে?';
+      const b = $('rtModalBody'); b.textContent = '';
+      let reason = '';
+      REASONS.forEach(([k, t]) => {
+        const l = mk('label', 'rt-reason');
+        const r = mk('input'); r.type = 'radio'; r.name = 'rtReason'; r.value = k;
+        r.addEventListener('change', () => { reason = k; });
+        l.append(r, document.createTextNode(t));
+        b.appendChild(l);
+      });
+      const ta = mk('textarea', 'rt-ta'); ta.rows = 2; ta.maxLength = 500; ta.placeholder = 'বিস্তারিত (ঐচ্ছিক)';
+      b.appendChild(ta);
+      const row = mk('div', 'rt-2');
+      const no = mk('button', 'rt-btn muted', 'বাতিল'); no.type = 'button';
+      const ok = mk('button', 'rt-btn orange', 'রিপোর্ট পাঠান'); ok.type = 'button';
+      no.addEventListener('click', () => { $('rtModal').hidden = true; });
+      ok.addEventListener('click', async () => {
+        if (!reason) { toast('একটা কারণ বেছে নিন', 'warning'); return; }
+        const done = await act(ok, () => supabase.rpc('local_ride_report_create', { p_request_id: id, p_reason: reason, p_note: ta.value.trim() || null }), 'রিপোর্ট জমা হয়েছে, অ্যাডমিন দেখবেন');
+        if (done) $('rtModal').hidden = true;
+      });
+      row.append(no, ok); b.appendChild(row);
+      $('rtModal').hidden = false;
+    }
+    async function shareTrip() {
+      const d = trip.driver || {};
+      const text = 'আমি স্মার্ট ফেনী লোকাল রাইডে আছি। ' + [d.vehicle_type, d.vehicle_number].filter(Boolean).join(' ') + (d.name ? ', চালক ' + d.name : '') + '। ' + (trip.pickup_text || '') + ' থেকে ' + (trip.drop_text || '') + '।';
+      try {
+        if (navigator.share) { await navigator.share({ text }); return; }
+        await navigator.clipboard.writeText(text);
+        toast('ট্রিপের তথ্য কপি হয়েছে, যাকে খুশি পাঠান', 'success');
+      } catch (_) { /* ইউজার বাতিল করেছে */ }
+    }
+
+    // ---------- লোড ও রিফ্রেশ ----------
+    async function load() {
+      const { data, error } = await supabase.rpc('local_ride_trip', { p_request_id: id });
+      if (error) {
+        if (/FORBIDDEN|AUTH_REQUIRED/.test(String(error.message || ''))) { setPill('রাইড পাওয়া যায়নি', ''); $('rtBody').textContent = ''; $('rtBody').appendChild(mk('p', 'rt-note', 'এই রাইডটা আপনার অ্যাকাউন্টে নেই। লগইন ঠিক আছে কিনা দেখুন।')); stopPoll(); }
+        return;
+      }
+      data.__fetchedAt = Date.now();
+      const before = trip ? trip.status + (trip.arrived_at || '') + (trip.started_at || '') : '';
+      trip = data;
+      render();
+      const after = trip.status + (trip.arrived_at || '') + (trip.started_at || '');
+      if (before && before !== after) { try { navigator.vibrate && navigator.vibrate([80, 60, 80]); } catch (_) {} }
+      if (!['open', 'confirmed'].includes(trip.status)) stopPoll();
+    }
+    function startPoll() {
+      stopPoll();
+      pollT = setInterval(() => { if (!document.hidden && !busy) load(); }, POLL_MS);
+      tickT = setInterval(() => { if (trip && trip.status === 'open') $('rtPillS').textContent = remaining(); }, 1000);
+    }
+    function stopPoll() { clearInterval(pollT); clearInterval(tickT); pollT = tickT = null; }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && trip && ['open', 'confirmed'].includes(trip.status)) load(); });
+
+    const css = document.createElement('style');
+    css.textContent = '.rt-radar{position:relative;width:220px;height:220px}.rt-radar span{position:absolute;inset:0;border-radius:50%;background:rgba(255,107,53,.18);border:1.5px solid rgba(255,107,53,.45);animation:rtRad 3s ease-out infinite;opacity:0}.rt-radar span:nth-child(2){animation-delay:1s}.rt-radar span:nth-child(3){animation-delay:2s}@keyframes rtRad{0%{transform:scale(.1);opacity:.9}100%{transform:scale(1);opacity:0}}';
+    document.head.appendChild(css);
+
+    async function init() {
+      if (!id) { location.replace('/services/local-ride'); return; }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setPill('লগইন করুন', ''); if (window.openAuthModal) window.openAuthModal('login'); supabase.auth.onAuthStateChange((e, s) => { if (s) location.reload(); }); return; }
+      initMap();
+      await load();
+      if (trip && ['open', 'confirmed'].includes(trip.status)) startPoll();
+    }
+    init();
+  </script>
+</BaseLayout>
