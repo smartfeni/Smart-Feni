@@ -221,17 +221,18 @@ export async function POST({ request }) {
     }
 
     const webSubs = subscriptions.filter((s) => s.platform === 'android' ? false : true);
-    // Android রাউটিং: Pro নোটিফিকেশন -> Pro অ্যাপের টোকেন; বাকি -> মেইন অ্যাপের টোকেন।
-    // কাঙ্ক্ষিত অ্যাপের টোকেন না থাকলে অন্যটিতে যায় (Pro ইনস্টল না থাকলে সব আগের মতো মেইনে)।
+    // Android রাউটিং (SF, ২৭ নভে ২০২৬):
+    // - Pro লিংক -> Pro অ্যাপ; Pro না থাকলে মেইনে।
+    // - অ্যাডমিন লিংক (/admin, /console) -> Admin অ্যাপ + মেইন অ্যাপ দুটোতেই (Admin অ্যাপ পুরোপুরি চালু না হওয়া পর্যন্ত); Pro-তে কখনো না।
+    // - বাকি সব (কাস্টমারের) -> শুধু মেইন অ্যাপ; মেইন না থাকলে push নয় (ইনবক্সে থাকে), Pro/Admin-এ কখনো না।
     const proAndroidSubs = subscriptions.filter((s) => s.platform === 'android' && s.app_id === 'pro');
     const adminAndroidSubs = subscriptions.filter((s) => s.platform === 'android' && s.app_id === 'admin');
     const mainAndroidSubs = subscriptions.filter((s) => s.platform === 'android' && s.app_id !== 'pro' && s.app_id !== 'admin');
-    const proNotif = isProNotification(action_url);
-    const preferredAndroid = proNotif ? proAndroidSubs : mainAndroidSubs;
-    const fallbackAndroid = proNotif ? mainAndroidSubs : proAndroidSubs;
-    const androidSubs = (isAdminNotification(action_url) && adminAndroidSubs.length > 0)
-      ? adminAndroidSubs
-      : (preferredAndroid.length > 0 ? preferredAndroid : fallbackAndroid);
+    const androidSubs = isProNotification(action_url)
+      ? (proAndroidSubs.length > 0 ? proAndroidSubs : mainAndroidSubs)
+      : isAdminNotification(action_url)
+        ? [...adminAndroidSubs, ...mainAndroidSubs]
+        : mainAndroidSubs;
 
     let sentCount = 0;
     const staleWebIds = [];        // web: ডিলিট হবে
