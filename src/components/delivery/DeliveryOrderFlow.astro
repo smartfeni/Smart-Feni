@@ -347,6 +347,7 @@ const guideReview = [
   import { supabase } from '../../lib/supabase.js';
   import { loadLeaflet as sfLoadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
   import { addBaseMap } from '../../lib/baseMap.js';
+  import { addFeniOverlay } from '../../lib/feniOverlay.js';
   import { splitMapLink, requestCurrentLocation } from '../../lib/mapLinks.js';
   import {
     UPAZILAS,
@@ -594,40 +595,12 @@ const guideReview = [
     L.control.zoom({ position: 'bottomleft' }).addTo(map); // উপরে back/ধাপ বার, তাই নিচে বাঁয়ে
     map.setView(FENI_CENTER, 10);
     addBaseMap(L, map); // স্মার্ট ফেনী ভেক্টর + বাংলা HTML লেবেল, ব্যর্থ হলে OSM
-    if (geo) {
-      // সব ইউনিয়নের পাতলা বর্ডার + নাম (জুম ১২+); ট্যাপ/ড্র্যাগে বাধা দেয় না
-      L.geoJSON(geo, {
-        interactive: false,
-        style: () => ({ color: '#1B2A4A', weight: 1, opacity: 0.35, fill: false }),
-      }).addTo(map);
-      const unionPts = getLabelPoints(geo).unions || {};
-      const unionLabels = L.layerGroup();
-      Object.keys(unionPts).forEach((en) => {
-        const chip = document.createElement('div');
-        chip.className = 'sfo-mapchip';
-        chip.textContent = getUnionBn(en) || en;
-        L.marker(unionPts[en], {
-          interactive: false,
-          keyboard: false,
-          icon: L.divIcon({ className: '', html: chip, iconSize: [0, 0], iconAnchor: [0, 0] }),
-        }).addTo(unionLabels);
-      });
-      const syncUnionLabels = () => {
-        if (map.getZoom() >= 12) {
-          if (!map.hasLayer(unionLabels)) unionLabels.addTo(map);
-        } else if (map.hasLayer(unionLabels)) {
-          map.removeLayer(unionLabels);
-        }
-      };
-      map.on('zoomend', syncUnionLabels);
-      L.polyline(getDistrictBorder(geo), { color: '#FF6B35', weight: 3, opacity: 0.9, interactive: false }).addTo(map);
-      map.fitBounds(getFeniBounds(geo, 0.02));
-      map.setMaxBounds(getFeniBounds(geo, 0.06));
-      map.setMinZoom(9);
-      syncUnionLabels();
-    }
+    // শেয়ার্ড ফেনী ম্যাপ (src/lib/feniOverlay.js): উপজেলা/ইউনিয়ন বর্ডার + নাম, ফ্রি প্যান
+    // (সোনাগাজীর চরসহ যেকোনো কোণ টেনে মাঝের পিনে আনা যায়)। ট্যাপ/ড্র্যাগে বাধা দেয় না।
+    if (geo) map.fitBounds(getFeniBounds(geo, 0.02));
+    const ovReady = geo ? addFeniOverlay(L, map, { geo }).catch(() => null) : Promise.resolve(null);
     const wrap = el.parentElement;
-    const m = { kind, map, hl: L.layerGroup().addTo(map), dot: null, user: false, wrap, cpin: wrap.querySelector('.sfo-cpin') };
+    const m = { kind, map, hl: L.layerGroup().addTo(map), dot: null, user: false, wrap, cpin: wrap.querySelector('.sfo-cpin'), ovReady };
     wireCenterPin(m, el);
     return m;
   }
@@ -652,24 +625,12 @@ const guideReview = [
     const L = window.L;
     m.hl.clearLayers();
     const en = UNION_EN_BY_BN[unionBn];
-    if (!geo || !en) return;
+    if (!geo || !en) { m.ovReady.then((ov) => ov && ov.highlight(null)); return; }
     const feature = (geo.features || []).find((f) => f.properties && f.properties.shapeName === en);
     if (!feature) return;
-    const layer = L.geoJSON(feature, {
-      interactive: false,
-      style: { color: '#FF6B35', weight: 2.5, dashArray: '7 6', fillColor: '#FF6B35', fillOpacity: 0.08 },
-    }).addTo(m.hl);
-    const pt = getLabelPoints(geo).unions[en];
-    if (pt) {
-      const chip = document.createElement('div');
-      chip.className = 'sfo-mapchip';
-      chip.textContent = unionBn;
-      L.marker(pt, {
-        interactive: false,
-        keyboard: false,
-        icon: L.divIcon({ className: '', html: chip, iconSize: [0, 0], iconAnchor: [0, 0] }),
-      }).addTo(m.hl);
-    }
+    // হাইলাইট শেয়ার্ড ওভারলের স্টাইলে (ইউনিয়ন গাঢ় + নামের চিপ পিনের নিচে)
+    m.ovReady.then((ov) => ov && ov.highlight(en));
+    const layer = L.geoJSON(feature);
     if (fit) {
       m.user = false;
       m.map.fitBounds(layer.getBounds(), { padding: [24, 24], maxZoom: 16 });
@@ -1946,8 +1907,8 @@ const guideReview = [
   .sfo-cpin-ground { position: absolute; left: -6px; top: -3px; width: 12px; height: 6px; border-radius: 50%; background: radial-gradient(closest-side, rgba(27, 42, 74, 0.45), rgba(27, 42, 74, 0)); transition: transform 0.18s, opacity 0.18s; }
   .sfo-moving .sfo-cpin-svg { transform: translateY(-12px); }
   .sfo-moving .sfo-cpin-ground { transform: scale(1.6); opacity: 0.55; }
-  .sfo-cpin-bubble { position: absolute; left: 0; bottom: 56px; transform: translateX(-50%); max-width: min(270px, 78vw); background: #fff; border-radius: 14px; padding: 7px 13px 6px; box-shadow: 0 6px 18px rgba(27, 42, 74, 0.2); text-align: center; line-height: 1.25; transition: opacity 0.15s, transform 0.15s; }
-  .sfo-cpin-bubble::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: #fff; transform: rotate(45deg); border-radius: 2px; }
+  .sfo-cpin-bubble { position: absolute; left: 0; bottom: 56px; transform: translateX(-50%); max-width: min(270px, 78vw); background: var(--sf-glass-strong-bg); -webkit-backdrop-filter: var(--sf-glass-blur); backdrop-filter: var(--sf-glass-blur); border: 1px solid var(--sf-glass-edge); border-radius: 14px; padding: 7px 13px 6px; box-shadow: var(--sf-glass-shadow); text-align: center; line-height: 1.25; transition: opacity 0.15s, transform 0.15s; }
+  .sfo-cpin-bubble::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: var(--sf-glass-strong-bg); transform: rotate(45deg); border-radius: 2px; }
   .sfo-cpin-bubble[hidden] { display: none; }
   .sfo-cpin-t1 { display: block; font-size: 13.5px; font-weight: 700; color: #1b2a4a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sfo-cpin-t2 { display: block; font-size: 11.5px; font-weight: 500; color: #5b6b86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1956,7 +1917,7 @@ const guideReview = [
   .sfo-cpin-bubble[data-state="warn"]::after { background: #fff4ec; }
   .sfo-cpin-bubble[data-state="warn"] .sfo-cpin-t1 { color: #c2410c; font-size: 12.5px; }
   .sfo-moving .sfo-cpin-bubble { opacity: 0; transform: translateX(-50%) translateY(4px); }
-  .sfo-mapfab { position: absolute; right: 12px; bottom: 42px; z-index: 5; height: 44px; padding: 0 16px 0 13px; border: 0; border-radius: 22px; background: #fff; color: #1b2a4a; box-shadow: 0 3px 12px rgba(27, 42, 74, 0.2); display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 700; }
+  .sfo-mapfab { position: absolute; right: 12px; bottom: 42px; z-index: 5; height: 44px; padding: 0 16px 0 13px; border: 1px solid var(--sf-glass-edge); border-radius: 22px; background: var(--sf-glass-bg); -webkit-backdrop-filter: var(--sf-glass-blur); backdrop-filter: var(--sf-glass-blur); color: #1b2a4a; box-shadow: var(--sf-glass-shadow); display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 700; }
   .sfo-mapfab:active { transform: scale(0.97); }
   .sfo-mapwrap .leaflet-bottom.leaflet-left { bottom: 30px; }
   .sfo-mapwrap .leaflet-bottom.leaflet-right { bottom: 28px; }

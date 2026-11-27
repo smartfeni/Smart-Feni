@@ -642,6 +642,7 @@
   import { supabase } from '../../lib/supabase.js';
   import { loadLeaflet as sfLoadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
   import { addBaseMap } from '../../lib/baseMap.js';
+  import { deepen, upazilaColor, DISTRICT_LINE, DISTRICT_GLOW } from '../../lib/feniOverlay.js';
   import { trackEvent } from '../../lib/analytics.js';
   import { getCurrentPosition } from '../../lib/native-bridge.js';
   import {
@@ -875,21 +876,22 @@
     Lf.geoJSON(geo, {
       pane: 'sfUnionLines',
       interactive: false,
-      style: () => ({ color: BORDER_COLORS.union, weight: 1.2, opacity: 0.8, fill: false }),
+      // নতুন শেয়ার্ড স্টাইল: উপজেলার গাঢ় রঙে সরু ড্যাশ
+      style: (f: any) => ({ color: deepen(upazilaColor(getUnionUpazilaId(f && f.properties && f.properties.shapeName))), weight: 1, opacity: 0.55, dashArray: '3 4', fill: false }),
     }).addTo(map);
 
     // ফেনী জেলার পুরো বাইরের সীমানা — সবচেয়ে বোল্ড (গ্লো + সাদা হ্যালো + কমলা লাইন)
     const border = getDistrictBorder(geo);
     distGlow = Lf.polyline(border, {
-      pane: 'sfDistrictGlow', color: BORDER_COLORS.district, weight: 18, opacity: 0.2,
+      pane: 'sfDistrictGlow', color: DISTRICT_GLOW, weight: 14, opacity: 0.18,
       lineCap: 'round', lineJoin: 'round', interactive: false,
     }).addTo(map);
     distHalo = Lf.polyline(border, {
-      pane: 'sfDistrictHalo', color: '#ffffff', weight: 11, opacity: 0.95,
+      pane: 'sfDistrictHalo', color: '#ffffff', weight: 7, opacity: 0.95,
       lineCap: 'round', lineJoin: 'round', interactive: false,
     }).addTo(map);
     distLine = Lf.polyline(border, {
-      pane: 'sfDistrictLine', color: BORDER_COLORS.district, weight: 5, opacity: 1,
+      pane: 'sfDistrictLine', color: DISTRICT_LINE, weight: 3, opacity: 1,
       lineCap: 'round', lineJoin: 'round', interactive: false,
     }).addTo(map);
 
@@ -928,9 +930,9 @@
   function applyDistrictStyle() {
     if (!distLine) return;
     const c = viewMode === 'country';
-    distGlow.setStyle({ weight: c ? 12 : 18 });
-    distHalo.setStyle({ weight: c ? 6 : 11 });
-    distLine.setStyle({ weight: c ? 3 : 5 });
+    distGlow.setStyle({ weight: c ? 10 : 14 });
+    distHalo.setStyle({ weight: c ? 5 : 7 });
+    distLine.setStyle({ weight: c ? 2 : 3 });
   }
 
   function clearLayers() {
@@ -989,7 +991,7 @@
 
       layerGroup.addLayer(
         Lf.polyline(borders[u.id], {
-          pane: 'sfBorders', color: BORDER_COLORS.upazila, weight: 3, opacity: 1,
+          pane: 'sfBorders', color: deepen(u.color, 0.25), weight: 2.6, opacity: 1,
           lineCap: 'round', lineJoin: 'round', interactive: false,
         })
       );
@@ -1018,8 +1020,8 @@
     // ইউনিয়নের বর্ডার টিল (BORDER_COLORS.union); নির্বাচিতটা গাঢ় টিলে মোটা।
     // ফিল উপজেলার নিজের রঙে হালকা। লেজেন্ডে ইউনিয়ন অফ থাকলে বর্ডার বন্ধ।
     return selected
-      ? { stroke: true, color: '#155E75', weight: 3.5, opacity: 1, fillColor: color, fillOpacity: 0.5 }
-      : { stroke: vis.union, color: BORDER_COLORS.union, weight: 1.8, opacity: 0.95, fillColor: color, fillOpacity: 0.14 };
+      ? { stroke: true, color: deepen(color, 0.2), weight: 3.5, opacity: 1, dashArray: null, fillColor: color, fillOpacity: 0.4 }
+      : { stroke: vis.union, color: deepen(color), weight: 1.4, opacity: 0.75, dashArray: '3 4', fillColor: color, fillOpacity: 0.14 };
   }
 
   function setUnionSelection(name: string | null, color: string) {
@@ -1066,7 +1068,7 @@
       );
       layerGroup.addLayer(
         Lf.polyline(borders[o.id], {
-          pane: 'sfBorders', color: BORDER_COLORS.upazila, weight: 1.5, opacity: 0.55, dashArray: '4 4', interactive: false,
+          pane: 'sfBorders', color: deepen(o.color, 0.25), weight: 1.5, opacity: 0.55, dashArray: '4 4', interactive: false,
         })
       );
     });
@@ -1097,7 +1099,7 @@
     // উপজেলার বাইরের সীমানা — একটু মোটা
     layerGroup.addLayer(
       Lf.polyline(borders[upazilaId], {
-        pane: 'sfBorders', color: BORDER_COLORS.upazila, weight: 4.5, opacity: 1,
+        pane: 'sfBorders', color: deepen(u.color, 0.25), weight: 4, opacity: 1,
         lineCap: 'round', lineJoin: 'round', interactive: false,
       })
     );
@@ -1527,7 +1529,12 @@
   legendEl.querySelectorAll('.ls-leg-row').forEach((row) => {
     const el = row as HTMLElement;
     const level = el.dataset.level as string;
-    el.style.setProperty('--c', (BORDER_COLORS as Record<string, string>)[level]);
+    // লেজেন্ড নতুন স্টাইলে: জেলা নেভি, উপজেলা ৬ রঙের দাগ, ইউনিয়ন ধূসর ড্যাশ
+    const LEGEND_COLOR: Record<string, string> = { country: BORDER_COLORS.country, district: DISTRICT_LINE, upazila: '#64748b', union: '#94a3b8' };
+    el.style.setProperty('--c', LEGEND_COLOR[level]);
+    const legLine = el.querySelector('.ls-leg-line') as HTMLElement | null;
+    if (legLine && level === 'upazila') legLine.style.borderImage = 'linear-gradient(90deg,' + UPAZILAS.map((x: any) => x.color).join(',') + ') 1';
+    if (legLine && level === 'union') legLine.style.borderTopStyle = 'dashed';
     el.style.setProperty('--w', LEGEND_WEIGHT[level] || '3px');
     el.addEventListener('click', () => {
       vis[level] = !vis[level];

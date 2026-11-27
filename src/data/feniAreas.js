@@ -38,12 +38,13 @@ export const BORDER_COLORS = {
 
 // উপজেলা — id (slug) LocationSelector-এর সাথে মেলে, name বাংলা
 export const UPAZILAS = [
-  { id: 'feni-sadar', name: 'ফেনী সদর', color: '#e74c3c' },
-  { id: 'chhagalnaiya', name: 'ছাগলনাইয়া', color: '#27ae60' },
-  { id: 'daganbhuiyan', name: 'দাগনভূঞা', color: '#2980b9' },
-  { id: 'parshuram', name: 'পরশুরাম', color: '#e67e22' },
-  { id: 'fulgazi', name: 'ফুলগাজী', color: '#8e44ad' },
-  { id: 'sonagazi', name: 'সোনাগাজী', color: '#16a085' },
+  // রঙ: নতুন শেয়ার্ড ম্যাপ প্যালেট (src/lib/feniOverlay.js, ২৭ নভে ২০২৬)
+  { id: 'feni-sadar', name: 'ফেনী সদর', color: '#F0526F' },
+  { id: 'chhagalnaiya', name: 'ছাগলনাইয়া', color: '#1FAA6E' },
+  { id: 'daganbhuiyan', name: 'দাগনভূঞা', color: '#3478F6' },
+  { id: 'parshuram', name: 'পরশুরাম', color: '#F29A0B' },
+  { id: 'fulgazi', name: 'ফুলগাজী', color: '#8A5CF5' },
+  { id: 'sonagazi', name: 'সোনাগাজী', color: '#0AA3B5' },
 ];
 
 // উপজেলা → ইউনিয়ন/পৌরসভা (geojson-এর shapeName অনুযায়ী ইংরেজি নাম)

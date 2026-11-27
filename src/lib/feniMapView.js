@@ -4,16 +4,16 @@
 // ফেনীর পুরো ম্যাপ দেখাবে; ফেনীর বাইরে কোথাও পিন বসবে না।
 // ============================================================
 import { getFeniBounds, findAreaAt, loadFeniGeo } from '../data/feniAreas.js';
+import { freePanToFeni } from './feniOverlay.js';
 
-// সীমার চারপাশে একটু ফাঁকা, যাতে কিনারের জায়গায় পিন বসাতে টানাটানি না হয়
+// সীমার চারপাশে একটু ফাঁকা (পুরনো কলারদের জন্য রাখা)
 export const FENI_LOCK_PAD = 0.06;
 
-// ম্যাপ ফেনীর সীমার বাইরে প্যান/জুম-আউট করা যাবে না
+// ফেনীতে আটকানো — এখন "ফ্রি প্যান" (SF, ২৭ নভে): ফেনীর যেকোনো কোণ (সোনাগাজীর চরসহ)
+// টেনে ম্যাপের মাঝে আনা যায়; ফেনী থেকে অনেক দূরে গেলে নরমভাবে ফিরে আসে।
 export function lockToFeni(map, geo) {
-  if (!map || !geo) return;
-  map.setMaxBounds(getFeniBounds(geo, FENI_LOCK_PAD));
-  map.options.maxBoundsViscosity = 1.0;
-  if (!(map.options.minZoom >= 9)) map.setMinZoom(9);
+  if (!map || !geo || !window.L) return;
+  freePanToFeni(window.L, map, getFeniBounds(geo, 0));
 }
 
 // geo নিজে লোড করে লক (যেসব পেজে geo আগে লোড হয় না)
