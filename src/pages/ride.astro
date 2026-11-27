@@ -269,6 +269,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     import { loadLeaflet, mapRetryBox, removeMapRetryBox } from '../lib/leafletLoader.js';
     import { addBaseMap } from '../lib/baseMap.js';
     import { loadFeniGeo, findAreaAt, getLabelPoints, getFeniBounds } from '../data/feniAreas.js';
+    import { lockToFeni, fitFullFeni } from '../lib/feniMapView.js';
     import { getCurrentPosition } from '../lib/native-bridge.js';
     import { fetchDeliveryFare } from '../lib/fareCalc.js';
     import { fetchNearby, etaMinutes, carIcon } from '../lib/rideLive.js';
@@ -497,6 +498,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
           },
         });
       } catch (_) { geo = null; }
+      if (geo) lockToFeni(map, geo);
       if (st.pLat == null) locate(true); else updatePickupFromMap();
       drawForStep();
     }
@@ -504,11 +506,18 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     function locate(silent) {
       getCurrentPosition((pos) => {
         const lat = pos.coords.latitude, lng = pos.coords.longitude;
+        // ফেনীর বাইরে (প্রবাস ইত্যাদি) হলে সেখানে যাবে না, ফেনীর পুরো ম্যাপ দেখাবে
+        if (geo && !findAreaAt(lat, lng, geo)) {
+          toast('আপনি এখন ফেনীর বাইরে আছেন — ম্যাপ সরিয়ে ফেনীর ভেতরে পিন বসান', 'warning');
+          if (map) fitFullFeni(map, geo, sheetPad());
+          return;
+        }
         st.pManual = false;
         if (map) map.setView([lat, lng], 17);
       }, () => {
         if (!silent) toast('লোকেশন পাওয়া যায়নি। ম্যাপ সরিয়ে পিন বসান।', 'warning');
-        if (st.pLat == null && map) updatePickupFromMap();
+        if (st.pLat == null && map && geo) fitFullFeni(map, geo, sheetPad());
+        else if (st.pLat == null && map) updatePickupFromMap();
       }, { enableHighAccuracy: true, timeout: 9000 });
     }
 
