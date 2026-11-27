@@ -62,6 +62,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         </span>
         <button type="button" class="rd-link" id="rdPChange">বদলান</button>
       </div>
+      <p class="rd-near" id="rdNear" hidden></p>
       <div class="rd-sel-row" id="rdPSel" hidden>
         <label class="rd-sel">উপজেলা <span class="required-mark">*</span>
           <select id="rdPUpa"><option value="">বাছুন</option></select>
@@ -190,6 +191,10 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     .rd-place-t b { font-size: 16px; }
     .rd-place-t small { font-size: 13px; color: #5A6E85; }
     .rd-place.bad { background: #FDECEA; border-color: #F8C9C4; }
+    .rd-near { margin: -4px 0 0; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #17663F; }
+    .rd-near::before { content: ''; width: 8px; height: 8px; border-radius: 4px; background: #16A34A; flex-shrink: 0; }
+    .rd-near.none { color: #8FA0BC; }
+    .rd-near.none::before { background: #CBD3DF; }
     .rd-link { border: 0; background: none; color: #FF6B35; font: inherit; font-size: 14px; font-weight: 700; padding: 8px 4px; cursor: pointer; text-decoration: none; text-align: center; }
     .rd-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: #5A6E85; }
     .rd-field input, .rd-field textarea { border-radius: 14px; border: 1.5px solid #E2E6EE; padding: 0 14px; height: 46px; font: inherit; font-size: 16px; color: #1B2A4A; background: #fff; box-sizing: border-box; width: 100%; }
@@ -266,6 +271,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     import { loadFeniGeo, findAreaAt, getLabelPoints, getFeniBounds } from '../data/feniAreas.js';
     import { getCurrentPosition } from '../lib/native-bridge.js';
     import { fetchDeliveryFare } from '../lib/fareCalc.js';
+    import { fetchNearby, etaMinutes, carIcon } from '../lib/rideLive.js';
     import { FENI_CENTER, bn, estimateTrip, kmLabel, unionEnOf, upazilaBnOfUnionEn, pickupIcon, dropIcon, vehicleMeta } from '../lib/rideMap.js';
 
     const $ = (id) => document.getElementById(id);
@@ -293,6 +299,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
     };
     let suggest = null;
     let unionLayer = null, pMarker = null, dMarker = null, line = null;
+    let carMarkers = [], nearT = null, nearAt = 0;
     const avail = {};
     let submitting = false;
 
@@ -378,6 +385,7 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
         if (step === 2 || step === 3) { if (!map.hasLayer(unionLayer)) unionLayer.addTo(map); styleUnions(); }
         else if (map.hasLayer(unionLayer)) map.removeLayer(unionLayer);
       }
+      if (step !== 1) clearCars();
       if (step === 1) {
         map.dragging.enable();
         if (st.pLat != null) map.setView([st.pLat, st.pLng], Math.max(map.getZoom(), 15), { animate: false });
@@ -408,7 +416,36 @@ import BaseLayout from '../components/layout/BaseLayout.astro';
       }
       paintPickup();
       save();
+      scheduleNearby();
     }
+
+    // ---------- আশেপাশের গাড়ি (ধাপ ১) ----------
+    function clearCars() { carMarkers.forEach((m) => map.removeLayer(m)); carMarkers = []; }
+    function scheduleNearby() {
+      clearTimeout(nearT);
+      nearT = setTimeout(loadNearby, Date.now() - nearAt > 20000 ? 300 : 1500);
+    }
+    async function loadNearby() {
+      if (!map || step !== 1 || st.pLat == null) return;
+      nearAt = Date.now();
+      const r = await fetchNearby(st.pLat, st.pLng);
+      if (step !== 1) return;
+      clearCars();
+      const box = $('rdNear');
+      if (!r) { box.hidden = true; return; }
+      (r.cars || []).forEach((c) => carMarkers.push(L.marker([c.lat, c.lng], { icon: carIcon(L, Math.abs(Math.round(c.lat * 7919 + c.lng * 104729)) % 360), interactive: false }).addTo(map)));
+      box.hidden = false;
+      if (r.count > 0) {
+        box.className = 'rd-near';
+        const m = etaMinutes(Number(r.nearest_km));
+        box.textContent = 'আশেপাশে ' + bn(r.count) + 'টা গাড়ি অনলাইন' + (m ? ' · সবচেয়ে কাছেরটা ~' + bn(m) + ' মিনিট দূরে' : '');
+      } else {
+        box.className = 'rd-near none';
+        box.textContent = 'এখন কাছাকাছি কোনো গাড়ি অনলাইন নেই, তবু রিকোয়েস্ট দিতে পারবেন';
+      }
+    }
+    setInterval(() => { if (!document.hidden && step === 1) loadNearby(); }, 30000);
+
     function paintPickup() {
       const a = areaById(st.pAreaId);
       const box = $('rdPName').closest('.rd-place');

@@ -3612,4 +3612,7 @@ window.SF_I18N_EN = {
 "পিকআপে পৌঁছেছি": "Reached pickup",
 "যাত্রা শুরু": "Start trip",
 "গন্তব্যে নেভিগেট": "Navigate to destination",
+"চালক একদম কাছে": "Driver is very close",
+"ট্রিপ চলাকালে অ্যাপ খোলা রাখুন, যাত্রী ম্যাপে আপনার গাড়ি দেখবেন।": "Keep the app open during the trip so the rider can see your car on the map.",
+"এখন কাছাকাছি কোনো গাড়ি অনলাইন নেই, তবু রিকোয়েস্ট দিতে পারবেন": "No vehicles online nearby right now, but you can still send a request",
 };
