@@ -58,6 +58,7 @@ const AREA_BY_SEGMENT = {
   'scratch-cards': 'scratch_card',
   'local-drivers': 'local_ride',
   'local-ride': 'local_ride',
+  'local-rides': 'local_ride', // /admin/local-rides ও /console/local-rides (আগে ম্যাপে ছিল না, তাই রোলের স্টাফ ঢুকতে পারত না)
   'hisab': 'hisab',
 };
 

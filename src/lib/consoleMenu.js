@@ -24,7 +24,7 @@ export const TODO_ITEMS = [
   { name: 'ক্লিনিক প্রতিনিধির আবেদন', desc: 'ক্লিনিকের প্রতিনিধি হতে চাওয়া আবেদন', href: '/console/clinics', adminOnly: true, keys: 'রিপ্রেজেন্টেটিভ', types: ['clinic_rep'] },
   { name: 'ডাক্তারের সিরিয়াল রিকোয়েস্ট', desc: 'রোগীর সিরিয়াল অনুরোধ দেখা ও নিশ্চিত করা', href: '/console/doctors?tab=serials', perm: '/admin/doctors', keys: 'সিরিয়াল', types: ['serial'] },
   { name: 'ডেলিভারি ডিসপিউট', desc: 'কাস্টমার বা রাইডারের অভিযোগ মীমাংসা', href: '/console/disputes', perm: '/admin/delivery-disputes', keys: 'অভিযোগ সমস্যা', types: ['dispute'] },
-  { name: 'লোকাল রাইড রিপোর্ট', desc: 'লোকাল রাইড নিয়ে আসা রিপোর্ট', href: '/console/local-rides', perm: '/admin/local-rides', keys: 'অভিযোগ', types: ['ride_report'] },
+  { name: 'লোকাল রাইড রিপোর্ট', desc: 'লোকাল রাইড নিয়ে আসা রিপোর্ট', href: '/console/local-rides?tab=reports', perm: '/admin/local-rides', keys: 'অভিযোগ', types: ['ride_report'] },
   { name: 'রেফারের উইথড্র', desc: 'পয়েন্ট তুলতে চাওয়া ইউজারকে টাকা পাঠানো', href: '/console/referrals', adminOnly: true, keys: 'পয়েন্ট বিকাশ', types: ['withdraw'] },
   { name: 'স্ক্রেচ কার্ড বিজয়ীর পেমেন্ট', desc: 'বিজয়ীর নম্বর যাচাই ও টাকা পাঠানো', href: '/console/scratch-cards', perm: '/admin/scratch-cards', keys: 'পুরস্কার', types: ['scratch'] },
 ];
@@ -36,7 +36,7 @@ export const TODO_TYPE = {
   listing_report: { name: 'লিস্টিং রিপোর্ট', href: '/console/listings?tab=reports' },
   rider: { name: 'রাইডার আবেদন', href: '/console/riders?tab=pending' },
   local_driver: { name: 'লোকাল ড্রাইভার', href: '/console/drivers?tab=pending' },
-  ride_report: { name: 'রাইড রিপোর্ট', href: '/console/local-rides' },
+  ride_report: { name: 'রাইড রিপোর্ট', href: '/console/local-rides?tab=reports' },
   shop_app: { name: 'দোকানের আবেদন', href: '/console/shop-apps' },
   payment: { name: 'অগ্রিম পেমেন্ট', href: '/console/payments' },
   wallet: { name: 'রাইডার ওয়ালেট', href: '/console/wallets?tab=requests' },
