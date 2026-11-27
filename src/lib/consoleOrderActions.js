@@ -473,8 +473,8 @@ export function renderOrderActions({ bar, data, st, canManage, reload, chatBtn }
   } else if (st === 'confirmed' || st === 'disputed') {
     btn('রাইডার বদলান', st === 'confirmed' && !o.release_requested_at ? '' : 'primary', () => assign(o, true, reload));
     if (st === 'disputed') {
-      const d = el('a', 'od-btn', 'ডিসপিউট পেজ ↗');
-      d.href = '/admin/delivery-disputes?q=' + encodeURIComponent(o.order_no);
+      const d = el('a', 'od-btn', 'ডিসপিউট পেজ');
+      d.href = '/console/disputes?q=' + encodeURIComponent(o.order_no);
       bar.appendChild(d);
     }
     more.push({ label: 'মার্কেটে ফেরত দিন', run: () => cancelOrReopen(o, true, reload) });

@@ -9,6 +9,7 @@
 // ============================================================
 
 import { Capacitor } from '@capacitor/core';
+import { consoleUrl } from './consoleLinks.js';
 
 export const PRO_APP_ID = 'com.smartfeni.pro';
 export const PRO_HOME = '/pro';
@@ -108,7 +109,8 @@ export async function scopedAppPath(target) {
       let p = u.pathname;
       if (p === '/') p = ADMIN_HOME;
       else if (p === '/pro/login') p = ADMIN_HOME + '/login';
-      return p + u.search + u.hash;
+      // পুরনো প্যানেলের লিংক (নোটিফিকেশন ইত্যাদি) নতুন অ্যাপের পেজে (consoleLinks.js)
+      return consoleUrl(p + u.search + u.hash);
     }
   } catch (_) { /* উপেক্ষা */ }
   return target;

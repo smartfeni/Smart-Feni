@@ -110,8 +110,17 @@ export async function initConsole() {
 
   refreshTodoBadge();
   setInterval(() => { if (document.visibilityState === 'visible') refreshTodoBadge(); }, 120000);
-  refreshInboxBadge();
+  markNotifFromUrl().finally(refreshInboxBadge);
   setInterval(() => { if (document.visibilityState === 'visible') refreshInboxBadge(); }, 60000);
+}
+
+// push ট্যাপে আসা ?notif=<id>: নিজের নোটিফিকেশন পড়া হিসেবে চিহ্ন (RLS: শুধু নিজেরটা)
+async function markNotifFromUrl() {
+  try {
+    const id = new URLSearchParams(location.search).get('notif');
+    if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return;
+    await supabase.from('user_notifications').update({ is_read: true }).eq('id', id);
+  } catch (_) { /* উপেক্ষা */ }
 }
 
 // ---------- নোটিফিকেশন ইনবক্স (/console/inbox) ----------
