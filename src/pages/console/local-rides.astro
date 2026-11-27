@@ -25,9 +25,15 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
           <button type="button" class="lm-tab" data-tab="confirmed">কনফার্ম</button>
           <button type="button" class="lm-tab" data-tab="completed">সম্পন্ন</button>
           <button type="button" class="lm-tab" data-tab="closed">বাতিল</button>
+          <button type="button" class="lm-tab" data-tab="map">লাইভ ম্যাপ</button>
           <button type="button" class="lm-tab" data-tab="reports">রিপোর্ট <span class="lm-count lm-count-red" id="lmReportCount" style="display:none;">0</span></button>
         </div>
 
+        <div id="lmMapWrap" class="lm-mapwrap" hidden>
+          <div class="lm-mapsum" id="lmMapSum"></div>
+          <div id="lmMap" class="lm-map" data-no-ptr></div>
+          <p class="lm-maphint">সবুজ গাড়ি = ফাঁকা চালক · কমলা গাড়ি = ট্রিপে · লাল পিন = খোলা রিকোয়েস্ট · লাইন = চলমান ট্রিপ। ১৫ সেকেন্ড পর পর আপডেট। চালক Pro অ্যাপ খোলা রাখলেই লোকেশন আসে।</p>
+        </div>
         <div id="lmList" class="lm-list"></div>
         <p class="lm-empty" id="lmEmpty" style="display:none;">এই ট্যাবে কোনো রিকোয়েস্ট নেই</p>
       </div>
@@ -36,6 +42,17 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
 
   <style is:global>
     .lm-page { min-height: 60vh; padding: 14px 0 40px; }
+    .lm-mapwrap[hidden] { display: none !important; }
+    #lmList[hidden] { display: none !important; }
+    .lm-mapwrap { display: flex; flex-direction: column; gap: 10px; }
+    .lm-map { height: 62vh; min-height: 360px; border-radius: 16px; overflow: hidden; border: 1px solid #E5EAF0; }
+    .lm-mapsum { display: flex; gap: 8px; flex-wrap: wrap; }
+    .lm-mapsum span { background: #fff; border: 1px solid #E5EAF0; border-radius: 12px; padding: 6px 12px; font-size: .84rem; font-weight: 700; color: #1B2A4A; }
+    .lm-mapsum span b { color: #FF6B35; }
+    .lm-maphint { margin: 0; font-size: .76rem; color: #8FA0BC; }
+    .lm-pop b { display: block; font-size: .9rem; }
+    .lm-pop small { display: block; color: #5A6E85; font-size: .78rem; }
+    .lm-pop a { display: inline-block; margin-top: 4px; font-weight: 700; color: #FF6B35; }
     #adminGuardedContent[hidden], .cx-deny[hidden] { display: none !important; }
     .cx-deny { padding: 40px 16px; text-align: center; color: #64748B; font-weight: 600; }
     .lm-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 120px 0; color: #5A6E85; font-weight: 600; }
@@ -87,6 +104,10 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
   <script>
     import { onConsoleReady, canOpenAdminPath } from '../../lib/consoleApp.js';
     import { supabase } from '../../lib/supabase.js';
+    import { loadLeaflet, mapRetryBox, removeMapRetryBox } from '../../lib/leafletLoader.js';
+    import { addBaseMap } from '../../lib/baseMap.js';
+    import { FENI_CENTER, pickupIcon, dropIcon } from '../../lib/rideMap.js';
+    import { carIcon } from '../../lib/rideLive.js';
 
     const $ = (id) => document.getElementById(id);
     const BN = '০১২৩৪৫৬৭৮৯';
@@ -175,8 +196,68 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
       });
     }
 
+    // ---------- লাইভ ম্যাপ (RPC admin_local_ride_live_map) ----------
+    let lmMap = null, lmL = null, lmLayers = [], lmFitted = false, lmTimer = null;
+    function popEl(lines, phone) {
+      const d = el('div', 'lm-pop');
+      lines.forEach((t, i) => { if (t) d.appendChild(el(i === 0 ? 'b' : 'small', null, t)); });
+      const ph = safePhone(phone);
+      if (ph) { const a = el('a', null, 'কল করুন'); a.href = 'tel:' + ph; d.appendChild(a); }
+      return d;
+    }
+    async function initLiveMap() {
+      if (!lmMap) {
+        try { await loadLeaflet(); lmL = window.L; removeMapRetryBox($('lmMap')); } catch (_) { mapRetryBox($('lmMap'), initLiveMap); return; }
+        lmMap = lmL.map('lmMap', { zoomControl: true }).setView(FENI_CENTER, 11);
+        addBaseMap(lmL, lmMap, { poi: false }).catch(() => {});
+      }
+      setTimeout(() => lmMap && lmMap.invalidateSize(), 60);
+      loadLiveMap();
+      clearInterval(lmTimer);
+      lmTimer = setInterval(() => { if (!document.hidden && tab === 'map') loadLiveMap(); }, 15000);
+    }
+    async function loadLiveMap() {
+      const { data, error } = await supabase.rpc('admin_local_ride_live_map');
+      if (error || !data || !lmMap) return;
+      const L = lmL;
+      lmLayers.forEach((l) => lmMap.removeLayer(l));
+      lmLayers = [];
+      const pts = [];
+      (data.trips || []).forEach((t) => {
+        if (t.p_lat != null && t.d_lat != null) {
+          lmLayers.push(L.polyline([[t.p_lat, t.p_lng], [t.d_lat, t.d_lng]], { color: '#FF6B35', weight: 3, dashArray: '6 6' }).addTo(lmMap));
+          lmLayers.push(L.marker([t.d_lat, t.d_lng], { icon: dropIcon(L) }).bindPopup(popEl([(t.request_no || '') + ' · গন্তব্য', t.drop, 'চালক: ' + (t.driver_name || '')])).addTo(lmMap));
+        }
+      });
+      (data.open || []).forEach((r) => {
+        if (r.lat == null) return;
+        pts.push([r.lat, r.lng]);
+        lmLayers.push(L.circleMarker([r.lat, r.lng], { radius: 9, color: '#fff', weight: 3, fillColor: '#D14343', fillOpacity: 1 })
+          .bindPopup(popEl([(r.request_no || 'রিকোয়েস্ট') + ' · ৳' + bn(Math.round(r.fare)), r.pickup + ' → ' + (r.drop || ''), (r.vehicle_types || []).join(', '), timeText(r.created_at) + ' · অফার ' + bn(r.offers)])).addTo(lmMap));
+      });
+      (data.drivers || []).forEach((d) => {
+        pts.push([d.lat, d.lng]);
+        const m = L.marker([d.lat, d.lng], { icon: carIcon(L, d.heading, d.on_trip), zIndexOffset: 400 });
+        m.bindPopup(popEl([d.name || 'চালক', [d.vehicle_type, d.vehicle_number].filter(Boolean).join(' · '), (d.on_trip ? 'ট্রিপে আছেন' : 'ফাঁকা') + ' · ' + bn(Math.round(d.age_s / 60)) + ' মিনিট আগের লোকেশন'], d.phone));
+        lmLayers.push(m.addTo(lmMap));
+      });
+      const box = $('lmMapSum');
+      box.textContent = '';
+      const chip = (label, n) => { const s = el('span'); s.appendChild(document.createTextNode(label + ' ')); s.appendChild(el('b', null, bn(n))); box.appendChild(s); };
+      chip('অনলাইন চালক', data.online_total || 0);
+      chip('ম্যাপে দেখা যাচ্ছে', (data.drivers || []).length);
+      chip('ট্রিপে', (data.drivers || []).filter((d) => d.on_trip).length);
+      chip('খোলা রিকোয়েস্ট', (data.open || []).length);
+      chip('চলমান ট্রিপ', (data.trips || []).length);
+      if (!lmFitted && pts.length) { lmFitted = true; lmMap.fitBounds(pts, { padding: [40, 40], maxZoom: 14 }); }
+    }
+
     function render() {
       paintStats();
+      const isMap = tab === 'map';
+      $('lmMapWrap').hidden = !isMap;
+      $('lmList').hidden = isMap;
+      if (isMap) { $('lmEmpty').style.display = 'none'; initLiveMap(); return; }
       if (tab === 'reports') { renderReports(); return; }
       const box = $('lmList');
       box.textContent = '';
@@ -365,9 +446,10 @@ import ConsoleShell from '../../components/console/ConsoleShell.astro';
 
     // নোটিফিকেশন লিংক: /admin/local-rides?tab=reports
     try {
-      if (new URLSearchParams(window.location.search).get('tab') === 'reports') {
-        tab = 'reports';
-        document.querySelectorAll('.lm-tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === 'reports'));
+      const qt = new URLSearchParams(window.location.search).get('tab');
+      if (qt === 'reports' || qt === 'map') {
+        tab = qt;
+        document.querySelectorAll('.lm-tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === qt));
       }
     } catch (_) { /* উপেক্ষা */ }
 

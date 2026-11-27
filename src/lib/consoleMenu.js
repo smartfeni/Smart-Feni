@@ -62,6 +62,7 @@ export const MENU = [
       { name: 'প্রি-অর্ডার', desc: 'দোকানে যাওয়া আগাম অর্ডার ট্র্যাক করা', href: '/console/preorders', perm: '/admin/delivery-orders', keys: 'আগাম অর্ডার দোকান' },
       { name: 'ম্যানুয়াল অর্ডার', desc: 'ফোন বা চ্যাটে আসা অর্ডার তোলা ও পাঠানো', href: '/console/manual-orders', perm: '/admin/manual-orders', keys: 'ফোন অর্ডার' },
       { name: 'লোকাল রাইড', desc: 'সিএনজি/অটো রাইড: চলমান, কনফার্ম, সম্পন্ন, বাতিল', href: '/console/local-rides', perm: '/admin/local-rides', keys: 'রাইড' },
+      { name: 'লোকাল রাইড লাইভ ম্যাপ', desc: 'অনলাইন চালক, খোলা রিকোয়েস্ট ও চলমান ট্রিপ ম্যাপে', href: '/console/local-rides?tab=map', perm: '/admin/local-rides', keys: 'ম্যাপ চালক লাইভ লোকেশন' },
       { name: 'ব্লাড রিকোয়েস্ট', desc: 'রক্তের অনুরোধ ও ডোনার সাড়া', href: '/console/blood-requests', perm: '/admin/blood-requests', keys: 'রক্ত ডোনার' },
     ],
   },
